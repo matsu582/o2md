@@ -8196,7 +8196,10 @@ class ExcelToMarkdownConverter:
                         print(f"[INFO][_iso_group_repr] sheet={sheet.title} representative_pairs={pairs}")
                     except (ValueError, TypeError) as e:
                         print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                    return basename
+                    
+                    # Return (filename, cluster_min_row) tuple
+                    cluster_min_row = rep if rep is not None else 1
+                    return (basename, cluster_min_row)
                 except (ValueError, TypeError):
                     return png_name
             except (ValueError, TypeError):
