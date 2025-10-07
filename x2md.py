@@ -7635,23 +7635,14 @@ class ExcelToMarkdownConverter:
                 os.makedirs(dbg_dir, exist_ok=True)
                 src_for_conv = os.path.join(dbg_dir, os.path.basename(tmp_xlsx))
                 
-                print(f"[DEBUG] Creating Excel file with single save: {src_for_conv}")
+                print(f"[DEBUG] Using ZIP-created workbook directly (preserving shapes): {src_for_conv}")
+                shutil.copyfile(tmp_xlsx, src_for_conv)
+                
                 try:
-                    from openpyxl import load_workbook as _op_load
-                    _wb_tmp = _op_load(tmp_xlsx)
-                    _wb_tmp.save(src_for_conv)
-                    print(f"[DEBUG] Saved workbook via openpyxl (OOXML normalized): {src_for_conv}")
-                    
-                    try:
-                        st = os.stat(src_for_conv)
-                        print(f"[DEBUG] Workbook size: {st.st_size} bytes")
-                    except (ValueError, TypeError):
-                        pass
-                        
-                except Exception as e:
-                    print(f"[WARN] openpyxl save failed: {e}")
-                    shutil.copyfile(tmp_xlsx, src_for_conv)
-                    print(f"[DEBUG] Using ZIP-created workbook directly: {src_for_conv}")
+                    st = os.stat(src_for_conv)
+                    print(f"[DEBUG] Workbook size: {st.st_size} bytes")
+                except (ValueError, TypeError):
+                    pass
                 
                 try:
                     self._set_excel_fit_to_one_page(src_for_conv)
