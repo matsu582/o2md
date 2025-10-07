@@ -43,17 +43,58 @@ except ImportError:
     print("Pillowライブラリが必要です: pip install pillow")
     sys.exit(1)
 
-from utils import get_libreoffice_path, get_imagemagick_command, detect_image_format
-from image_processor import (
-    convert_document_to_pdf,
-    convert_pdf_to_png,
-    convert_vector_image,
-    convert_with_libreoffice
-)
+def _get_libreoffice_path():
+    """プラットフォームに応じたLibreOfficeのパスを取得"""
+    system = platform.system()
+    
+    if system == "Darwin":  # macOS
+        path = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+        if os.path.exists(path):
+            return path
+    elif system == "Linux":  # Ubuntu/Linux
+        common_paths = [
+            "/usr/bin/soffice",
+            "/usr/bin/libreoffice",
+            "/snap/bin/libreoffice",
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+        try:
+            result = subprocess.run(["which", "soffice"], capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+            result = subprocess.run(["which", "libreoffice"], capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception:
+            pass
+    elif system == "Windows":
+        common_paths = [
+            r"C:\Program Files\LibreOffice\program\soffice.exe",
+            r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+    
+    return "soffice"
+
+def _get_imagemagick_command():
+    """ImageMagickのコマンド名を取得（バージョンに応じて'magick'または'convert'）"""
+    try:
+        if shutil.which('magick'):
+            return 'magick'
+        elif shutil.which('convert'):
+            return 'convert'
+        else:
+            return 'convert'
+    except Exception:
+        return 'convert'
 
 # 設定
-LIBREOFFICE_PATH = get_libreoffice_path()
-IMAGEMAGICK_CMD = get_imagemagick_command()
+LIBREOFFICE_PATH = _get_libreoffice_path()
+IMAGEMAGICK_CMD = _get_imagemagick_command()
 
 class WordToMarkdownConverter:
     def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None):
@@ -1221,12 +1262,124 @@ class WordToMarkdownConverter:
             return None
     
     def _convert_document_to_pdf(self, docx_path):
-        """Word文書をPDFに変換"""
-        return convert_document_to_pdf(docx_path)
+        """Word文書をPDFに変換（最高品質設定）"""
+        try:
+            temp_dir = tempfile.mkdtemp()
+            
+            # LibreOfficeでPDFに変換（最高品質設定）
+            cmd = [
+                LIBREOFFICE_PATH,
+                '--headless',
+                '--convert-to', 'pdf',
+                '--outdir', temp_dir,
+                docx_path
+            ]
+            
+            # 環境変数でPDF品質を最高設定に
+            env = os.environ.copy()
+            env['SAL_DISABLE_OPENCL'] = '1'  # OpenCL無効化で安定性向上
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
+            
+            if result.returncode == 0:
+                # 変換されたPDFのパスを探す
+                for file in os.listdir(temp_dir):
+                    if file.endswith('.pdf'):
+                        pdf_path = os.path.join(temp_dir, file)
+                        # 永続的な場所にコピー
+                        final_pdf_path = tempfile.mktemp(suffix='.pdf')
+                        shutil.copy2(pdf_path, final_pdf_path)
+                        shutil.rmtree(temp_dir)
+                        print(f"[INFO] PDFに変換完了: {final_pdf_path}")
+                        return final_pdf_path
+            
+            shutil.rmtree(temp_dir)
+            print(f"[ERROR] PDF変換失敗: {result.stderr}")
+            return None
+            
+        except Exception as e:
+            print(f"[ERROR] PDF変換エラー: {e}")
+            return None
     
     def _convert_pdf_to_png(self, pdf_path, output_path):
-        """PDFをPNGに変換"""
-        return convert_pdf_to_png(pdf_path, output_path)
+        """PDFをPNGに変換（高速化オプション付き）"""
+        try:
+            # 手法1: 高速変換（品質は標準、速度重視）
+            print("[DEBUG] 高速PDF→PNG変換実行...")
+            cmd_fast = [
+                IMAGEMAGICK_CMD,
+                '-density', '300',  # 標準DPIで高速化
+                f'{pdf_path}[0]',  # 最初のページ
+                '-colorspace', 'RGB',
+                '-background', 'white',
+                '-alpha', 'remove',
+                '-resize', '200%',  # 2倍拡大（高速）
+                '-trim',  # 余白除去
+                '+repage',
+                '-quality', '90',  # 品質を少し下げて高速化
+                '-depth', '8',
+                output_path
+            ]
+            
+            result = subprocess.run(cmd_fast, capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0 and os.path.exists(output_path):
+                print(f"[INFO] 高速PNG変換完了: {output_path}")
+                
+                # 画像情報を簡単に出力
+                try:
+                    identify_result = subprocess.run([IMAGEMAGICK_CMD, 'identify', output_path], 
+                                                   capture_output=True, text=True, timeout=5)
+                    if identify_result.returncode == 0:
+                        info = identify_result.stdout.strip()
+                        # ファイル名を除いて重要な情報だけ表示
+                        parts = info.split()
+                        if len(parts) >= 3:
+                            print(f"[DEBUG] 画像情報: {parts[2]} {parts[6] if len(parts) > 6 else ''}")
+                except Exception:
+                    pass
+                    
+                return True
+            else:
+                print(f"[WARNING] 高速変換失敗、代替手法を試行: {result.stderr}")
+                
+                # 手法2: pdftoppm使用（利用可能な場合）
+                if shutil.which('pdftoppm'):
+                    print("[DEBUG] pdftoppm高速変換試行...")
+                    cmd_ppm = ['pdftoppm', '-png', '-r', '200', '-singlefile', pdf_path, output_path.replace('.png', '')]
+                    
+                    result2 = subprocess.run(cmd_ppm, capture_output=True, text=True, timeout=20)
+                    if result2.returncode == 0 and os.path.exists(output_path):
+                        print(f"[INFO] pdftoppm変換完了: {output_path}")
+                        
+                        # 余白除去を後処理で実行
+                        cmd_trim = [IMAGEMAGICK_CMD, output_path, '-trim', '+repage', output_path]
+                        subprocess.run(cmd_trim, capture_output=True, text=True, timeout=10)
+                        
+                        return True
+                
+                # 手法3: 最小設定での変換
+                print("[DEBUG] 最小設定変換試行...")
+                cmd_minimal = [
+                    IMAGEMAGICK_CMD,
+                    '-density', '150',  # 低DPIで最高速
+                    f'{pdf_path}[0]',
+                    '-resize', '150%',  # 小さめの拡大
+                    '-trim',
+                    '+repage',
+                    output_path
+                ]
+                
+                result3 = subprocess.run(cmd_minimal, capture_output=True, text=True, timeout=15)
+                if result3.returncode == 0 and os.path.exists(output_path):
+                    print(f"[INFO] 最小設定変換完了: {output_path}")
+                    return True
+                    
+            return False
+                
+        except Exception as e:
+            print(f"[ERROR] PNG変換エラー: {e}")
+            return False
     
     def _debug_pdf_content(self, pdf_path):
         """PDFの内容をデバッグ（オプション）"""
@@ -1269,36 +1422,133 @@ class WordToMarkdownConverter:
             print(f"[DEBUG] 画像情報取得エラー: {e}")
 
     def _detect_image_format(self, image_data: bytes, target_ref: str) -> str:
-        """画像データのフォーマットを検出"""
-        fmt = detect_image_format(image_data)
-        if fmt == 'png':
+        """画像形式を検出"""
+        if image_data.startswith(b'\x89PNG'):
             return '.png'
-        elif fmt == 'jpeg':
+        elif image_data.startswith(b'\xff\xd8\xff'):
             return '.jpg'
-        elif fmt == 'emf':
+        elif image_data.startswith(b'GIF'):
+            return '.gif'
+        elif image_data.startswith(b'\x01\x00\x00\x00'):
             return '.emf'
-        elif fmt == 'wmf':
+        elif image_data.startswith(b'\xd7\xcd\xc6\x9a'):
             return '.wmf'
         
-        # フォールバック：拡張子から判定
-        if target_ref.endswith('.png'):
-            return '.png'
-        elif target_ref.endswith('.emf'):
+        # target_refから推測
+        if target_ref.endswith('.emf'):
             return '.emf'
         elif target_ref.endswith('.wmf'):
             return '.wmf'
         elif target_ref.endswith('.jpeg'):
             return '.jpg'
         
-        return '.png'
+        return '.png'  # デフォルト
     
     def _convert_vector_image(self, image_data: bytes, original_path: str) -> Optional[str]:
         """ベクター画像をPNGに変換"""
-        return convert_vector_image(image_data, original_path)
+        try:
+            # 一時ファイルに保存
+            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(original_path).suffix) as temp_file:
+                temp_file.write(image_data)
+                temp_path = temp_file.name
+            
+            # 出力パス
+            output_path = original_path.replace('.emf', '.png').replace('.wmf', '.png')
+            
+            # LibreOfficeで直接変換を試す
+            if self._convert_with_libreoffice(temp_path, output_path):
+                os.unlink(temp_path)
+                return output_path
+            
+            # LibreOfficeが失敗した場合、ImageMagickを試す
+            cmd = [
+                IMAGEMAGICK_CMD,
+                temp_path,
+                '-density', '300',
+                '-quality', '100',
+                '-background', 'white',
+                '-alpha', 'remove',
+                output_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            
+            # 一時ファイルを削除
+            os.unlink(temp_path)
+            
+            if result.returncode == 0 and os.path.exists(output_path):
+                print(f"[SUCCESS] ベクター画像変換完了（ImageMagick）: {output_path}")
+                return output_path
+            else:
+                print(f"[ERROR] ベクター画像変換失敗: {result.stderr}")
+                # 失敗した場合は元のデータをそのまま保存
+                with open(original_path, 'wb') as f:
+                    f.write(image_data)
+                return original_path
+                
+        except Exception as e:
+            print(f"[ERROR] ベクター画像変換エラー: {e}")
+            # エラーの場合は元のデータをそのまま保存
+            with open(original_path, 'wb') as f:
+                f.write(image_data)
+            return original_path
 
     def _convert_with_libreoffice(self, input_path: str, output_path: str) -> bool:
         """LibreOfficeを使用してベクター画像を変換"""
-        return convert_with_libreoffice(input_path, output_path)
+        try:
+            # 一時的にPDFに変換
+            temp_dir = tempfile.mkdtemp()
+            
+            # LibreOfficeでPDFに変換
+            cmd = [
+                LIBREOFFICE_PATH,
+                '--headless',
+                '--convert-to', 'pdf',
+                '--outdir', temp_dir,
+                input_path
+            ]
+            
+            subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            
+            # 変換されたPDFのパスを探す
+            pdf_path = None
+            for file in os.listdir(temp_dir):
+                if file.endswith('.pdf'):
+                    pdf_path = os.path.join(temp_dir, file)
+                    break
+            
+            if pdf_path and os.path.exists(pdf_path):
+                # PDFからPNGに変換（余白除去付き）
+                cmd2 = [
+                    IMAGEMAGICK_CMD,
+                    pdf_path,
+                    '-density', '300',
+                    '-quality', '100',
+                    '-background', 'white',
+                    '-alpha', 'remove',
+                    '-trim',  # 余白を自動除去
+                    '+repage',  # ページ情報をリセット
+                    output_path
+                ]
+                
+                result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=30)
+                
+                # 一時ディレクトリを削除
+                import shutil
+                shutil.rmtree(temp_dir)
+                
+                if result2.returncode == 0 and os.path.exists(output_path):
+                    print(f"[SUCCESS] ベクター画像変換完了（LibreOffice→PDF→PNG）: {output_path}")
+                    return True
+            
+            # 一時ディレクトリを削除
+            import shutil
+            shutil.rmtree(temp_dir)
+            return False
+            
+        except Exception as e:
+            print(f"[ERROR] LibreOffice変換エラー: {e}")
+            return False
 
 
 def convert_doc_to_docx(doc_file_path: str) -> str:
