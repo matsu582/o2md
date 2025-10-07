@@ -18,6 +18,7 @@ import tempfile
 import subprocess
 import shutil
 import urllib.parse
+import platform
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any, Set
 import io
@@ -40,8 +41,45 @@ except ImportError:
     print("Pillowライブラリが必要です: pip install pillow")
     sys.exit(1)
 
+def _get_libreoffice_path():
+    """プラットフォームに応じたLibreOfficeのパスを取得"""
+    system = platform.system()
+    
+    if system == "Darwin":  # macOS
+        path = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+        if os.path.exists(path):
+            return path
+    elif system == "Linux":  # Ubuntu/Linux
+        common_paths = [
+            "/usr/bin/soffice",
+            "/usr/bin/libreoffice",
+            "/snap/bin/libreoffice",
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+        try:
+            result = subprocess.run(["which", "soffice"], capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+            result = subprocess.run(["which", "libreoffice"], capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception:
+            pass
+    elif system == "Windows":
+        common_paths = [
+            r"C:\Program Files\LibreOffice\program\soffice.exe",
+            r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+    
+    return "soffice"
+
 # 設定定数
-LIBREOFFICE_PATH = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+LIBREOFFICE_PATH = _get_libreoffice_path()
 
 # DPI設定
 DEFAULT_DPI = 600
