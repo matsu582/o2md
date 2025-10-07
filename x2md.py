@@ -7620,6 +7620,7 @@ class ExcelToMarkdownConverter:
                 except (ValueError, TypeError):
                     pass  # 一時ディレクトリ削除失敗は無視
 
+                # openpyxlによる正規化を事前に実施してから保存
                 with zipfile.ZipFile(tmp_xlsx, 'w', zipfile.ZIP_DEFLATED) as zout:
                     for folder, _, files in os.walk(tmpdir):
                         for fn in files:
@@ -7630,140 +7631,24 @@ class ExcelToMarkdownConverter:
                                 continue
                             zout.write(full, arcname)
 
-                # Save a copy of the generated tmp_xlsx for debugging/inspection
+                dbg_dir = os.path.join(self.output_dir, 'debug_workbooks')
+                os.makedirs(dbg_dir, exist_ok=True)
+                src_for_conv = os.path.join(dbg_dir, os.path.basename(tmp_xlsx))
+                
+                print(f"[DEBUG] Using ZIP-created workbook directly (preserving shapes): {src_for_conv}")
+                shutil.copyfile(tmp_xlsx, src_for_conv)
+                
                 try:
-                    dbg_dir = os.path.join(self.output_dir, 'debug_workbooks')
-                    os.makedirs(dbg_dir, exist_ok=True)
-                    dbg_copy = os.path.join(dbg_dir, os.path.basename(tmp_xlsx))
-                    # atomic copy: write to a temp file in the same dir and rename
-                    tmp_dbg = dbg_copy + '.tmp'
-                    shutil.copyfile(tmp_xlsx, tmp_dbg)
-                    try:
-                        os.replace(tmp_dbg, dbg_copy)
-                    except Exception:
-                        # fallback to non-atomic move
-                        shutil.move(tmp_dbg, dbg_copy)
-                    print(f"[DEBUG] saved group workbook: {dbg_copy}")
-                    try:
-                        st = os.stat(dbg_copy)
-                        print(f"[DEBUG] dbg_copy exists: size={st.st_size} bytes")
-                    except (ValueError, TypeError):
-                        print(f"[WARN] dbg_copy not found after save: {dbg_copy}")
-                    # Try to run a conservative fixer and prefer its output if available
-                    try:
-                        repair_script = os.path.join(os.path.dirname(__file__), 'tools', 'repair_xlsx.py')
-                        repaired_candidate = dbg_copy.replace('.xlsx', '.repaired.xlsx')
-                        fixed_candidate = dbg_copy.replace('.xlsx', '.fixed.xlsx')
-                        # Previously we invoked an external repair script here.
-                        # Instead, rely on the in-place OOXML fixes already applied
-                        # to the temporary package before zipping. Create a '.fixed.xlsx'
-                        # copy so downstream logic can prefer a "fixed" candidate
-                        # without spawning an external process.
-                        try:
-                            # Create a fixed candidate by copying and then attempt
-                            # to normalize the package using openpyxl. openpyxl
-                            # rewrite often fixes subtle OOXML packaging order
-                            # and relationship issues that trip LibreOffice.
-                            shutil.copyfile(dbg_copy, fixed_candidate)
-                            print(f"[DEBUG] created fixed workbook (inline): {fixed_candidate}")
-                            try:
-                                # Attempt an in-place normalization using openpyxl.
-                                # Use a read/load+save cycle; if it fails, leave
-                                # the copied file intact and continue.
-                                from openpyxl import load_workbook as _op_load
-                                try:
-                                    _wb_tmp = _op_load(fixed_candidate)
-                                    _wb_tmp.save(fixed_candidate)
-                                    print(f"[DEBUG] openpyxl resaved fixed workbook: {fixed_candidate}")
-                                except Exception as _e_inner:
-                                    print(f"[WARN] openpyxl resave failed: {_e_inner}")
-                            except (ValueError, TypeError):
-                                # If import or resave fails, fall back silently
-                                pass
-                        except Exception as _e:
-                            print(f"[WARN] could not create inline fixed workbook: {_e}")
-                        # After creating the fixed workbook, extract drawing cNvPr ids
-                        # and write them to a companion JSON file for debugging/tracing.
-                        try:
-                            import json
-                            def dump_fixed_ids(xlsx_path):
-                                ids = []
-                                try:
-                                    with zipfile.ZipFile(xlsx_path) as zf:
-                                        cand = [n for n in zf.namelist() if n.startswith('xl/drawings/') and n.endswith('.xml')]
-                                        for d in cand:
-                                            data = zf.read(d)
-                                            try:
-                                                root = ET.fromstring(data)
-                                            except (ET.ParseError, KeyError, AttributeError):
-                                                continue
-                                            for node in root:
-                                                tag = node.tag.split('}')[-1].lower()
-                                                if tag in ('twocellanchor','onecellanchor','absoluteanchor'):
-                                                    for sub in node.iter():
-                                                        if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                                                            ids.append(sub.attrib.get('id') or sub.attrib.get('idx'))
-                                                            break
-                                except (ET.ParseError, KeyError, AttributeError) as e:
-                                    print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
-                                return ids
-
-                            try:
-                                ids = dump_fixed_ids(fixed_candidate)
-                                ids_fn = fixed_candidate + '.ids.json'
-                                with open(ids_fn, 'w', encoding='utf-8') as jf:
-                                    json.dump({'cNvPr_ids': ids}, jf, ensure_ascii=False, indent=2)
-                                print(f"[DEBUG] wrote fixed workbook ids: {ids_fn} (count={len(ids)})")
-                            except (OSError, IOError, FileNotFoundError):
-                                print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
-                        except (OSError, IOError, FileNotFoundError):
-                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
-
-                        # If a more explicit '.repaired.xlsx' already exists (from other tools), prefer it.
-                        src_for_conv = dbg_copy
-                        if os.path.exists(repaired_candidate):
-                            src_for_conv = repaired_candidate
-                            print(f"[DEBUG] using repaired workbook for conversion: {src_for_conv}")
-                        elif os.path.exists(fixed_candidate):
-                            src_for_conv = fixed_candidate
-                            print(f"[DEBUG] using fixed workbook for conversion: {src_for_conv}")
-                        else:
-                            # fallback: use the original dbg_copy
-                            src_for_conv = dbg_copy
-                        
-                        # PDF変換前に縦横1ページ設定を適用(isolated group用)
-                        try:
-                            self._set_excel_fit_to_one_page(src_for_conv)
-                        except Exception as e:
-                            print(f"[WARNING] isolated group pageSetup設定失敗: {e}")
-
-                        # Additionally, create an Excel-compatible resaved copy using LibreOffice
-                        try:
-                            compat_dir = os.path.join(self.output_dir, 'debug_workbooks_compat')
-                            os.makedirs(compat_dir, exist_ok=True)
-                            print(f"[DEBUG][_iso_conv_choice] sheet={sheet.title} src_for_conv={src_for_conv}")
-                            cmd_conv = [LIBREOFFICE_PATH, '--headless', '--convert-to', 'xlsx', '--outdir', compat_dir, src_for_conv]
-                            proc_conv = subprocess.run(cmd_conv, capture_output=True, text=True, timeout=90)
-                            # LibreOffice may create a file with the same basename under compat_dir
-                            compat_path = os.path.join(compat_dir, os.path.basename(src_for_conv))
-                            if proc_conv.returncode == 0 and os.path.exists(compat_path):
-                                print(f"[DEBUG] saved LibreOffice-resaved compatible workbook: {compat_path}")
-                            else:
-                                # If conversion failed, log stderr for diagnostics and try to detect any produced xlsx file
-                                stderr = (proc_conv.stderr or '').strip()
-                                if stderr:
-                                    print(f"[WARN] LibreOffice conversion warning/error: {stderr}")
-                                # try to pick any xlsx in compat_dir with similar base
-                                base = os.path.splitext(os.path.basename(src_for_conv))[0]
-                                candidates = [os.path.join(compat_dir, f) for f in os.listdir(compat_dir) if f.startswith(base) and f.lower().endswith('.xlsx')]
-                                if candidates:
-                                    print(f"[DEBUG] detected LibreOffice output candidate: {candidates[0]}")
-                        except Exception as _e:
-                            print(f"[WARN] LibreOffice conversion failed: {_e}")
-                    except (ValueError, TypeError):
-                        pass  # データ構造操作失敗は無視
+                    st = os.stat(src_for_conv)
+                    print(f"[DEBUG] Workbook size: {st.st_size} bytes")
                 except (ValueError, TypeError):
-                    pass  # データ構造操作失敗は無視
+                    pass
+                
+                try:
+                    self._set_excel_fit_to_one_page(src_for_conv)
+                    print(f"[DEBUG] Applied fit-to-page settings to: {src_for_conv}")
+                except Exception as e:
+                    print(f"[WARNING] fit-to-page設定失敗: {e}")
 
                 # openpyxl resave+merge disabled: using the original trimmed workbook
                 # directly tends to preserve drawing anchors. If openpyxl-based
@@ -7885,83 +7770,10 @@ class ExcelToMarkdownConverter:
                     pass  # 一時ディレクトリ削除失敗は無視
 
                 tmp_pdf_dir = tempfile.mkdtemp(prefix='xls2md_pdf_')
-                # Before invoking LibreOffice, force the temporary workbook's
-                # worksheet pageSetup to fit-to-page so LibreOffice will scale
-                # the rendered sheet into a single PDF page. This prevents
-                # tall drawings from being split across PDF pages (which
-                # previously caused only the first page to be used and the
-                # lower half to disappear in the PNG).
-                try:
-                    try:
-                        # try sheet1.xml (common when cell_range was applied)
-                        sheet_paths = [os.path.join(tmpdir, 'xl/worksheets/sheet1.xml'),
-                                       os.path.join(tmpdir, f'xl/worksheets/sheet{sheet_index+1}.xml')]
-                        for sp in sheet_paths:
-                            if os.path.exists(sp):
-                                try:
-                                    stree = ET.parse(sp)
-                                    sroot = stree.getroot()
-                                    ns = sroot.tag.split('}')[0].strip('{')
-                                    
-                                    # Add or modify sheetPr with pageSetupPr fitToPage attribute
-                                    sheet_pr = sroot.find('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}sheetPr')
-                                    if sheet_pr is None:
-                                        sheet_pr = ET.Element('{%s}sheetPr' % ns)
-                                        # Insert at the beginning of worksheet
-                                        sroot.insert(0, sheet_pr)
-                                    page_setup_pr = sheet_pr.find('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}pageSetUpPr')
-                                    if page_setup_pr is None:
-                                        page_setup_pr = ET.SubElement(sheet_pr, '{%s}pageSetUpPr' % ns)
-                                    page_setup_pr.set('fitToPage', '1')
-                                    
-                                    # Add or modify printOptions
-                                    print_opts = sroot.find('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}printOptions')
-                                    if print_opts is None:
-                                        print_opts = ET.Element('{%s}printOptions' % ns)
-                                        sroot.append(print_opts)
-                                    print_opts.set('horizontalCentered', '1')
-                                    print_opts.set('verticalCentered', '1')
-                                    
-                                    # Configure pageSetup for single-page fit
-                                    ps = sroot.find('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}pageSetup')
-                                    if ps is None:
-                                        ps = ET.Element('{%s}pageSetup' % ns)
-                                        sroot.append(ps)
-                                    ps.set('fitToHeight', '1')
-                                    ps.set('fitToWidth', '1')
-                                    ps.set('paperSize', '9')  # A4
-                                    ps.set('orientation', 'portrait')
-                                    ps.set('useFirstPageNumber', '1')
-                                    ps.set('usePrinterDefaults', '0')
-                                    # Remove explicit scale so fitTo* controls scaling
-                                    if 'scale' in ps.attrib:
-                                        try:
-                                            del ps.attrib['scale']
-                                        except Exception:
-                                            pass  # 一時ファイルの削除失敗は無視
-                                    
-                                    stree.write(sp, encoding='utf-8', xml_declaration=True)
-                                    print(f"[DEBUG] Applied fitToPage settings to {sp}")
-                                except Exception as e:
-                                    print(f"[DEBUG] Failed to apply fitToPage settings: {e}")
-                                except (ValueError, TypeError):
-                                    pass  # XML書き込み失敗は無視
-                    except (ValueError, TypeError):
-                        pass  # XML書き込み失敗は無視
-                except (ValueError, TypeError):
-                    pass  # XML書き込み失敗は無視
                 
-                # PDF変換直前にtmp_xlsxに縦横1ページ設定を適用(isolated group)
-                try:
-                    self._set_excel_fit_to_one_page(tmp_xlsx)
-                    print(f"[DEBUG] isolated group用にtmp_xlsxへpageSetup設定を適用: {tmp_xlsx}")
-                except Exception as e:
-                    print(f"[WARNING] isolated group tmp_xlsx pageSetup設定失敗: {e}")
-
-                # Use Phase 1 foundation method for Excel→PDF conversion
-                print(f"[DEBUG][_iso_conv_invoke] sheet={sheet.title} invoking LibreOffice to convert tmp_xlsx={tmp_xlsx} to PDF in {tmp_pdf_dir}")
+                print(f"[DEBUG][_iso_conv_invoke] sheet={sheet.title} invoking LibreOffice to convert src_for_conv={src_for_conv} to PDF in {tmp_pdf_dir}")
                 
-                pdf_path = self._convert_excel_to_pdf(tmp_xlsx, tmp_pdf_dir, apply_fit_to_page=False)
+                pdf_path = self._convert_excel_to_pdf(src_for_conv, tmp_pdf_dir, apply_fit_to_page=False)
                 if pdf_path is None:
                     try:
                         print(f"[WARN][_iso_conv_fail] LibreOffice PDF conversion failed")
@@ -8384,7 +8196,10 @@ class ExcelToMarkdownConverter:
                         print(f"[INFO][_iso_group_repr] sheet={sheet.title} representative_pairs={pairs}")
                     except (ValueError, TypeError) as e:
                         print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                    return basename
+                    
+                    # Return (filename, cluster_min_row) tuple
+                    cluster_min_row = rep if rep is not None else 1
+                    return (basename, cluster_min_row)
                 except (ValueError, TypeError):
                     return png_name
             except (ValueError, TypeError):
