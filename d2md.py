@@ -22,6 +22,7 @@ import shutil
 import zipfile
 import urllib.parse
 import xml.etree.ElementTree as ET
+import platform
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any
 from PIL import Image, ImageDraw, ImageFont
@@ -42,8 +43,58 @@ except ImportError:
     print("Pillowライブラリが必要です: pip install pillow")
     sys.exit(1)
 
+def _get_libreoffice_path():
+    """プラットフォームに応じたLibreOfficeのパスを取得"""
+    system = platform.system()
+    
+    if system == "Darwin":  # macOS
+        path = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+        if os.path.exists(path):
+            return path
+    elif system == "Linux":  # Ubuntu/Linux
+        common_paths = [
+            "/usr/bin/soffice",
+            "/usr/bin/libreoffice",
+            "/snap/bin/libreoffice",
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+        try:
+            result = subprocess.run(["which", "soffice"], capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+            result = subprocess.run(["which", "libreoffice"], capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception:
+            pass
+    elif system == "Windows":
+        common_paths = [
+            r"C:\Program Files\LibreOffice\program\soffice.exe",
+            r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+    
+    return "soffice"
+
+def _get_imagemagick_command():
+    """ImageMagickのコマンド名を取得（バージョンに応じて'magick'または'convert'）"""
+    try:
+        if shutil.which('magick'):
+            return 'magick'
+        elif shutil.which('convert'):
+            return 'convert'
+        else:
+            return 'convert'
+    except Exception:
+        return 'convert'
+
 # 設定
-LIBREOFFICE_PATH = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+LIBREOFFICE_PATH = _get_libreoffice_path()
+IMAGEMAGICK_CMD = _get_imagemagick_command()
 
 class WordToMarkdownConverter:
     def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None):
@@ -1256,7 +1307,7 @@ class WordToMarkdownConverter:
             # 手法1: 高速変換（品質は標準、速度重視）
             print("[DEBUG] 高速PDF→PNG変換実行...")
             cmd_fast = [
-                'magick',
+                IMAGEMAGICK_CMD,
                 '-density', '300',  # 標準DPIで高速化
                 f'{pdf_path}[0]',  # 最初のページ
                 '-colorspace', 'RGB',
@@ -1277,7 +1328,7 @@ class WordToMarkdownConverter:
                 
                 # 画像情報を簡単に出力
                 try:
-                    identify_result = subprocess.run(['magick', 'identify', output_path], 
+                    identify_result = subprocess.run([IMAGEMAGICK_CMD, 'identify', output_path], 
                                                    capture_output=True, text=True, timeout=5)
                     if identify_result.returncode == 0:
                         info = identify_result.stdout.strip()
@@ -1302,7 +1353,7 @@ class WordToMarkdownConverter:
                         print(f"[INFO] pdftoppm変換完了: {output_path}")
                         
                         # 余白除去を後処理で実行
-                        cmd_trim = ['magick', output_path, '-trim', '+repage', output_path]
+                        cmd_trim = [IMAGEMAGICK_CMD, output_path, '-trim', '+repage', output_path]
                         subprocess.run(cmd_trim, capture_output=True, text=True, timeout=10)
                         
                         return True
@@ -1310,7 +1361,7 @@ class WordToMarkdownConverter:
                 # 手法3: 最小設定での変換
                 print("[DEBUG] 最小設定変換試行...")
                 cmd_minimal = [
-                    'magick',
+                    IMAGEMAGICK_CMD,
                     '-density', '150',  # 低DPIで最高速
                     f'{pdf_path}[0]',
                     '-resize', '150%',  # 小さめの拡大
@@ -1354,7 +1405,8 @@ class WordToMarkdownConverter:
         """生成された画像の詳細情報をデバッグ"""
         try:
             # ImageMagickのidentifyコマンドで画像情報を取得
-            cmd = ['magick', 'identify', '-verbose', image_path]
+            cmd = [
+                IMAGEMAGICK_CMD, 'identify', '-verbose', image_path]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 # 重要な情報のみ抽出
@@ -1410,7 +1462,7 @@ class WordToMarkdownConverter:
             
             # LibreOfficeが失敗した場合、ImageMagickを試す
             cmd = [
-                'magick',
+                IMAGEMAGICK_CMD,
                 temp_path,
                 '-density', '300',
                 '-quality', '100',
@@ -1468,7 +1520,7 @@ class WordToMarkdownConverter:
             if pdf_path and os.path.exists(pdf_path):
                 # PDFからPNGに変換（余白除去付き）
                 cmd2 = [
-                    'magick',
+                    IMAGEMAGICK_CMD,
                     pdf_path,
                     '-density', '300',
                     '-quality', '100',
