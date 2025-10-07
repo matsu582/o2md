@@ -10789,6 +10789,9 @@ class ExcelToMarkdownConverter:
         # Debug: report computed heuristics for this region
         print(f"PLAIN_ENTRY sheet={getattr(sheet,'title',None)} region={start_row}-{end_row},{start_col}-{end_col} non_empty={non_empty_cells} total={total_cells}")
         text_content = ' '.join(texts)
+        
+        avg_len = sum(len(t) for t in texts) / non_empty_cells if non_empty_cells > 0 else 0
+        
         # token-based heuristic: a single row containing multiple short tokens
         # is likely a compact table header or data row (e.g. "名前 初期値 設定値").
         # Be conservative: require the average cell length to be not too large so
@@ -10804,9 +10807,6 @@ class ExcelToMarkdownConverter:
         # - ファイルパス・URL・XMLやタグなどの記述的コンテンツが多い -> プレーンテキスト
         # - セルの平均長が大きい（長文が多い） -> プレーンテキスト
         # - 列ごとの非空セル分布が均一で、各行に同程度の列数のデータがある -> 表形式
-
-        # 基本統計
-        avg_len = sum(len(t) for t in texts) / non_empty_cells if non_empty_cells > 0 else 0
         long_count = sum(1 for t in texts if len(t) > 120)
         path_like_count = sum(1 for t in texts if ('\\' in t and ':' in t) or '/' in t or t.lower().startswith('http') or 'xml' in t.lower() or ('<' in t and '>' in t))
 
