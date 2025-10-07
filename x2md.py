@@ -18,6 +18,7 @@ import tempfile
 import subprocess
 import shutil
 import urllib.parse
+import platform
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any, Set
 import io
@@ -40,8 +41,58 @@ except ImportError:
     print("Pillowライブラリが必要です: pip install pillow")
     sys.exit(1)
 
+def _get_libreoffice_path():
+    """プラットフォームに応じたLibreOfficeのパスを取得"""
+    system = platform.system()
+    
+    if system == "Darwin":  # macOS
+        path = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+        if os.path.exists(path):
+            return path
+    elif system == "Linux":  # Ubuntu/Linux
+        common_paths = [
+            "/usr/bin/soffice",
+            "/usr/bin/libreoffice",
+            "/snap/bin/libreoffice",
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+        try:
+            result = subprocess.run(["which", "soffice"], capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+            result = subprocess.run(["which", "libreoffice"], capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception:
+            pass
+    elif system == "Windows":
+        common_paths = [
+            r"C:\Program Files\LibreOffice\program\soffice.exe",
+            r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+    
+    return "soffice"
+
+def _get_imagemagick_command():
+    """ImageMagickのコマンド名を取得（バージョンに応じて'magick'または'convert'）"""
+    try:
+        if shutil.which('magick'):
+            return 'magick'
+        elif shutil.which('convert'):
+            return 'convert'
+        else:
+            return 'convert'
+    except Exception:
+        return 'convert'
+
 # 設定定数
-LIBREOFFICE_PATH = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+LIBREOFFICE_PATH = _get_libreoffice_path()
+IMAGEMAGICK_CMD = _get_imagemagick_command()
 
 # DPI設定
 DEFAULT_DPI = 600
@@ -8003,7 +8054,7 @@ class ExcelToMarkdownConverter:
                     
                     # ページ数を確認
                     try:
-                        im_check = shutil.which('magick') or shutil.which('convert')
+                        im_check = IMAGEMAGICK_CMD
                         if im_check:
                             page_count_proc = subprocess.run(
                                 [im_check, 'identify', pdf_path],
@@ -8017,7 +8068,7 @@ class ExcelToMarkdownConverter:
                 except Exception as e:
                     print(f"[WARNING] 分離グループPDF保存失敗: {e}")
 
-                im_cmd = shutil.which('magick') or shutil.which('convert')
+                im_cmd = IMAGEMAGICK_CMD
                 if not im_cmd:
                     try:
                         shutil.rmtree(tmp_pdf_dir)
