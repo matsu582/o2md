@@ -1984,10 +1984,9 @@ class ExcelToMarkdownConverter:
                                                     cell_ranges_all = []
                                                 
                                                 # Use _cluster_shapes_common for proper clustering
-                                                # max_groups=1 means cluster into 1 group if possible (no splitting)
-                                                # But the method will still split if there are large gaps
+                                                # max_groups=2 enables row-gap based splitting
                                                 clusters, debug_info = self._cluster_shapes_common(
-                                                    sheet, shapes, cell_ranges=cell_ranges_all, max_groups=1
+                                                    sheet, shapes, cell_ranges=cell_ranges_all, max_groups=2
                                                 )
                                                 print(f"[DEBUG] clustered into {len(clusters)} groups: sizes={[len(c) for c in clusters]}")
                                                 
@@ -3229,6 +3228,9 @@ class ExcelToMarkdownConverter:
             for node in drawing_xml:
                 lname = node.tag.split('}')[-1].lower()
                 if lname not in ('twocellanchor', 'onecellanchor'):
+                    continue
+                # only consider anchors that have drawable content (matching _extract_drawing_shapes)
+                if not self._anchor_has_drawable(node):
                     continue
                 # determine cell indices
                 if lname == 'twocellanchor':
