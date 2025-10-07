@@ -5666,7 +5666,6 @@ class ExcelToMarkdownConverter:
                         dtree_check = ET.parse(drawing_relpath)
                         droot_check = dtree_check.getroot()
                         kept_anchors = [n for n in list(droot_check) if n.tag.split('}')[-1].lower() in ('twocellanchor', 'onecellanchor')]
-                        print(f"[DEBUG][_iso_anchor_check] sheet={sheet.title} kept_anchors count after pruning: {len(kept_anchors)}")
                         if not kept_anchors:
                             print(f"[DEBUG][_iso_entry] sheet={sheet.title} trimmed drawing has no anchors after pruning; skipping isolated group")
                             return None
@@ -5676,7 +5675,6 @@ class ExcelToMarkdownConverter:
                     print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
 
                 # After writing, ensure kept anchors have connector cosmetic children copied
-                print(f"[DEBUG][_iso_connector_copy] Starting connector cosmetic children copy")
                 try:
                     import copy
                     # reload tree to operate on current root
@@ -5726,8 +5724,7 @@ class ExcelToMarkdownConverter:
                                             if orig_sub.tag.split('}')[-1].lower() == 'lnref':
                                                 found_lnref = True
                                                 try:
-                                                    # new_ln = materialize_ln_from_lnref(orig_sub)
-                                                    new_ln = None
+                                                    new_ln = materialize_ln_from_lnref(orig_sub)
                                                     if new_ln is not None:
                                                         # attach new_ln under spPr if possible
                                                         attached = False
@@ -5751,8 +5748,7 @@ class ExcelToMarkdownConverter:
                                             for el in list(new_ch.iter()):
                                                 if el.tag.split('}')[-1].lower() == 'lnref':
                                                     try:
-                                                        # new_ln = materialize_ln_from_lnref(el)
-                                                        new_ln = None
+                                                        new_ln = materialize_ln_from_lnref(el)
                                                         if new_ln is not None:
                                                             for p in new_ch.iter():
                                                                 for c_child in list(p):
@@ -5809,10 +5805,8 @@ class ExcelToMarkdownConverter:
                                     except Exception as e:
                                         pass  # XML解析エラーは無視
                     tree2.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
-                    print(f"[DEBUG][_iso_connector_copy] Completed connector cosmetic children copy")
                 except Exception as e:
                     print(f"[WARNING] ファイル操作エラー: {e}")
-                    print(f"[DEBUG][_iso_connector_copy] Exception in connector copy: {e}")
 
                 # Extra pass: for any kept anchor that corresponds to an original
                 # connector anchor (cxnSp/cxn), replace the connector element in
@@ -5820,7 +5814,6 @@ class ExcelToMarkdownConverter:
                 # element from the source drawing. This is a conservative step to
                 # preserve exact <a:ln> children (w/prstDash/headEnd/tailEnd) and
                 # other connector-specific structure that some renderers rely on.
-                print(f"[DEBUG][_iso_extra_pass] Starting extra connector pass")
                 try:
                     try:
                         tree3 = ET.parse(drawing_relpath)
@@ -5924,10 +5917,10 @@ class ExcelToMarkdownConverter:
                                         print(f"[WARNING] ファイル操作エラー: {e}")
                                     # Force materialize any lnRef under the connector's style
                                     # using the robust helper to ensure concrete <a:ln>
-                                    # try:
-                                    #     ensure_materialize_lnref_on_connector(conn_elem)
-                                    # except Exception:
-                                    #     pass  # データ構造操作失敗は無視
+                                    try:
+                                        ensure_materialize_lnref_on_connector(conn_elem)
+                                    except Exception:
+                                        pass  # データ構造操作失敗は無視
 
                                     # normalize ln children: keep exactly one <ln> under spPr
                                     try:
@@ -5997,8 +5990,7 @@ class ExcelToMarkdownConverter:
                                                         for ssub in list(style_el):
                                                             if ssub.tag.split('}')[-1].lower() == 'lnref':
                                                                 try:
-                                                                    # new_ln = materialize_ln_from_lnref(ssub)  # 未定義関数のため無効化
-                                                                    new_ln = None
+                                                                    new_ln = materialize_ln_from_lnref(ssub)
                                                                     if new_ln is not None:
                                                                         # replace remaining_ln with new_ln
                                                                         try:
@@ -6965,7 +6957,6 @@ class ExcelToMarkdownConverter:
                     suffix = "_grp"
                 tmp_xlsx = os.path.join(tmpdir, f"{self.base_name}_iso_group{suffix}.xlsx")
                 print(f"[DEBUG][_iso_entry] sheet={sheet.title} tmp_xlsx will be created at: {tmp_xlsx}")
-                print(f"[DEBUG][_iso_checkpoint] Reached tmp_xlsx creation point")
                 # If cell_range was provided, further minimize the tmpdir contents
                 # by keeping only the target worksheet and its drawing resources.
                 try:
@@ -7630,7 +7621,6 @@ class ExcelToMarkdownConverter:
                     pass  # 一時ディレクトリ削除失敗は無視
 
                 # openpyxlによる正規化を事前に実施してから保存
-                print(f"[DEBUG][_iso_zip_start] Starting ZIP creation: {tmp_xlsx}")
                 with zipfile.ZipFile(tmp_xlsx, 'w', zipfile.ZIP_DEFLATED) as zout:
                     for folder, _, files in os.walk(tmpdir):
                         for fn in files:
