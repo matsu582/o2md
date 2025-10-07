@@ -5718,62 +5718,6 @@ class ExcelToMarkdownConverter:
                                                         elem.set('val', hexv)
                                     except Exception as e:
                                         print(f"[WARNING] ファイル操作エラー: {e}")
-                                    # Materialize lnRef similar to isolated-shapes path
-                                    try:
-                                        a_ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
-                                        found_lnref = False
-                                        for orig_sub in ch.iter():
-                                            if orig_sub.tag.split('}')[-1].lower() == 'lnref':
-                                                found_lnref = True
-                                                try:
-                                                    # new_ln = materialize_ln_from_lnref(orig_sub)
-                                                    new_ln = None
-                                                    if new_ln is not None:
-                                                        # attach new_ln under spPr if possible
-                                                        attached = False
-                                                        for cand in new_ch.iter():
-                                                            if cand.tag.split('}')[-1].lower() == 'sppr':
-                                                                try:
-                                                                    cand.append(new_ln)
-                                                                    attached = True
-                                                                    break
-                                                                except Exception:
-                                                                    pass  # データ構造操作失敗は無視
-                                                        if not attached:
-                                                            try:
-                                                                new_ch.append(new_ln)
-                                                            except Exception:
-                                                                pass  # データ構造操作失敗は無視
-                                                except Exception:
-                                                    pass  # データ構造操作失敗は無視
-                                                break
-                                        if not found_lnref:
-                                            for el in list(new_ch.iter()):
-                                                if el.tag.split('}')[-1].lower() == 'lnref':
-                                                    try:
-                                                        # new_ln = materialize_ln_from_lnref(el)
-                                                        new_ln = None
-                                                        if new_ln is not None:
-                                                            for p in new_ch.iter():
-                                                                for c_child in list(p):
-                                                                    if c_child is el:
-                                                                        try:
-                                                                            p.remove(el)
-                                                                            p.append(new_ln)
-                                                                        except Exception:
-                                                                            try:
-                                                                                new_ch.append(new_ln)
-                                                                            except Exception:
-                                                                                pass  # 一時ファイルの削除失敗は無視
-                                                                        raise StopIteration
-                                                    except StopIteration:
-                                                        raise
-                                                    except Exception:
-                                                        pass  # 一時ファイルの削除失敗は無視
-                                    except StopIteration:
-                                        pass  # データ構造操作失敗は無視
-                                    except Exception:
-                                        pass  # データ構造操作失敗は無視
                                     # preserve attributes for important drawing tags (ln/headEnd/tailEnd/spPr)
                                     for sub in ch.iter():
                                         try:
@@ -5922,12 +5866,6 @@ class ExcelToMarkdownConverter:
                                                         elem.set('val', hexv)
                                     except Exception as e:
                                         print(f"[WARNING] ファイル操作エラー: {e}")
-                                    # Force materialize any lnRef under the connector's style
-                                    # using the robust helper to ensure concrete <a:ln>
-                                    # try:
-                                    #     ensure_materialize_lnref_on_connector(conn_elem)
-                                    # except Exception:
-                                    #     pass  # データ構造操作失敗は無視
 
                                     # normalize ln children: keep exactly one <ln> under spPr
                                     try:
@@ -5978,47 +5916,6 @@ class ExcelToMarkdownConverter:
                                                         except Exception:
                                                             pass  # 一時ファイルの削除失敗は無視
 
-                                            # If preferred ln exists but lacks @w, attempt to materialize from any lnRef in style
-                                            try:
-                                                # find the remaining ln (preferred or single)
-                                                remaining_ln = None
-                                                for c in list(sppr):
-                                                    if c.tag.split('}')[-1].lower() == 'ln':
-                                                        remaining_ln = c
-                                                        break
-                                                if remaining_ln is not None and not remaining_ln.attrib.get('w'):
-                                                    # look for a style/lnRef under conn_elem
-                                                    style_el = None
-                                                    for ch in list(conn_elem):
-                                                        if ch.tag.split('}')[-1].lower() == 'style':
-                                                            style_el = ch
-                                                            break
-                                                    if style_el is not None:
-                                                        for ssub in list(style_el):
-                                                            if ssub.tag.split('}')[-1].lower() == 'lnref':
-                                                                try:
-                                                                    # new_ln = materialize_ln_from_lnref(ssub)  # 未定義関数のため無効化
-                                                                    new_ln = None
-                                                                    if new_ln is not None:
-                                                                        # replace remaining_ln with new_ln
-                                                                        try:
-                                                                            sppr.remove(remaining_ln)
-                                                                        except Exception:
-                                                                            pass  # 一時ファイルの削除失敗は無視
-                                                                        try:
-                                                                            sppr.append(new_ln)
-                                                                        except Exception:
-                                                                            pass  # 一時ファイルの削除失敗は無視
-                                                                        # remove lnRef from style to avoid renderer fallbacks
-                                                                        try:
-                                                                            style_el.remove(ssub)
-                                                                        except Exception:
-                                                                            pass  # 一時ファイルの削除失敗は無視
-                                                                    break
-                                                                except Exception:
-                                                                    pass  # 一時ファイルの削除失敗は無視
-                                            except Exception:
-                                                pass  # 一時ファイルの削除失敗は無視
                                     except Exception:
                                         pass  # 一時ファイルの削除失敗は無視
                             except Exception:
