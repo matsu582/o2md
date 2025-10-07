@@ -41,58 +41,24 @@ except ImportError:
     print("Pillowライブラリが必要です: pip install pillow")
     sys.exit(1)
 
-def _get_libreoffice_path():
-    """プラットフォームに応じたLibreOfficeのパスを取得"""
-    system = platform.system()
-    
-    if system == "Darwin":  # macOS
-        path = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
-        if os.path.exists(path):
-            return path
-    elif system == "Linux":  # Ubuntu/Linux
-        common_paths = [
-            "/usr/bin/soffice",
-            "/usr/bin/libreoffice",
-            "/snap/bin/libreoffice",
-        ]
-        for path in common_paths:
-            if os.path.exists(path):
-                return path
-        try:
-            result = subprocess.run(["which", "soffice"], capture_output=True, text=True)
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-            result = subprocess.run(["which", "libreoffice"], capture_output=True, text=True)
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-        except Exception:
-            pass  # コマンド検索失敗は無視
-    elif system == "Windows":
-        common_paths = [
-            r"C:\Program Files\LibreOffice\program\soffice.exe",
-            r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
-        ]
-        for path in common_paths:
-            if os.path.exists(path):
-                return path
-    
-    return "soffice"
-
-def _get_imagemagick_command():
-    """ImageMagickのコマンド名を取得（バージョンに応じて'magick'または'convert'）"""
-    try:
-        if shutil.which('magick'):
-            return 'magick'
-        elif shutil.which('convert'):
-            return 'convert'
-        else:
-            return 'convert'
-    except Exception:
-        return 'convert'
+from utils import (
+    get_libreoffice_path, 
+    get_imagemagick_command, 
+    col_letter,
+    sanitize_filename,
+    detect_image_format,
+    to_positive
+)
+from image_processor import (
+    convert_excel_to_pdf,
+    convert_pdf_page_to_png,
+    compute_sheet_cell_pixel_map,
+    snap_box_to_cell_bounds
+)
 
 # 設定定数
-LIBREOFFICE_PATH = _get_libreoffice_path()
-IMAGEMAGICK_CMD = _get_imagemagick_command()
+LIBREOFFICE_PATH = get_libreoffice_path()
+IMAGEMAGICK_CMD = get_imagemagick_command()
 
 # DPI設定
 DEFAULT_DPI = 600
@@ -2974,99 +2940,36 @@ class ExcelToMarkdownConverter:
             print(f"[DEBUG][_prune_drawing_anchors] Error: {e}")
 
     def _convert_excel_to_pdf(self, xlsx_path: str, tmpdir: str, apply_fit_to_page: bool = True) -> Optional[str]:
-        """ExcelファイルをPDFに変換
-        
-        LibreOfficeを使用してExcelファイルをPDF形式に変換します。
-        2つのレンダリングメソッドで重複していた処理を統合。
-        
-        Args:
-            xlsx_path: 変換するExcelファイルのパス
-            tmpdir: PDF出力先ディレクトリ
-            apply_fit_to_page: 1ページに収める設定を適用するか
-        
-        Returns:
-            生成されたPDFファイルのパス または None
-        """
+        """ExcelファイルをPDFに変換"""
         try:
-            # 元のファイルを上書きしないように一時コピーを作成
             tmp_xlsx = os.path.join(tmpdir, os.path.basename(xlsx_path))
             shutil.copyfile(xlsx_path, tmp_xlsx)
             
-            # PDF変換前に縦横1ページ設定を適用
             if apply_fit_to_page:
                 self._set_excel_fit_to_one_page(tmp_xlsx)
             
-            # LibreOfficeでPDF変換
-            cmd = [LIBREOFFICE_PATH, '--headless', '--convert-to', 'pdf', '--outdir', tmpdir, tmp_xlsx]
-            print(f"[DEBUG] LibreOffice export command: {' '.join(cmd)}")
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
-            
-            if proc.returncode != 0:
-                print(f"[WARNING] LibreOffice PDF 変換失敗: {proc.stderr}")
-                return None
-            
-            # 生成されたPDFを探す
-            pdf_name = f"{self.base_name}.pdf"
-            pdf_path = os.path.join(tmpdir, pdf_name)
-            
-            if not os.path.exists(pdf_path):
+            pdf_path = convert_excel_to_pdf(tmp_xlsx, tmpdir, apply_fit_to_page)
+            if pdf_path and not os.path.exists(pdf_path):
                 # LibreOfficeが異なる名前で出力した可能性
                 candidates = [os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if f.lower().endswith('.pdf')]
-                if not candidates:
-                    print("[WARNING] LibreOffice がPDFを出力しませんでした")
-                    return None
-                pdf_path = candidates[0]
+                if candidates:
+                    pdf_path = candidates[0]
             
             return pdf_path
-        
         except Exception as e:
             print(f"[WARNING] Excel→PDF変換失敗: {e}")
             return None
 
     def _convert_pdf_page_to_png(self, pdf_path: str, page_index: int, dpi: int,
                                   output_dir: str, filename_prefix: str) -> Optional[str]:
-        """PDFの指定ページをPNG画像に変換
-        
-        ImageMagickを使用してPDFの特定ページをPNG形式に変換します。
-        複数のレンダリングメソッドで重複していた処理を統合。
-        
-        Args:
-            pdf_path: 変換するPDFファイルのパス
-            page_index: ページ番号(0始まり)
-            dpi: 解像度
-            output_dir: PNG出力先ディレクトリ
-            filename_prefix: 出力ファイル名のプレフィックス
-        
-        Returns:
-            生成されたPNGファイル名(相対パス) または None
-        """
+        """PDFの指定ページをPNG画像に変換"""
         try:
             png_filename = f"{filename_prefix}.png"
             png_path = os.path.join(output_dir, png_filename)
             
-            # ImageMagickでPNG変換
-            cmd = [
-                'convert',
-                '-density', str(dpi),
-                f'{pdf_path}[{page_index}]',
-                '-quality', '100',
-                png_path
-            ]
-            
-            print(f"[DEBUG] ImageMagick command: {' '.join(cmd)}")
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            
-            if proc.returncode != 0:
-                print(f"[WARNING] ImageMagick PNG変換失敗: {proc.stderr}")
-                return None
-            
-            if not os.path.exists(png_path):
-                print(f"[WARNING] PNG画像が生成されませんでした: {png_path}")
-                return None
-            
-            # ファイル名のみを返す(呼び出し元でパスを構築)
-            return png_filename
-        
+            if convert_pdf_page_to_png(pdf_path, page_index, dpi, png_path):
+                return png_filename
+            return None
         except Exception as e:
             print(f"[WARNING] PDF→PNG変換失敗: {e}")
             return None
@@ -3159,231 +3062,33 @@ class ExcelToMarkdownConverter:
                     pass  # 一時ディレクトリ削除失敗は無視
 
     def _detect_image_format(self, image_data: bytes) -> str:
-        """Detect common image formats from initial bytes and return extension.
-
-        Falls back to .png if unknown.
-        """
-        try:
-            if not image_data or len(image_data) < 4:
-                return '.png'
-            # JPEG
-            if image_data.startswith(b'\xff\xd8'):
-                return '.jpg'
-            # PNG
-            if image_data.startswith(b'\x89PNG'):
-                return '.png'
-            # GIF
-            if image_data.startswith(b'GIF87a') or image_data.startswith(b'GIF89a'):
-                return '.gif'
-            # BMP
-            if image_data.startswith(b'BM'):
-                return '.bmp'
+        """画像データから画像フォーマットを検出"""
+        fmt = detect_image_format(image_data)
+        if fmt == 'png':
             return '.png'
-        except Exception:
-            return '.png'
+        elif fmt == 'jpeg':
+            return '.jpg'
+        elif fmt == 'gif':
+            return '.gif'
+        elif fmt == 'bmp':
+            return '.bmp'
+        return '.png'
 
     def _sanitize_filename(self, s: str) -> str:
-        """ファイルシステム上で安全なファイル名に正規化する。
-
-        - Unicode 正規化 (NFKC)
-        - 連続空白はアンダースコアに置換
-        - ファイル名に使えない記号 (/\\:*?"<>|) を除去
-        - 複数アンダースコアを単一に、先頭/末尾のアンダースコアを除去
-        """
-        import unicodedata, re
-        if s is None:
-            return 'image'
-        txt = unicodedata.normalize('NFKC', str(s))
-        # replace whitespace with underscore
-        txt = re.sub(r"\s+", '_', txt)
-        # remove characters that are problematic in filenames
-        txt = re.sub(r'[/\\:*?"<>|]', '', txt)
-        # collapse multiple underscores
-        txt = re.sub(r'_+', '_', txt)
-        # remove leading/trailing underscores
-        txt = txt.strip('_')
-        if not txt:
-            return 'image'
-        return txt
+        """ファイル名として安全な文字列に変換"""
+        return sanitize_filename(s)
 
     def _compute_sheet_cell_pixel_map(self, sheet, DPI=300):
-        """Compute approximate pixel positions for column right-edges and row bottom-edges.
-
-        Returns (col_x, row_y) where col_x[0] == 0 and col_x[i] is the right edge
-        of column i (1-based). row_y similar for rows.
-        """
-        try:
-            max_col = sheet.max_column
-            max_row = sheet.max_row
-            col_pixels = []
-            from openpyxl.utils import get_column_letter
-            for c in range(1, max_col+1):
-                cd = sheet.column_dimensions.get(get_column_letter(c))
-                # Excel column width is in character units. Use a more
-                # accurate conversion based on Microsoft's documented
-                # equation: pixels = floor(((256*W + floor(128/MAX_DIGIT_WIDTH))/256) * MAX_DIGIT_WIDTH)
-                # where MAX_DIGIT_WIDTH approximates the maximum digit width
-                # in pixels for the workbook's default font. We use 7 as a
-                # conservative default (common for Calibri/Arial at default size).
-                width = getattr(cd, 'width', None) if cd is not None else None
-                if width is None:
-                    try:
-                        from openpyxl.utils import units as _units
-                        width = getattr(sheet.sheet_format, 'defaultColWidth', None) or _units.DEFAULT_COLUMN_WIDTH
-                    except Exception:
-                        width = 8.43
-                try:
-                    import math
-                    # Compute base pixel width at standard screen DPI (96). Then
-                    # scale to the requested DPI so EMU offsets (which are later
-                    # converted using the target rasterization DPI) align with the
-                    # produced PDF/PNG pixels. This reduces mismatches between
-                    # drawing EMU conversions and column pixel map used elsewhere.
-                    MAX_DIGIT_WIDTH = 7
-                    base_px = int(math.floor(((256.0 * float(width) + math.floor(128.0 / MAX_DIGIT_WIDTH)) / 256.0) * MAX_DIGIT_WIDTH))
-                    if base_px < 1:
-                        base_px = 1
-                    # scale from 96 DPI (typical screen) to target DPI
-                    scale = float(DPI) / 96.0 if DPI and DPI > 0 else 1.0
-                    px = max(1, int(round(base_px * scale)))
-                except (ValueError, TypeError):
-                    # fallback heuristic, also scale by DPI
-                    try:
-                        base = max(1, int(float(width) * 7 + 5))
-                        px = max(1, int(round(base * (float(DPI) / 96.0))))
-                    except (ValueError, TypeError):
-                        px = max(1, int(float(width) * 7 + 5))
-                col_pixels.append(px)
-
-            row_pixels = []
-            for r in range(1, max_row+1):
-                rd = sheet.row_dimensions.get(r)
-                hpts = getattr(rd, 'height', None) if rd is not None else None
-                if hpts is None:
-                    try:
-                        from openpyxl.utils import units as _units
-                        hpts = _units.DEFAULT_ROW_HEIGHT
-                    except Exception:
-                        hpts = 15
-                # Row heights are in points; convert to pixels at the target DPI
-                try:
-                    px = max(1, int(float(hpts) * DPI / 72.0))
-                except (ValueError, TypeError):
-                    px = max(1, int(hpts * DPI / 72))
-                row_pixels.append(px)
-
-            col_x = [0]
-            for v in col_pixels:
-                col_x.append(col_x[-1] + v)
-            row_y = [0]
-            for v in row_pixels:
-                row_y.append(row_y[-1] + v)
-
-            return col_x, row_y
-        except Exception:
-            return [0], [0]
+        """セルとピクセルのマッピングを計算"""
+        return compute_sheet_cell_pixel_map(sheet, DPI)
 
     def _to_positive(self, value, orig_ext, orig_ch_ext, target_px):
-        """Ensure the EMU extent is positive.
-
-        Priority for choosing a positive extent:
-        1. keep 'value' if it's already positive
-        2. fall back to orig_ext (if provided and >0)
-        3. fall back to orig_ch_ext (if provided and >0)
-        4. fall back to converting target_px -> EMU (at least 1 px)
-        5. finally return 1 EMU as absolute safe minimum
-
-        This helper is defensive and avoids raising errors; it always
-        returns an int > 0.
-        """
-        try:
-            v = int(value) if value is not None else 0
-        except (ValueError, TypeError):
-            v = 0
-        if v and v > 0:
-            return v
-        try:
-            if orig_ext is not None:
-                oe = int(orig_ext)
-                if oe > 0:
-                    return oe
-        except (ValueError, TypeError):
-            pass  # 型変換失敗は無視
-        try:
-            if orig_ch_ext is not None:
-                oc = int(orig_ch_ext)
-                if oc > 0:
-                    return oc
-        except (ValueError, TypeError):
-            pass  # 型変換失敗は無視
-        try:
-            # target_px is in pixels; convert to EMU using object's dpi if available
-            DPI = int(getattr(self, 'dpi', 300) or 300)
-            EMU_PER_INCH = 914400
-            emu_per_pixel = EMU_PER_INCH / float(DPI) if DPI and DPI > 0 else EMU_PER_INCH / 300.0
-            px = float(target_px) if target_px is not None else 1.0
-            emu = int(round(max(1.0, px) * emu_per_pixel))
-            if emu and emu > 0:
-                return emu
-        except (ValueError, TypeError):
-            pass  # 型変換失敗は無視
-        # absolute fallback
-        return 1
+        """負のオフセット値を正の値に変換"""
+        return to_positive(value, orig_ext, orig_ch_ext, target_px)
 
     def _snap_box_to_cell_bounds(self, box, col_x, row_y, DPI=300):
-        """Snap a pixel box (l,t,r,b) to nearest enclosing cell boundaries using
-        the provided col_x and row_y arrays. Returns integer pixel box.
-        """
-        try:
-            l, t, r, btm = box
-            # find start column: smallest c such that col_x[c] >= l (allow small tolerance)
-            # tol scales with DPI to preserve previous behavior when DPI differs
-            try:
-                tol = max(1, int(DPI / 300.0 * 3))  # a few pixels tolerance dependent on DPI
-            except (ValueError, TypeError):
-                tol = 3
-            start_col = None
-            for c in range(1, len(col_x)):
-                if col_x[c] >= l - tol:
-                    start_col = c
-                    break
-            if start_col is None:
-                start_col = max(1, len(col_x)-1)
-
-            # find end column: smallest c such that col_x[c] >= r (allow small tolerance)
-            end_col = None
-            for c in range(1, len(col_x)):
-                if col_x[c] >= r + tol:
-                    end_col = c
-                    break
-            if end_col is None:
-                end_col = max(1, len(col_x)-1)
-
-            # rows
-            start_row = None
-            for rr in range(1, len(row_y)):
-                if row_y[rr] >= t - tol:
-                    start_row = rr
-                    break
-            if start_row is None:
-                start_row = max(1, len(row_y)-1)
-
-            end_row = None
-            for rr in range(1, len(row_y)):
-                if row_y[rr] >= btm + tol:
-                    end_row = rr
-                    break
-            if end_row is None:
-                end_row = max(1, len(row_y)-1)
-
-            left_px = max(0, int(col_x[start_col-1]))
-            top_px = max(0, int(row_y[start_row-1]))
-            right_px = int(col_x[end_col]) if end_col < len(col_x) else int(col_x[-1])
-            bottom_px = int(row_y[end_row]) if end_row < len(row_y) else int(row_y[-1])
-
-            return left_px, top_px, right_px, bottom_px
-        except (ValueError, TypeError):
-            return int(box[0]), int(box[1]), int(box[2]), int(box[3])
+        """バウンディングボックスをセルの境界にスナップ"""
+        return snap_box_to_cell_bounds(box, col_x, row_y, DPI)
 
     def _find_content_bbox(self, pil_image, white_thresh: int = 245):
         """Find bounding box of non-white content in a PIL Image.
@@ -4610,12 +4315,7 @@ class ExcelToMarkdownConverter:
                             cells_copied = 0
                             
                             # Helper to convert index to letters
-                            def _col_letter(n: int) -> str:
-                                letters = ''
-                                while n > 0:
-                                    n, rem = divmod(n-1, 26)
-                                    letters = chr(65 + rem) + letters
-                                return letters
+                            _col_letter = col_letter
                             
                             # Copy rows in range, keeping original row numbers
                             for row_el in src_rows:
@@ -4669,13 +4369,6 @@ class ExcelToMarkdownConverter:
                             sroot.append(new_sheet_data)
                             
                             # Update dimension element with ORIGINAL row/column numbers
-                            def col_letter(n: int) -> str:
-                                letters = ''
-                                while n > 0:
-                                    n, rem = divmod(n-1, 26)
-                                    letters = chr(65 + rem) + letters
-                                return letters
-                            
                             dim_tag = f'{{{ns}}}dimension'
                             dim = sroot.find(dim_tag)
                             if dim is None:
@@ -6028,13 +5721,6 @@ class ExcelToMarkdownConverter:
                     try:
                         s_col, e_col, s_row, e_row = cell_range
                         # compute Excel-style column letters
-                        def col_letter(n: int) -> str:
-                            letters = ''
-                            while n > 0:
-                                n, rem = divmod(n-1, 26)
-                                letters = chr(65 + rem) + letters
-                            return letters
-
                         start_col_letter = col_letter(s_col)
                         end_col_letter = col_letter(e_col)
                         # create print area string like 'Sheet Name'!$A$5:$D$20
@@ -6191,13 +5877,7 @@ class ExcelToMarkdownConverter:
                                         if new_col_idx < 1:
                                             new_col_idx = 1
                                         # helper to compute column letters from index
-                                        def _col_letter_local(n: int) -> str:
-                                            letters = ''
-                                            while n > 0:
-                                                n, rem = divmod(n-1, 26)
-                                                letters = chr(65 + rem) + letters
-                                            return letters
-                                        new_col_letters = _col_letter_local(new_col_idx)
+                                        new_col_letters = col_letter(new_col_idx)
                                         # adjust cell r attribute to new column letters + new row number
                                         new_cell = ET.Element('{%s}c' % ns, dict(c.attrib))
                                         new_cell.attrib['r'] = f"{new_col_letters}{new_r_index}"
@@ -6223,12 +5903,6 @@ class ExcelToMarkdownConverter:
                                     dim = ET.Element(dim_tag)
                                     sroot4.insert(0, dim)
                                 # compute A1-style addresses for new dimension
-                                def col_letter(n: int) -> str:
-                                    letters = ''
-                                    while n > 0:
-                                        n, rem = divmod(n-1, 26)
-                                        letters = chr(65 + rem) + letters
-                                    return letters
                                 # After trimming we renumber columns so leftmost column becomes A (1)
                                 start_addr = f"{col_letter(1)}1"
                                 end_addr = f"{col_letter(e_col - s_col + 1)}{max(1, new_r_index-1)}"
