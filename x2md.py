@@ -8041,7 +8041,7 @@ class ExcelToMarkdownConverter:
                     
                     # ページ数を確認
                     try:
-                        im_check = shutil.which('magick') or shutil.which('convert')
+                        im_check = shutil.which('convert') or shutil.which('convert')
                         if im_check:
                             page_count_proc = subprocess.run(
                                 [im_check, 'identify', pdf_path],
@@ -8055,7 +8055,7 @@ class ExcelToMarkdownConverter:
                 except Exception as e:
                     print(f"[WARNING] 分離グループPDF保存失敗: {e}")
 
-                im_cmd = shutil.which('magick') or shutil.which('convert')
+                im_cmd = shutil.which('convert') or shutil.which('convert')
                 if not im_cmd:
                     try:
                         shutil.rmtree(tmp_pdf_dir)

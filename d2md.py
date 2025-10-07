@@ -1294,7 +1294,7 @@ class WordToMarkdownConverter:
             # 手法1: 高速変換（品質は標準、速度重視）
             print("[DEBUG] 高速PDF→PNG変換実行...")
             cmd_fast = [
-                'magick',
+                'convert',
                 '-density', '300',  # 標準DPIで高速化
                 f'{pdf_path}[0]',  # 最初のページ
                 '-colorspace', 'RGB',
@@ -1315,7 +1315,7 @@ class WordToMarkdownConverter:
                 
                 # 画像情報を簡単に出力
                 try:
-                    identify_result = subprocess.run(['magick', 'identify', output_path], 
+                    identify_result = subprocess.run(['convert', 'identify', output_path], 
                                                    capture_output=True, text=True, timeout=5)
                     if identify_result.returncode == 0:
                         info = identify_result.stdout.strip()
@@ -1340,7 +1340,7 @@ class WordToMarkdownConverter:
                         print(f"[INFO] pdftoppm変換完了: {output_path}")
                         
                         # 余白除去を後処理で実行
-                        cmd_trim = ['magick', output_path, '-trim', '+repage', output_path]
+                        cmd_trim = ['convert', output_path, '-trim', '+repage', output_path]
                         subprocess.run(cmd_trim, capture_output=True, text=True, timeout=10)
                         
                         return True
@@ -1348,7 +1348,7 @@ class WordToMarkdownConverter:
                 # 手法3: 最小設定での変換
                 print("[DEBUG] 最小設定変換試行...")
                 cmd_minimal = [
-                    'magick',
+                    'convert',
                     '-density', '150',  # 低DPIで最高速
                     f'{pdf_path}[0]',
                     '-resize', '150%',  # 小さめの拡大
@@ -1392,7 +1392,7 @@ class WordToMarkdownConverter:
         """生成された画像の詳細情報をデバッグ"""
         try:
             # ImageMagickのidentifyコマンドで画像情報を取得
-            cmd = ['magick', 'identify', '-verbose', image_path]
+            cmd = ['convert', 'identify', '-verbose', image_path]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 # 重要な情報のみ抽出
@@ -1448,7 +1448,7 @@ class WordToMarkdownConverter:
             
             # LibreOfficeが失敗した場合、ImageMagickを試す
             cmd = [
-                'magick',
+                'convert',
                 temp_path,
                 '-density', '300',
                 '-quality', '100',
@@ -1506,7 +1506,7 @@ class WordToMarkdownConverter:
             if pdf_path and os.path.exists(pdf_path):
                 # PDFからPNGに変換（余白除去付き）
                 cmd2 = [
-                    'magick',
+                    'convert',
                     pdf_path,
                     '-density', '300',
                     '-quality', '100',
