@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import shutil
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from PIL import Image
 
 from utils import get_libreoffice_path, get_imagemagick_command
@@ -324,82 +324,149 @@ def convert_with_libreoffice(input_path: str, output_path: str) -> bool:
         return False
 
 
-def compute_sheet_cell_pixel_map(sheet, DPI: int = 300) -> Tuple[dict, dict]:
+def compute_sheet_cell_pixel_map(sheet, DPI: int = 300):
     """
     Excelシートのセルとピクセルのマッピングを計算
+    
+    元の実装と互換性を保つため、list形式で返します。
+    col_x[0] == 0, col_x[i]は列i(1-based)の右端のピクセル位置
     
     Args:
         sheet: openpyxlのワークシート
         DPI: 解像度
     
     Returns:
-        (列のピクセル位置dict, 行のピクセル位置dict)
+        (列のピクセル位置list, 行のピクセル位置list)
     """
-    EMU_PER_INCH = 914400
-    px_per_emu = DPI / EMU_PER_INCH
-    
-    col_x = {}
-    x = 0
-    for col_idx in range(1, sheet.max_column + 1):
-        col_letter_val = sheet.column_dimensions[chr(64 + col_idx) if col_idx <= 26 else ''].width
-        if col_letter_val is None:
-            col_letter_val = 8.43
-        width_px = int(col_letter_val * 7)
-        col_x[col_idx] = x
-        x += width_px
-    
-    row_y = {}
-    y = 0
-    for row_idx in range(1, sheet.max_row + 1):
-        row_dim = sheet.row_dimensions.get(row_idx)
-        if row_dim and row_dim.height:
-            height_px = int(row_dim.height * (DPI / 72.0))
-        else:
-            height_px = int(15 * (DPI / 72.0))
-        row_y[row_idx] = y
-        y += height_px
-    
-    return col_x, row_y
+    try:
+        from openpyxl.utils import get_column_letter
+        import math
+        
+        max_col = sheet.max_column
+        max_row = sheet.max_row
+        col_pixels = []
+        
+        for c in range(1, max_col+1):
+            cd = sheet.column_dimensions.get(get_column_letter(c))
+            width = getattr(cd, 'width', None) if cd is not None else None
+            if width is None:
+                try:
+                    from openpyxl.utils import units as _units
+                    width = getattr(sheet.sheet_format, 'defaultColWidth', None) or _units.DEFAULT_COLUMN_WIDTH
+                except Exception:
+                    width = 8.43
+            try:
+                MAX_DIGIT_WIDTH = 7
+                base_px = int(math.floor(((256.0 * float(width) + math.floor(128.0 / MAX_DIGIT_WIDTH)) / 256.0) * MAX_DIGIT_WIDTH))
+                if base_px < 1:
+                    base_px = 1
+                scale = float(DPI) / 96.0 if DPI and DPI > 0 else 1.0
+                px = max(1, int(round(base_px * scale)))
+            except (ValueError, TypeError):
+                try:
+                    base = max(1, int(float(width) * 7 + 5))
+                    px = max(1, int(round(base * (float(DPI) / 96.0))))
+                except (ValueError, TypeError):
+                    px = max(1, int(float(width) * 7 + 5))
+            col_pixels.append(px)
+
+        row_pixels = []
+        for r in range(1, max_row+1):
+            rd = sheet.row_dimensions.get(r)
+            hpts = getattr(rd, 'height', None) if rd is not None else None
+            if hpts is None:
+                try:
+                    from openpyxl.utils import units as _units
+                    hpts = _units.DEFAULT_ROW_HEIGHT
+                except Exception:
+                    hpts = 15
+            try:
+                px = max(1, int(float(hpts) * DPI / 72.0))
+            except (ValueError, TypeError):
+                px = max(1, int(hpts * DPI / 72))
+            row_pixels.append(px)
+
+        col_x = [0]
+        for v in col_pixels:
+            col_x.append(col_x[-1] + v)
+        row_y = [0]
+        for v in row_pixels:
+            row_y.append(row_y[-1] + v)
+
+        return col_x, row_y
+    except Exception:
+        return [0], [0]
 
 
 def snap_box_to_cell_bounds(box: Tuple[int, int, int, int], 
-                            col_x: dict, row_y: dict, DPI: int = 300) -> Tuple[int, int, int, int]:
+                            col_x: List[int], row_y: List[int], DPI: int = 300) -> Tuple[int, int, int, int]:
     """
     バウンディングボックスをセルの境界にスナップ
     
+    元の実装と互換性を保つため、list形式のcol_x/row_yを期待します。
+    
     Args:
         box: (left, top, right, bottom)のピクセル座標
-        col_x: 列のピクセル位置マップ
-        row_y: 行のピクセル位置マップ
+        col_x: 列のピクセル位置リスト（インデックスベース）
+        row_y: 行のピクセル位置リスト（インデックスベース）
         DPI: 解像度
     
     Returns:
         スナップされた(left, top, right, bottom)
     """
-    l, t, r, b = box
-    
-    snap_l = None
-    for col_idx in sorted(col_x.keys()):
-        if abs(col_x[col_idx] - l) < 10:
-            snap_l = col_x[col_idx]
-            break
-    
-    snap_t = None
-    for row_idx in sorted(row_y.keys()):
-        if abs(row_y[row_idx] - t) < 10:
-            snap_t = row_y[row_idx]
-            break
-    
-    snap_r = None
-    for col_idx in sorted(col_x.keys()):
-        if abs(col_x[col_idx] - r) < 10:
-            snap_r = col_x[col_idx]
-            break
-    
-    snap_b = None
-    for row_idx in sorted(row_y.keys()):
-        if abs(row_y[row_idx] - b) < 10:
-            snap_b = row_y[row_idx]
-            break
-    
-    return (snap_l or l, snap_t or t, snap_r or r, snap_b or b)
+    try:
+        l, t, r, btm = box
+        try:
+            tol = max(1, int(DPI / 300.0 * 3))
+        except (ValueError, TypeError):
+            tol = 3
+        
+        start_col = None
+        for c in range(1, len(col_x)):
+            if col_x[c] >= l - tol:
+                start_col = c
+                break
+        if start_col is None:
+            start_col = max(1, len(col_x)-1)
+        
+        end_col = None
+        for c in range(1, len(col_x)):
+            if col_x[c] >= r + tol:
+                end_col = c
+                break
+        if end_col is None:
+            end_col = max(1, len(col_x)-1)
+        
+        start_row = None
+        for rw in range(1, len(row_y)):
+            if row_y[rw] >= t - tol:
+                start_row = rw
+                break
+        if start_row is None:
+            start_row = max(1, len(row_y)-1)
+        
+        end_row = None
+        for rw in range(1, len(row_y)):
+            if row_y[rw] >= btm + tol:
+                end_row = rw
+                break
+        if end_row is None:
+            end_row = max(1, len(row_y)-1)
+        
+        if start_col > 0:
+            snap_l = col_x[start_col - 1]
+        else:
+            snap_l = l
+        
+        snap_r = col_x[end_col] if end_col < len(col_x) else r
+        
+        if start_row > 0:
+            snap_t = row_y[start_row - 1]
+        else:
+            snap_t = t
+        
+        snap_b = row_y[end_row] if end_row < len(row_y) else btm
+        
+        return (snap_l, snap_t, snap_r, snap_b)
+    except Exception:
+        return box
