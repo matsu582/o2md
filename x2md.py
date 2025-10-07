@@ -17,12 +17,12 @@ import sys
 import tempfile
 import subprocess
 import shutil
-import urllib.parse
+# import urllib.parse
 import platform
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any, Set
-import io
-import base64
+# import io
+# import base64
 import zipfile
 import xml.etree.ElementTree as ET
 
@@ -260,7 +260,7 @@ class ExcelToMarkdownConverter:
         # detected bordered tables and will fall back to the general table
         # detection logic elsewhere.
         return tables
-        self.image_counter = 0
+        # デッドコード削除: self.image_counter = 0
         # mapping: sheet.title -> dict of (row_num -> markdown line index after that row's output)
         # we'll populate this while emitting markdown for rows/regions so that drawings
         # anchored to a cell (row) can be inserted immediately after the corresponding
@@ -4486,9 +4486,12 @@ class ExcelToMarkdownConverter:
                                     if fname.endswith('.xml') and not fname.startswith('_rels'):
                                         drawing_file = os.path.join(drawings_dir, fname)
                                         try:
-                                            os.remove(drawing_file)
-                                        except Exception:
-                                            pass
+
+                                            os.remove(p)
+
+                                        except (OSError, FileNotFoundError):
+
+                                            pass  # ファイル削除失敗は無視
                                 
                                 # Remove drawing rels that don't belong to target sheet
                                 rels_dir = os.path.join(drawings_dir, '_rels')
@@ -8058,9 +8061,12 @@ class ExcelToMarkdownConverter:
                     base_noext = os.path.splitext(out_path)[0]
                     for p in sorted(glob.glob(base_noext + "*.png")):
                         try:
+
                             os.remove(p)
-                        except Exception:
-                            pass
+
+                        except (OSError, FileNotFoundError):
+
+                            pass  # ファイル削除失敗は無視
                 except Exception:
                     pass
 
@@ -8170,9 +8176,12 @@ class ExcelToMarkdownConverter:
                                     try:
                                         if existing is not None and png_bytes is not None and hashlib.sha1(existing).hexdigest() == hashlib.sha1(png_bytes).hexdigest():
                                             try:
-                                                os.remove(out_path)
-                                            except Exception:
-                                                pass
+
+                                                os.remove(p)
+
+                                            except (OSError, FileNotFoundError):
+
+                                                pass  # ファイル削除失敗は無視
                                             out_path = final_path
                                         else:
                                             # different content or comparison unavailable: attempt to replace
