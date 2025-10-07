@@ -78,8 +78,21 @@ def _get_libreoffice_path():
     
     return "soffice"
 
+def _get_imagemagick_command():
+    """ImageMagickのコマンド名を取得（バージョンに応じて'magick'または'convert'）"""
+    try:
+        if shutil.which('magick'):
+            return 'magick'
+        elif shutil.which('convert'):
+            return 'convert'
+        else:
+            return 'convert'
+    except Exception:
+        return 'convert'
+
 # 設定定数
 LIBREOFFICE_PATH = _get_libreoffice_path()
+IMAGEMAGICK_CMD = _get_imagemagick_command()
 
 # DPI設定
 DEFAULT_DPI = 600
@@ -8041,7 +8054,7 @@ class ExcelToMarkdownConverter:
                     
                     # ページ数を確認
                     try:
-                        im_check = shutil.which('convert') or shutil.which('convert')
+                        im_check = IMAGEMAGICK_CMD
                         if im_check:
                             page_count_proc = subprocess.run(
                                 [im_check, 'identify', pdf_path],
@@ -8055,7 +8068,7 @@ class ExcelToMarkdownConverter:
                 except Exception as e:
                     print(f"[WARNING] 分離グループPDF保存失敗: {e}")
 
-                im_cmd = shutil.which('convert') or shutil.which('convert')
+                im_cmd = IMAGEMAGICK_CMD
                 if not im_cmd:
                     try:
                         shutil.rmtree(tmp_pdf_dir)
