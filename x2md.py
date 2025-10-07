@@ -585,7 +585,7 @@ class ExcelToMarkdownConverter:
                 try:
                     shutil.rmtree(tmpdir)
                 except Exception:
-                    pass
+                    pass  # 一時ファイルの削除失敗は無視
         except Exception as e:
             print(f"[ERROR] pageSetup設定に失敗: {e}")
             return False
@@ -922,8 +922,8 @@ class ExcelToMarkdownConverter:
                             for j, (_, fn) in enumerate(normalized_pairs):
                                 if j % nimgs == bi:
                                     new_img_map.setdefault(insert_r, []).append(fn)
-                        except (ValueError, TypeError):
-                            pass
+                        except (ValueError, TypeError) as e:
+                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     img_map = new_img_map
                     # Log both to stdout and logger if available for easier
                     # post-run inspection.
@@ -944,8 +944,8 @@ class ExcelToMarkdownConverter:
                 img_map = {}
                 for r, fn in normalized_pairs:
                     img_map.setdefault(r, []).append(fn)
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
             # If an iso_group (trimmed/group) image exists for the same row,
             # prefer it and suppress individual embedded images for that row.
@@ -965,8 +965,8 @@ class ExcelToMarkdownConverter:
                             print(f"[DEBUG][_img_suppress] sheet={sheet.title} row={rr} suppressed={suppressed} kept={kept}")
                         img_map[rr] = kept
                     
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
             # Rebuild normalized_pairs from possibly-filtered img_map so the
             # canonical emission loop below uses the updated set.
@@ -977,8 +977,8 @@ class ExcelToMarkdownConverter:
                         new_normalized.append((int(rr), fn))
                 if new_normalized:
                     normalized_pairs = new_normalized
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
             # Collect text for each non-empty source row (skip already emitted rows)
             # This must happen before we decide image anchors so that freshly-detected
@@ -1012,10 +1012,10 @@ class ExcelToMarkdownConverter:
                                 continue
                             if dtxt:
                                 texts_by_row[rr] = dtxt
-                    except (ValueError, TypeError):
-                        pass
-            except (ValueError, TypeError):
-                pass
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] 型変換エラー（無視）: {e}")
             for r in range(1, max_row + 1):
                 if r in emitted:
                     continue
@@ -1086,8 +1086,8 @@ class ExcelToMarkdownConverter:
                             except (ValueError, TypeError):
                                 # give up on this entry
                                 continue
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                 # Remove text events that overlap with deferred table source rows
                 try:
@@ -1135,8 +1135,8 @@ class ExcelToMarkdownConverter:
                                         except (ValueError, TypeError):
                                             # skip non-int-like entries
                                             continue
-                                except (ValueError, TypeError):
-                                    pass
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                             # Heuristic: sometimes src_rows can be off-by-one and
                             # the actual table contains one additional row immediately
@@ -1172,10 +1172,10 @@ class ExcelToMarkdownConverter:
                                             if has_text:
                                                 try:
                                                     table_src_rows.add(int(cand))
-                                                except (ValueError, TypeError):
-                                                    pass
-                            except (ValueError, TypeError):
-                                pass
+                                                except (ValueError, TypeError) as e:
+                                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                            except (ValueError, TypeError) as e:
+                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                             # Fallback: when no explicit src_rows, but we have an anchor and
                             # table data, conservatively add the anchor..anchor+len(table)-1
@@ -1208,8 +1208,8 @@ class ExcelToMarkdownConverter:
                                 continue
                             filtered.append((r, order, kind, payload))
                         events_emit = filtered
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                 # Sort deterministically by (row, order) and preserve original relative order
                 events_emit.sort(key=lambda e: (e[0], e[1]))
@@ -1237,8 +1237,8 @@ class ExcelToMarkdownConverter:
                             p_summary = str(payload)
                         log_line = f"row={row} order={order} kind={kind} payload={p_summary}"
                         print(f"[DEBUG][_events_emit_sorted] sheet={sheet.title} {log_line}")
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                 # Now synthesize events_log from the authoritative sheet mapping
                 # (previously-emitted lines) followed by the finalized emit list.
@@ -1297,8 +1297,8 @@ class ExcelToMarkdownConverter:
                                 self._mark_image_emitted(imgnm)
                         except Exception:
                             continue
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[WARNING] ファイル操作エラー: {e}")
 
                 # Strong debug: always emit events count so we can detect empty/filled
                 print(f"[DEBUG][_events_sorted] sheet={sheet.title} events_count_emit={len(events_emit)}")
@@ -1343,8 +1343,8 @@ class ExcelToMarkdownConverter:
                         except (ValueError, TypeError):
                             # be robust in diagnostic pass; do not raise
                             print(f"  [LOG] event @{row} kind={kind} (payload unstable)")
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                 # Now emit events in deterministic order and record positions.
                 # This mutates self.markdown_lines (canonical output path).
@@ -1368,8 +1368,8 @@ class ExcelToMarkdownConverter:
                                 self._mark_emitted_text(sheet.title, self._normalize_text(payload))
                                 self.markdown_lines.append("")
                                 print("<< text")
-                            except (ValueError, TypeError):
-                                pass
+                            except (ValueError, TypeError) as e:
+                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     elif kind == 'table':
                         try:
                             # payload may be either (table_data, src_rows) or
@@ -1414,8 +1414,8 @@ class ExcelToMarkdownConverter:
                                     except Exception:
                                         # fallback to previous free-text emission
                                         self._emit_free_text(sheet, row, title)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                pass  # XML解析エラーは無視
 
                             # In canonical emission: output table and record mappings
                             try:
@@ -1432,8 +1432,8 @@ class ExcelToMarkdownConverter:
                                 for rr in src_rows:
                                     self._mark_emitted_row(sheet.title, rr)
                             print("<< table")
-                        except (ValueError, TypeError):
-                            pass
+                        except (ValueError, TypeError) as e:
+                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     else:  # image
                         img_fn = payload
                         print(f"[DEBUG][_emit_image] row={row} image={img_fn} >> ")
@@ -1755,12 +1755,12 @@ class ExcelToMarkdownConverter:
                                                             try:
                                                                 if sha8:
                                                                     self._embedded_image_cid_by_name[sheet.title][sha8] = None
-                                                            except Exception:
-                                                                pass
-                                    except Exception:
-                                        pass
-                except Exception:
-                    pass
+                                                            except Exception as e:
+                                                                print(f"[WARNING] ファイル操作エラー: {e}")
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
+                except Exception as e:
+                    print(f"[WARNING] ファイル操作エラー: {e}")
                 md_lines = []
                 for image in sheet._images:
                     # _process_excel_image now returns the saved image filename (basename)
@@ -1803,8 +1803,8 @@ class ExcelToMarkdownConverter:
                                             if m:
                                                 maybe = m.group(1)
                                                 mapped_cid = cid_map.get(maybe)
-                                        except Exception:
-                                            pass
+                                        except Exception as e:
+                                            print(f"[WARNING] ファイル操作エラー: {e}")
                                     # If still unknown, try computing short sha from the existing file on disk
                                     if mapped_cid is None:
                                         try:
@@ -1816,13 +1816,13 @@ class ExcelToMarkdownConverter:
                                                 sha8 = _hashlib.sha1(d).hexdigest()[:8]
                                                 mapped_cid = cid_map.get(sha8)
                                         except (OSError, IOError, FileNotFoundError):
-                                            pass
+                                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
                                     global_iso_preserved_ids = getattr(self, '_global_iso_preserved_ids', set()) or set()
                                     if mapped_cid and str(mapped_cid) in global_iso_preserved_ids:
                                         print(f"[DEBUG][_emit_image_skip] sheet={sheet.title} embedded image {img_name} suppressed (cid={mapped_cid} already preserved)")
                                         continue
                                 except (OSError, IOError, FileNotFoundError):
-                                    pass
+                                    print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
                                 if ref in self._emitted_images or img_name in self._emitted_images:
                                     continue
                                 try:
@@ -1830,18 +1830,18 @@ class ExcelToMarkdownConverter:
                                     try:
                                         if insert_index is not None:
                                             insert_index = new_idx
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
                                 except Exception:
                                     try:
                                         self.markdown_lines.append(md_line)
                                         self.markdown_lines.append("")
                                         try:
                                             self._mark_image_emitted(img_name)
-                                        except Exception:
-                                            pass
-                                    except Exception:
-                                        pass
+                                        except Exception as e:
+                                            print(f"[WARNING] ファイル操作エラー: {e}")
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
                                 # Defer insertion: register for canonical row-sorted emission
                                 try:
                                     # check mapped cNvPr for this embedded image and
@@ -1854,8 +1854,8 @@ class ExcelToMarkdownConverter:
                                     else:
                                         self._sheet_shape_images.setdefault(sheet.title, [])
                                         self._sheet_shape_images[sheet.title].append((start_row, img_name))
-                                except (ValueError, TypeError):
-                                    pass
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                             else:
                                 # Non-canonical context: register/defer the image so the
                                 # canonical emitter will place it deterministically.
@@ -1865,15 +1865,15 @@ class ExcelToMarkdownConverter:
                                     try:
                                         if insert_index is not None:
                                             insert_index = new_idx
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
                                 except Exception:
                                     # Fallback: directly register into sheet_shape_images
                                     try:
                                         self._sheet_shape_images.setdefault(sheet.title, [])
                                         self._sheet_shape_images[sheet.title].append((start_row, img_name))
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
 
             # Check for drawing shapes (vector shapes, connectors, etc.) regardless
             # of whether embedded images were found. This ensures that sheets with
@@ -1985,8 +1985,8 @@ class ExcelToMarkdownConverter:
                                                             fname = os.path.basename(target)
                                                             try:
                                                                 self._embedded_image_cid_by_name[sheet.title][fname] = str(cid_val) if cid_val is not None else None
-                                                            except (ValueError, TypeError):
-                                                                pass
+                                                            except (ValueError, TypeError) as e:
+                                                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                                             break
                                     except (ValueError, TypeError):
                                         # non-fatal: ensure we have defaults
@@ -2081,8 +2081,8 @@ class ExcelToMarkdownConverter:
                                             isolated_produced = False
                                         
                                         # end of drawing parsing block
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
             # If no parser-detected images were found, attempt a conservative
             # fallback: render the sheet to PDF via LibreOffice and rasterize the
             # corresponding PDF page to PNG using ImageMagick. This captures vector
@@ -2144,8 +2144,8 @@ class ExcelToMarkdownConverter:
                                         # fallback: treat as filename with default row=1
                                         try:
                                             normalized.append((1, str(item)))
-                                        except (ValueError, TypeError):
-                                            pass
+                                        except (ValueError, TypeError) as e:
+                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                                 # allow small adjustments: if a representative start_row
                                 # is near an existing textual anchor (within SNAP_DIST rows),
@@ -2186,8 +2186,8 @@ class ExcelToMarkdownConverter:
                                     try:
                                         # log for diagnostics but do not use it
                                         print(f"[DEBUG] Ignoring persisted start_map for sheet={sheet.title}")
-                                    except (ValueError, TypeError):
-                                        pass
+                                    except (ValueError, TypeError) as e:
+                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                                 # determine a sensible set of rows to iterate (union of text rows and image rows)
                                 rows = sorted(set(list(sheet_map.keys()) + list(imgs_by_row.keys())))
@@ -2197,8 +2197,8 @@ class ExcelToMarkdownConverter:
                                     print(f"[DEBUG][_img_insertion_debug] sheet={sheet.title} sheet_map={sheet_map}")
                                     print(f"[DEBUG][_img_insertion_debug] imgs_by_row={imgs_by_row}")
                                     print(f"[DEBUG][_img_insertion_debug] normalized_pairs={normalized}")
-                                except (ValueError, TypeError):
-                                    pass
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                                 # base insertion index when no mapped text exists for a row
                                 insert_base = insert_index if insert_index is not None else len(self.markdown_lines)
@@ -2285,8 +2285,8 @@ class ExcelToMarkdownConverter:
                                                 self.markdown_lines.append(md)
                                                 self.markdown_lines.append("")
                                                 self._mark_image_emitted(img)
-                                            except Exception:
-                                                pass
+                                            except Exception as e:
+                                                print(f"[WARNING] ファイル操作エラー: {e}")
 
                                     # if we inserted at the global insert_base position, advance it
                                     if (row_num not in sheet_map) and insert_at > insert_base:
@@ -2303,8 +2303,8 @@ class ExcelToMarkdownConverter:
                                                         if k != (row_num if row_num in sheet_map else None):
                                                             # update mapping to new index
                                                             self._mark_sheet_map(sheet.title, k, v + 2 * len(imgs_for_row))
-                                                except Exception:
-                                                    pass
+                                                except Exception as e:
+                                                    pass  # XML解析エラーは無視
                                         else:
                                             print(f"[TRACE] Skipping sheet_map offset updates in non-canonical pass for sheet={sheet.title}")
 
@@ -2314,8 +2314,8 @@ class ExcelToMarkdownConverter:
                                 try:
                                         if md_index_map:
                                             print(f"[INFO][_final_img_map] sheet={sheet.title} insert_mappings={md_index_map}")
-                                except (ValueError, TypeError):
-                                    pass
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                         except (ValueError, TypeError):
                             # fallback to previous simple insertion if anything fails
                             try:
@@ -2336,20 +2336,20 @@ class ExcelToMarkdownConverter:
                                             new_at = self._insert_markdown_image(insert_at, md, img_fn)
                                             try:
                                                 insert_at = new_at
-                                            except (ValueError, TypeError):
-                                                pass
+                                            except (ValueError, TypeError) as e:
+                                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                         except Exception:
                                             try:
                                                 self.markdown_lines.append(md)
                                                 self.markdown_lines.append("")
                                                 self._mark_image_emitted(img_fn)
-                                            except Exception:
-                                                pass
+                                            except Exception as e:
+                                                print(f"[WARNING] ファイル操作エラー: {e}")
                                     # record next idx as number of saved images (filenames)
                                     try:
                                         self._sheet_shape_next_idx[sheet.title] = len(imgs)
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
                             except Exception:
                                 self._sheet_shape_next_idx[sheet.title] = len(imgs)
                     else:
@@ -2412,8 +2412,8 @@ class ExcelToMarkdownConverter:
                             finally:
                                 try:
                                     z.close()
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    print(f"[WARNING] ファイル操作エラー: {e}")
                         except Exception:
                             image_data = None
                     # refがstrでない場合はimage_dataはNone
@@ -2578,8 +2578,8 @@ class ExcelToMarkdownConverter:
                         new_lines.append(s)
                     self.markdown_lines = ExcelToMarkdownConverter._LoggingList(self)
                     self.markdown_lines += new_lines
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[WARNING] ファイル操作エラー: {e}")
 
                 # Remove duplicate files (keep canonical)
                 for dup in duplicate_names:
@@ -2602,10 +2602,10 @@ class ExcelToMarkdownConverter:
                             self._emitted_images.add(m.group(1))
                     except Exception:
                         continue
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as e:
+                print(f"[WARNING] ファイル操作エラー: {e}")
+        except Exception as e:
+            print(f"[WARNING] ファイル操作エラー: {e}")
 
     # ========================================================================
     # Phase 1: 画像・図形処理の共通基盤メソッド群
@@ -2820,8 +2820,8 @@ class ExcelToMarkdownConverter:
                 if r is not None and r.text is not None:
                     try:
                         id_to_row[str(a_cid)] = int(r.text)
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
         # Fallback mapping from ALL anchors
         for orig_an in list(drawing_xml):
@@ -2841,8 +2841,8 @@ class ExcelToMarkdownConverter:
                 if r2 is not None and r2.text is not None:
                     try:
                         all_id_to_row[str(a_cid2)] = int(r2.text)
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
         # Determine group's row span
         group_rows = set()
@@ -2910,8 +2910,8 @@ class ExcelToMarkdownConverter:
                             vid = sub.attrib.get('id') or sub.attrib.get('idx')
                             if vid is not None and str(vid) in referenced_ids:
                                 return True
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 return False
             
             tree = ET.parse(drawing_relpath)
@@ -2937,8 +2937,8 @@ class ExcelToMarkdownConverter:
                     try:
                         if node_contains_referenced_id(node):
                             continue
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     
                     try:
                         if (not keep_cnvpr_ids) and group_rows:
@@ -2951,10 +2951,10 @@ class ExcelToMarkdownConverter:
                                         from_row = int(r.text)
                                         if from_row in group_rows or any(abs(from_row - gr) <= 1 for gr in group_rows):
                                             continue
-                                    except (ValueError, TypeError):
-                                        pass
-                    except (ValueError, TypeError):
-                        pass
+                                    except (ValueError, TypeError) as e:
+                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     
                     try:
                         root.remove(node)
@@ -2965,8 +2965,8 @@ class ExcelToMarkdownConverter:
                             root.remove(node)
                             removed_count += 1
                             print(f"[DEBUG][_prune] REMOVE anchor id={this_cid} (retry)")
-                        except (ValueError, TypeError):
-                            pass
+                        except (ValueError, TypeError) as e:
+                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
             
             print(f"[DEBUG][_prune] Summary: kept={kept_count}, removed={removed_count}, total={kept_count+removed_count}")
             tree.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
@@ -3761,8 +3761,8 @@ class ExcelToMarkdownConverter:
                 cache = {}
                 try:
                     setattr(self, '_anchor_drawable_cache', cache)
-                except Exception:
-                    pass
+                except Exception as e:
+                    pass  # XML解析エラーは無視
 
             key = None
             try:
@@ -3791,8 +3791,8 @@ class ExcelToMarkdownConverter:
             try:
                 if key in cache:
                     return cache[key]
-            except Exception:
-                pass
+            except Exception as e:
+                pass  # XML解析エラーは無視
 
             drawable_types = []
             has_text = False
@@ -3904,8 +3904,8 @@ class ExcelToMarkdownConverter:
                     debug['clusters'] = clusters
                     debug['chosen_split'] = None
                     return clusters, debug
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
             # try adjacent pair splits where integer empty rows exist
             split_at = None
@@ -4021,8 +4021,8 @@ class ExcelToMarkdownConverter:
                                         split_index = pos; break
                                 if split_index is not None and 0 < split_index < len(indices_sorted):
                                     split_at = split_index; debug['chosen_split'] = ('gap_fallback', gap_start, gap_end); break
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
             if split_at is not None:
                 clusters = [indices_sorted[:split_at], indices_sorted[split_at:]]
@@ -4194,8 +4194,8 @@ class ExcelToMarkdownConverter:
                     page_area = max(1, page_w * page_h)
                     if box_area / page_area > 0.85:
                         continue
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[WARNING] ファイル操作エラー: {e}")
                 bboxes.append((left, top, right, bottom))
 
             # return bboxes (list of (left, top, right, bottom) in pixel-ish units)
@@ -4357,8 +4357,8 @@ class ExcelToMarkdownConverter:
             # Expose preserved IDs for callers
             try:
                 self._last_iso_preserved_ids = set(referenced_ids)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[WARNING] ファイル操作エラー: {e}")
             
             # Create temp directory and extract workbook
             tmp_base = tempfile.mkdtemp(prefix='xls2md_iso_v2_base_')
@@ -4386,8 +4386,8 @@ class ExcelToMarkdownConverter:
                                         # Normalize path: ../drawings/drawing1.xml -> drawing1.xml
                                         target_sheet_drawing = os.path.basename(target_drawing)
                                         break
-                        except (ET.ParseError, KeyError, AttributeError):
-                            pass
+                        except (ET.ParseError, KeyError, AttributeError) as e:
+                            print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
                     
                     # Parse workbook.xml to get sheet relationships
                     wb_path = os.path.join(tmpdir, 'xl/workbook.xml')
@@ -4502,7 +4502,7 @@ class ExcelToMarkdownConverter:
                                             try:
                                                 os.remove(os.path.join(rels_dir, fname))
                                             except Exception:
-                                                pass
+                                                pass  # 一時ファイルの削除失敗は無視
                             
                             print(f"[DEBUG][_iso_v2] Removed {len(sheets_to_remove)} non-target sheets from workbook (kept drawing: {target_sheet_drawing or 'none'})")
                 
@@ -4518,8 +4518,8 @@ class ExcelToMarkdownConverter:
                     try:
                         s_col, e_col, s_row, e_row = cell_range
                         group_rows = set(range(s_row, e_row + 1))
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 
                 # Use helper method to prune drawing anchors
                 drawing_relpath = os.path.join(tmpdir, drawing_path)
@@ -4694,7 +4694,7 @@ class ExcelToMarkdownConverter:
                                 try:
                                     sroot.remove(child)
                                 except Exception:
-                                    pass
+                                    pass  # 一時ファイルの削除失敗は無視
                         
                         cols_el = ET.Element(cols_tag)
                         try:
@@ -4936,8 +4936,8 @@ class ExcelToMarkdownConverter:
                         shutil.rmtree(tmpdir, ignore_errors=True)
                     if tmp_base and os.path.exists(tmp_base):
                         shutil.rmtree(tmp_base, ignore_errors=True)
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
         except Exception as e:
             print(f"[ERROR][_iso_v2] Exception: {e}")
@@ -4972,8 +4972,8 @@ class ExcelToMarkdownConverter:
             # reset last preserved ids marker for this invocation
             try:
                 self._last_iso_preserved_ids = set()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[WARNING] ファイル操作エラー: {e}")
             # Create a single temporary workbook that keeps only the requested
             # anchors and render that workbook once. This avoids creating one
             # file per anchor and produces a single grouped image.
@@ -5063,8 +5063,8 @@ class ExcelToMarkdownConverter:
                             print(f"[DEBUG][_iso_entry] Failed to limit cell_range: {limit_err}")
                         
                         cell_range = (s_col, e_col, s_row, e_row)
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
             # Build set for quick lookup (we'll convert requested indices to cNvPr ids)
             # shape_indices are indices into the filtered `anchors` list; when
@@ -5106,7 +5106,7 @@ class ExcelToMarkdownConverter:
                             with open(tgt, 'wb') as _fw:
                                 _fw.write(z.read(preserve))
                 except (OSError, IOError, FileNotFoundError):
-                    pass
+                    print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
 
                 # When pruning anchors below, ensure that any shapes referenced by
                 # connectors in the kept indices are also preserved. We'll compute
@@ -5187,8 +5187,8 @@ class ExcelToMarkdownConverter:
                                 if r is not None and r.text is not None:
                                     try:
                                         id_to_row[str(a_cid)] = int(r.text)
-                                    except (ValueError, TypeError):
-                                        pass
+                                    except (ValueError, TypeError) as e:
+                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                         # Build a fallback mapping from ALL anchors in the drawing
                         # (not only those filtered into `anchors`) so we can find
@@ -5214,8 +5214,8 @@ class ExcelToMarkdownConverter:
                                     if r2 is not None and r2.text is not None:
                                         try:
                                             all_id_to_row[str(a_cid2)] = int(r2.text)
-                                        except (ValueError, TypeError):
-                                            pass
+                                        except (ValueError, TypeError) as e:
+                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
                         except (ValueError, TypeError):
                             all_id_to_row = {}
 
@@ -5230,8 +5230,8 @@ class ExcelToMarkdownConverter:
                             if r in group_rows and cid not in preserve:
                                 preserve.add(cid)
                                 q.append(cid)
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     # Expand transitive closure but constrain expansion by row membership
                     # to avoid pulling the same anchor into multiple row-based clusters.
                     # Only include a candidate anchor/ref if its 'from' row lies within
@@ -5334,17 +5334,17 @@ class ExcelToMarkdownConverter:
                                             preserve.add(str(cid))
                                             try:
                                                 q.append(str(cid))
-                                            except (ValueError, TypeError):
-                                                pass
+                                            except (ValueError, TypeError) as e:
+                                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                             added = True
                                             break
                                     if added:
                                         continue
-                                except (ValueError, TypeError):
-                                    pass
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                 # fallback: if endpoints empty or no match, skip
-                            except (ValueError, TypeError):
-                                pass
+                            except (ValueError, TypeError) as e:
+                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     except Exception:
                         pass
 
@@ -5381,8 +5381,8 @@ class ExcelToMarkdownConverter:
                                         preserve.add(scid)
                                         try:
                                             q.append(scid)
-                                        except (ValueError, TypeError):
-                                            pass
+                                        except (ValueError, TypeError) as e:
+                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
                             except Exception:
                                 pass
                     except Exception:
@@ -5433,15 +5433,15 @@ class ExcelToMarkdownConverter:
                                     except Exception:
                                         rows_mapped.append(None)
                                 print(f"[DEBUG][_iso_group_conn] cid={ccid} endpoints={sorted(list(eps))} mapped_rows={rows_mapped}")
-                        except (ValueError, TypeError):
-                            pass
+                        except (ValueError, TypeError) as e:
+                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
                         # Additionally, show explicit mapping for connector-only ids that are present only in all_id_to_row
                         try:
                             for special in ('56','61'):
                                 if 'all_id_to_row' in locals() and special in all_id_to_row:
                                     print(f"[DEBUG][_iso_group_idrow] id={special} all_row={all_id_to_row.get(special)} id_to_row_val={id_to_row.get(special) if 'id_to_row' in locals() else None}")
-                        except (ValueError, TypeError):
-                            pass
+                        except (ValueError, TypeError) as e:
+                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
                         msg = f"[DEBUG][_iso_group] keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))} preserved_ids={sorted(list(referenced_ids))} connector_children_keys={sorted(list(connector_children_by_id.keys()))}"
                         print(msg)
                         # expose preserved ids for callers so they can avoid duplicate renders
@@ -5450,8 +5450,8 @@ class ExcelToMarkdownConverter:
                         except (ValueError, TypeError):
                             try:
                                 self._last_iso_preserved_ids = set()
-                            except (ValueError, TypeError):
-                                pass
+                            except (ValueError, TypeError) as e:
+                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
                         # Write a per-isolation diagnostic file (guaranteed path) so
                         # conversion runs always emit a record of which cNvPr ids
                         # were preserved into this isolated group. This is useful
@@ -5474,9 +5474,9 @@ class ExcelToMarkdownConverter:
                                 w.writerow([";".join(sorted(list(map(str, keep_cnvpr_ids)))), ";".join(sorted(list(map(str, referenced_ids)))), ";".join(sorted(list(map(str, connector_children_by_id.keys()))) )])
                             print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
                         except (OSError, IOError, FileNotFoundError):
-                            pass
+                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
                     except (OSError, IOError, FileNotFoundError):
-                        pass
+                        print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
                 except (OSError, IOError, FileNotFoundError):
                     referenced_ids = set()
                     connector_children_by_id = {}
@@ -5545,8 +5545,8 @@ class ExcelToMarkdownConverter:
                         try:
                             if node_contains_referenced_id(node):
                                 continue
-                        except (ValueError, TypeError):
-                            pass
+                        except (ValueError, TypeError) as e:
+                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                         # Fallback: when keep_cnvpr_ids is empty but a cell_range
                         # was computed for the group, preserve any anchor whose
@@ -5565,10 +5565,10 @@ class ExcelToMarkdownConverter:
                                             # accept exact or off-by-one matches
                                             if from_row in group_rows or any(abs(from_row - gr) <= 1 for gr in group_rows):
                                                 continue
-                                        except (ValueError, TypeError):
-                                            pass
-                        except (ValueError, TypeError):
-                            pass
+                                        except (ValueError, TypeError) as e:
+                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                        except (ValueError, TypeError) as e:
+                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                         # otherwise remove this node from the trimmed drawing
                         try:
@@ -5577,7 +5577,7 @@ class ExcelToMarkdownConverter:
                             try:
                                 root.remove(node)
                             except Exception:
-                                pass
+                                pass  # 一時ファイルの削除失敗は無視
 
                 # Additionally, clear worksheet cell text in the tmp workbook so rendered PDF
                 # contains only the drawing shapes. This prevents sheet text from appearing
@@ -5606,7 +5606,7 @@ class ExcelToMarkdownConverter:
                                             try:
                                                 sroot.remove(child)
                                             except Exception:
-                                                pass
+                                                pass  # 一時ファイルの削除失敗は無視
                                     # add pageMargins with zeros
                                     pm = ET.Element(pm_tag)
                                     for name, val in (('left', '0'), ('right', '0'), ('top', '0'), ('bottom', '0'), ('header', '0'), ('footer', '0')):
@@ -5625,8 +5625,8 @@ class ExcelToMarkdownConverter:
                                     except Exception:
                                         try:
                                             ps.set('scale', '100')
-                                        except Exception:
-                                            pass
+                                        except Exception as e:
+                                            pass  # XML解析エラーは無視
                                     sroot.append(ps)
                                 except Exception:
                                     pass
@@ -5645,7 +5645,7 @@ class ExcelToMarkdownConverter:
                                             sroot.remove(hf)
                                             removed += 1
                                         except Exception:
-                                            pass
+                                            pass  # 一時ファイルの削除失敗は無視
                                     if removed:
                                         print(f"[DEBUG][_iso_hdrfoot] removed {removed} headerFooter elements from {sheet_rel}")
                                 except (ValueError, TypeError):
@@ -5669,10 +5669,10 @@ class ExcelToMarkdownConverter:
                         if not kept_anchors:
                             print(f"[DEBUG][_iso_entry] sheet={sheet.title} trimmed drawing has no anchors after pruning; skipping isolated group")
                             return None
-                    except (ET.ParseError, KeyError, AttributeError):
-                        pass
-                except (ET.ParseError, KeyError, AttributeError):
-                    pass
+                    except (ET.ParseError, KeyError, AttributeError) as e:
+                        print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
+                except (ET.ParseError, KeyError, AttributeError) as e:
+                    print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
 
                 # After writing, ensure kept anchors have connector cosmetic children copied
                 try:
@@ -5714,8 +5714,8 @@ class ExcelToMarkdownConverter:
                                                         elem.tag = '{%s}srgbClr' % a_ns
                                                         elem.attrib.clear()
                                                         elem.set('val', hexv)
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
                                     # Materialize lnRef similar to isolated-shapes path
                                     try:
                                         a_ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
@@ -5760,12 +5760,12 @@ class ExcelToMarkdownConverter:
                                                                             try:
                                                                                 new_ch.append(new_ln)
                                                                             except Exception:
-                                                                                pass
+                                                                                pass  # 一時ファイルの削除失敗は無視
                                                                         raise StopIteration
                                                     except StopIteration:
                                                         raise
                                                     except Exception:
-                                                        pass
+                                                        pass  # 一時ファイルの削除失敗は無視
                                     except StopIteration:
                                         pass
                                     except Exception:
@@ -5802,11 +5802,11 @@ class ExcelToMarkdownConverter:
                                 except Exception:
                                     try:
                                         kept.append(copy.deepcopy(ch))
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        pass  # XML解析エラーは無視
                     tree2.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[WARNING] ファイル操作エラー: {e}")
 
                 # Extra pass: for any kept anchor that corresponds to an original
                 # connector anchor (cxnSp/cxn), replace the connector element in
@@ -5872,14 +5872,14 @@ class ExcelToMarkdownConverter:
                                         try:
                                             kept.remove(child_candidate)
                                         except Exception:
-                                            pass
+                                            pass  # 一時ファイルの削除失敗は無視
                                         try:
                                             kept.insert(idx_child, copy.deepcopy(orig_cxn))
                                         except Exception:
                                             try:
                                                 kept.append(copy.deepcopy(orig_cxn))
                                             except Exception:
-                                                pass
+                                                pass  # 一時ファイルの削除失敗は無視
                                         replaced = True
                                         break
                                 except Exception:
@@ -5913,8 +5913,8 @@ class ExcelToMarkdownConverter:
                                                         elem.tag = '{%s}srgbClr' % a_ns
                                                         elem.attrib.clear()
                                                         elem.set('val', hexv)
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
                                     # Force materialize any lnRef under the connector's style
                                     # using the robust helper to ensure concrete <a:ln>
                                     try:
@@ -5969,7 +5969,7 @@ class ExcelToMarkdownConverter:
                                                         try:
                                                             sppr.remove(ln_c)
                                                         except Exception:
-                                                            pass
+                                                            pass  # 一時ファイルの削除失敗は無視
 
                                             # If preferred ln exists but lacks @w, attempt to materialize from any lnRef in style
                                             try:
@@ -5996,31 +5996,31 @@ class ExcelToMarkdownConverter:
                                                                         try:
                                                                             sppr.remove(remaining_ln)
                                                                         except Exception:
-                                                                            pass
+                                                                            pass  # 一時ファイルの削除失敗は無視
                                                                         try:
                                                                             sppr.append(new_ln)
                                                                         except Exception:
-                                                                            pass
+                                                                            pass  # 一時ファイルの削除失敗は無視
                                                                         # remove lnRef from style to avoid renderer fallbacks
                                                                         try:
                                                                             style_el.remove(ssub)
                                                                         except Exception:
-                                                                            pass
+                                                                            pass  # 一時ファイルの削除失敗は無視
                                                                     break
                                                                 except Exception:
-                                                                    pass
+                                                                    pass  # 一時ファイルの削除失敗は無視
                                             except Exception:
-                                                pass
+                                                pass  # 一時ファイルの削除失敗は無視
                                     except Exception:
-                                        pass
+                                        pass  # 一時ファイルの削除失敗は無視
                             except Exception:
-                                pass
-                        except Exception:
-                            pass
+                                pass  # 一時ファイルの削除失敗は無視
+                        except Exception as e:
+                            print(f"[WARNING] ファイル操作エラー: {e}")
                     # write back
                     tree3.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[WARNING] ファイル操作エラー: {e}")
 
                 # If a cell_range was provided, define the workbook Print_Area so LibreOffice
                 # exports only that area to PDF. This is more reliable than hiding rows.
@@ -6064,7 +6064,7 @@ class ExcelToMarkdownConverter:
                                         try:
                                             dn.remove(existing)
                                         except Exception:
-                                            pass
+                                            pass  # 一時ファイルの削除失敗は無視
                                 new_dn = ET.Element('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}definedName')
                                 new_dn.set('name', '_xlnm.Print_Area')
                                 # localSheetId scopes the Print_Area to a specific sheet (0-based)
@@ -6104,7 +6104,7 @@ class ExcelToMarkdownConverter:
                                             try:
                                                 sroot2.remove(el)
                                             except Exception:
-                                                pass
+                                                pass  # 一時ファイルの削除失敗は無視
                                     # remove any break child elements under any br container
                                     for br_container in sroot2.findall('.//{%s}break' % ns):
                                         parent = br_container.getparent() if hasattr(br_container, 'getparent') else None
@@ -6117,9 +6117,9 @@ class ExcelToMarkdownConverter:
                                                 # fallback: attempt to remove directly from root
                                                 sroot2.remove(br_container)
                                             except Exception:
-                                                pass
+                                                pass  # 一時ファイルの削除失敗は無視
                                 except Exception:
-                                    pass
+                                    pass  # 一時ファイルの削除失敗は無視
                                 for row_el in sroot2.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}row'):
                                     try:
                                         rnum = int(row_el.attrib.get('r', '0'))
@@ -6131,8 +6131,8 @@ class ExcelToMarkdownConverter:
                                         row_el.set('ht', '0')
                                         row_el.set('customHeight', '1')
                                 stree2.write(sheet_rel, encoding='utf-8', xml_declaration=True)
-                            except (ValueError, TypeError):
-                                pass
+                            except (ValueError, TypeError) as e:
+                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
                         # Aggressive: reconstruct sheetData to only include rows/columns in the requested range
                         try:
                             stree4 = ET.parse(sheet_rel)
@@ -6169,8 +6169,8 @@ class ExcelToMarkdownConverter:
                                             if rh is not None and 'ht' not in new_row.attrib:
                                                 new_row.set('ht', str(rh))
                                                 new_row.set('customHeight', '1')
-                                    except (ValueError, TypeError):
-                                        pass
+                                    except (ValueError, TypeError) as e:
+                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                     # copy cell elements within column range
                                     for c in list(row_el):
                                         if c.tag.split('}')[-1] != 'c':
@@ -6243,7 +6243,7 @@ class ExcelToMarkdownConverter:
                                         try:
                                             sroot4.remove(child)
                                         except Exception:
-                                            pass
+                                            pass  # 一時ファイルの削除失敗は無視
                                 cols_el = ET.Element(cols_tag)
                                 # attempt to get column widths from openpyxl sheet object
                                 try:
@@ -6278,8 +6278,8 @@ class ExcelToMarkdownConverter:
                                         try:
                                             if hidden:
                                                 col_el.set('hidden', '1')
-                                        except (ValueError, TypeError):
-                                            pass
+                                        except (ValueError, TypeError) as e:
+                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                         cols_el.append(col_el)
                                 except (ValueError, TypeError):
                                     # best-effort: set default widths
@@ -6299,21 +6299,21 @@ class ExcelToMarkdownConverter:
                                             try:
                                                 sroot4.remove(child)
                                             except Exception:
-                                                pass
+                                                pass  # 一時ファイルの削除失敗は無視
                                     sf = ET.Element(sf_tag)
                                     # default column width
                                     try:
                                         from openpyxl.utils import units as _units2
                                         default_col_w = getattr(sheet.sheet_format, 'defaultColWidth', None) or getattr(_units2, 'DEFAULT_COLUMN_WIDTH', 8.43)
                                         sf.set('defaultColWidth', str(float(default_col_w)))
-                                    except (ValueError, TypeError):
-                                        pass
+                                    except (ValueError, TypeError) as e:
+                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                     # default row height
                                     try:
                                         default_row_h = getattr(sheet.sheet_format, 'defaultRowHeight', None) or getattr(_units2, 'DEFAULT_ROW_HEIGHT', 15.0)
                                         sf.set('defaultRowHeight', str(float(default_row_h)))
-                                    except (ValueError, TypeError):
-                                        pass
+                                    except (ValueError, TypeError) as e:
+                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                     # insert sheetFormatPr near the top
                                     inserted_sf = False
                                     for i, child in enumerate(list(sroot4)):
@@ -6350,7 +6350,7 @@ class ExcelToMarkdownConverter:
                                                 try:
                                                     sd.remove(child)
                                                 except Exception:
-                                                    pass
+                                                    pass  # 一時ファイルの削除失敗は無視
                                         # rows in trimmed sheet should start at 1..(e_row - s_row + 1)
                                         try:
                                             first_row = int(s_row)
@@ -6372,23 +6372,23 @@ class ExcelToMarkdownConverter:
                                                                 dflt = getattr(sheet.sheet_format, 'defaultRowHeight', None)
                                                                 if dflt is not None:
                                                                     r_el.set('ht', str(float(dflt)))
-                                                            except (ValueError, TypeError):
-                                                                pass
-                                                    except (ValueError, TypeError):
-                                                        pass
+                                                            except (ValueError, TypeError) as e:
+                                                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                                                    except (ValueError, TypeError) as e:
+                                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                                     sd.append(r_el)
-                                                except (ValueError, TypeError):
-                                                    pass
+                                                except (ValueError, TypeError) as e:
+                                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                                 out_r += 1
-                                        except (ValueError, TypeError):
-                                            pass
+                                        except (ValueError, TypeError) as e:
+                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                 except Exception:
                                     pass
 
                                 # write back
                                 stree4.write(sheet_rel, encoding='utf-8', xml_declaration=True)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            pass  # XML解析エラーは無視
                                 # If we trimmed rows/columns above, also adjust the drawing anchor
                         # cell indices so they are relative to the trimmed worksheet. This
                         # makes the drawing coordinates consistent with the modified
@@ -6418,16 +6418,16 @@ class ExcelToMarkdownConverter:
                                                         if new_col < 0:
                                                             new_col = 0
                                                         col_el.text = str(new_col)
-                                                except (ValueError, TypeError):
-                                                    pass
+                                                except (ValueError, TypeError) as e:
+                                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                                 try:
                                                     if row_el is not None and row_el.text is not None:
                                                         new_row = int(row_el.text) - (s_row - 1)
                                                         if new_row < 0:
                                                             new_row = 0
                                                         row_el.text = str(new_row)
-                                                except (ValueError, TypeError):
-                                                    pass
+                                                except (ValueError, TypeError) as e:
+                                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                             to = node.find('xdr:to', ns)
                                             if to is not None:
                                                 col_el = to.find('xdr:col', ns)
@@ -6438,16 +6438,16 @@ class ExcelToMarkdownConverter:
                                                         if new_col < 0:
                                                             new_col = 0
                                                         col_el.text = str(new_col)
-                                                except (ValueError, TypeError):
-                                                    pass
+                                                except (ValueError, TypeError) as e:
+                                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                                 try:
                                                     if row_el is not None and row_el.text is not None:
                                                         new_row = int(row_el.text) - (s_row - 1)
                                                         if new_row < 0:
                                                             new_row = 0
                                                         row_el.text = str(new_row)
-                                                except (ValueError, TypeError):
-                                                    pass
+                                                except (ValueError, TypeError) as e:
+                                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                             else:
                                                 # oneCellAnchor ext is relative; adjust the from row/col only
                                                 pass
@@ -6929,19 +6929,19 @@ class ExcelToMarkdownConverter:
                                                                 pl = ET.Element('{%s}picLocks' % a_ns)
                                                                 pl.set('noChangeAspect', '1')
                                                                 cNvPicPr.append(pl)
-                                                except Exception:
-                                                    pass
-                                        except Exception:
-                                            pass
+                                                except Exception as e:
+                                                    print(f"[WARNING] ファイル操作エラー: {e}")
+                                        except Exception as e:
+                                            print(f"[WARNING] ファイル操作エラー: {e}")
 
                                         # write back adjusted drawing xml
                                         dtree.write(drawing_relpath_full, encoding='utf-8', xml_declaration=True)
-                                    except Exception:
-                                        pass
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
+                        except Exception as e:
+                            print(f"[WARNING] ファイル操作エラー: {e}")
+                except Exception as e:
+                    print(f"[WARNING] ファイル操作エラー: {e}")
 
                 # create a short, deterministic suffix for this group so each
                 # generated workbook is saved separately for inspection in Excel.
@@ -6992,8 +6992,8 @@ class ExcelToMarkdownConverter:
                                             rel.set('Target', '../drawings/drawing1.xml')
                                             rel.set('Id', rel.attrib.get('Id','rId1'))
                                     rtree.write(rels_path_local, encoding='utf-8', xml_declaration=True)
-                                except (ET.ParseError, KeyError, AttributeError):
-                                    pass
+                                except (ET.ParseError, KeyError, AttributeError) as e:
+                                    print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
 
                             # move drawing files if referenced
                             if drawing_target:
@@ -7016,7 +7016,7 @@ class ExcelToMarkdownConverter:
                                     try:
                                         shutil.move(orig_drawing_rels, os.path.join(new_drels_dir, 'drawing1.xml.rels'))
                                     except Exception:
-                                        pass
+                                        pass  # 一時ファイルの削除失敗は無視
 
                             # Remove other worksheets and their rels
                             ws_dir = os.path.join(tmpdir, 'xl/worksheets')
@@ -7025,7 +7025,7 @@ class ExcelToMarkdownConverter:
                                     try:
                                         os.remove(os.path.join(ws_dir, fname))
                                     except Exception:
-                                        pass
+                                        pass  # 一時ファイルの削除失敗は無視
                             # Remove other rels in worksheets/_rels
                             ws_rels_dir = os.path.join(tmpdir, 'xl/worksheets/_rels')
                             if os.path.exists(ws_rels_dir):
@@ -7034,7 +7034,7 @@ class ExcelToMarkdownConverter:
                                         try:
                                             os.remove(os.path.join(ws_rels_dir, fname))
                                         except Exception:
-                                            pass
+                                            pass  # 一時ファイルの削除失敗は無視
 
                             # Update workbook.xml to only reference this single sheet
                             wb_rel_path = os.path.join(tmpdir, 'xl/_rels/workbook.xml.rels')
@@ -7058,7 +7058,7 @@ class ExcelToMarkdownConverter:
                                     wroot.append(sheets_el)
                                     wtree.write(wb_path, encoding='utf-8', xml_declaration=True)
                                 except Exception:
-                                    pass
+                                    pass  # 一時ファイルの削除失敗は無視
 
                             # Update workbook rels to only include the sheet relationship (and keep others like styles)
                             if os.path.exists(wb_rel_path):
@@ -7083,7 +7083,7 @@ class ExcelToMarkdownConverter:
                                         wrr.append(rel)
                                     wr.write(wb_rel_path, encoding='utf-8', xml_declaration=True)
                                 except Exception:
-                                    pass
+                                    pass  # 一時ファイルの削除失敗は無視
 
                             # Update [Content_Types].xml: keep overrides for sheet1 and drawing1; remove other sheet overrides
                             ct_path = os.path.join(tmpdir, '[Content_Types].xml')
@@ -7097,20 +7097,20 @@ class ExcelToMarkdownConverter:
                                         if part.startswith('/xl/worksheets/') and not part.endswith('sheet1.xml'):
                                             try:
                                                 croot.remove(ov)
-                                            except (ET.ParseError, KeyError, AttributeError):
-                                                pass
+                                            except (ET.ParseError, KeyError, AttributeError) as e:
+                                                print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
                                         if part.startswith('/xl/drawings/') and not part.endswith('drawing1.xml'):
                                             try:
                                                 croot.remove(ov)
                                             except Exception:
-                                                pass
+                                                pass  # 一時ファイルの削除失敗は無視
                                     ctree.write(ct_path, encoding='utf-8', xml_declaration=True)
                                 except Exception:
-                                    pass
+                                    pass  # 一時ファイルの削除失敗は無視
                         except Exception:
-                            pass
+                            pass  # 一時ファイルの削除失敗は無視
                 except Exception:
-                    pass
+                    pass  # 一時ファイルの削除失敗は無視
 
                 # (removed an earlier unsafe zip-write that could include the zip itself)
 
@@ -7138,7 +7138,7 @@ class ExcelToMarkdownConverter:
                             f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
                             f.write('<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme"><a:themeElements></a:themeElements></a:theme>')
                 except (OSError, IOError, FileNotFoundError):
-                    pass
+                    print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
 
                 # Before creating the ZIP, perform minimal in-place OOXML fixes
                 # so the produced package is more likely to be readable by Excel
@@ -7175,7 +7175,7 @@ class ExcelToMarkdownConverter:
                                 _add_override('/xl/drawings/drawing1.xml', 'application/vnd.openxmlformats-officedocument.drawing+xml')
                             ctree.write(ct_path, encoding='utf-8', xml_declaration=True)
                     except Exception:
-                        pass
+                        pass  # 一時ファイルの削除失敗は無視
 
                     # Rebuild workbook rels deterministically: assign sequential rId1..n
                     # for only the parts that actually exist in the trimmed package.
@@ -7235,8 +7235,8 @@ class ExcelToMarkdownConverter:
                         try:
                             os.makedirs(os.path.dirname(wb_rels_path), exist_ok=True)
                             ET.ElementTree(rels_root).write(wb_rels_path, encoding='utf-8', xml_declaration=True)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            pass  # XML解析エラーは無視
 
                         # update workbook.xml sheets to use the new rId for sheet1 (if present)
                         if os.path.exists(wb_path):
@@ -7255,7 +7255,7 @@ class ExcelToMarkdownConverter:
                                             sh.set('sheetId', '1')
                                 wtree.write(wb_path, encoding='utf-8', xml_declaration=True)
                             except Exception:
-                                pass
+                                pass  # 一時ファイルの削除失敗は無視
 
                         # Normalize definedNames localSheetId values so they refer to
                         # valid sheet indices within the trimmed package. Some
@@ -7335,16 +7335,16 @@ class ExcelToMarkdownConverter:
                                                         # fallback: set attribute with common prefix if present
                                                         try:
                                                             elem.set('r:id', new_draw_rel_id)
-                                                        except Exception:
-                                                            pass
+                                                        except Exception as e:
+                                                            print(f"[WARNING] ファイル操作エラー: {e}")
                                                     break
                                             stree.write(sheet_xml_path, encoding='utf-8', xml_declaration=True)
-                                except Exception:
-                                    pass
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                                except Exception as e:
+                                    print(f"[WARNING] ファイル操作エラー: {e}")
+                            except Exception as e:
+                                pass  # XML解析エラーは無視
+                    except Exception as e:
+                        pass  # XML解析エラーは無視
 
                     # Ensure sheet rels point to ../drawings/drawing1.xml when appropriate
                     try:
@@ -7358,10 +7358,10 @@ class ExcelToMarkdownConverter:
                                     # make target relative from worksheets/_rels to drawings
                                     rel.set('Target', '../drawings/drawing1.xml')
                             srt.write(sheet_rels, encoding='utf-8', xml_declaration=True)
-                    except (ET.ParseError, KeyError, AttributeError):
-                        pass
-                except (ET.ParseError, KeyError, AttributeError):
-                    pass
+                    except (ET.ParseError, KeyError, AttributeError) as e:
+                        print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
+                except (ET.ParseError, KeyError, AttributeError) as e:
+                    print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
 
                 # Before zipping the trimmed package, attempt to copy visual
                 # layout properties (row heights, column widths, pageSetup,
@@ -7387,10 +7387,10 @@ class ExcelToMarkdownConverter:
                                     default_row_h = getattr(sheet.sheet_format, 'defaultRowHeight', None)
                                     if default_row_h is not None:
                                         sf.set('defaultRowHeight', str(float(default_row_h)))
-                                except (ValueError, TypeError):
-                                    pass
-                            except (ValueError, TypeError):
-                                pass
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                            except (ValueError, TypeError) as e:
+                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
                             # copy explicit column widths from the original sheet
                             try:
                                 try:
@@ -7448,12 +7448,12 @@ class ExcelToMarkdownConverter:
                                             col_el.set('width', str(float(width)))
                                             col_el.set('customWidth', '1')
                                             cols_el.append(col_el)
-                                        except (ValueError, TypeError):
-                                            pass
-                                except (ValueError, TypeError):
-                                    pass
-                            except (ValueError, TypeError):
-                                pass
+                                        except (ValueError, TypeError) as e:
+                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                            except (ValueError, TypeError) as e:
+                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                             # copy explicit row heights from the original sheet
                             try:
@@ -7468,8 +7468,8 @@ class ExcelToMarkdownConverter:
                                     try:
                                         rnum = int(r_el.attrib.get('r'))
                                         existing_rows[rnum] = r_el
-                                    except (ValueError, TypeError):
-                                        pass
+                                    except (ValueError, TypeError) as e:
+                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                 try:
                                     row_dims = getattr(sheet, 'row_dimensions', {}) or {}
                                     for rk, rd in list(row_dims.items()):
@@ -7486,12 +7486,12 @@ class ExcelToMarkdownConverter:
                                                 sheetData.append(er)
                                             er.set('ht', str(float(height)))
                                             er.set('customHeight', '1')
-                                        except (ValueError, TypeError):
-                                            pass
-                                except (ValueError, TypeError):
-                                    pass
-                            except (ValueError, TypeError):
-                                pass
+                                        except (ValueError, TypeError) as e:
+                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                            except (ValueError, TypeError) as e:
+                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
                             # copy pageMargins and pageSetup where available
                             try:
                                 # pageSetup
@@ -7537,8 +7537,8 @@ class ExcelToMarkdownConverter:
                                 pass
                         except (ValueError, TypeError):
                             pass
-                except Exception:
-                    pass
+                except Exception as e:
+                    pass  # XML解析エラーは無視
 
                 # Defensive sweep: ensure no worksheet XML in tmpdir still
                 # contains headerFooter nodes. Some input workbooks or later
@@ -7562,8 +7562,8 @@ class ExcelToMarkdownConverter:
                                         try:
                                             wroot.remove(hf)
                                             removed_count += 1
-                                        except (ET.ParseError, KeyError, AttributeError):
-                                            pass
+                                        except (ET.ParseError, KeyError, AttributeError) as e:
+                                            print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
                                     # Also force pageSetup fit-to-page and tighten margins
                                     try:
                                         ns = None
@@ -7591,9 +7591,9 @@ class ExcelToMarkdownConverter:
                                                     try:
                                                         del ps.attrib['scale']
                                                     except Exception:
-                                                        pass
+                                                        pass  # 一時ファイルの削除失敗は無視
                                             except Exception:
-                                                pass
+                                                pass  # 一時ファイルの削除失敗は無視
                                         # pageMargins: make them minimal (0)
                                         pm = wroot.find('.//' + pm_tag) if ns else wroot.find('.//pageMargins')
                                         if pm is None:
@@ -7606,14 +7606,14 @@ class ExcelToMarkdownConverter:
                                             try:
                                                 for name, val in (('left','0'),('right','0'),('top','0'),('bottom','0'),('header','0'),('footer','0')):
                                                     pm.set(name, val)
-                                            except Exception:
-                                                pass
-                                    except Exception:
-                                        pass
+                                            except Exception as e:
+                                                pass  # XML解析エラーは無視
+                                    except Exception as e:
+                                        pass  # XML解析エラーは無視
                                     try:
                                         wtree.write(relp, encoding='utf-8', xml_declaration=True)
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        pass  # XML解析エラーは無視
                                     print(f"[DEBUG][_iso_hdrfoot_sweep] removed {removed_count} headerFooter from {relp} and forced fit-to-page/margins")
                             except (ValueError, TypeError):
                                 pass
@@ -7704,8 +7704,8 @@ class ExcelToMarkdownConverter:
                                                         if sub.tag.split('}')[-1].lower() == 'cnvpr':
                                                             ids.append(sub.attrib.get('id') or sub.attrib.get('idx'))
                                                             break
-                                except (ET.ParseError, KeyError, AttributeError):
-                                    pass
+                                except (ET.ParseError, KeyError, AttributeError) as e:
+                                    print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
                                 return ids
 
                             try:
@@ -7715,9 +7715,9 @@ class ExcelToMarkdownConverter:
                                     json.dump({'cNvPr_ids': ids}, jf, ensure_ascii=False, indent=2)
                                 print(f"[DEBUG] wrote fixed workbook ids: {ids_fn} (count={len(ids)})")
                             except (OSError, IOError, FileNotFoundError):
-                                pass
+                                print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
                         except (OSError, IOError, FileNotFoundError):
-                            pass
+                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
 
                         # If a more explicit '.repaired.xlsx' already exists (from other tools), prefer it.
                         src_for_conv = dbg_copy
@@ -7770,8 +7770,8 @@ class ExcelToMarkdownConverter:
                 # normalization is required later, re-enable this section.
                 try:
                     ENABLE_RESAVE = False
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[WARNING] ファイル操作エラー: {e}")
 
                 # export tmp_xlsx to PDF via LibreOffice
                 # Shortcut: if the trimmed drawing contains only embedded bitmap
@@ -7874,7 +7874,7 @@ class ExcelToMarkdownConverter:
                             try:
                                 shutil.rmtree(tmpdir)
                             except (OSError, IOError, FileNotFoundError):
-                                pass
+                                print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
                             # return filename (caller expects png_name)
                             print(f"[DEBUG][_iso_direct_return] sheet={sheet.title} returned_direct_image={os.path.basename(out_img_path)} src={img_src_path}")
                             return os.path.basename(out_img_path)
@@ -7938,7 +7938,7 @@ class ExcelToMarkdownConverter:
                                         try:
                                             del ps.attrib['scale']
                                         except Exception:
-                                            pass
+                                            pass  # 一時ファイルの削除失敗は無視
                                     
                                     stree.write(sp, encoding='utf-8', xml_declaration=True)
                                     print(f"[DEBUG] Applied fitToPage settings to {sp}")
@@ -7982,7 +7982,7 @@ class ExcelToMarkdownConverter:
                 try:
                     self._last_temp_pdf_path = pdf_path
                 except Exception:
-                    pass
+                    pass  # 一時ファイルの削除失敗は無視
                 
                 # PDFを確認用に保存（isolated group）
                 try:
@@ -8068,7 +8068,7 @@ class ExcelToMarkdownConverter:
 
                             pass  # ファイル削除失敗は無視
                 except Exception:
-                    pass
+                    pass  # 一時ファイルの削除失敗は無視
 
                 print(f"[DEBUG][_iso_imagemagick] running image magick to produce {out_path}")
                 proc2 = subprocess.run(im_cmd_full, capture_output=True, text=True, timeout=120)
@@ -8122,7 +8122,7 @@ class ExcelToMarkdownConverter:
                                 if os.path.abspath(p) != os.path.abspath(out_path):
                                     os.remove(p)
                             except Exception:
-                                pass
+                                pass  # 一時ファイルの削除失敗は無視
                     else:
                         # single-page: ensure out_path exists (ImageMagick may
                         # have written it under the exact name already)
@@ -8133,8 +8133,8 @@ class ExcelToMarkdownConverter:
                                 # pick the first candidate and rename to out_path
                                 try:
                                     os.replace(alt[0], out_path)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    print(f"[WARNING] ファイル操作エラー: {e}")
                 except Exception:
                     # If stitching fails, continue with whatever was produced
                     pass
@@ -8213,11 +8213,11 @@ class ExcelToMarkdownConverter:
                 try:
                     shutil.rmtree(tmp_pdf_dir)
                 except Exception:
-                    pass
+                    pass  # 一時ファイルの削除失敗は無視
                 try:
                     shutil.rmtree(tmpdir)
                 except Exception:
-                    pass
+                    pass  # 一時ファイルの削除失敗は無視
 
                     # If a desired cell_range was provided, post-crop the generated PNG
                     # to the corresponding cell pixel rectangle. Compute sheet pixel map
@@ -8327,8 +8327,8 @@ class ExcelToMarkdownConverter:
                                 if rpx - lpx > 4 and bpx - tpx > 4 and (rpx - lpx) < w_im and (bpx - tpx) < h_im:
                                     cropped = im.crop((lpx, tpx, rpx, bpx))
                                     cropped.save(out_path)
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                 # Return the actual basename of the file we ended up with on disk.
                 # During processing we may have renamed/moved out_path into a
@@ -8360,8 +8360,8 @@ class ExcelToMarkdownConverter:
                             try:
                                 for r, fn in imgs_by_row.items():
                                     pairs.append((int(r), str(fn)))
-                            except (ValueError, TypeError):
-                                pass
+                            except (ValueError, TypeError) as e:
+                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
                         # Finally, include the current generated file as evidence.
                         # Prefer to attach a representative start_row if we can
                         # derive one from nearby variables (group_rows or cell_range).
@@ -8382,8 +8382,8 @@ class ExcelToMarkdownConverter:
                             rep = None
                         pairs.append((rep, basename))
                         print(f"[INFO][_iso_group_repr] sheet={sheet.title} representative_pairs={pairs}")
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     return basename
                 except (ValueError, TypeError):
                     return png_name
@@ -8419,8 +8419,8 @@ class ExcelToMarkdownConverter:
                         print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
                     if heur_annotations:
                         print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 if heur_tables:
                     print(f"[DEBUG] heuristic detection found {len(heur_tables)} table regions")
                     table_regions = heur_tables
@@ -8604,8 +8604,8 @@ class ExcelToMarkdownConverter:
                 before_count = len(merged_texts)
                 merged_texts = [t for t in merged_texts if t[0] not in processed_rows]
                 print(f"[DEBUG] filtered merged_texts: removed {before_count - len(merged_texts)} rows that were already processed as tables")
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
         # Before emitting merged_texts, attempt to detect implicit tables formed
         # by contiguous rows that have multiple non-empty columns. This recovers
@@ -8683,8 +8683,8 @@ class ExcelToMarkdownConverter:
                                     if ratio >= 0.8 and r_avg >= 8:
                                         print(f"[DEBUG] implicit run looks like enumerated list; skipping table conversion rows={srow}-{erow} cols={lcol}-{rcol} left_ratio={ratio:.2f} right_avg={r_avg:.1f}")
                                         continue
-                        except (ValueError, TypeError):
-                            pass
+                        except (ValueError, TypeError) as e:
+                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                         # convert region as a table (this will append to markdown_lines)
                         try:
@@ -8707,8 +8707,8 @@ class ExcelToMarkdownConverter:
                 before_count2 = len(merged_texts)
                 merged_texts = [t for t in merged_texts if t[0] not in processed_rows]
                 print(f"[DEBUG] post-implicit-filter: removed {before_count2 - len(merged_texts)} rows processed by implicit-table conversion")
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] 型変換エラー（無視）: {e}")
         # Emit merged free-form text entries in ascending row order.
         last_emitted_row = None
         if merged_texts:
@@ -8723,8 +8723,8 @@ class ExcelToMarkdownConverter:
                     # map the end_row to the blank line index and mark emitted rows
                     try:
                         self._mark_sheet_map(sheet.title, r, len(self.markdown_lines) - 1)
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     try:
                         # mark all rows in the corresponding excluded block as emitted
                         for (srow, erow, lines) in excluded_blocks:
@@ -8732,8 +8732,8 @@ class ExcelToMarkdownConverter:
                                 for rr in range(srow, erow + 1):
                                     self._mark_emitted_row(sheet.title, rr)
                                 break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        pass  # XML解析エラーは無視
                 last_emitted_row = r
             # Add a separating blank line after any merged free-text region (only when actually emitting)
             if getattr(self, '_in_canonical_emit', False):
@@ -8792,13 +8792,13 @@ class ExcelToMarkdownConverter:
                 # map the end_row to the blank line index and mark emitted rows (helper already registered normalized texts)
                 try:
                     self._mark_sheet_map(sheet.title, end_row, len(self.markdown_lines) - 1)
-                except Exception:
-                    pass
+                except Exception as e:
+                    pass  # XML解析エラーは無視
                 try:
                     for r in range(start_row, end_row + 1):
                         self._mark_emitted_row(sheet.title, r)
-                except Exception:
-                    pass
+                except Exception as e:
+                    pass  # XML解析エラーは無視
             else:
                 print(f"[TRACE] Skipping authoritative mapping for excluded_region rows {start_row}-{end_row} (non-canonical)")
     
@@ -8834,14 +8834,14 @@ class ExcelToMarkdownConverter:
                 self.markdown_lines.append("")  # 空行を追加
                 try:
                     self._mark_sheet_map(sheet.title, end_row, len(self.markdown_lines) - 1)
-                except Exception:
-                    pass
+                except Exception as e:
+                    pass  # XML解析エラーは無視
                 # mark all emitted rows
                 try:
                     for r in range(start_row, end_row + 1):
                         self._mark_emitted_row(sheet.title, r)
-                except Exception:
-                    pass
+                except Exception as e:
+                    pass  # XML解析エラーは無視
             print(f"[DEBUG] プレーンテキスト出力: {len(text_content)}行")
 
     def _detect_table_regions_excluding_processed(self, sheet, min_row: int, max_row: int, min_col: int, max_col: int, processed_rows: set) -> Tuple[List[Tuple[int, int, int, int]], List[str]]:
@@ -8849,8 +8849,8 @@ class ExcelToMarkdownConverter:
         try:
             print("[INFO] 罫線による表領域の検出を開始...")
             print(f"[TRACE][_detect_table_regions_excl_entry] sheet={getattr(sheet,'title',None)} range=({min_row}-{max_row},{min_col}-{max_col}) processed_rows_count={len(processed_rows) if processed_rows else 0} processed_rows_sample={sorted(list(processed_rows))[:20] if processed_rows else []}")
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
         table_boundaries = []
         current_table_start = None
@@ -8972,8 +8972,8 @@ class ExcelToMarkdownConverter:
                         total_borders += 1
                     if cell.border.right and cell.border.right.style:
                         total_borders += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    pass  # XML解析エラーは無視
         
         return total_borders / possible_borders if possible_borders > 0 else 0.0
 
@@ -10314,15 +10314,15 @@ class ExcelToMarkdownConverter:
                     print(f"[DEBUG][_prune_call_single] sheet={sheet.title} before_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
                     table_data, source_rows = self._prune_emitted_rows(sheet.title, table_data, source_rows)
                     print(f"[DEBUG][_prune_result_single] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 # Pre-output deterministic dump for debugging: capture small preview of table_data and source_rows
                 try:
                     src_sample = source_rows[:10] if source_rows else None
                     rows_len = len(table_data) if table_data else 0
                     print(f"[DEBUG][_pre_output_call] path=single_table sheet={sheet.title} rows={rows_len} source_rows_sample={src_sample}")
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 # Defer table emission to canonical pass so authoritative mappings
                 # are recorded only during that pass. Use the first source row as
                 # the anchor. Include optional metadata (no title available in
@@ -10356,8 +10356,8 @@ class ExcelToMarkdownConverter:
                         v = None
                     rowvals.append((cc, v))
                 print(f"[DEBUG][_convert_table_region_entry] raw row {rr}: {rowvals}")
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
         # 小さすぎるテーブル（1-2行のみ）で、タイトルのみを含む場合はスキップ
         if end_row - start_row <= 1:
@@ -10406,8 +10406,8 @@ class ExcelToMarkdownConverter:
                 print(f"[DEBUG] タイトル行が領域先頭に含まれているためスキップ: '{title_text}' at 行{start_row}")
                 start_row = start_row + 1
                 region = (start_row, end_row, start_col, end_col)
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
         # 結合セル情報を取得
         merged_cells = self._get_merged_cell_info(sheet, region)
@@ -10443,8 +10443,8 @@ class ExcelToMarkdownConverter:
                         if left['distinct'] == 1 and right['distinct'] > 1 and left['nonempty'] / max(1, total_rows) < 0.95:
                             print(f"[DEBUG] unique_cols heuristic: dropping left repeated column {left['col']} in favor of {right['col']}")
                             unique_cols = unique_cols[1:]
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 # 行ごとの平均非空セル数（対象列内）
                 total_rows = end_row - header_row + 1 if header_row else end_row - start_row + 1
                 row_counts = []
@@ -10544,8 +10544,8 @@ class ExcelToMarkdownConverter:
                     merge_info_sample = None
                     if 'merge_into_left' in locals():
                         merge_info_sample = sorted(list(merge_into_left))
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 # シート固有の追加ダンプ: 'XMLファイル自動生成' の場合はより詳細に出力
                 try:
                     sheet_name = getattr(sheet, 'title', None)
@@ -10599,15 +10599,15 @@ class ExcelToMarkdownConverter:
                     print(f"[DEBUG][_prune_call_unique] sheet={sheet.title} before_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
                     table_data, source_rows = self._prune_emitted_rows(sheet.title, table_data, source_rows)
                     print(f"[DEBUG][_prune_result_unique] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 # Pre-output deterministic dump for debugging (unique_cols path)
                 try:
                     src_sample = source_rows[:10] if source_rows else None
                     rows_len = len(table_data) if table_data else 0
                     print(f"[DEBUG][_pre_output_call] path=unique_cols sheet={getattr(sheet, 'title', None)} rows={rows_len} source_rows_sample={src_sample}")
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 try:
                     # Defer table emission to canonical pass. Use first source row
                     # as anchor when available and include no title meta here.
@@ -10629,8 +10629,8 @@ class ExcelToMarkdownConverter:
                     # outer try - if anything else fails, try direct output
                     try:
                         self._output_markdown_table(table_data)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        pass  # XML解析エラーは無視
                 return
 
         # テーブルデータを結合セル考慮で構築
@@ -10666,15 +10666,15 @@ class ExcelToMarkdownConverter:
                 print(f"[DEBUG][_prune_call_headerdata] sheet={sheet.title} before_prune rows={len(table_data) if table_data else 0} approx_rows_sample={approx_rows[:10] if approx_rows else None}")
                 table_data, approx_rows = self._prune_emitted_rows(sheet.title, table_data, approx_rows)
                 print(f"[DEBUG][_prune_result_headerdata] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} approx_rows_sample={approx_rows[:10] if approx_rows else None}")
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] 型変換エラー（無視）: {e}")
             # Pre-output deterministic dump for debugging (header/data path)
             try:
                 src_sample = approx_rows[:10] if approx_rows else None
                 rows_len = len(table_data) if table_data else 0
                 print(f"[DEBUG][_pre_output_call] path=header_data sheet={sheet.title} rows={rows_len} source_rows_sample={src_sample}")
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] 型変換エラー（無視）: {e}")
             # Defer table emission until canonical pass so authoritative maps are
             # recorded only during that pass. Store anchor row = first source row
             try:
@@ -10697,15 +10697,15 @@ class ExcelToMarkdownConverter:
                 # clear transient title row after deferring
                 try:
                     self._last_table_title_row = None
-                except Exception:
-                    pass
+                except Exception as e:
+                    pass  # XML解析エラーは無視
                 print(f"DEFER_TABLE sheet={sheet.title} anchor={anchor} rows={len(table_data)} title_present={bool(safe_title)}")
             except (ValueError, TypeError):
                 # fallback to immediate output if deferral fails
                 try:
                     self._output_markdown_table(table_data, source_rows=approx_rows, sheet_title=sheet.title)
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
             # テーブル右隣の記述的テキストを検出・出力 (this will be deferred by _emit_free_text)
             # _last_group_positionsが存在する場合は、実際に使用された最大列を使用
             try:
@@ -10761,8 +10761,8 @@ class ExcelToMarkdownConverter:
             rows = end_row - start_row + 1
             cols = end_col - start_col + 1
             print(f"[DEBUG][_is_plain_text_region_entry] sheet={getattr(sheet,'title',None)} region={start_row}-{end_row},{start_col}-{end_col} rows={rows} cols={cols}")
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
         # 領域のサイズが小さい場合（行数が少ない）
         row_count = end_row - start_row + 1
@@ -10798,8 +10798,8 @@ class ExcelToMarkdownConverter:
             if row_count == 1 and len(tokens) >= 2 and avg_len <= 60:
                 print(f"[DEBUG] 単一行トークン複数 -> 表扱い: 行{start_row}〜{end_row}, tokens={len(tokens)}, avg_len={avg_len:.1f}")
                 return False
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
         # プレーンテキスト判定: キーワードベースを廃止し、汎用的な構造的ヒューリスティックを使用する
         # - ファイルパス・URL・XMLやタグなどの記述的コンテンツが多い -> プレーンテキスト
         # - セルの平均長が大きい（長文が多い） -> プレーンテキスト
@@ -10898,8 +10898,8 @@ class ExcelToMarkdownConverter:
                     if ratio >= 0.8 and right_avg >= 10:
                         print(f"[DEBUG] 番号付きリスト検出: 行{start_row}〜{end_row} 左番号率={num_matches}/{len(left_texts)} 右平均長={right_avg:.1f}")
                         return True
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
         # ルール1: ファイルパス/URL/XMLが多い場合はプレーンテキスト（説明的な列）
         if non_empty_cells > 0 and (path_like_count / non_empty_cells) > 0.25:
@@ -10927,8 +10927,8 @@ class ExcelToMarkdownConverter:
             if row_count == 1 and cols_with_content >= 2 and avg_len < 40:
                 print(f"[DEBUG] 単一行短文複数列は表扱い: 行{start_row}〜{end_row}, cols_with_content={cols_with_content}, avg_len={avg_len:.1f}")
                 return False
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
         # ルール3: 非常に少ない行・セルで長文が混在している場合はプレーンテキスト
         if row_count <= 2 and non_empty_cells <= 6 and long_count > 0:
@@ -10980,21 +10980,21 @@ class ExcelToMarkdownConverter:
                                 # Only record authoritative mappings during canonical pass
                                 md_idx = len(self.markdown_lines) - 1
                                 self._mark_sheet_map(sheet.title, row_num, md_idx)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                pass  # XML解析エラーは無視
                             try:
                                 self._mark_emitted_row(sheet.title, row_num)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                pass  # XML解析エラーは無視
                             try:
                                 self._mark_emitted_text(sheet.title, self._normalize_text(combined))
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                pass  # XML解析エラーは無視
                         else:
                             # non-canonical context: canonical pass will assign indices
                             print(f"[TRACE] Skipping authoritative mapping for plain-text fallback row={row_num} (non-canonical)")
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
         # add a separating blank line if any lines were emitted
         try:
@@ -11171,7 +11171,7 @@ class ExcelToMarkdownConverter:
                         collapsed = self._collapse_repeated_sequence(uniq)
                         combined = '<br>'.join(collapsed)
                 except Exception:
-                    pass
+                    pass  # 一時ファイルの削除失敗は無視
             except Exception:
                 combined = '<br>'.join(dedup_parts) if dedup_parts else ''
 
@@ -11198,8 +11198,8 @@ class ExcelToMarkdownConverter:
                         try:
                             if head_cell.border and (getattr(head_cell.border.left, 'style', None) or getattr(head_cell.border.right, 'style', None)):
                                 keep_despite_low_ratio = True
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            pass  # XML解析エラーは無視
                         
                         # 塗りつぶしがある列も保持
                         if not keep_despite_low_ratio:
@@ -11218,8 +11218,8 @@ class ExcelToMarkdownConverter:
                                     total_check += 1
                                     if c.border and c.border.right and getattr(c.border.right, 'style', None):
                                         right_count += 1
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    pass  # XML解析エラーは無視
                             if total_check > 0 and (right_count / total_check) >= 0.5:
                                 keep_despite_low_ratio = True
                         
@@ -11238,8 +11238,8 @@ class ExcelToMarkdownConverter:
                                         if border_style in ('medium', 'thick', 'double'):
                                             keep_despite_low_ratio = True
                                             break
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    pass  # XML解析エラーは無視
                 except Exception:
                     keep_despite_low_ratio = False
 
@@ -11296,8 +11296,8 @@ class ExcelToMarkdownConverter:
                     header_positions = shifted_positions
                     header_row = shifted_row
                     print(f"[DEBUG] シフト後ヘッダー採用: headers={headers}, positions={header_positions}, header_row={header_row}")
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
         # 空のヘッダー列が混入していると余分な空列が出力されるため除去する
         try:
@@ -11308,8 +11308,8 @@ class ExcelToMarkdownConverter:
                 else:
                     headers, header_positions = [], []
                 print(f"[DEBUG] 空ヘッダー列を削除: headers={headers}, positions={header_positions}")
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
         # ヘッダー行が実は記述的データ（ファイルパス/XML/長文など）である場合は
         # ヘッダー扱いをやめ、結合セルを考慮した従来のテーブル構築へフォールバックする
@@ -11484,8 +11484,8 @@ class ExcelToMarkdownConverter:
                     hdr_cell = sheet.cell(header_row, col_left)
                     if hdr_cell and hdr_cell.border and hdr_cell.border.right and getattr(hdr_cell.border.right, 'style', None):
                         has_strong_right = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    pass  # XML解析エラーは無視
 
                 # Also check merged-cell masters for differences across header rows
                 masters_differ = False
@@ -12064,8 +12064,8 @@ class ExcelToMarkdownConverter:
                             try:
                                 if cell_obj and cell_obj.font and getattr(cell_obj.font, 'bold', False):
                                     bold_count += 1
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                pass  # XML解析エラーは無視
 
                         if total_nonempty == 0:
                             return 0.0
@@ -12110,8 +12110,8 @@ class ExcelToMarkdownConverter:
                             extended_group_count += 1
                         if val_str:
                             prev_val = val_str
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 
                 print(f"[DEBUG] extended_group_count(row={row})={extended_group_count} (original group_count={group_count})")
 
@@ -12204,8 +12204,8 @@ class ExcelToMarkdownConverter:
                         print(f"[DEBUG] ヘッダー高さの見直し: 複数行によるグループ増分が小さいため単一行を優先します (row={best_row}, before_height={best_height}, groups_before={best_group_count}, groups_one={group_count_one})")
                         best_height = 1
                         self._detected_header_height = best_height
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] 型変換エラー（無視）: {e}")
             # Additional guard: if the bottom row of the selected multi-row header
             # by itself provides equal or better grouping coverage, prefer it as a
             # single-row header (avoids pulling first data row into header).
@@ -12246,10 +12246,10 @@ class ExcelToMarkdownConverter:
                         try:
                             self._detected_header_start = best_row
                             self._detected_header_height = best_height
-                        except (ValueError, TypeError):
-                            pass
-            except (ValueError, TypeError):
-                pass
+                        except (ValueError, TypeError) as e:
+                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
             print(f"[DEBUG] ヘッダー行選択 (罫線優先): 行{best_row} (groups={best_group_count}, height={best_height})")
             return (best_row, best_height)
@@ -12427,8 +12427,8 @@ class ExcelToMarkdownConverter:
 
             useful_columns = sorted(set(useful_columns))
             print(f"[TRACE-USEFUL-DECISION] region={region} initial_counts={col_counts} kept_by_guard={kept_by_guard} final_useful={useful_columns}")
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
         # Diagnostics: for every original sheet column in the region, record why it was
         # kept or dropped. This helps trace which branch collapsed columns.
@@ -12459,8 +12459,8 @@ class ExcelToMarkdownConverter:
                             if hv and str(hv).strip():
                                 header_present = True
                                 header_texts.append(str(hv).strip())
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                 # data non-empty count for this original rel column
                 data_count = 0
@@ -12476,8 +12476,8 @@ class ExcelToMarkdownConverter:
             for t in per_column_diag:
                 abs_col, rel, in_initial, header_present, header_texts, data_count, reason = t
                 print(f"[COLUMN-MAP] col={abs_col} rel={rel} initial={in_initial} header_present={header_present} header_texts={header_texts} data_count={data_count} -> {reason}")
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
         # 有用な列のみでテーブルを再構築
         table_data = []
@@ -12855,8 +12855,8 @@ class ExcelToMarkdownConverter:
                                 # write back into table_data header cell
                                 if col_idx < len(table_data[ri]):
                                     table_data[ri][col_idx] = last
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
         # build header cells by joining header rows
         # NOTE: each header row cell may already contain '<br>' sequences (from merged/header assembly).
@@ -12924,8 +12924,8 @@ class ExcelToMarkdownConverter:
                 table_data = new_table
                 header_cells = new_header
                 num_cols = len(header_cells)
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
     # output header
         safe_header = [self._escape_cell_for_table(h) for h in header_cells]
