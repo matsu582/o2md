@@ -1402,7 +1402,8 @@ class IsolatedGroupRenderer:
                 'convert',
                 '-density', str(dpi),
                 f'{pdf_path}[0]',
-                '-strip',
+                '-background', 'white',
+                '-alpha', 'remove',
                 '-quality', '90',
                 output_path
             ]
