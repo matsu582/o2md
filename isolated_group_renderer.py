@@ -1283,15 +1283,21 @@ class IsolatedGroupRenderer:
                             continue
                     
                     tree.write(sheet_path, encoding='utf-8', xml_declaration=True)
+                
+                except Exception as e:
+                    print(f"[WARNING] シートXML処理失敗: {e}")
+            
+            if False:
+                try:
+                    sheet_path = os.path.join(tmpdir, f'xl/worksheets/sheet{target_sheet_new_index + 1}.xml')
+                    tree2 = ET.parse(sheet_path)
+                    root2 = tree2.getroot()
+                    ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
                     
-                    try:
-                        tree2 = ET.parse(sheet_path)
-                        root2 = tree2.getroot()
-                        
-                        sheet_data_tag = f'{{{ns}}}sheetData'
-                        sheet_data = root2.find(sheet_data_tag)
-                        
-                        if sheet_data is not None:
+                    sheet_data_tag = f'{{{ns}}}sheetData'
+                    sheet_data = root2.find(sheet_data_tag)
+                    
+                    if sheet_data is not None:
                             keep_cols = set(range(s_col, e_col + 1))
                             new_sheet_data = ET.Element(sheet_data_tag)
                             
@@ -1449,8 +1455,8 @@ class IsolatedGroupRenderer:
                                     tree3.write(sheet_path, encoding='utf-8', xml_declaration=True)
                             except Exception:
                                 pass
-                    except Exception as e:
-                        pass
+                        except Exception as e:
+                            pass
                     
                     try:
                         if cell_range:
