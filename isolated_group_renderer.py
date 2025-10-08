@@ -187,10 +187,7 @@ class IsolatedGroupRenderer:
             
             theme_color_map = {}
             try:
-                theme_path = 'xl/theme/theme1.xml'
-                if theme_path in z.namelist():
-                    theme_xml = ET.fromstring(z.read(theme_path))
-                    theme_color_map = self.converter._parse_theme_colors(theme_xml)
+                theme_color_map, _ = self.converter._parse_theme_colors(z)
             except Exception:
                 pass
             
@@ -912,6 +909,9 @@ class IsolatedGroupRenderer:
                     seen_sigs = set()
                     for ch in connector_children_by_id[kept_cid]:
                         try:
+                            if not hasattr(ch, 'iter'):
+                                print(f"[ERROR] ch is not an XML element: type={type(ch)}, value={ch}")
+                                continue
                             new_ch = copy.deepcopy(ch)
                             # Replace any a:schemeClr children with explicit a:srgbClr using parsed theme
                             try:
@@ -1073,6 +1073,8 @@ class IsolatedGroupRenderer:
                                                 elem.set('val', hexv)
                             except Exception as e:
                                 print(f"[WARNING] ファイル操作エラー: {e}")
+                                import traceback
+                                traceback.print_exc()
 
                             # normalize ln children: keep exactly one <ln> under spPr
                             try:
