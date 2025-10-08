@@ -1395,6 +1395,7 @@ class IsolatedGroupRenderer:
                 'convert',
                 '-density', str(dpi),
                 pdf_path,
+                '-strip',  # すべてのプロファイルとコメントを削除
                 '-quality', '90',
                 output_path
             ]
