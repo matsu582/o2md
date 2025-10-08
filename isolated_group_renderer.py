@@ -1418,11 +1418,11 @@ class IsolatedGroupRenderer:
         print(f"[DEBUG] _convert_pdf_to_png_with_output: pdf_path={pdf_path}, output_path={output_path}, dpi={dpi}")
         
         try:
-            # ImageMagickで変換
+            # ImageMagickで変換（PDFの最初のページのみ）
             cmd = [
                 'convert',
                 '-density', str(dpi),
-                pdf_path,
+                f'{pdf_path}[0]',  # PDFの最初のページのみを変換
                 '-strip',
                 '-quality', '90',
                 output_path
