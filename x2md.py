@@ -4891,7 +4891,7 @@ class ExcelToMarkdownConverter:
             traceback.print_exc()
             return None
 
-    def _render_sheet_isolated_group(self, sheet, shape_indices: List[int], dpi: int = 600, cell_range: Optional[Tuple[int,int,int,int]] = None) -> Optional[str]:
+    def _render_sheet_isolated_group(self, sheet, shape_indices: List[int], dpi: int = 600, cell_range: Optional[Tuple[int,int,int,int]] = None) -> Optional[Tuple[str, int]]:
         """Render a group of shape indices as a single isolated image.
         
         **PRODUCTION METHOD - RECOMMENDED FOR ALL USE CASES**
