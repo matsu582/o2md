@@ -1299,7 +1299,7 @@ class IsolatedGroupRenderer:
         tmp_pdf_dir = tempfile.mkdtemp(prefix='xls2md_pdf_')
         
         try:
-            # LibreOfficeでPDF生成
+            # LibreOfficeでPDF生成（一時ディレクトリに出力）
             print(f"[DEBUG] LibreOffice PDF変換開始: sheet={sheet.title}")
             pdf_path = self._convert_excel_to_pdf(src_for_conv, tmp_pdf_dir, apply_fit_to_page=False)
             
@@ -1307,8 +1307,11 @@ class IsolatedGroupRenderer:
                 print(f"[WARN] LibreOffice PDF変換失敗")
                 return None
             
-            # PDFをPNGに変換
-            png_path = self._convert_pdf_to_png(pdf_path, dpi=dpi)
+            png_filename = os.path.basename(src_for_conv).replace('.xlsx', '.png')
+            final_png_path = os.path.join(self.converter.images_dir, png_filename)
+            
+            # PDFをPNGに変換（最終出力ディレクトリに直接出力）
+            png_path = self._convert_pdf_to_png_with_output(pdf_path, final_png_path, dpi=dpi)
             
             if png_path is None:
                 print(f"[WARN] PDF→PNG変換失敗")
@@ -1326,6 +1329,8 @@ class IsolatedGroupRenderer:
             
         except Exception as e:
             print(f"[ERROR] PDF/PNG生成エラー: {e}")
+            import traceback
+            traceback.print_exc()
             return None
         finally:
             # 一時PDFディレクトリを削除
@@ -1400,19 +1405,19 @@ class IsolatedGroupRenderer:
             return None
     
     def _convert_pdf_to_png(self, pdf_path, dpi=300):
-        """PDFをPNGに変換"""
+        """PDFをPNGに変換（同じディレクトリに出力）"""
+        import os
+        output_path = pdf_path.replace('.pdf', '.png')
+        return self._convert_pdf_to_png_with_output(pdf_path, output_path, dpi)
+    
+    def _convert_pdf_to_png_with_output(self, pdf_path, output_path, dpi=300):
+        """PDFをPNGに変換（出力先を指定）"""
         import os
         import subprocess
-        import tempfile
         
-        print(f"[DEBUG] _convert_pdf_to_png: pdf_path={pdf_path}, dpi={dpi}")
+        print(f"[DEBUG] _convert_pdf_to_png_with_output: pdf_path={pdf_path}, output_path={output_path}, dpi={dpi}")
         
         try:
-            # 出力PNGパス
-            output_path = pdf_path.replace('.pdf', '.png')
-            
-            print(f"[DEBUG] PNG output_path: {output_path}")
-            
             # ImageMagickで変換
             cmd = [
                 'convert',
