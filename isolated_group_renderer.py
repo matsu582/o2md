@@ -1454,6 +1454,56 @@ class IsolatedGroupRenderer:
             except Exception as e:
                 print(f"[WARNING] 図形座標調整失敗: {e}")
         
+        try:
+            sheet_rels_path = os.path.join(tmpdir, f'xl/worksheets/_rels/sheet{target_sheet_new_index + 1}.xml.rels')
+            if os.path.exists(sheet_rels_path):
+                tree = ET.parse(sheet_rels_path)
+                root = tree.getroot()
+                ns = 'http://schemas.openxmlformats.org/package/2006/relationships'
+                
+                drawing_target = None
+                for rel in list(root.findall(f'{{{ns}}}Relationship')):
+                    rel_type = rel.get('Type', '')
+                    if 'drawing' in rel_type.lower():
+                        drawing_target = rel.get('Target')
+                        root.remove(rel)
+                    else:
+                        root.remove(rel)
+                
+                if drawing_target:
+                    new_rel = ET.Element(f'{{{ns}}}Relationship')
+                    new_rel.set('Id', 'rId1')
+                    new_rel.set('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing')
+                    new_rel.set('Target', drawing_target)
+                    root.append(new_rel)
+                    
+                    tree.write(sheet_rels_path, encoding='utf-8', xml_declaration=True)
+                    print(f"[DEBUG] Cleaned sheet rels and set drawing to rId1")
+                
+                sheet_path = os.path.join(tmpdir, f'xl/worksheets/sheet{target_sheet_new_index + 1}.xml')
+                if os.path.exists(sheet_path):
+                    stree = ET.parse(sheet_path)
+                    sroot = stree.getroot()
+                    ns_s = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+                    ns_r = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+                    
+                    drawing_elem = sroot.find(f'.//{{{ns_s}}}drawing')
+                    if drawing_elem is not None:
+                        drawing_elem.set(f'{{{ns_r}}}id', 'rId1')
+                        stree.write(sheet_path, encoding='utf-8', xml_declaration=True)
+                        print(f"[DEBUG] Updated sheet drawing reference to rId1")
+        except Exception as e:
+            print(f"[WARNING] リレーションシップのクリーンアップ失敗: {e}")
+        
+        try:
+            printer_dir = os.path.join(tmpdir, 'xl', 'printerSettings')
+            if os.path.exists(printer_dir):
+                import shutil
+                shutil.rmtree(printer_dir, ignore_errors=True)
+                print(f"[DEBUG] Removed printerSettings directory")
+        except Exception as e:
+            print(f"[WARNING] printerSettings削除失敗: {e}")
+        
         # tmpdirをzip化して一時xlsxファイルを作成
         try:
             # shape_indicesからユニークなファイル名を生成（mainブランチと同じロジック）
