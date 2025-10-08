@@ -54,8 +54,6 @@ class IsolatedGroupRenderer:
             self.sheet = sheet  # Aggressiveセクションで使用
             self._last_iso_preserved_ids = set()
             
-            print(f"[DEBUG][IsolatedGroupRenderer.render] sheet={sheet.title} shape_indices={shape_indices}")
-            
             # フェーズ1: 初期化とXMLロード
             excel_zip, drawing_xml, drawing_path, sheet_index, theme_color_map = \
                 self._phase1_initialize_and_load_xml(sheet)
