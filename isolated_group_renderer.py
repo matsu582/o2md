@@ -31,6 +31,7 @@ class IsolatedGroupRenderer:
             converter: 親のExcelToMarkdownConverterインスタンス
         """
         self.converter = converter
+        self.sheet = None  # renderメソッドで設定される
         self._last_iso_preserved_ids = set()
         self._last_temp_pdf_path = None
     
@@ -50,6 +51,7 @@ class IsolatedGroupRenderer:
         """
         try:
             # 初期化
+            self.sheet = sheet  # Aggressiveセクションで使用
             self._last_iso_preserved_ids = set()
             
             # フェーズ1: 初期化とXMLロード
@@ -1203,7 +1205,7 @@ class IsolatedGroupRenderer:
             
             # Print_Area文字列を作成
             sheet_name_escaped = sheet.title.replace("'", "''")
-            area_ref = f"'{sheet_name_escaped}'!${start_col_letter}${s_row}:${end_col_letter}${e_row}"
+            area_ref = f"'{sheet_name_escaped}'!${start_col_letter}$1:${end_col_letter}${e_row - s_row + 1}"
             
             # workbook.xmlを更新
             wb_path = os.path.join(tmpdir, 'xl/workbook.xml')
@@ -1257,7 +1259,7 @@ class IsolatedGroupRenderer:
                         for el in list(root.findall(f'{{{ns}}}{tag}')):
                             root.remove(el)
                     
-                    # 範囲外の行を非表示に
+                    # 範囲外の行を非表示に（最初の試み）
                     for row_el in root.findall(f'.//{{{ns}}}row'):
                         try:
                             rnum = int(row_el.attrib.get('r', '0'))
@@ -1269,6 +1271,57 @@ class IsolatedGroupRenderer:
                             continue
                     
                     tree.write(sheet_path, encoding='utf-8', xml_declaration=True)
+                    
+                    try:
+                        tree2 = ET.parse(sheet_path)
+                        root2 = tree2.getroot()
+                        
+                        sheet_data_tag = f'{{{ns}}}sheetData'
+                        sheet_data = root2.find(sheet_data_tag)
+                        
+                        if sheet_data is not None:
+                            for child in list(sheet_data):
+                                if child.tag.endswith('row'):
+                                    try:
+                                        sheet_data.remove(child)
+                                    except Exception:
+                                        pass
+                            
+                            try:
+                                first_row = int(s_row)
+                                last_row = int(e_row)
+                                out_r = 1
+                                for src_r in range(first_row, last_row + 1):
+                                    try:
+                                        r_el = ET.Element(f'{{{ns}}}row')
+                                        r_el.set('r', str(out_r))
+                                        
+                                        try:
+                                            src_row_obj = self.sheet.row_dimensions.get(src_r)
+                                            if src_row_obj is not None and getattr(src_row_obj, 'height', None) is not None:
+                                                r_el.set('ht', str(float(src_row_obj.height)))
+                                                r_el.set('customHeight', '1')
+                                            else:
+                                                try:
+                                                    dflt = getattr(self.sheet.sheet_format, 'defaultRowHeight', None)
+                                                    if dflt is not None:
+                                                        r_el.set('ht', str(float(dflt)))
+                                                except (ValueError, TypeError):
+                                                    pass
+                                        except (ValueError, TypeError):
+                                            pass
+                                        
+                                        sheet_data.append(r_el)
+                                    except (ValueError, TypeError):
+                                        pass
+                                    out_r += 1
+                            except (ValueError, TypeError):
+                                pass
+                            
+                            tree2.write(sheet_path, encoding='utf-8', xml_declaration=True)
+                    except Exception as e:
+                        pass
+                    
                 except Exception as e:
                     print(f"[WARNING] シートXML更新失敗: {e}")
         
