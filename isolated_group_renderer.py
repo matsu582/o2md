@@ -1559,7 +1559,7 @@ class IsolatedGroupRenderer:
             cell_range: セル範囲 (s_col, e_col, s_row, e_row)（オプション）
             
         Returns:
-            Tuple[int, str]: (開始行, 画像ファイル名)
+            Tuple[str, int]: (画像ファイル名, 開始行)
         """
         import os
         
@@ -1591,12 +1591,12 @@ class IsolatedGroupRenderer:
             # デバッグログ
             print(f"[INFO] sheet={sheet.title} file={basename} start_row={rep}")
             
-            return (rep, basename)
+            return (basename, rep)
             
         except Exception as e:
             print(f"[ERROR] 後処理エラー: {e}")
-            # フォールバック: タプルで返す（順序を修正）
-            return (1, png_name)
+            # フォールバック: タプルで返す
+            return (png_name, 1)
 
 
     def _col_letter(self, col_num):

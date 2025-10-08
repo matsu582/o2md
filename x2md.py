@@ -1996,7 +1996,7 @@ class ExcelToMarkdownConverter:
                                                         result = self._render_sheet_isolated_group(sheet, cluster)
                                                         if result:
                                                             if isinstance(result, tuple) and len(result) == 2:
-                                                                cluster_row, img_name = result
+                                                                img_name, cluster_row = result
                                                             else:
                                                                 # Fallback for old code path (if any)
                                                                 img_name = result
@@ -4891,7 +4891,7 @@ class ExcelToMarkdownConverter:
             traceback.print_exc()
             return None
 
-    def _render_sheet_isolated_group(self, sheet, shape_indices: List[int], dpi: int = 600, cell_range: Optional[Tuple[int,int,int,int]] = None) -> Optional[Tuple[int, str]]:
+    def _render_sheet_isolated_group(self, sheet, shape_indices: List[int], dpi: int = 600, cell_range: Optional[Tuple[int,int,int,int]] = None) -> Optional[Tuple[str, int]]:
         """Render a group of shape indices as a single isolated image.
         
         **PRODUCTION METHOD - RECOMMENDED FOR ALL USE CASES**
@@ -4912,7 +4912,7 @@ class ExcelToMarkdownConverter:
         flowcharts and composite diagrams.
         
         Returns:
-            Optional[Tuple[int, str]]: (start_row, filename) or None on failure
+            Optional[Tuple[str, int]]: (filename, start_row) or None on failure
         """
         renderer = IsolatedGroupRenderer(self)
         return renderer.render(sheet, shape_indices, dpi, cell_range)
