@@ -17,6 +17,7 @@ from typing import List, Dict, Tuple, Optional, Set
 from collections import deque
 import copy
 import hashlib
+from utils import get_imagemagick_command, get_libreoffice_path
 
 
 class IsolatedGroupRenderer:
@@ -1376,7 +1377,6 @@ class IsolatedGroupRenderer:
         """ExcelファイルをPDFに変換"""
         import os
         import subprocess
-        from utils import get_libreoffice_path
         
         LIBREOFFICE_PATH = get_libreoffice_path()
         
@@ -1440,8 +1440,13 @@ class IsolatedGroupRenderer:
                 except (OSError, FileNotFoundError):
                     pass
             
+            im_cmd = get_imagemagick_command()
+            if not im_cmd:
+                print(f"[ERROR] ImageMagickが見つかりません")
+                return None
+            
             cmd = [
-                'convert',
+                im_cmd,
                 '-density', str(dpi),
                 pdf_path,
                 '-background', 'white',
