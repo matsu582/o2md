@@ -1455,8 +1455,6 @@ class IsolatedGroupRenderer:
                                     tree3.write(sheet_path, encoding='utf-8', xml_declaration=True)
                             except Exception:
                                 pass
-                        except Exception as e:
-                            pass
                     
                     try:
                         if cell_range:
