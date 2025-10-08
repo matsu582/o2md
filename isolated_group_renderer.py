@@ -108,7 +108,7 @@ class IsolatedGroupRenderer:
                 
                 # フェーズ8: ワークブック準備
                 src_for_conv = self._phase8_prepare_workbook(
-                    tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices
+                    tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices, keep_cnvpr_ids
                 )
                 
                 if src_for_conv is None:
@@ -1142,7 +1142,7 @@ class IsolatedGroupRenderer:
     
 
 
-    def _phase8_prepare_workbook(self, tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices):
+    def _phase8_prepare_workbook(self, tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices, keep_cnvpr_ids):
         """フェーズ8: ワークブック準備
         
         cell_rangeを使用してPrint_Areaを設定し、一時的なxlsxファイルを作成
@@ -1156,6 +1156,7 @@ class IsolatedGroupRenderer:
             drawing_path: drawing XMLのパス
             dpi: 解像度
             shape_indices: シェイプのインデックスリスト
+            keep_cnvpr_ids: 保持する図形IDのセット
             
         Returns:
             str: 一時xlsxファイルのパス、失敗時はNone
@@ -1449,17 +1450,24 @@ class IsolatedGroupRenderer:
         
         # tmpdirをzip化して一時xlsxファイルを作成
         try:
-            # shape_indicesからユニークなファイル名を生成
+            # keep_cnvpr_idsからユニークなファイル名を生成（mainブランチと同じロジック）
             import hashlib
-            indices_str = '_'.join(map(str, sorted(shape_indices)))
-            group_hash = hashlib.md5(indices_str.encode()).hexdigest()[:8]
+            try:
+                keep_list = sorted(list(keep_cnvpr_ids)) if keep_cnvpr_ids else []
+                if keep_list:
+                    h = hashlib.sha1(','.join(map(str, keep_list)).encode('utf-8')).hexdigest()[:8]
+                    suffix = f"_grp_{h}"
+                else:
+                    suffix = "_grp_all"
+            except Exception:
+                suffix = "_grp"
             
             excel_base = os.path.splitext(os.path.basename(self.converter.excel_file))[0]
             
             dbg_dir = os.path.join(self.converter.output_dir, 'debug_workbooks')
             os.makedirs(dbg_dir, exist_ok=True)
             
-            final_xlsx_name = f"{excel_base}_iso_group_grp_{group_hash}.xlsx"
+            final_xlsx_name = f"{excel_base}_iso_group{suffix}.xlsx"
             src_for_conv = os.path.join(dbg_dir, final_xlsx_name)
             
             import zipfile
