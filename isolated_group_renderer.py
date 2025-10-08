@@ -1401,7 +1401,7 @@ class IsolatedGroupRenderer:
             cmd = [
                 'convert',
                 '-density', str(dpi),
-                f'{pdf_path}[0]',
+                pdf_path,
                 '-background', 'white',
                 '-alpha', 'remove',
                 '-quality', '90',
