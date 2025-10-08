@@ -1322,7 +1322,23 @@ class IsolatedGroupRenderer:
                     for child in list(parent):
                         if child.tag == sheet_data_tag:
                             parent.remove(child)
+                    
+                    drawing_tag = f'{{{ns}}}drawing'
+                    drawing_elem = parent.find(drawing_tag)
+                    if drawing_elem is not None:
+                        parent.remove(drawing_elem)
+                    
                     parent.append(new_sheet_data)
+                    
+                    if drawing_elem is not None:
+                        sheet_data_index = None
+                        for i, child in enumerate(list(parent)):
+                            if child.tag == sheet_data_tag:
+                                sheet_data_index = i
+                                break
+                        
+                        if sheet_data_index is not None:
+                            parent.insert(sheet_data_index, drawing_elem)
                     
                     dim_tag = f'{{{ns}}}dimension'
                     dim_el = root2.find(dim_tag)
