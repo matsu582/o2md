@@ -1163,6 +1163,13 @@ class IsolatedGroupRenderer:
         import tempfile
         import shutil
         
+        shared_strings_path = os.path.join(tmpdir, 'xl', 'sharedStrings.xml')
+        if os.path.exists(shared_strings_path):
+            try:
+                os.remove(shared_strings_path)
+            except Exception:
+                pass
+        
         target_sheet_new_index = 0
         wb_path = os.path.join(tmpdir, 'xl/workbook.xml')
         if os.path.exists(wb_path):
