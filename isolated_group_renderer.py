@@ -1337,6 +1337,62 @@ class IsolatedGroupRenderer:
                             end_addr = f"{self._col_letter(e_col - s_col + 1)}{max(1, new_r_index - 1)}"
                             dim_el.set('ref', f"{start_addr}:{end_addr}")
                             
+                            cols_tag = f'{{{ns}}}cols'
+                            col_tag = f'{{{ns}}}col'
+                            for child in list(root2):
+                                if child.tag == cols_tag:
+                                    try:
+                                        root2.remove(child)
+                                    except Exception:
+                                        pass
+                            cols_el = ET.Element(cols_tag)
+                            try:
+                                from openpyxl.utils import get_column_letter
+                                default_col_w = getattr(self.sheet.sheet_format, 'defaultColWidth', None) or 8.43
+                                for c in range(s_col, e_col + 1):
+                                    cd = self.sheet.column_dimensions.get(get_column_letter(c))
+                                    width = None
+                                    hidden = None
+                                    if cd is not None:
+                                        width = getattr(cd, 'width', None)
+                                        hidden = getattr(cd, 'hidden', None)
+                                    if width is None:
+                                        width = default_col_w
+                                    col_el = ET.Element(col_tag)
+                                    new_idx = c - s_col + 1
+                                    col_el.set('min', str(new_idx))
+                                    col_el.set('max', str(new_idx))
+                                    try:
+                                        col_el.set('width', str(float(width)))
+                                        if cd is not None and getattr(cd, 'width', None) is not None:
+                                            col_el.set('customWidth', '1')
+                                    except (ValueError, TypeError):
+                                        col_el.set('width', str(int(width) if width is not None else 8))
+                                        if cd is not None and getattr(cd, 'width', None) is not None:
+                                            col_el.set('customWidth', '1')
+                                    try:
+                                        if hidden:
+                                            col_el.set('hidden', '1')
+                                    except (ValueError, TypeError):
+                                        pass
+                                    cols_el.append(col_el)
+                            except (ValueError, TypeError):
+                                for i_col in range(1, e_col - s_col + 2):
+                                    col_el = ET.Element(col_tag)
+                                    col_el.set('min', str(i_col))
+                                    col_el.set('max', str(i_col))
+                                    col_el.set('width', '8.43')
+                                    cols_el.append(col_el)
+                            
+                            inserted = False
+                            for i, child in enumerate(list(root2)):
+                                if 'sheetPr' in child.tag:
+                                    root2.insert(i+1, cols_el)
+                                    inserted = True
+                                    break
+                            if not inserted:
+                                root2.insert(0, cols_el)
+                            
                             tree2.write(sheet_path, encoding='utf-8', xml_declaration=True)
                             
                             try:
