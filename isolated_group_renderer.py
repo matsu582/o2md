@@ -1254,6 +1254,11 @@ class IsolatedGroupRenderer:
                     root = tree.getroot()
                     ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
                     
+                    for v in root.findall(f'.//{{{ns}}}v'):
+                        v.text = ''
+                    for t in root.findall(f'.//{{{ns}}}t'):
+                        t.text = ''
+                    
                     # pageBreaks要素を削除
                     for tag in ['rowBreaks', 'colBreaks', 'pageBreaks']:
                         for el in list(root.findall(f'{{{ns}}}{tag}')):
