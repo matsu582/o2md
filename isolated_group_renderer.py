@@ -1450,10 +1450,11 @@ class IsolatedGroupRenderer:
         
         # tmpdirをzip化して一時xlsxファイルを作成
         try:
-            # keep_cnvpr_idsからユニークなファイル名を生成（mainブランチと同じロジック）
+            # shape_indicesからユニークなファイル名を生成（mainブランチと同じロジック）
             import hashlib
             try:
-                keep_list = sorted(list(keep_cnvpr_ids)) if keep_cnvpr_ids else []
+                keep_set = set(shape_indices)
+                keep_list = sorted(list(keep_set)) if 'keep_set' in locals() else []
                 if keep_list:
                     h = hashlib.sha1(','.join(map(str, keep_list)).encode('utf-8')).hexdigest()[:8]
                     suffix = f"_grp_{h}"
