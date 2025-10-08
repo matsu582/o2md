@@ -1,0 +1,1511 @@
+"""
+IsolatedGroupRenderer - 分離グループ画像レンダリングクラス
+
+ExcelToMarkdownConverterから_render_sheet_isolated_groupメソッドを
+切り出したクラス。図形グループを一時ワークブックとして分離し、
+LibreOffice→PDF→ImageMagickの変換パイプラインで画像化する。
+"""
+
+import os
+import sys
+import tempfile
+import subprocess
+import shutil
+import zipfile
+import xml.etree.ElementTree as ET
+from typing import List, Dict, Tuple, Optional, Set
+from collections import deque
+import copy
+import hashlib
+
+
+class IsolatedGroupRenderer:
+    """図形グループを分離レンダリングするクラス"""
+    
+    def __init__(self, converter):
+        """
+        コンストラクタ
+        
+        Args:
+            converter: 親のExcelToMarkdownConverterインスタンス
+        """
+        self.converter = converter
+        self._last_iso_preserved_ids = set()
+        self._last_temp_pdf_path = None
+    
+    def render(self, sheet, shape_indices: List[int], dpi: int = 600, 
+               cell_range: Optional[Tuple[int,int,int,int]] = None) -> Optional[str]:
+        """
+        図形グループを分離レンダリング
+        
+        Args:
+            sheet: openpyxlのWorksheetオブジェクト
+            shape_indices: レンダリングする図形のインデックスリスト
+            dpi: レンダリング解像度
+            cell_range: セル範囲 (start_col, end_col, start_row, end_row)
+        
+        Returns:
+            生成された画像ファイル名（相対パス）またはNone
+        """
+        try:
+            # 初期化
+            self._last_iso_preserved_ids = set()
+            
+            # フェーズ1: 初期化とXMLロード
+            excel_zip, drawing_xml, drawing_path, sheet_index, theme_color_map = \
+                self._phase1_initialize_and_load_xml(sheet)
+            
+            if drawing_xml is None:
+                return None
+            
+            # フェーズ2: アンカー収集
+            anchors = self._phase2_collect_anchors(drawing_xml)
+            
+            if not anchors:
+                print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawable anchors found")
+                return None
+            
+            # フェーズ3: セル範囲計算
+            cell_range = self._phase3_compute_cell_range(sheet, shape_indices, anchors, cell_range)
+            
+            # フェーズ4: ID収集
+            keep_cnvpr_ids = self._phase4_collect_keep_ids(shape_indices, anchors)
+            
+            print(f"[DEBUG][_iso_entry] sheet={sheet.title} anchors_count={len(anchors)} keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))}")
+            
+            # フェーズ5: 一時ディレクトリ作成とコネクタ参照解決
+            tmpdir, referenced_ids, connector_children_by_id = \
+                self._phase5_create_tmpdir_and_resolve_connectors(
+                    excel_zip, sheet, shape_indices, anchors, keep_cnvpr_ids, 
+                    drawing_xml, drawing_path, theme_color_map
+                )
+            
+            if tmpdir is None:
+                return None
+            
+            try:
+                        # フェーズ6: 描画XML刈り込み
+                drawing_relpath = os.path.join(tmpdir, drawing_path)
+                drawing_xml_bytes = ET.tostring(drawing_xml)
+                success = self._phase6_prune_drawing_xml(
+                    drawing_relpath, keep_cnvpr_ids, referenced_ids, 
+                    cell_range, drawing_xml, tmpdir, sheet, sheet_index
+                )
+                
+                if not success:
+                    return None
+                
+                # フェーズ7: コネクタコスメティック処理
+                self._phase7_apply_connector_cosmetics(
+                    drawing_relpath, referenced_ids, connector_children_by_id,
+                    theme_color_map, drawing_xml_bytes, drawing_xml
+                )
+                
+                # フェーズ8: ワークブック準備
+                src_for_conv = self._phase8_prepare_workbook(
+                    tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices
+                )
+                
+                if src_for_conv is None:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    return None
+                
+                # フェーズ9: PDF/PNG生成
+                out_path = self._phase9_generate_pdf_png(
+                    sheet, shape_indices, src_for_conv, tmpdir, dpi, cell_range
+                )
+                
+                if out_path is None:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    return None
+                
+                # フェーズ10: 後処理
+                png_name = os.path.basename(out_path) if out_path else "unknown.png"
+                group_rows = [cell_range[2]] if cell_range else None
+                final_result = self._phase10_postprocess(
+                    out_path, png_name, sheet, group_rows, cell_range
+                )
+                
+                # クリーンアップ
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                
+                return final_result
+                
+            except Exception as e:
+                print(f"[ERROR][IsolatedGroupRenderer] Exception: {e}")
+                import traceback
+                traceback.print_exc()
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return None
+                
+        except Exception as e:
+            print(f"[ERROR][IsolatedGroupRenderer] Exception: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _phase1_initialize_and_load_xml(self, sheet):
+        """フェーズ1: 初期化とXMLロード"""
+        try:
+            zpath = self.converter.excel_file
+            z = zipfile.ZipFile(zpath, 'r')
+            sheet_index = self.converter.workbook.sheetnames.index(sheet.title)
+            rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
+            
+            if rels_path not in z.namelist():
+                print(f"[DEBUG][_iso_entry] sheet={sheet.title} missing rels: {rels_path}")
+                return None, None, None, None, None
+            
+            rels_xml = ET.fromstring(z.read(rels_path))
+            drawing_target = None
+            for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
+                if rel.attrib.get('Type','').endswith('/drawing'):
+                    drawing_target = rel.attrib.get('Target')
+                    break
+            
+            if not drawing_target:
+                print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawing relationship found in rels")
+                return None, None, None, None, None
+            
+            drawing_path = drawing_target
+            if drawing_path.startswith('..'):
+                drawing_path = drawing_path.replace('../', 'xl/')
+            if drawing_path.startswith('/'):
+                drawing_path = drawing_path.lstrip('/')
+            
+            print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path={drawing_path}")
+            
+            if drawing_path not in z.namelist():
+                drawing_path = drawing_path.replace('worksheets', 'drawings')
+                if drawing_path not in z.namelist():
+                    print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path not found in archive")
+                    return None, None, None, None, None
+            
+            drawing_xml_bytes = z.read(drawing_path)
+            drawing_xml = ET.fromstring(drawing_xml_bytes)
+            
+            theme_color_map = {}
+            try:
+                theme_path = 'xl/theme/theme1.xml'
+                if theme_path in z.namelist():
+                    theme_xml = ET.fromstring(z.read(theme_path))
+                    theme_color_map = self.converter._parse_theme_colors(theme_xml)
+            except Exception:
+                pass
+            
+            return z, drawing_xml, drawing_path, sheet_index, theme_color_map
+        except Exception as e:
+            print(f"[ERROR] Phase1 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None, None, None, None, None
+    
+    def _phase2_collect_anchors(self, drawing_xml):
+        """フェーズ2: アンカー収集"""
+        anchors = []
+        for node in drawing_xml:
+            lname = node.tag.split('}')[-1].lower()
+            if lname in ('twocellanchor', 'onecellanchor') and self.converter._anchor_has_drawable(node):
+                anchors.append(node)
+        return anchors
+    
+    def _phase3_compute_cell_range(self, sheet, shape_indices, anchors, cell_range):
+        """フェーズ3: セル範囲計算"""
+        try:
+            if cell_range is None and shape_indices:
+                all_ranges = self.converter._extract_drawing_cell_ranges(sheet)
+                picked = []
+                for idx in shape_indices:
+                    if idx >= 0 and idx < len(all_ranges):
+                        picked.append(all_ranges[idx])
+                
+                if picked:
+                    s_col = min(r[0] for r in picked)
+                    e_col = max(r[1] for r in picked)
+                    s_row = min(r[2] for r in picked)
+                    e_row = max(r[3] for r in picked)
+                    
+                    try:
+                        max_data_col = 0
+                        max_data_row = 0
+                        for row in sheet.iter_rows():
+                            for cell in row:
+                                if cell.value is not None:
+                                    if cell.column > max_data_col:
+                                        max_data_col = cell.column
+                                    if cell.row > max_data_row:
+                                        max_data_row = cell.row
+                        
+                        if max_data_col > 0:
+                            max_allowed_col = max_data_col + 5
+                            if e_col > max_allowed_col:
+                                print(f"[DEBUG][_iso_entry] Limiting e_col from {e_col} to {max_allowed_col}")
+                                e_col = max_allowed_col
+                    except Exception as limit_err:
+                        print(f"[DEBUG][_iso_entry] Failed to limit cell_range: {limit_err}")
+                    
+                    cell_range = (s_col, e_col, s_row, e_row)
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] 型変換エラー（無視）: {e}")
+        
+        return cell_range
+    
+    def _phase4_collect_keep_ids(self, shape_indices, anchors):
+        """フェーズ4: ID収集"""
+        keep_cnvpr_ids = set()
+        try:
+            for si in shape_indices:
+                if si < 0 or si >= len(anchors):
+                    continue
+                cid = None
+                for sub in anchors[si].iter():
+                    if sub.tag.split('}')[-1].lower() == 'cnvpr':
+                        cid = sub.attrib.get('id')
+                        break
+                if cid is not None:
+                    keep_cnvpr_ids.add(str(cid))
+        except (ValueError, TypeError):
+            keep_cnvpr_ids = set()
+        
+        return keep_cnvpr_ids
+    
+    def _phase5_create_tmpdir_and_resolve_connectors(self, excel_zip, sheet, shape_indices, 
+                                                      anchors, keep_cnvpr_ids, drawing_xml, 
+                                                      drawing_path, theme_color_map):
+        """フェーズ5: 一時ディレクトリ作成とコネクタ参照解決"""
+        zpath = self.converter.excel_file
+        z = excel_zip
+        
+        # create tempdir and copy original xlsx contents there to modify
+        tmpdir = tempfile.mkdtemp(prefix='xls2md_iso_group_')
+        try:
+            with zipfile.ZipFile(zpath, 'r') as zin:
+                zin.extractall(tmpdir)
+            # Preserve original styles and theme so style references inside drawing XML resolve
+            try:
+                for preserve in ('xl/styles.xml', 'xl/theme/theme1.xml'):
+                    if preserve in z.namelist():
+                        tgt = os.path.join(tmpdir, preserve)
+                        os.makedirs(os.path.dirname(tgt), exist_ok=True)
+                        with open(tgt, 'wb') as _fw:
+                            _fw.write(z.read(preserve))
+            except (OSError, IOError, FileNotFoundError):
+                print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+
+            # When pruning anchors below, ensure that any shapes referenced by
+            # connectors in the kept indices are also preserved. We'll compute
+            # referenced ids from the anchors list first, and also gather
+            # connector cosmetic children to copy into kept anchors.
+            # We'll compute a transitive closure of anchor ids to preserve.
+            # Build mappings of anchor_id -> referenced ids (refs) and reverse refs
+            # so we can include connectors that reference kept shapes and also
+            # include endpoints referenced by kept connectors, transitively.
+            referenced_ids = set()
+            connector_children_by_id = {}
+            try:
+                refs = {}  # anchor_id -> set(of ids it references)
+                reverse_refs = {}  # id -> set(of anchor_ids that reference it)
+
+                # First, build refs and connector_children_by_id from all anchor nodes
+                for orig in list(drawing_xml):
+                    lname = orig.tag.split('}')[-1].lower()
+                    if lname not in ('twocellanchor', 'onecellanchor'):
+                        continue
+                    cid = None
+                    for sub in orig.iter():
+                        if sub.tag.split('}')[-1].lower() == 'cnvpr':
+                            cid = str(sub.attrib.get('id'))
+                            break
+                    if cid is None:
+                        continue
+                    # find referenced ids inside this anchor (stCxn/endCxn variants)
+                    rset = set()
+                    for sub in orig.iter():
+                        st = sub.tag.split('}')[-1].lower()
+                        if st in ('stcxn', 'endcxn', 'stcxnpr', 'endcxnpr'):
+                            vid = sub.attrib.get('id') or sub.attrib.get('idx')
+                            if vid is not None:
+                                rset.add(str(vid))
+                    if rset:
+                        refs[cid] = rset
+                        for rid in rset:
+                            reverse_refs.setdefault(rid, set()).add(cid)
+
+                    # search children for cosmetic subtrees to copy later
+                    kids = []
+                    for child in orig:
+                        for sub in child.iter():
+                            st = sub.tag.split('}')[-1].lower()
+                            if st in ('prstgeom', 'ln', 'headend', 'tailend', 'custgeom', 'sppr'):
+                                kids.append(child)
+                                break
+                    if kids:
+                        connector_children_by_id[cid] = kids
+
+                # seed the BFS with explicitly requested keep ids
+                preserve = set(keep_cnvpr_ids)
+                q = deque(keep_cnvpr_ids)
+
+                # Additionally, include anchors whose "from" row lies within
+                # any of the shape_indices' corresponding rows for this group.
+                # This enforces a row-based inclusion rule so connectors whose
+                # endpoints are on the same sheet row are preserved even if
+                # they are not transitively referenced via stCxn/endCxn tags.
+                try:
+                    # build mapping: cNvPr id -> from_row for all anchors
+                    id_to_row = {}
+                    ns_xdr = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
+                    for an in anchors:
+                        # find cNvPr id
+                        a_cid = None
+                        for sub in an.iter():
+                            if sub.tag.split('}')[-1].lower() == 'cnvpr':
+                                a_cid = sub.attrib.get('id') or sub.attrib.get('idx')
+                                break
+                        if a_cid is None:
+                            continue
+                        fr = an.find('{%s}from' % ns_xdr)
+                        if fr is not None:
+                            r = fr.find('{%s}row' % ns_xdr)
+                            if r is not None and r.text is not None:
+                                try:
+                                    id_to_row[str(a_cid)] = int(r.text)
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+
+                    # Build a fallback mapping from ALL anchors in the drawing
+                    # (not only those filtered into `anchors`) so we can find
+                    # endpoint rows for connector-only anchors that were
+                    # omitted by the drawable filter. This helps include
+                    # connectors whose endpoints are on the group's rows.
+                    all_id_to_row = {}
+                    try:
+                        for orig_an in list(drawing_xml):
+                            lname2 = orig_an.tag.split('}')[-1].lower()
+                            if lname2 not in ('twocellanchor', 'onecellanchor'):
+                                continue
+                            a_cid2 = None
+                            for sub2 in orig_an.iter():
+                                if sub2.tag.split('}')[-1].lower() == 'cnvpr':
+                                    a_cid2 = sub2.attrib.get('id') or sub2.attrib.get('idx')
+                                    break
+                            if a_cid2 is None:
+                                continue
+                            fr2 = orig_an.find('{%s}from' % ns_xdr)
+                            if fr2 is not None:
+                                r2 = fr2.find('{%s}row' % ns_xdr)
+                                if r2 is not None and r2.text is not None:
+                                    try:
+                                        all_id_to_row[str(a_cid2)] = int(r2.text)
+                                    except (ValueError, TypeError) as e:
+                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                    except (ValueError, TypeError):
+                        all_id_to_row = {}
+
+                    # Determine group's approximate row span by inspecting the
+                    # keep_cnvpr_ids' rows and include anchors on those rows.
+                    group_rows = set()
+                    for cid in keep_cnvpr_ids:
+                        if str(cid) in id_to_row:
+                            group_rows.add(id_to_row[str(cid)])
+                    # include any anchor whose from_row is in group_rows
+                    for cid, r in id_to_row.items():
+                        if r in group_rows and cid not in preserve:
+                            preserve.add(cid)
+                            q.append(cid)
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                # Expand transitive closure but constrain expansion by row membership
+                # to avoid pulling the same anchor into multiple row-based clusters.
+                # Only include a candidate anchor/ref if its 'from' row lies within
+                # the group's rows (group_rows) or if it was part of the original seed
+                # (keep_cnvpr_ids). This prevents cross-cluster duplication while
+                # keeping local endpoints.
+                # Ensure id_to_row exists (may be empty if earlier parsing failed)
+                try:
+                    id_to_row
+                except NameError:
+                    id_to_row = {}
+
+                # Protect BFS expansion from pathological inputs by
+                # bounding the number of deque pops. If we exceed the
+                # cap, emit a warning and stop expanding further to
+                # avoid infinite loops observed on malformed workbooks.
+                bfs_iter = 0
+                bfs_max = max(1000, len(keep_cnvpr_ids) * 10 if keep_cnvpr_ids else 1000)
+                while q:
+                    bfs_iter += 1
+                    if bfs_iter > bfs_max:
+                        print(f"[WARN][_iso_bfs] reached bfs_max={bfs_max}; aborting BFS expansion (preserve_count={len(preserve)})")
+                        break
+                    cur = q.popleft()
+                    # anchors that reference cur -> consider including them
+                    for anc in list(reverse_refs.get(str(cur), set())):
+                        if anc in preserve:
+                            continue
+                        # allow if anc was in original seed
+                        if anc in keep_cnvpr_ids:
+                            preserve.add(anc)
+                            q.append(anc)
+                            continue
+                        # otherwise require anc's from_row to be in group_rows
+                        anc_row = id_to_row.get(str(anc))
+                        if anc_row is not None and anc_row in group_rows:
+                            preserve.add(anc)
+                            q.append(anc)
+                    # ids that cur references -> consider including them
+                    for ref in list(refs.get(str(cur), set())):
+                        if ref in preserve:
+                            continue
+                        if ref in keep_cnvpr_ids:
+                            preserve.add(ref)
+                            q.append(ref)
+                            continue
+                        ref_row = id_to_row.get(str(ref))
+                        if ref_row is not None and ref_row in group_rows:
+                            preserve.add(ref)
+                            q.append(ref)
+
+                # Before exposing the set of preserved ids, also ensure we
+                # include connector-only anchors that were recorded in
+                # connector_children_by_id when those connector anchors
+                # reference any id already in the preserve set. The
+                # earlier BFS conservatively constrains expansion by group
+                # rows which can omit connector-only anchors whose
+                # endpoints lie just outside the group's rows. That
+                # causes connectors (e.g. 56,61) to be pruned; include them
+                # here if they reference preserved shapes so they are
+                # rendered with the group.
+                try:
+                    for cid, kids in list(connector_children_by_id.items()):
+                        try:
+                            # If this connector (cid) already preserved, skip
+                            if cid in preserve:
+                                continue
+                            # Inspect cosmetic children for endpoint refs
+                            added = False
+                            endpoints = set()
+                            for ch in kids:
+                                for sub in ch.iter():
+                                    try:
+                                        t = sub.tag.split('}')[-1].lower()
+                                    except Exception:
+                                        t = ''
+                                    if t in ('stcxn', 'endcxn', 'stcxnpr', 'endcxnpr'):
+                                        vid = sub.attrib.get('id') or sub.attrib.get('idx')
+                                        if vid is not None:
+                                            endpoints.add(str(vid))
+                            # If any endpoint directly references an already-preserved id, include connector
+                            if endpoints and (endpoints & set(preserve)):
+                                preserve.add(str(cid))
+                                try:
+                                    q.append(str(cid))
+                                except (ValueError, TypeError):
+                                    pass  # データ構造操作失敗は無視
+                                continue
+                            # Also include connector if any endpoint's anchor 'from' row
+                            # is inside this group's rows (id_to_row may be empty if earlier parsing failed)
+                            try:
+                                for vid in endpoints:
+                                    try:
+                                        # prefer id_to_row (filtered anchors) but fall back
+                                        # to all_id_to_row if not present
+                                        row_for_vid = id_to_row.get(str(vid)) or all_id_to_row.get(str(vid))
+                                    except (ValueError, TypeError):
+                                        row_for_vid = None
+                                    if row_for_vid is not None and row_for_vid in group_rows:
+                                        preserve.add(str(cid))
+                                        try:
+                                            q.append(str(cid))
+                                        except (ValueError, TypeError) as e:
+                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                                        added = True
+                                        break
+                                if added:
+                                    continue
+                            except (ValueError, TypeError) as e:
+                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                            # fallback: if endpoints empty or no match, skip
+                        except (ValueError, TypeError) as e:
+                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                except Exception:
+                    pass  # データ構造操作失敗は無視
+
+                # Heuristic: include connectors whose own anchor 'from' row
+                # is inside the group's rows even when their cosmetic children
+                # do not expose endpoint tags. This handles connector-only
+                # anchors that were omitted from id_to_row but appear in
+                # all_id_to_row (we built that fallback earlier).
+                try:
+                    for cid in list(connector_children_by_id.keys()):
+                        scid = str(cid)
+                        if scid in preserve:
+                            continue
+                        try:
+                            rowc = None
+                            if 'id_to_row' in locals():
+                                rowc = id_to_row.get(scid)
+                            if rowc is None and 'all_id_to_row' in locals():
+                                rowc = all_id_to_row.get(scid)
+                            if rowc is not None:
+                                # accept exact match or off-by-one to be more tolerant
+                                accept = False
+                                try:
+                                    if rowc in group_rows:
+                                        accept = True
+                                    else:
+                                        for gr in group_rows:
+                                            if abs(int(rowc) - int(gr)) <= 1:
+                                                accept = True
+                                                break
+                                except (ValueError, TypeError):
+                                    accept = False
+                                if accept:
+                                    preserve.add(scid)
+                                    try:
+                                        q.append(scid)
+                                    except (ValueError, TypeError) as e:
+                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                        except Exception:
+                            pass  # データ構造操作失敗は無視
+                except Exception:
+                    pass  # データ構造操作失敗は無視
+
+                # For debugging, expose the set of preserved ids
+                referenced_ids = set(preserve)
+                try:
+                    # Extra debug: dump row mappings and connector endpoint resolution
+                    try:
+                        dbg_rows = sorted(list(group_rows)) if 'group_rows' in locals() else []
+                    except Exception:
+                        dbg_rows = []
+                    try:
+                        dbg_id_to_row_keys = sorted(list(id_to_row.keys())) if 'id_to_row' in locals() else []
+                    except Exception:
+                        dbg_id_to_row_keys = []
+                    try:
+                        dbg_all_id_to_row_keys = sorted(list(all_id_to_row.keys())) if 'all_id_to_row' in locals() else []
+                    except Exception:
+                        dbg_all_id_to_row_keys = []
+                    print(f"[DEBUG][_iso_group_extra] group_rows={dbg_rows} id_to_row_keys={dbg_id_to_row_keys} all_id_to_row_keys={dbg_all_id_to_row_keys}")
+                    # For each connector cosmetic entry, list endpoints (may be empty) and mapped rows
+                    try:
+                        for ccid in sorted(list(connector_children_by_id.keys()), key=lambda x: int(x) if str(x).isdigit() else x):
+                            ckids = connector_children_by_id.get(ccid, [])
+                            eps = set()
+                            for ch in ckids:
+                                for sub in ch.iter():
+                                    try:
+                                        t = sub.tag.split('}')[-1].lower()
+                                    except (ValueError, TypeError):
+                                        t = ''
+                                    if t in ('stcxn', 'endcxn', 'stcxnpr', 'endcxnpr'):
+                                        vid = sub.attrib.get('id') or sub.attrib.get('idx')
+                                        if vid is not None:
+                                            eps.add(str(vid))
+                            # map to rows via id_to_row or all_id_to_row (may be empty)
+                            rows_mapped = []
+                            for e in sorted(list(eps)):
+                                try:
+                                    r = None
+                                    if 'id_to_row' in locals():
+                                        r = id_to_row.get(e)
+                                    if r is None and 'all_id_to_row' in locals():
+                                        r = all_id_to_row.get(e)
+                                    rows_mapped.append(r)
+                                except Exception:
+                                    rows_mapped.append(None)
+                            print(f"[DEBUG][_iso_group_conn] cid={ccid} endpoints={sorted(list(eps))} mapped_rows={rows_mapped}")
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                    # Additionally, show explicit mapping for connector-only ids that are present only in all_id_to_row
+                    try:
+                        for special in ('56','61'):
+                            if 'all_id_to_row' in locals() and special in all_id_to_row:
+                                print(f"[DEBUG][_iso_group_idrow] id={special} all_row={all_id_to_row.get(special)} id_to_row_val={id_to_row.get(special) if 'id_to_row' in locals() else None}")
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                    msg = f"[DEBUG][_iso_group] keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))} preserved_ids={sorted(list(referenced_ids))} connector_children_keys={sorted(list(connector_children_by_id.keys()))}"
+                    print(msg)
+                    # expose preserved ids for callers so they can avoid duplicate renders
+                    try:
+                        self._last_iso_preserved_ids = set(referenced_ids)
+                    except (ValueError, TypeError):
+                        try:
+                            self._last_iso_preserved_ids = set()
+                        except (ValueError, TypeError) as e:
+                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                    # Write a per-isolation diagnostic file (guaranteed path) so
+                    # conversion runs always emit a record of which cNvPr ids
+                    # were preserved into this isolated group. This is useful
+                    # when downstream code later decides to skip clusters.
+                    try:
+                        import csv
+                        out_dir = getattr(self.converter, 'output_dir', None) or os.path.join(os.getcwd(), 'output')
+                        diag_dir = os.path.join(out_dir, 'diagnostics')
+                        os.makedirs(diag_dir, exist_ok=True)
+                        # deterministic name: base + sheet + hash of keep ids
+                        try:
+                            base = getattr(self.converter, 'base_name')
+                        except Exception:
+                            base = os.path.splitext(os.path.basename(getattr(self.converter, 'excel_file', 'workbook')))[0]
+                        ksig = hashlib.sha1((base + sheet.title + ''.join(sorted(list(map(str, keep_cnvpr_ids))))).encode('utf-8')).hexdigest()[:8]
+                        diag_path = os.path.join(diag_dir, f"{base}_{self.converter._sanitize_filename(sheet.title)}_iso_{ksig}.csv")
+                        with open(diag_path, 'w', newline='', encoding='utf-8') as df:
+                            w = csv.writer(df)
+                            w.writerow(['keep_cnvpr_ids', 'preserved_ids', 'connector_children_keys'])
+                            w.writerow([";".join(sorted(list(map(str, keep_cnvpr_ids)))), ";".join(sorted(list(map(str, referenced_ids)))), ";".join(sorted(list(map(str, connector_children_by_id.keys()))) )])
+                        print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
+                    except (OSError, IOError, FileNotFoundError):
+                        print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+                except (OSError, IOError, FileNotFoundError):
+                    print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+            except (OSError, IOError, FileNotFoundError):
+                referenced_ids = set()
+                connector_children_by_id = {}
+            
+            return tmpdir, referenced_ids, connector_children_by_id
+            
+        except Exception as e:
+            print(f"[ERROR] Phase5 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return None, set(), {}
+    
+    def _phase6_prune_drawing_xml(self, drawing_relpath, keep_cnvpr_ids, referenced_ids, 
+                                   cell_range, drawing_xml, tmpdir, sheet, sheet_index):
+        """フェーズ6: 描画XML刈り込み"""
+        def node_contains_referenced_id(n):
+            try:
+                for sub in n.iter():
+                    lname = sub.tag.split('}')[-1].lower()
+                    # keep node if it contains a cNvPr whose id matches any referenced id
+                    if lname == 'cnvpr' or lname.endswith('cnvpr'):
+                        vid = sub.attrib.get('id') or sub.attrib.get('idx')
+                        if vid is not None and str(vid) in referenced_ids:
+                            return True
+                    # also keep node if it contains connector endpoint refs
+                    # such as <a:stCxn id="N"/> or <a:endCxn id="M"/>
+                    if lname in ('stcxn', 'endcxn', 'stcxnpr', 'endcxnpr'):
+                        vid = sub.attrib.get('id') or sub.attrib.get('idx')
+                        if vid is not None and str(vid) in referenced_ids:
+                            return True
+            except (ValueError, TypeError):
+                pass  # 一時ディレクトリ削除失敗は無視
+            return False
+
+        # parse drawing xml from extracted file
+        try:
+            tree = ET.parse(drawing_relpath)
+            root = tree.getroot()
+        except (ET.ParseError, KeyError, AttributeError):
+            drawing_xml_bytes = ET.tostring(drawing_xml)
+            root = ET.fromstring(drawing_xml_bytes)
+            tree = ET.ElementTree(root)
+
+        # remove anchors whose cNvPr id is not in keep_cnvpr_ids and which
+        # do not contain referenced ids (connector endpoints). This avoids
+        # relying on index positions which previously caused mismatches
+        # when anchors was built as a filtered list.
+        # If keep_cnvpr_ids is empty (index->id mapping failed), fall back
+        # to preserving anchors that lie within the computed cell_range
+        # when available. This avoids producing an empty trimmed drawing
+        # workbook for groups whose indices were synthesized from cell
+        # ranges rather than exact anchor indices.
+        # Compute group_rows from cell_range for quick membership tests.
+        group_rows = set()
+        try:
+            if cell_range:
+                s_col, e_col, s_row, e_row = cell_range
+                group_rows = set(range(int(s_row), int(e_row) + 1))
+        except (ValueError, TypeError):
+            group_rows = set()
+
+        for node in list(root):
+            lname = node.tag.split('}')[-1].lower()
+            if lname in ('twocellanchor', 'onecellanchor'):
+                # find cNvPr id for this anchor
+                this_cid = None
+                for sub in node.iter():
+                    if sub.tag.split('}')[-1].lower() == 'cnvpr':
+                        this_cid = sub.attrib.get('id') or sub.attrib.get('idx')
+                        break
+
+                # If we have an explicit id and it's requested, keep it.
+                if this_cid is not None and str(this_cid) in keep_cnvpr_ids:
+                    continue
+
+                # If the node contains referenced ids (connector endpoints), keep it.
+                try:
+                    if node_contains_referenced_id(node):
+                        continue
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+
+                # Fallback: when keep_cnvpr_ids is empty but a cell_range
+                # was computed for the group, preserve any anchor whose
+                # "from" row lies within the group's rows. This handles
+                # cases where indices were synthesized from cell ranges
+                # and direct id matching fails.
+                try:
+                    if (not keep_cnvpr_ids) and group_rows:
+                        ns_xdr = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
+                        fr = node.find('{%s}from' % ns_xdr)
+                        if fr is not None:
+                            r = fr.find('{%s}row' % ns_xdr)
+                            if r is not None and r.text is not None:
+                                try:
+                                    from_row = int(r.text)
+                                    # accept exact or off-by-one matches
+                                    if from_row in group_rows or any(abs(from_row - gr) <= 1 for gr in group_rows):
+                                        continue
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                except (ValueError, TypeError) as e:
+                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+
+                # otherwise remove this node from the trimmed drawing
+                try:
+                    root.remove(node)
+                except Exception:
+                    try:
+                        root.remove(node)
+                    except Exception:
+                        pass  # 一時ファイルの削除失敗は無視
+
+        # Additionally, clear worksheet cell text in the tmp workbook so rendered PDF
+        # contains only the drawing shapes. This prevents sheet text from appearing
+        # in isolated renders.
+        try:
+            sheet_rel = os.path.join(tmpdir, f"xl/worksheets/sheet{sheet_index+1}.xml")
+            if os.path.exists(sheet_rel):
+                try:
+                    stree = ET.parse(sheet_rel)
+                    sroot = stree.getroot()
+                    # clear all <v> and inline string texts under sheetData
+                    for v in sroot.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}v'):
+                        v.text = ''
+                    for t in sroot.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t'):
+                        t.text = ''
+                        # ensure page margins and page setup are tight so exported PDF
+                        # doesn't add unexpected whitespace or scaling. Use zero margins
+                        # and 100% scale.
+                        try:
+                            ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+                            pm_tag = '{%s}pageMargins' % ns
+                            ps_tag = '{%s}pageSetup' % ns
+                            # remove existing pageMargins/pageSetup if present
+                            for child in list(sroot):
+                                if child.tag in (pm_tag, ps_tag):
+                                    try:
+                                        sroot.remove(child)
+                                    except Exception:
+                                        pass  # 一時ファイルの削除失敗は無視
+                            # add pageMargins with zeros
+                            pm = ET.Element(pm_tag)
+                            for name, val in (('left', '0'), ('right', '0'), ('top', '0'), ('bottom', '0'), ('header', '0'), ('footer', '0')):
+                                el = ET.SubElement(pm, '{%s}%s' % (ns, name))
+                                el.text = val
+                            sroot.append(pm)
+                            # add pageSetup: prefer fit-to-page so LibreOffice
+                            # does not create extra pages due to legacy pageBreaks.
+                            ps = ET.Element(ps_tag)
+                            # Use fitToPage with fitToWidth/fitToHeight to try to
+                            # keep the trimmed area on a single PDF page.
+                            try:
+                                ps.set('fitToPage', '1')
+                                ps.set('fitToWidth', '1')
+                                ps.set('fitToHeight', '1')
+                            except Exception:
+                                try:
+                                    ps.set('scale', '100')
+                                except Exception as e:
+                                    pass  # XML解析エラーは無視
+                            sroot.append(ps)
+                        except Exception:
+                            pass  # データ構造操作失敗は無視
+                        # Remove any header/footer elements from this sheet
+                        # node so isolated-group PDF/PNG renders do not
+                        # include workbook headers or footers. This keeps
+                        # the output image focused on the drawing shapes
+                        # only. We'll still perform a defensive sweep later
+                        # over all worksheet files in tmpdir just before
+                        # creating the tmp_xlsx to be certain none remain.
+                        try:
+                            hf_tag = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}headerFooter'
+                            removed = 0
+                            for hf in list(sroot.findall(hf_tag)):
+                                try:
+                                    sroot.remove(hf)
+                                    removed += 1
+                                except Exception:
+                                    pass  # 一時ファイルの削除失敗は無視
+                            if removed:
+                                print(f"[DEBUG][_iso_hdrfoot] removed {removed} headerFooter elements from {sheet_rel}")
+                        except (ValueError, TypeError):
+                            pass  # XML書き込み失敗は無視
+                        stree.write(sheet_rel, encoding='utf-8', xml_declaration=True)
+                except (ValueError, TypeError):
+                    pass  # XML書き込み失敗は無視
+        except (ValueError, TypeError):
+            pass  # XML書き込み失敗は無視
+
+        # write modified drawing xml back
+        tree.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
+
+        # If pruning removed all anchors, skip isolated rendering to avoid
+        # producing empty trimmed workbooks and placeholder images.
+        try:
+            try:
+                dtree_check = ET.parse(drawing_relpath)
+                droot_check = dtree_check.getroot()
+                kept_anchors = [n for n in list(droot_check) if n.tag.split('}')[-1].lower() in ('twocellanchor', 'onecellanchor')]
+                if not kept_anchors:
+                    print(f"[DEBUG][_iso_entry] sheet={sheet.title} trimmed drawing has no anchors after pruning; skipping isolated group")
+                    return False
+            except (ET.ParseError, KeyError, AttributeError) as e:
+                print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
+        except (ET.ParseError, KeyError, AttributeError) as e:
+            print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
+
+        return True
+    
+    def _phase7_apply_connector_cosmetics(self, drawing_relpath, referenced_ids, 
+                                          connector_children_by_id, theme_color_map, 
+                                          drawing_xml_bytes, drawing_xml):
+        """フェーズ7: コネクタコスメティック処理"""
+        # After writing, ensure kept anchors have connector cosmetic children copied
+        try:
+            # reload tree to operate on current root
+            try:
+                tree2 = ET.parse(drawing_relpath)
+                root2 = tree2.getroot()
+            except (ET.ParseError, KeyError, AttributeError):
+                root2 = ET.fromstring(drawing_xml_bytes)
+                tree2 = ET.ElementTree(root2)
+            # track dedupe signatures per-kept-anchor to avoid appending the same
+            # cosmetic subtree multiple times (was causing duplicated anchor blocks)
+            for kept in list(root2):
+                if kept.tag.split('}')[-1].lower() not in ('twocellanchor', 'onecellanchor'):
+                    continue
+                kept_cid = None
+                for sub in kept.iter():
+                    if sub.tag.split('}')[-1].lower() == 'cnvpr':
+                        kept_cid = str(sub.attrib.get('id'))
+                        break
+                if not kept_cid:
+                    continue
+                if kept_cid in connector_children_by_id:
+                    seen_sigs = set()
+                    for ch in connector_children_by_id[kept_cid]:
+                        try:
+                            new_ch = copy.deepcopy(ch)
+                            # Replace any a:schemeClr children with explicit a:srgbClr using parsed theme
+                            try:
+                                a_ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+                                for elem in list(new_ch.iter()):
+                                    tag_lower = elem.tag.split('}')[-1].lower()
+                                    if tag_lower == 'schemeclr':
+                                        scheme_name = elem.attrib.get('val')
+                                        if scheme_name and theme_color_map:
+                                            hexv = theme_color_map.get(scheme_name.lower())
+                                            if hexv:
+                                                elem.tag = '{%s}srgbClr' % a_ns
+                                                elem.attrib.clear()
+                                                elem.set('val', hexv)
+                            except Exception as e:
+                                print(f"[WARNING] ファイル操作エラー: {e}")
+                            # preserve attributes for important drawing tags (ln/headEnd/tailEnd/spPr)
+                            for sub in ch.iter():
+                                try:
+                                    tag_lower = sub.tag.split('}')[-1].lower()
+                                    if tag_lower in ('ln', 'headend', 'tailend', 'sppr'):
+                                        for attr_k, attr_v in sub.attrib.items():
+                                            applied = False
+                                            for cand in new_ch.iter():
+                                                if cand.tag.split('}')[-1].lower() == tag_lower:
+                                                    if attr_k not in cand.attrib:
+                                                        cand.attrib[attr_k] = attr_v
+                                                    applied = True
+                                                    break
+                                            if not applied:
+                                                if attr_k not in new_ch.attrib:
+                                                    new_ch.attrib[attr_k] = attr_v
+                                except Exception:
+                                    pass  # データ構造操作失敗は無視
+                            # compute a lightweight signature for deduplication:
+                            try:
+                                sig = ET.tostring(new_ch, encoding='utf-8')
+                            except Exception:
+                                sig = None
+                            if sig is not None:
+                                if sig in seen_sigs:
+                                    # already appended equivalent subtree
+                                    continue
+                                seen_sigs.add(sig)
+                            kept.append(new_ch)
+                        except Exception:
+                            try:
+                                kept.append(copy.deepcopy(ch))
+                            except Exception as e:
+                                pass  # XML解析エラーは無視
+            tree2.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
+        except Exception as e:
+            print(f"[WARNING] ファイル操作エラー: {e}")
+
+        # Extra pass: for any kept anchor that corresponds to an original
+        # connector anchor (cxnSp/cxn), replace the connector element in
+        # the trimmed drawing with a deep-copy of the original connector
+        # element from the source drawing. This is a conservative step to
+        # preserve exact <a:ln> children (w/prstDash/headEnd/tailEnd) and
+        # other connector-specific structure that some renderers rely on.
+        try:
+            try:
+                tree3 = ET.parse(drawing_relpath)
+                root3 = tree3.getroot()
+            except (ET.ParseError, KeyError, AttributeError):
+                root3 = ET.fromstring(drawing_xml_bytes)
+                tree3 = ET.ElementTree(root3)
+
+            # build mapping from original anchor cNvPr id -> original cxnSp/cxn element
+            orig_cxn_by_id = {}
+            try:
+                for orig in list(drawing_xml):
+                    try:
+                        if orig.tag.split('}')[-1].lower() not in ('twocellanchor', 'onecellanchor'):
+                            continue
+                        orig_cid = None
+                        for sub in orig.iter():
+                            if sub.tag.split('}')[-1].lower() == 'cnvpr':
+                                orig_cid = sub.attrib.get('id') or sub.attrib.get('idx')
+                                break
+                        if orig_cid is None:
+                            continue
+                        # find immediate connector child (cxnSp or cxn)
+                        for child in orig:
+                            if child.tag.split('}')[-1].lower() in ('cxnsp', 'cxn'):
+                                orig_cxn_by_id[str(orig_cid)] = child
+                                break
+                    except (ValueError, TypeError):
+                        continue
+            except (ValueError, TypeError):
+                orig_cxn_by_id = {}
+
+            # Now replace/inject in the trimmed drawing for kept anchors
+            for kept in list(root3):
+                try:
+                    if kept.tag.split('}')[-1].lower() not in ('twocellanchor', 'onecellanchor'):
+                        continue
+                    kept_cid = None
+                    for sub in kept.iter():
+                        if sub.tag.split('}')[-1].lower() == 'cnvpr':
+                            kept_cid = str(sub.attrib.get('id'))
+                            break
+                    if not kept_cid:
+                        continue
+                    if kept_cid not in orig_cxn_by_id:
+                        continue
+                    orig_cxn = orig_cxn_by_id.get(kept_cid)
+                    if orig_cxn is None:
+                        continue
+
+                    # find first immediate cxn child in kept and replace it
+                    replaced = False
+                    for idx_child, child_candidate in enumerate(list(kept)):
+                        try:
+                            if child_candidate.tag.split('}')[-1].lower() in ('cxnsp', 'cxn'):
+                                try:
+                                    kept.remove(child_candidate)
+                                except Exception:
+                                    pass  # 一時ファイルの削除失敗は無視
+                                try:
+                                    kept.insert(idx_child, copy.deepcopy(orig_cxn))
+                                except Exception:
+                                    try:
+                                        kept.append(copy.deepcopy(orig_cxn))
+                                    except Exception:
+                                        pass  # 一時ファイルの削除失敗は無視
+                                replaced = True
+                                break
+                        except Exception:
+                            continue
+                    if not replaced:
+                        try:
+                            kept.append(copy.deepcopy(orig_cxn))
+                        except Exception:
+                            pass  # データ構造操作失敗は無視
+                    # Post-process the injected connector element to ensure
+                    # a single concrete <a:ln> exists under spPr and to remove
+                    # any style/<a:lnRef> entries that may cause LibreOffice
+                    # to prefer theme defaults (which can change dash/width).
+                    try:
+                        # find the (new) connector child we just inserted
+                        conn_elem = None
+                        for child_candidate in list(kept):
+                            if child_candidate.tag.split('}')[-1].lower() in ('cxnsp', 'cxn'):
+                                conn_elem = child_candidate
+                                break
+                        if conn_elem is not None:
+                            # resolve any schemeClr under conn_elem -> srgb using theme_color_map
+                            try:
+                                a_ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+                                for elem in list(conn_elem.iter()):
+                                    if elem.tag.split('}')[-1].lower() == 'schemeclr':
+                                        scheme_name = elem.attrib.get('val')
+                                        if scheme_name and theme_color_map:
+                                            hexv = theme_color_map.get(scheme_name.lower())
+                                            if hexv:
+                                                elem.tag = '{%s}srgbClr' % a_ns
+                                                elem.attrib.clear()
+                                                elem.set('val', hexv)
+                            except Exception as e:
+                                print(f"[WARNING] ファイル操作エラー: {e}")
+
+                            # normalize ln children: keep exactly one <ln> under spPr
+                            try:
+                                sppr = None
+                                # prefer spPr child under connector (ns may vary)
+                                for ch in list(conn_elem):
+                                    if ch.tag.split('}')[-1].lower() in ('sppr','sppr'.lower(),'sppr') or ch.tag.split('}')[-1].lower() == 'sppr' or ch.tag.split('}')[-1].lower() == 'spPr'.lower():
+                                        sppr = ch
+                                        break
+                                # fallback: try to find any spPr-like element by tag name
+                                if sppr is None:
+                                    for ch in list(conn_elem):
+                                        if ch.tag.split('}')[-1].lower() == 'sppr' or ch.tag.split('}')[-1].lower() == 'sppr':
+                                            sppr = ch
+                                            break
+                                if sppr is not None:
+                                    ln_elems = [c for c in list(sppr) if c.tag.split('}')[-1].lower() == 'ln']
+                                    if len(ln_elems) > 1:
+                                        # choose preferred ln: one with @w, then prstDash, then head/tail
+                                        preferred = None
+                                        for ln_c in ln_elems:
+                                            if ln_c.attrib.get('w'):
+                                                preferred = ln_c
+                                                break
+                                        if preferred is None:
+                                            for ln_c in ln_elems:
+                                                for sub in ln_c:
+                                                    if sub.tag.split('}')[-1].lower() == 'prstdash':
+                                                        preferred = ln_c
+                                                        break
+                                                if preferred is not None:
+                                                    break
+                                        if preferred is None:
+                                            for ln_c in ln_elems:
+                                                for sub in ln_c:
+                                                    if sub.tag.split('}')[-1].lower() in ('headend','tailend'):
+                                                        preferred = ln_c
+                                                        break
+                                                if preferred is not None:
+                                                    break
+                                        if preferred is None:
+                                            preferred = ln_elems[0]
+                                        # remove others
+                                        for ln_c in ln_elems:
+                                            if ln_c is not preferred:
+                                                try:
+                                                    sppr.remove(ln_c)
+                                                except Exception:
+                                                    pass  # 一時ファイルの削除失敗は無視
+
+                            except Exception:
+                                pass  # 一時ファイルの削除失敗は無視
+                    except Exception:
+                        pass  # 一時ファイルの削除失敗は無視
+                except Exception as e:
+                    print(f"[WARNING] ファイル操作エラー: {e}")
+            # write back
+            tree3.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
+        except Exception as e:
+            print(f"[WARNING] ファイル操作エラー: {e}")
+    
+
+
+    def _phase8_prepare_workbook(self, tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices):
+        """フェーズ8: ワークブック準備
+        
+        cell_rangeを使用してPrint_Areaを設定し、一時的なxlsxファイルを作成
+        
+        Args:
+            tmpdir: 一時ディレクトリパス
+            sheet: ワークシートオブジェクト
+            sheet_index: シートのインデックス
+            cell_range: セル範囲 (s_col, e_col, s_row, e_row) または None
+            drawing_path: drawing XMLのパス
+            dpi: 解像度
+            shape_indices: シェイプのインデックスリスト
+            
+        Returns:
+            str: 一時xlsxファイルのパス、失敗時はNone
+        """
+        import os
+        import xml.etree.ElementTree as ET
+        import tempfile
+        import shutil
+        
+        # cell_rangeが指定されている場合、Print_Areaを設定
+        if cell_range:
+            s_col, e_col, s_row, e_row = cell_range
+            
+            # 列文字を計算
+            start_col_letter = self._col_letter(s_col)
+            end_col_letter = self._col_letter(e_col)
+            
+            # Print_Area文字列を作成
+            sheet_name_escaped = sheet.title.replace("'", "''")
+            area_ref = f"'{sheet_name_escaped}'!${start_col_letter}${s_row}:${end_col_letter}${e_row}"
+            
+            # workbook.xmlを更新
+            wb_path = os.path.join(tmpdir, 'xl/workbook.xml')
+            if os.path.exists(wb_path):
+                try:
+                    tree = ET.parse(wb_path)
+                    root = tree.getroot()
+                    
+                    # definedNames要素を取得または作成
+                    ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+                    dn_tag = f'{{{ns}}}definedNames'
+                    dn = root.find(dn_tag)
+                    
+                    if dn is None:
+                        dn = ET.Element(dn_tag)
+                        # sheets要素の後に挿入
+                        sheets_tag = f'{{{ns}}}sheets'
+                        sheets_el = root.find(sheets_tag)
+                        if sheets_el is not None:
+                            idx = list(root).index(sheets_el)
+                            root.insert(idx + 1, dn)
+                        else:
+                            root.append(dn)
+                    
+                    # 既存のPrint_Areaを削除
+                    for existing in list(dn.findall(f'{{{ns}}}definedName')):
+                        if existing.attrib.get('name') == '_xlnm.Print_Area':
+                            dn.remove(existing)
+                    
+                    # 新しいPrint_Areaを追加
+                    new_dn = ET.Element(f'{{{ns}}}definedName')
+                    new_dn.set('name', '_xlnm.Print_Area')
+                    new_dn.set('localSheetId', str(sheet_index))
+                    new_dn.text = area_ref
+                    dn.append(new_dn)
+                    
+                    tree.write(wb_path, encoding='utf-8', xml_declaration=True)
+                except Exception as e:
+                    print(f"[WARNING] Print_Area設定失敗: {e}")
+            
+            # シートXMLで範囲外の行を非表示に設定
+            sheet_path = os.path.join(tmpdir, f'xl/worksheets/sheet{sheet_index + 1}.xml')
+            if os.path.exists(sheet_path):
+                try:
+                    tree = ET.parse(sheet_path)
+                    root = tree.getroot()
+                    ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+                    
+                    # pageBreaks要素を削除
+                    for tag in ['rowBreaks', 'colBreaks', 'pageBreaks']:
+                        for el in list(root.findall(f'{{{ns}}}{tag}')):
+                            root.remove(el)
+                    
+                    # 範囲外の行を非表示に
+                    for row_el in root.findall(f'.//{{{ns}}}row'):
+                        try:
+                            rnum = int(row_el.attrib.get('r', '0'))
+                            if rnum < s_row or rnum > e_row:
+                                row_el.set('hidden', '1')
+                                row_el.set('ht', '0')
+                                row_el.set('customHeight', '1')
+                        except (ValueError, TypeError):
+                            continue
+                    
+                    tree.write(sheet_path, encoding='utf-8', xml_declaration=True)
+                except Exception as e:
+                    print(f"[WARNING] シートXML更新失敗: {e}")
+        
+        # tmpdirをzip化して一時xlsxファイルを作成
+        try:
+            # shape_indicesからユニークなファイル名を生成
+            import hashlib
+            indices_str = '_'.join(map(str, sorted(shape_indices)))
+            group_hash = hashlib.md5(indices_str.encode()).hexdigest()[:8]
+            
+            excel_base = os.path.splitext(os.path.basename(self.converter.excel_file))[0]
+            
+            dbg_dir = os.path.join(self.converter.output_dir, 'debug_workbooks')
+            os.makedirs(dbg_dir, exist_ok=True)
+            
+            final_xlsx_name = f"{excel_base}_iso_group_grp_{group_hash}.xlsx"
+            src_for_conv = os.path.join(dbg_dir, final_xlsx_name)
+            
+            import zipfile
+            with zipfile.ZipFile(src_for_conv, 'w', zipfile.ZIP_DEFLATED) as zout:
+                for folder, _, files in os.walk(tmpdir):
+                    for fn in files:
+                        full = os.path.join(folder, fn)
+                        arcname = os.path.relpath(full, tmpdir)
+                        zout.write(full, arcname)
+            
+            print(f"[DEBUG] Using ZIP-created workbook directly (preserving shapes): {src_for_conv}")
+            
+            try:
+                st = os.stat(src_for_conv)
+                print(f"[DEBUG] Workbook size: {st.st_size} bytes")
+            except (ValueError, TypeError):
+                pass
+            
+            return src_for_conv
+        except Exception as e:
+            print(f"[ERROR] 一時xlsxファイル作成失敗: {e}")
+            return None
+
+
+    def _phase9_generate_pdf_png(self, sheet, shape_indices, src_for_conv, tmpdir, dpi, cell_range):
+        """フェーズ9: PDF/PNG生成
+        
+        LibreOfficeを使用してPDF生成、ImageMagickでPNGに変換
+        
+        Args:
+            sheet: ワークシートオブジェクト
+            shape_indices: シェイプのインデックスリスト
+            src_for_conv: 変換元xlsxファイルパス
+            tmpdir: 一時ディレクトリパス
+            dpi: 解像度
+            cell_range: セル範囲 (s_col, e_col, s_row, e_row) または None
+            
+        Returns:
+            str: 生成されたPNGファイルのパス、失敗時はNone
+        """
+        import os
+        import tempfile
+        import subprocess
+        import shutil
+        from PIL import Image
+        
+        # PDF生成用の一時ディレクトリ
+        tmp_pdf_dir = tempfile.mkdtemp(prefix='xls2md_pdf_')
+        
+        try:
+            # LibreOfficeでPDF生成
+            print(f"[DEBUG] LibreOffice PDF変換開始: sheet={sheet.title}")
+            pdf_path = self._convert_excel_to_pdf(src_for_conv, tmp_pdf_dir, apply_fit_to_page=False)
+            
+            if pdf_path is None:
+                print(f"[WARN] LibreOffice PDF変換失敗")
+                return None
+            
+            # PDFをPNGに変換
+            png_path = self._convert_pdf_to_png(pdf_path, dpi=dpi)
+            
+            if png_path is None:
+                print(f"[WARN] PDF→PNG変換失敗")
+                return None
+            
+            # cell_rangeが指定されている場合、クロップ処理
+            if cell_range and os.path.exists(png_path):
+                cropped_path = self._crop_png_to_cell_range(
+                    png_path, cell_range, sheet, dpi
+                )
+                if cropped_path:
+                    png_path = cropped_path
+            
+            return png_path
+            
+        except Exception as e:
+            print(f"[ERROR] PDF/PNG生成エラー: {e}")
+            return None
+        finally:
+            # 一時PDFディレクトリを削除
+            try:
+                shutil.rmtree(tmp_pdf_dir)
+            except Exception:
+                pass
+    
+    def _convert_excel_to_pdf(self, excel_path, output_dir, apply_fit_to_page=False):
+        """ExcelファイルをPDFに変換"""
+        import os
+        import subprocess
+        
+        LIBREOFFICE_PATH = '/Applications/LibreOffice.app/Contents/MacOS/soffice'
+        
+        if not os.path.exists(LIBREOFFICE_PATH):
+            print(f"[ERROR] LibreOffice not found: {LIBREOFFICE_PATH}")
+            return None
+        
+        try:
+            cmd = [
+                LIBREOFFICE_PATH,
+                '--headless',
+                '--convert-to', 'pdf',
+                '--outdir', output_dir,
+                excel_path
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=90
+            )
+            
+            if result.returncode == 0:
+                # 生成されたPDFファイルを探す
+                basename = os.path.splitext(os.path.basename(excel_path))[0]
+                pdf_path = os.path.join(output_dir, basename + '.pdf')
+                
+                if os.path.exists(pdf_path):
+                    return pdf_path
+            
+            print(f"[ERROR] LibreOffice変換失敗: {result.stderr}")
+            return None
+            
+        except subprocess.TimeoutExpired:
+            print(f"[ERROR] LibreOffice変換タイムアウト")
+            return None
+        except Exception as e:
+            print(f"[ERROR] LibreOffice変換エラー: {e}")
+            return None
+    
+    def _convert_pdf_to_png(self, pdf_path, dpi=300):
+        """PDFをPNGに変換"""
+        import os
+        import subprocess
+        import tempfile
+        
+        try:
+            # 出力PNGパス
+            output_path = pdf_path.replace('.pdf', '.png')
+            
+            # ImageMagickで変換
+            cmd = [
+                'convert',
+                '-density', str(dpi),
+                pdf_path,
+                '-quality', '90',
+                output_path
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            if result.returncode == 0 and os.path.exists(output_path):
+                return output_path
+            
+            print(f"[ERROR] ImageMagick変換失敗: {result.stderr}")
+            return None
+            
+        except subprocess.TimeoutExpired:
+            print(f"[ERROR] ImageMagick変換タイムアウト")
+            return None
+        except Exception as e:
+            print(f"[ERROR] ImageMagick変換エラー: {e}")
+            return None
+    
+    def _crop_png_to_cell_range(self, png_path, cell_range, sheet, dpi):
+        """PNGを指定されたセル範囲にクロップ"""
+        import os
+        from PIL import Image
+        
+        try:
+            s_col, e_col, s_row, e_row = cell_range
+            
+            # 画像を開く
+            im = Image.open(png_path)
+            w_im, h_im = im.size
+            
+            # セル座標を取得（簡易版）
+            # 実際にはシートの列幅・行高を使用して計算すべき
+            # ここでは画像サイズから推定
+            
+            # クロップ領域を計算（簡易版）
+            # より正確な実装は元のコードを参照
+            left_ratio = (s_col - 1) / max(1, sheet.max_column)
+            top_ratio = (s_row - 1) / max(1, sheet.max_row)
+            right_ratio = e_col / max(1, sheet.max_column)
+            bottom_ratio = e_row / max(1, sheet.max_row)
+            
+            left = int(w_im * left_ratio)
+            top = int(h_im * top_ratio)
+            right = int(w_im * right_ratio)
+            bottom = int(h_im * bottom_ratio)
+            
+            # クロップ
+            if right > left and bottom > top:
+                cropped = im.crop((left, top, right, bottom))
+                cropped.save(png_path)
+                return png_path
+            
+            return png_path
+            
+        except Exception as e:
+            print(f"[ERROR] クロップエラー: {e}")
+            return png_path
+
+
+    def _phase10_postprocess(self, out_path, png_name, sheet, group_rows=None, cell_range=None):
+        """フェーズ10: 後処理
+        
+        生成された画像ファイルの最終処理と戻り値の準備
+        
+        Args:
+            out_path: 出力ファイルパス
+            png_name: PNGファイル名
+            sheet: ワークシートオブジェクト
+            group_rows: グループ行のリスト（オプション）
+            cell_range: セル範囲 (s_col, e_col, s_row, e_row)（オプション）
+            
+        Returns:
+            str: 生成された画像ファイル名（ベース名のみ）
+        """
+        import os
+        
+        try:
+            # 実際に使用されたファイル名を取得
+            basename = os.path.basename(out_path)
+            
+            # 代表的な開始行を決定（ログ出力用）
+            rep = None
+            
+            # group_rowsから開始行を取得
+            if group_rows:
+                try:
+                    rep = int(min(group_rows))
+                except (ValueError, TypeError):
+                    pass
+            
+            # cell_rangeから開始行を取得
+            if rep is None and cell_range:
+                try:
+                    rep = int(cell_range[2])  # s_row
+                except (ValueError, TypeError):
+                    pass
+            
+            # デフォルト値
+            if rep is None:
+                rep = 1
+            
+            # デバッグログ
+            print(f"[INFO] sheet={sheet.title} file={basename} start_row={rep}")
+            
+            return basename
+            
+        except Exception as e:
+            print(f"[ERROR] 後処理エラー: {e}")
+            # フォールバック: ファイル名のみ返す
+            return png_name
+
+
+    def _col_letter(self, col_num):
+        """列番号をExcelの列文字に変換（1→'A', 27→'AA'）"""
+        result = []
+        while col_num > 0:
+            col_num -= 1
+            result.append(chr(col_num % 26 + ord('A')))
+            col_num //= 26
+        return ''.join(reversed(result))
