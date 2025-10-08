@@ -1351,8 +1351,6 @@ class IsolatedGroupRenderer:
             print(f"[ERROR] LibreOffice not found: {LIBREOFFICE_PATH}")
             return None
         
-        print(f"[DEBUG] _convert_excel_to_pdf: excel_path={excel_path}, output_dir={output_dir}")
-        
         try:
             cmd = [
                 LIBREOFFICE_PATH,
@@ -1362,8 +1360,6 @@ class IsolatedGroupRenderer:
                 excel_path
             ]
             
-            print(f"[DEBUG] LibreOffice command: {' '.join(cmd)}")
-            
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -1371,26 +1367,12 @@ class IsolatedGroupRenderer:
                 timeout=90
             )
             
-            print(f"[DEBUG] LibreOffice returncode: {result.returncode}")
-            print(f"[DEBUG] LibreOffice stdout: {result.stdout}")
-            print(f"[DEBUG] LibreOffice stderr: {result.stderr}")
-            
             if result.returncode == 0:
-                # 生成されたPDFファイルを探す
                 basename = os.path.splitext(os.path.basename(excel_path))[0]
                 pdf_path = os.path.join(output_dir, basename + '.pdf')
                 
-                print(f"[DEBUG] Looking for PDF at: {pdf_path}")
-                print(f"[DEBUG] PDF exists: {os.path.exists(pdf_path)}")
-                
                 if os.path.exists(pdf_path):
                     return pdf_path
-                else:
-                    try:
-                        files_in_dir = os.listdir(output_dir)
-                        print(f"[DEBUG] Files in output_dir: {files_in_dir}")
-                    except Exception as e:
-                        print(f"[DEBUG] Cannot list output_dir: {e}")
             
             print(f"[ERROR] LibreOffice変換失敗: {result.stderr}")
             return None
@@ -1415,20 +1397,15 @@ class IsolatedGroupRenderer:
         import os
         import subprocess
         
-        print(f"[DEBUG] _convert_pdf_to_png_with_output: pdf_path={pdf_path}, output_path={output_path}, dpi={dpi}")
-        
         try:
-            # ImageMagickで変換（PDFの最初のページのみ）
             cmd = [
                 'convert',
                 '-density', str(dpi),
-                f'{pdf_path}[0]',  # PDFの最初のページのみを変換
+                f'{pdf_path}[0]',
                 '-strip',
                 '-quality', '90',
                 output_path
             ]
-            
-            print(f"[DEBUG] ImageMagick command: {' '.join(cmd)}")
             
             result = subprocess.run(
                 cmd,
@@ -1437,13 +1414,7 @@ class IsolatedGroupRenderer:
                 timeout=60
             )
             
-            print(f"[DEBUG] ImageMagick returncode: {result.returncode}")
-            print(f"[DEBUG] ImageMagick stdout: {result.stdout}")
-            print(f"[DEBUG] ImageMagick stderr: {result.stderr}")
-            print(f"[DEBUG] PNG exists: {os.path.exists(output_path)}")
-            
             if result.returncode == 0 and os.path.exists(output_path):
-                print(f"[DEBUG] PNG successfully created at: {output_path}")
                 return output_path
             
             print(f"[ERROR] ImageMagick変換失敗: {result.stderr}")
