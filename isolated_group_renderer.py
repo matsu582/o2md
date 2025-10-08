@@ -34,7 +34,7 @@ class IsolatedGroupRenderer:
         self._last_temp_pdf_path = None
     
     def render(self, sheet, shape_indices: List[int], dpi: int = 600, 
-               cell_range: Optional[Tuple[int,int,int,int]] = None) -> Optional[str]:
+               cell_range: Optional[Tuple[int,int,int,int]] = None) -> Optional[Tuple[str, int]]:
         """
         図形グループを分離レンダリング
         
@@ -45,7 +45,7 @@ class IsolatedGroupRenderer:
             cell_range: セル範囲 (start_col, end_col, start_row, end_row)
         
         Returns:
-            生成された画像ファイル名（相対パス）またはNone
+            タプル(画像ファイル名, 開始行) またはNone
         """
         try:
             # 初期化
@@ -289,8 +289,13 @@ class IsolatedGroupRenderer:
                         os.makedirs(os.path.dirname(tgt), exist_ok=True)
                         with open(tgt, 'wb') as _fw:
                             _fw.write(z.read(preserve))
-            except (OSError, IOError, FileNotFoundError):
-                print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+            except (OSError, IOError, FileNotFoundError) as e:
+                print(f"[WARNING] ファイル操作エラー: {e}")
+            except Exception as e:
+                print(f"[WARNING] ファイル操作エラー: {e}")
+                print(f"[DEBUG] z type: {type(z)}, z value: {z}")
+                import traceback
+                traceback.print_exc()
 
             # When pruning anchors below, ensure that any shapes referenced by
             # connectors in the kept indices are also preserved. We'll compute
@@ -358,10 +363,16 @@ class IsolatedGroupRenderer:
                     for an in anchors:
                         # find cNvPr id
                         a_cid = None
-                        for sub in an.iter():
-                            if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                                a_cid = sub.attrib.get('id') or sub.attrib.get('idx')
-                                break
+                        try:
+                            for sub in an.iter():
+                                if sub.tag.split('}')[-1].lower() == 'cnvpr':
+                                    a_cid = sub.attrib.get('id') or sub.attrib.get('idx')
+                                    break
+                        except AttributeError as ae:
+                            print(f"[ERROR] anchors element type error: an={type(an)}, error={ae}")
+                            import traceback
+                            traceback.print_exc()
+                            continue
                         if a_cid is None:
                             continue
                         fr = an.find('{%s}from' % ns_xdr)
@@ -1327,10 +1338,11 @@ class IsolatedGroupRenderer:
         """ExcelファイルをPDFに変換"""
         import os
         import subprocess
+        from utils import get_libreoffice_path
         
-        LIBREOFFICE_PATH = '/Applications/LibreOffice.app/Contents/MacOS/soffice'
+        LIBREOFFICE_PATH = get_libreoffice_path()
         
-        if not os.path.exists(LIBREOFFICE_PATH):
+        if not LIBREOFFICE_PATH or not os.path.exists(LIBREOFFICE_PATH):
             print(f"[ERROR] LibreOffice not found: {LIBREOFFICE_PATH}")
             return None
         
@@ -1461,7 +1473,7 @@ class IsolatedGroupRenderer:
             cell_range: セル範囲 (s_col, e_col, s_row, e_row)（オプション）
             
         Returns:
-            str: 生成された画像ファイル名（ベース名のみ）
+            Tuple[str, int]: (画像ファイル名, 開始行)
         """
         import os
         
@@ -1493,12 +1505,12 @@ class IsolatedGroupRenderer:
             # デバッグログ
             print(f"[INFO] sheet={sheet.title} file={basename} start_row={rep}")
             
-            return basename
+            return (basename, rep)
             
         except Exception as e:
             print(f"[ERROR] 後処理エラー: {e}")
-            # フォールバック: ファイル名のみ返す
-            return png_name
+            # フォールバック: タプルで返す
+            return (png_name, 1)
 
 
     def _col_letter(self, col_num):
