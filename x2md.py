@@ -1995,16 +1995,15 @@ class ExcelToMarkdownConverter:
                                                     if len(cluster) > 0:
                                                         result = self._render_sheet_isolated_group(sheet, cluster)
                                                         if result:
-                                                            # Original method returns (filename, cluster_min_row) tuple
                                                             if isinstance(result, tuple) and len(result) == 2:
-                                                                img_name, cluster_row = result
+                                                                cluster_row, img_name = result
                                                             else:
                                                                 # Fallback for old code path (if any)
                                                                 img_name = result
                                                                 cluster_row = 1
                                                             
                                                             isolated_produced = True
-                                                            isolated_images.append((img_name, cluster_row))
+                                                            isolated_images.append((cluster_row, img_name))
                                                             print(f"[INFO] シート '{sheet.title}' のクラスタ {idx+1} をisolated groupとして出力: {img_name} (row={cluster_row})")
                                                 
                                                 if isolated_produced:
