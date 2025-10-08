@@ -1412,6 +1412,69 @@ class IsolatedGroupRenderer:
                     except Exception as e:
                         pass
                     
+                    try:
+                        if cell_range:
+                            s_col_adj, e_col_adj, s_row_adj, e_row_adj = cell_range
+                            drawing_path_full = os.path.join(tmpdir, drawing_path.lstrip('./'))
+                            if os.path.exists(drawing_path_full):
+                                try:
+                                    dtree = ET.parse(drawing_path_full)
+                                    droot = dtree.getroot()
+                                    xdr_ns = {'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'}
+                                    
+                                    for node in list(droot):
+                                        lname = node.tag.split('}')[-1].lower()
+                                        if lname not in ('twocellanchor', 'onecellanchor'):
+                                            continue
+                                        
+                                        fr = node.find('xdr:from', xdr_ns)
+                                        if fr is not None:
+                                            col_el = fr.find('xdr:col', xdr_ns)
+                                            row_el = fr.find('xdr:row', xdr_ns)
+                                            try:
+                                                if col_el is not None and col_el.text is not None:
+                                                    new_col = int(col_el.text) - (s_col_adj - 1)
+                                                    if new_col < 0:
+                                                        new_col = 0
+                                                    col_el.text = str(new_col)
+                                            except (ValueError, TypeError):
+                                                pass
+                                            try:
+                                                if row_el is not None and row_el.text is not None:
+                                                    new_row = int(row_el.text) - (s_row_adj - 1)
+                                                    if new_row < 0:
+                                                        new_row = 0
+                                                    row_el.text = str(new_row)
+                                            except (ValueError, TypeError):
+                                                pass
+                                        
+                                        to = node.find('xdr:to', xdr_ns)
+                                        if to is not None:
+                                            col_el = to.find('xdr:col', xdr_ns)
+                                            row_el = to.find('xdr:row', xdr_ns)
+                                            try:
+                                                if col_el is not None and col_el.text is not None:
+                                                    new_col = int(col_el.text) - (s_col_adj - 1)
+                                                    if new_col < 0:
+                                                        new_col = 0
+                                                    col_el.text = str(new_col)
+                                            except (ValueError, TypeError):
+                                                pass
+                                            try:
+                                                if row_el is not None and row_el.text is not None:
+                                                    new_row = int(row_el.text) - (s_row_adj - 1)
+                                                    if new_row < 0:
+                                                        new_row = 0
+                                                    row_el.text = str(new_row)
+                                            except (ValueError, TypeError):
+                                                pass
+                                    
+                                    dtree.write(drawing_path_full, encoding='utf-8', xml_declaration=True)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+                    
                 except Exception as e:
                     print(f"[WARNING] シートXML更新失敗: {e}")
         
