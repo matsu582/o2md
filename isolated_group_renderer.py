@@ -1253,7 +1253,6 @@ class IsolatedGroupRenderer:
                 except Exception as e:
                     print(f"[WARNING] Print_Area設定失敗: {e}")
             
-            # シートXMLで範囲外の行を非表示に設定（シート削除後は常にsheet1.xml）
             sheet_path = os.path.join(tmpdir, f'xl/worksheets/sheet{target_sheet_new_index + 1}.xml')
             if os.path.exists(sheet_path):
                 try:
@@ -1261,31 +1260,26 @@ class IsolatedGroupRenderer:
                     root = tree.getroot()
                     ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
                     
-                    for v in root.findall(f'.//{{{ns}}}v'):
-                        v.text = ''
-                    for t in root.findall(f'.//{{{ns}}}t'):
-                        t.text = ''
+                    for old_ps in list(root.findall(f'.//{{{ns}}}pageSetup')):
+                        root.remove(old_ps)
                     
-                    # pageBreaks要素を削除
-                    for tag in ['rowBreaks', 'colBreaks', 'pageBreaks']:
-                        for el in list(root.findall(f'{{{ns}}}{tag}')):
-                            root.remove(el)
-                    
-                    # 範囲外の行を非表示に（最初の試み）
-                    for row_el in root.findall(f'.//{{{ns}}}row'):
-                        try:
-                            rnum = int(row_el.attrib.get('r', '0'))
-                            if rnum < s_row or rnum > e_row:
-                                row_el.set('hidden', '1')
-                                row_el.set('ht', '0')
-                                row_el.set('customHeight', '1')
-                        except (ValueError, TypeError):
-                            continue
+                    ps = ET.Element(f'{{{ns}}}pageSetup')
+                    ps.set('scale', '100')
+                    ps.set('paperSize', '1')
+                    ps.set('orientation', 'portrait')
+                    ps.set('pageOrder', 'downThenOver')
+                    ps.set('blackAndWhite', 'false')
+                    ps.set('draft', 'false')
+                    ps.set('cellComments', 'none')
+                    ps.set('horizontalDpi', '300')
+                    ps.set('verticalDpi', '300')
+                    ps.set('copies', '1')
+                    root.append(ps)
                     
                     tree.write(sheet_path, encoding='utf-8', xml_declaration=True)
                 
                 except Exception as e:
-                    print(f"[WARNING] シートXML処理失敗: {e}")
+                    print(f"[WARNING] pageSetup修正失敗: {e}")
             
             if False:
                 try:
@@ -1407,117 +1401,6 @@ class IsolatedGroupRenderer:
                                 root2.insert(0, cols_el)
                             
                             tree2.write(sheet_path, encoding='utf-8', xml_declaration=True)
-                            
-                            try:
-                                tree3 = ET.parse(sheet_path)
-                                root3 = tree3.getroot()
-                                sheet_data3 = root3.find(sheet_data_tag)
-                                
-                                if sheet_data3 is not None:
-                                    for child in list(sheet_data3):
-                                        if child.tag.endswith('row'):
-                                            try:
-                                                sheet_data3.remove(child)
-                                            except Exception:
-                                                pass
-                                    
-                                    try:
-                                        first_row = int(s_row)
-                                        last_row = int(e_row)
-                                        out_r = 1
-                                        for src_r in range(first_row, last_row + 1):
-                                            try:
-                                                r_el = ET.Element(f'{{{ns}}}row')
-                                                r_el.set('r', str(out_r))
-                                                
-                                                try:
-                                                    src_row_obj = self.sheet.row_dimensions.get(src_r)
-                                                    if src_row_obj is not None and getattr(src_row_obj, 'height', None) is not None:
-                                                        r_el.set('ht', str(float(src_row_obj.height)))
-                                                        r_el.set('customHeight', '1')
-                                                    else:
-                                                        try:
-                                                            dflt = getattr(self.sheet.sheet_format, 'defaultRowHeight', None)
-                                                            if dflt is not None:
-                                                                r_el.set('ht', str(float(dflt)))
-                                                        except (ValueError, TypeError):
-                                                            pass
-                                                except (ValueError, TypeError):
-                                                    pass
-                                                
-                                                sheet_data3.append(r_el)
-                                            except (ValueError, TypeError):
-                                                pass
-                                            out_r += 1
-                                    except (ValueError, TypeError):
-                                        pass
-                                    
-                                    tree3.write(sheet_path, encoding='utf-8', xml_declaration=True)
-                            except Exception:
-                                pass
-                    
-                    try:
-                        if cell_range:
-                            s_col_adj, e_col_adj, s_row_adj, e_row_adj = cell_range
-                            drawing_path_full = os.path.join(tmpdir, drawing_path.lstrip('./'))
-                            if os.path.exists(drawing_path_full):
-                                try:
-                                    dtree = ET.parse(drawing_path_full)
-                                    droot = dtree.getroot()
-                                    xdr_ns = {'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'}
-                                    
-                                    for node in list(droot):
-                                        lname = node.tag.split('}')[-1].lower()
-                                        if lname not in ('twocellanchor', 'onecellanchor'):
-                                            continue
-                                        
-                                        fr = node.find('xdr:from', xdr_ns)
-                                        if fr is not None:
-                                            col_el = fr.find('xdr:col', xdr_ns)
-                                            row_el = fr.find('xdr:row', xdr_ns)
-                                            try:
-                                                if col_el is not None and col_el.text is not None:
-                                                    new_col = int(col_el.text) - (s_col_adj - 1)
-                                                    if new_col < 0:
-                                                        new_col = 0
-                                                    col_el.text = str(new_col)
-                                            except (ValueError, TypeError):
-                                                pass
-                                            try:
-                                                if row_el is not None and row_el.text is not None:
-                                                    new_row = int(row_el.text) - (s_row_adj - 1)
-                                                    if new_row < 0:
-                                                        new_row = 0
-                                                    row_el.text = str(new_row)
-                                            except (ValueError, TypeError):
-                                                pass
-                                        
-                                        to = node.find('xdr:to', xdr_ns)
-                                        if to is not None:
-                                            col_el = to.find('xdr:col', xdr_ns)
-                                            row_el = to.find('xdr:row', xdr_ns)
-                                            try:
-                                                if col_el is not None and col_el.text is not None:
-                                                    new_col = int(col_el.text) - (s_col_adj - 1)
-                                                    if new_col < 0:
-                                                        new_col = 0
-                                                    col_el.text = str(new_col)
-                                            except (ValueError, TypeError):
-                                                pass
-                                            try:
-                                                if row_el is not None and row_el.text is not None:
-                                                    new_row = int(row_el.text) - (s_row_adj - 1)
-                                                    if new_row < 0:
-                                                        new_row = 0
-                                                    row_el.text = str(new_row)
-                                            except (ValueError, TypeError):
-                                                pass
-                                    
-                                    dtree.write(drawing_path_full, encoding='utf-8', xml_declaration=True)
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
                     
                 except Exception as e:
                     print(f"[WARNING] シートXML更新失敗: {e}")
