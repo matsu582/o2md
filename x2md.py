@@ -26,6 +26,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from utils import get_libreoffice_path, get_imagemagick_command
+from isolated_group_renderer import IsolatedGroupRenderer
 
 try:
     import openpyxl
@@ -4895,9 +4896,8 @@ class ExcelToMarkdownConverter:
         
         **PRODUCTION METHOD - RECOMMENDED FOR ALL USE CASES**
         
-        This is the original, battle-tested implementation with full connector cosmetic processing.
-        A refactored version (_render_sheet_isolated_group_v2) exists but is incomplete and
-        should NOT be used for production.
+        This implementation delegates to IsolatedGroupRenderer class for better code organization.
+        The original monolithic implementation has been refactored into separate phases.
         
         Features:
         - Complete connector cosmetic processing
@@ -4912,6 +4912,15 @@ class ExcelToMarkdownConverter:
         flowcharts and composite diagrams.
         
         Returns generated filename (relative to images_dir) or None on failure.
+        """
+        renderer = IsolatedGroupRenderer(self)
+        return renderer.render(sheet, shape_indices, dpi, cell_range)
+    
+    def _render_sheet_isolated_group_old(self, sheet, shape_indices: List[int], dpi: int = 600, cell_range: Optional[Tuple[int,int,int,int]] = None) -> Optional[str]:
+        """OLD IMPLEMENTATION - KEPT FOR REFERENCE DURING REFACTORING
+        
+        This is the original monolithic implementation. It will be removed once
+        IsolatedGroupRenderer is fully implemented and tested.
         """
         try:
             # reset last preserved ids marker for this invocation
