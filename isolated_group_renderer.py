@@ -1346,6 +1346,8 @@ class IsolatedGroupRenderer:
             print(f"[ERROR] LibreOffice not found: {LIBREOFFICE_PATH}")
             return None
         
+        print(f"[DEBUG] _convert_excel_to_pdf: excel_path={excel_path}, output_dir={output_dir}")
+        
         try:
             cmd = [
                 LIBREOFFICE_PATH,
@@ -1355,6 +1357,8 @@ class IsolatedGroupRenderer:
                 excel_path
             ]
             
+            print(f"[DEBUG] LibreOffice command: {' '.join(cmd)}")
+            
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -1362,13 +1366,26 @@ class IsolatedGroupRenderer:
                 timeout=90
             )
             
+            print(f"[DEBUG] LibreOffice returncode: {result.returncode}")
+            print(f"[DEBUG] LibreOffice stdout: {result.stdout}")
+            print(f"[DEBUG] LibreOffice stderr: {result.stderr}")
+            
             if result.returncode == 0:
                 # 生成されたPDFファイルを探す
                 basename = os.path.splitext(os.path.basename(excel_path))[0]
                 pdf_path = os.path.join(output_dir, basename + '.pdf')
                 
+                print(f"[DEBUG] Looking for PDF at: {pdf_path}")
+                print(f"[DEBUG] PDF exists: {os.path.exists(pdf_path)}")
+                
                 if os.path.exists(pdf_path):
                     return pdf_path
+                else:
+                    try:
+                        files_in_dir = os.listdir(output_dir)
+                        print(f"[DEBUG] Files in output_dir: {files_in_dir}")
+                    except Exception as e:
+                        print(f"[DEBUG] Cannot list output_dir: {e}")
             
             print(f"[ERROR] LibreOffice変換失敗: {result.stderr}")
             return None
@@ -1378,6 +1395,8 @@ class IsolatedGroupRenderer:
             return None
         except Exception as e:
             print(f"[ERROR] LibreOffice変換エラー: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def _convert_pdf_to_png(self, pdf_path, dpi=300):
