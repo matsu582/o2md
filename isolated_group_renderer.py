@@ -1405,19 +1405,25 @@ class IsolatedGroupRenderer:
         import subprocess
         import tempfile
         
+        print(f"[DEBUG] _convert_pdf_to_png: pdf_path={pdf_path}, dpi={dpi}")
+        
         try:
             # 出力PNGパス
             output_path = pdf_path.replace('.pdf', '.png')
+            
+            print(f"[DEBUG] PNG output_path: {output_path}")
             
             # ImageMagickで変換
             cmd = [
                 'convert',
                 '-density', str(dpi),
                 pdf_path,
-                '-strip',  # すべてのプロファイルとコメントを削除
+                '-strip',
                 '-quality', '90',
                 output_path
             ]
+            
+            print(f"[DEBUG] ImageMagick command: {' '.join(cmd)}")
             
             result = subprocess.run(
                 cmd,
@@ -1426,7 +1432,13 @@ class IsolatedGroupRenderer:
                 timeout=60
             )
             
+            print(f"[DEBUG] ImageMagick returncode: {result.returncode}")
+            print(f"[DEBUG] ImageMagick stdout: {result.stdout}")
+            print(f"[DEBUG] ImageMagick stderr: {result.stderr}")
+            print(f"[DEBUG] PNG exists: {os.path.exists(output_path)}")
+            
             if result.returncode == 0 and os.path.exists(output_path):
+                print(f"[DEBUG] PNG successfully created at: {output_path}")
                 return output_path
             
             print(f"[ERROR] ImageMagick変換失敗: {result.stderr}")
@@ -1437,6 +1449,8 @@ class IsolatedGroupRenderer:
             return None
         except Exception as e:
             print(f"[ERROR] ImageMagick変換エラー: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def _crop_png_to_cell_range(self, png_path, cell_range, sheet, dpi):
