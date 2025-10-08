@@ -1281,129 +1281,169 @@ class IsolatedGroupRenderer:
                 except Exception as e:
                     print(f"[WARNING] pageSetup修正失敗: {e}")
             
-            if False:
-                try:
-                    sheet_path = os.path.join(tmpdir, f'xl/worksheets/sheet{target_sheet_new_index + 1}.xml')
-                    tree2 = ET.parse(sheet_path)
-                    root2 = tree2.getroot()
-                    ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+            try:
+                sheet_path = os.path.join(tmpdir, f'xl/worksheets/sheet{target_sheet_new_index + 1}.xml')
+                tree2 = ET.parse(sheet_path)
+                root2 = tree2.getroot()
+                ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+                
+                sheet_data_tag = f'{{{ns}}}sheetData'
+                sheet_data = root2.find(sheet_data_tag)
+                
+                if sheet_data is not None:
+                    new_sheet_data = ET.Element(sheet_data_tag)
                     
-                    sheet_data_tag = f'{{{ns}}}sheetData'
-                    sheet_data = root2.find(sheet_data_tag)
+                    new_r_index = 1
+                    for src_r in range(s_row, e_row + 1):
+                        r_el = ET.Element(f'{{{ns}}}row')
+                        r_el.set('r', str(new_r_index))
+                        
+                        try:
+                            src_row_obj = self.sheet.row_dimensions.get(src_r)
+                            if src_row_obj is not None and getattr(src_row_obj, 'height', None) is not None:
+                                r_el.set('ht', str(float(src_row_obj.height)))
+                                r_el.set('customHeight', '1')
+                        except (ValueError, TypeError):
+                            pass
+                        
+                        new_sheet_data.append(r_el)
+                        new_r_index += 1
                     
-                    if sheet_data is not None:
-                            keep_cols = set(range(s_col, e_col + 1))
-                            new_sheet_data = ET.Element(sheet_data_tag)
-                            
-                            rows = sheet_data.findall(f'{{{ns}}}row')
-                            new_r_index = 1
-                            
-                            for row_el in rows:
-                                try:
-                                    rnum = int(row_el.attrib.get('r', '0'))
-                                except (ValueError, TypeError):
-                                    continue
-                                
-                                if rnum < s_row or rnum > e_row:
-                                    continue
-                                
-                                new_row = ET.Element(f'{{{ns}}}row')
-                                new_row.set('r', str(new_r_index))
-                                
-                                for attr in ('ht', 'hidden', 'customHeight'):
-                                    if attr in row_el.attrib:
-                                        new_row.set(attr, row_el.attrib[attr])
-                                
-                                try:
-                                    rd = self.sheet.row_dimensions.get(rnum)
-                                    if rd is not None:
-                                        rh = getattr(rd, 'height', None)
-                                        if rh is not None and 'ht' not in new_row.attrib:
-                                            new_row.set('ht', str(rh))
-                                            new_row.set('customHeight', '1')
-                                except (ValueError, TypeError):
-                                    pass
-                                
-                                
-                                new_sheet_data.append(new_row)
-                                new_r_index += 1
-                            
-                            parent = root2
-                            for child in list(parent):
-                                if child.tag == sheet_data_tag:
-                                    parent.remove(child)
-                            parent.append(new_sheet_data)
-                            
-                            dim_tag = f'{{{ns}}}dimension'
-                            dim_el = root2.find(dim_tag)
-                            if dim_el is None:
-                                dim_el = ET.Element(dim_tag)
-                                root2.insert(0, dim_el)
-                            
-                            start_addr = f"{self._col_letter(1)}1"
-                            end_addr = f"{self._col_letter(e_col - s_col + 1)}{max(1, new_r_index - 1)}"
-                            dim_el.set('ref', f"{start_addr}:{end_addr}")
-                            
-                            cols_tag = f'{{{ns}}}cols'
-                            col_tag = f'{{{ns}}}col'
-                            for child in list(root2):
-                                if child.tag == cols_tag:
-                                    try:
-                                        root2.remove(child)
-                                    except Exception:
-                                        pass
-                            cols_el = ET.Element(cols_tag)
+                    parent = root2
+                    for child in list(parent):
+                        if child.tag == sheet_data_tag:
+                            parent.remove(child)
+                    parent.append(new_sheet_data)
+                    
+                    dim_tag = f'{{{ns}}}dimension'
+                    dim_el = root2.find(dim_tag)
+                    if dim_el is None:
+                        dim_el = ET.Element(dim_tag)
+                        root2.insert(0, dim_el)
+                    
+                    start_addr = f"{self._col_letter(1)}1"
+                    end_addr = f"{self._col_letter(e_col - s_col + 1)}{max(1, new_r_index - 1)}"
+                    dim_el.set('ref', f"{start_addr}:{end_addr}")
+                    
+                    cols_tag = f'{{{ns}}}cols'
+                    col_tag = f'{{{ns}}}col'
+                    for child in list(root2):
+                        if child.tag == cols_tag:
                             try:
-                                from openpyxl.utils import get_column_letter
-                                default_col_w = getattr(self.sheet.sheet_format, 'defaultColWidth', None) or 8.43
-                                for c in range(s_col, e_col + 1):
-                                    cd = self.sheet.column_dimensions.get(get_column_letter(c))
-                                    width = None
-                                    hidden = None
-                                    if cd is not None:
-                                        width = getattr(cd, 'width', None)
-                                        hidden = getattr(cd, 'hidden', None)
-                                    if width is None:
-                                        width = default_col_w
-                                    col_el = ET.Element(col_tag)
-                                    new_idx = c - s_col + 1
-                                    col_el.set('min', str(new_idx))
-                                    col_el.set('max', str(new_idx))
-                                    try:
-                                        col_el.set('width', str(float(width)))
-                                        if cd is not None and getattr(cd, 'width', None) is not None:
-                                            col_el.set('customWidth', '1')
-                                    except (ValueError, TypeError):
-                                        col_el.set('width', str(int(width) if width is not None else 8))
-                                        if cd is not None and getattr(cd, 'width', None) is not None:
-                                            col_el.set('customWidth', '1')
-                                    try:
-                                        if hidden:
-                                            col_el.set('hidden', '1')
-                                    except (ValueError, TypeError):
-                                        pass
-                                    cols_el.append(col_el)
+                                root2.remove(child)
+                            except Exception:
+                                pass
+                    cols_el = ET.Element(cols_tag)
+                    try:
+                        from openpyxl.utils import get_column_letter
+                        default_col_w = getattr(self.sheet.sheet_format, 'defaultColWidth', None) or 8.43
+                        for c in range(s_col, e_col + 1):
+                            cd = self.sheet.column_dimensions.get(get_column_letter(c))
+                            width = None
+                            hidden = None
+                            if cd is not None:
+                                width = getattr(cd, 'width', None)
+                                hidden = getattr(cd, 'hidden', None)
+                            if width is None:
+                                width = default_col_w
+                            col_el = ET.Element(col_tag)
+                            new_idx = c - s_col + 1
+                            col_el.set('min', str(new_idx))
+                            col_el.set('max', str(new_idx))
+                            try:
+                                col_el.set('width', str(float(width)))
+                                if cd is not None and getattr(cd, 'width', None) is not None:
+                                    col_el.set('customWidth', '1')
                             except (ValueError, TypeError):
-                                for i_col in range(1, e_col - s_col + 2):
-                                    col_el = ET.Element(col_tag)
-                                    col_el.set('min', str(i_col))
-                                    col_el.set('max', str(i_col))
-                                    col_el.set('width', '8.43')
-                                    cols_el.append(col_el)
-                            
-                            inserted = False
-                            for i, child in enumerate(list(root2)):
-                                if 'sheetPr' in child.tag:
-                                    root2.insert(i+1, cols_el)
-                                    inserted = True
-                                    break
-                            if not inserted:
-                                root2.insert(0, cols_el)
-                            
-                            tree2.write(sheet_path, encoding='utf-8', xml_declaration=True)
+                                col_el.set('width', str(int(width) if width is not None else 8))
+                                if cd is not None and getattr(cd, 'width', None) is not None:
+                                    col_el.set('customWidth', '1')
+                            try:
+                                if hidden:
+                                    col_el.set('hidden', '1')
+                            except (ValueError, TypeError):
+                                pass
+                            cols_el.append(col_el)
+                    except (ValueError, TypeError):
+                        for i_col in range(1, e_col - s_col + 2):
+                            col_el = ET.Element(col_tag)
+                            col_el.set('min', str(i_col))
+                            col_el.set('max', str(i_col))
+                            col_el.set('width', '8.43')
+                            cols_el.append(col_el)
                     
-                except Exception as e:
-                    print(f"[WARNING] シートXML更新失敗: {e}")
+                    inserted = False
+                    for i, child in enumerate(list(root2)):
+                        if 'sheetPr' in child.tag:
+                            root2.insert(i+1, cols_el)
+                            inserted = True
+                            break
+                    if not inserted:
+                        root2.insert(0, cols_el)
+                    
+                    tree2.write(sheet_path, encoding='utf-8', xml_declaration=True)
+                
+            except Exception as e:
+                print(f"[WARNING] シートXML再構築失敗: {e}")
+            
+            try:
+                drawing_path = os.path.join(tmpdir, self.drawing_path)
+                if os.path.exists(drawing_path):
+                    dtree = ET.parse(drawing_path)
+                    droot = dtree.getroot()
+                    ns_xdr = {'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'}
+                    
+                    for node in list(droot):
+                        lname = node.tag.split('}')[-1].lower()
+                        if lname not in ('twocellanchor', 'onecellanchor'):
+                            continue
+                        
+                        fr = node.find('xdr:from', ns_xdr)
+                        if fr is not None:
+                            col_el = fr.find('xdr:col', ns_xdr)
+                            row_el = fr.find('xdr:row', ns_xdr)
+                            try:
+                                if col_el is not None and col_el.text is not None:
+                                    new_col = int(col_el.text) - (s_col - 1)
+                                    if new_col < 0:
+                                        new_col = 0
+                                    col_el.text = str(new_col)
+                            except (ValueError, TypeError):
+                                pass
+                            try:
+                                if row_el is not None and row_el.text is not None:
+                                    new_row = int(row_el.text) - (s_row - 1)
+                                    if new_row < 0:
+                                        new_row = 0
+                                    row_el.text = str(new_row)
+                            except (ValueError, TypeError):
+                                pass
+                        
+                        to = node.find('xdr:to', ns_xdr)
+                        if to is not None:
+                            col_el = to.find('xdr:col', ns_xdr)
+                            row_el = to.find('xdr:row', ns_xdr)
+                            try:
+                                if col_el is not None and col_el.text is not None:
+                                    new_col = int(col_el.text) - (s_col - 1)
+                                    if new_col < 0:
+                                        new_col = 0
+                                    col_el.text = str(new_col)
+                            except (ValueError, TypeError):
+                                pass
+                            try:
+                                if row_el is not None and row_el.text is not None:
+                                    new_row = int(row_el.text) - (s_row - 1)
+                                    if new_row < 0:
+                                        new_row = 0
+                                    row_el.text = str(new_row)
+                            except (ValueError, TypeError):
+                                pass
+                    
+                    dtree.write(drawing_path, encoding='utf-8', xml_declaration=True)
+                    
+            except Exception as e:
+                print(f"[WARNING] 図形座標調整失敗: {e}")
         
         # tmpdirをzip化して一時xlsxファイルを作成
         try:
