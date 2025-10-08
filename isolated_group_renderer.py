@@ -1387,9 +1387,9 @@ class IsolatedGroupRenderer:
                 print(f"[WARNING] シートXML再構築失敗: {e}")
             
             try:
-                drawing_path = os.path.join(tmpdir, self.drawing_path)
-                if os.path.exists(drawing_path):
-                    dtree = ET.parse(drawing_path)
+                drawing_path_full = os.path.join(tmpdir, drawing_path)
+                if os.path.exists(drawing_path_full):
+                    dtree = ET.parse(drawing_path_full)
                     droot = dtree.getroot()
                     ns_xdr = {'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'}
                     
@@ -1440,7 +1440,7 @@ class IsolatedGroupRenderer:
                             except (ValueError, TypeError):
                                 pass
                     
-                    dtree.write(drawing_path, encoding='utf-8', xml_declaration=True)
+                    dtree.write(drawing_path_full, encoding='utf-8', xml_declaration=True)
                     
             except Exception as e:
                 print(f"[WARNING] 図形座標調整失敗: {e}")
