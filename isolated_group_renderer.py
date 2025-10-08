@@ -1393,11 +1393,20 @@ class IsolatedGroupRenderer:
         return self._convert_pdf_to_png_with_output(pdf_path, output_path, dpi)
     
     def _convert_pdf_to_png_with_output(self, pdf_path, output_path, dpi=300):
-        """PDFをPNGに変換（出力先を指定）"""
+        """PDFをPNGに変換（出力先を指定）、複数ページの場合は結合"""
         import os
         import subprocess
+        import glob
+        from PIL import Image as PILImage
         
         try:
+            base_noext = os.path.splitext(output_path)[0]
+            for p in sorted(glob.glob(base_noext + "*.png")):
+                try:
+                    os.remove(p)
+                except (OSError, FileNotFoundError):
+                    pass
+            
             cmd = [
                 'convert',
                 '-density', str(dpi),
@@ -1412,13 +1421,39 @@ class IsolatedGroupRenderer:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=60
+                timeout=120
             )
             
-            if result.returncode == 0 and os.path.exists(output_path):
+            if result.returncode != 0:
+                print(f"[ERROR] ImageMagick変換失敗: {result.stderr}")
+                return None
+            
+            candidates = sorted(glob.glob(base_noext + "*.png"))
+            if not candidates and os.path.exists(output_path):
+                candidates = [output_path]
+            
+            if len(candidates) > 1:
+                imgs = [PILImage.open(p).convert('RGBA') for p in candidates]
+                widths = [im.size[0] for im in imgs]
+                heights = [im.size[1] for im in imgs]
+                maxw = max(widths)
+                total_h = sum(heights)
+                stitched = PILImage.new('RGBA', (maxw, total_h), (255, 255, 255, 255))
+                y = 0
+                for im_obj in imgs:
+                    stitched.paste(im_obj, (0, y))
+                    y += im_obj.size[1]
+                stitched.convert('RGB').save(output_path, 'PNG')
+                for p in candidates:
+                    try:
+                        if os.path.abspath(p) != os.path.abspath(output_path):
+                            os.remove(p)
+                    except Exception:
+                        pass
+            
+            if os.path.exists(output_path):
                 return output_path
             
-            print(f"[ERROR] ImageMagick変換失敗: {result.stderr}")
             return None
             
         except subprocess.TimeoutExpired:
