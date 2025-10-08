@@ -1139,6 +1139,7 @@ class IsolatedGroupRenderer:
         """フェーズ8: ワークブック準備
         
         cell_rangeを使用してPrint_Areaを設定し、一時的なxlsxファイルを作成
+        対象シート以外のシートを削除
         
         Args:
             tmpdir: 一時ディレクトリパス
@@ -1156,6 +1157,38 @@ class IsolatedGroupRenderer:
         import xml.etree.ElementTree as ET
         import tempfile
         import shutil
+        
+        target_sheet_new_index = 0
+        wb_path = os.path.join(tmpdir, 'xl/workbook.xml')
+        if os.path.exists(wb_path):
+            try:
+                tree = ET.parse(wb_path)
+                root = tree.getroot()
+                ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+                
+                # sheets要素を取得
+                sheets_tag = f'{{{ns}}}sheets'
+                sheets_el = root.find(sheets_tag)
+                
+                if sheets_el is not None:
+                    sheets_to_remove = []
+                    for sheet_el in list(sheets_el.findall(f'{{{ns}}}sheet')):
+                        sheet_id = sheet_el.attrib.get('sheetId')
+                        if sheet_id and int(sheet_id) != (sheet_index + 1):
+                            sheets_to_remove.append(sheet_el)
+                    
+                    for sheet_el in sheets_to_remove:
+                        sheets_el.remove(sheet_el)
+                        print(f"[DEBUG] Removed sheet: {sheet_el.attrib.get('name')}")
+                    
+                    remaining_sheets = list(sheets_el.findall(f'{{{ns}}}sheet'))
+                    for i, sheet_el in enumerate(remaining_sheets, 1):
+                        sheet_el.set('sheetId', str(i))
+                    
+                    tree.write(wb_path, encoding='utf-8', xml_declaration=True)
+                    print(f"[DEBUG] Kept only target sheet: {sheet.title}")
+            except Exception as e:
+                print(f"[WARNING] シート削除失敗: {e}")
         
         # cell_rangeが指定されている場合、Print_Areaを設定
         if cell_range:
@@ -1197,10 +1230,10 @@ class IsolatedGroupRenderer:
                         if existing.attrib.get('name') == '_xlnm.Print_Area':
                             dn.remove(existing)
                     
-                    # 新しいPrint_Areaを追加
+                    # 新しいPrint_Areaを追加（シート削除後は常にインデックス0）
                     new_dn = ET.Element(f'{{{ns}}}definedName')
                     new_dn.set('name', '_xlnm.Print_Area')
-                    new_dn.set('localSheetId', str(sheet_index))
+                    new_dn.set('localSheetId', str(target_sheet_new_index))
                     new_dn.text = area_ref
                     dn.append(new_dn)
                     
@@ -1208,8 +1241,8 @@ class IsolatedGroupRenderer:
                 except Exception as e:
                     print(f"[WARNING] Print_Area設定失敗: {e}")
             
-            # シートXMLで範囲外の行を非表示に設定
-            sheet_path = os.path.join(tmpdir, f'xl/worksheets/sheet{sheet_index + 1}.xml')
+            # シートXMLで範囲外の行を非表示に設定（シート削除後は常にsheet1.xml）
+            sheet_path = os.path.join(tmpdir, f'xl/worksheets/sheet{target_sheet_new_index + 1}.xml')
             if os.path.exists(sheet_path):
                 try:
                     tree = ET.parse(sheet_path)
@@ -1519,7 +1552,7 @@ class IsolatedGroupRenderer:
             cell_range: セル範囲 (s_col, e_col, s_row, e_row)（オプション）
             
         Returns:
-            Tuple[str, int]: (画像ファイル名, 開始行)
+            Tuple[int, str]: (開始行, 画像ファイル名)
         """
         import os
         
@@ -1551,12 +1584,12 @@ class IsolatedGroupRenderer:
             # デバッグログ
             print(f"[INFO] sheet={sheet.title} file={basename} start_row={rep}")
             
-            return (basename, rep)
+            return (rep, basename)
             
         except Exception as e:
             print(f"[ERROR] 後処理エラー: {e}")
-            # フォールバック: タプルで返す
-            return (png_name, 1)
+            # フォールバック: タプルで返す（順序を修正）
+            return (1, png_name)
 
 
     def _col_letter(self, col_num):

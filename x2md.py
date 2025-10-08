@@ -2013,7 +2013,8 @@ class ExcelToMarkdownConverter:
                                                     # isolated group画像をMarkdownに追加するため、images_foundをTrueに設定
                                                     images_found = True
                                                     # 各画像を登録（row情報を使用）
-                                                    for img_name, cluster_row in isolated_images:
+                                                    # isolated_imagesは(start_row, filename)のタプルのリスト
+                                                    for cluster_row, img_name in isolated_images:
                                                         print(f"[DEBUG] Processing isolated group image: {img_name} at row={cluster_row}")
                                                         try:
                                                             self._mark_image_emitted(img_name)
@@ -4891,7 +4892,7 @@ class ExcelToMarkdownConverter:
             traceback.print_exc()
             return None
 
-    def _render_sheet_isolated_group(self, sheet, shape_indices: List[int], dpi: int = 600, cell_range: Optional[Tuple[int,int,int,int]] = None) -> Optional[Tuple[str, int]]:
+    def _render_sheet_isolated_group(self, sheet, shape_indices: List[int], dpi: int = 600, cell_range: Optional[Tuple[int,int,int,int]] = None) -> Optional[Tuple[int, str]]:
         """Render a group of shape indices as a single isolated image.
         
         **PRODUCTION METHOD - RECOMMENDED FOR ALL USE CASES**
@@ -4911,7 +4912,8 @@ class ExcelToMarkdownConverter:
         This preserves the spatial relationships between shapes, making it ideal for
         flowcharts and composite diagrams.
         
-        Returns generated filename (relative to images_dir) or None on failure.
+        Returns:
+            Optional[Tuple[int, str]]: (start_row, filename) or None on failure
         """
         renderer = IsolatedGroupRenderer(self)
         return renderer.render(sheet, shape_indices, dpi, cell_range)
