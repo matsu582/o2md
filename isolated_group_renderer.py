@@ -1280,45 +1280,135 @@ class IsolatedGroupRenderer:
                         sheet_data = root2.find(sheet_data_tag)
                         
                         if sheet_data is not None:
-                            for child in list(sheet_data):
-                                if child.tag.endswith('row'):
-                                    try:
-                                        sheet_data.remove(child)
-                                    except Exception:
-                                        pass
+                            keep_cols = set(range(s_col, e_col + 1))
+                            new_sheet_data = ET.Element(sheet_data_tag)
                             
-                            try:
-                                first_row = int(s_row)
-                                last_row = int(e_row)
-                                out_r = 1
-                                for src_r in range(first_row, last_row + 1):
-                                    try:
-                                        r_el = ET.Element(f'{{{ns}}}row')
-                                        r_el.set('r', str(out_r))
-                                        
-                                        try:
-                                            src_row_obj = self.sheet.row_dimensions.get(src_r)
-                                            if src_row_obj is not None and getattr(src_row_obj, 'height', None) is not None:
-                                                r_el.set('ht', str(float(src_row_obj.height)))
-                                                r_el.set('customHeight', '1')
-                                            else:
-                                                try:
-                                                    dflt = getattr(self.sheet.sheet_format, 'defaultRowHeight', None)
-                                                    if dflt is not None:
-                                                        r_el.set('ht', str(float(dflt)))
-                                                except (ValueError, TypeError):
-                                                    pass
-                                        except (ValueError, TypeError):
-                                            pass
-                                        
-                                        sheet_data.append(r_el)
-                                    except (ValueError, TypeError):
-                                        pass
-                                    out_r += 1
-                            except (ValueError, TypeError):
-                                pass
+                            rows = sheet_data.findall(f'{{{ns}}}row')
+                            new_r_index = 1
+                            
+                            for row_el in rows:
+                                try:
+                                    rnum = int(row_el.attrib.get('r', '0'))
+                                except (ValueError, TypeError):
+                                    continue
+                                
+                                if rnum < s_row or rnum > e_row:
+                                    continue
+                                
+                                new_row = ET.Element(f'{{{ns}}}row')
+                                new_row.set('r', str(new_r_index))
+                                
+                                for attr in ('ht', 'hidden', 'customHeight'):
+                                    if attr in row_el.attrib:
+                                        new_row.set(attr, row_el.attrib[attr])
+                                
+                                try:
+                                    rd = self.sheet.row_dimensions.get(rnum)
+                                    if rd is not None:
+                                        rh = getattr(rd, 'height', None)
+                                        if rh is not None and 'ht' not in new_row.attrib:
+                                            new_row.set('ht', str(rh))
+                                            new_row.set('customHeight', '1')
+                                except (ValueError, TypeError):
+                                    pass
+                                
+                                for c in list(row_el):
+                                    if c.tag.split('}')[-1] != 'c':
+                                        continue
+                                    cell_r = c.attrib.get('r', '')
+                                    col_letters = ''.join([ch for ch in cell_r if ch.isalpha()]) if cell_r else None
+                                    if not col_letters:
+                                        continue
+                                    
+                                    col_idx = 0
+                                    for ch in col_letters:
+                                        col_idx = col_idx * 26 + (ord(ch.upper()) - 64)
+                                    
+                                    if col_idx < s_col or col_idx > e_col:
+                                        continue
+                                    
+                                    new_col_idx = col_idx - (s_col - 1)
+                                    if new_col_idx < 1:
+                                        new_col_idx = 1
+                                    
+                                    new_col_letters = self._col_letter(new_col_idx)
+                                    
+                                    new_cell = ET.Element(f'{{{ns}}}c', dict(c.attrib))
+                                    new_cell.attrib['r'] = f"{new_col_letters}{new_r_index}"
+                                    
+                                    for cc in list(c):
+                                        new_cell.append(cc)
+                                    
+                                    new_row.append(new_cell)
+                                
+                                new_sheet_data.append(new_row)
+                                new_r_index += 1
+                            
+                            parent = root2
+                            for child in list(parent):
+                                if child.tag == sheet_data_tag:
+                                    parent.remove(child)
+                            parent.append(new_sheet_data)
+                            
+                            dim_tag = f'{{{ns}}}dimension'
+                            dim_el = root2.find(dim_tag)
+                            if dim_el is None:
+                                dim_el = ET.Element(dim_tag)
+                                root2.insert(0, dim_el)
+                            
+                            start_addr = f"{self._col_letter(1)}1"
+                            end_addr = f"{self._col_letter(e_col - s_col + 1)}{max(1, new_r_index - 1)}"
+                            dim_el.set('ref', f"{start_addr}:{end_addr}")
                             
                             tree2.write(sheet_path, encoding='utf-8', xml_declaration=True)
+                            
+                            try:
+                                tree3 = ET.parse(sheet_path)
+                                root3 = tree3.getroot()
+                                sheet_data3 = root3.find(sheet_data_tag)
+                                
+                                if sheet_data3 is not None:
+                                    for child in list(sheet_data3):
+                                        if child.tag.endswith('row'):
+                                            try:
+                                                sheet_data3.remove(child)
+                                            except Exception:
+                                                pass
+                                    
+                                    try:
+                                        first_row = int(s_row)
+                                        last_row = int(e_row)
+                                        out_r = 1
+                                        for src_r in range(first_row, last_row + 1):
+                                            try:
+                                                r_el = ET.Element(f'{{{ns}}}row')
+                                                r_el.set('r', str(out_r))
+                                                
+                                                try:
+                                                    src_row_obj = self.sheet.row_dimensions.get(src_r)
+                                                    if src_row_obj is not None and getattr(src_row_obj, 'height', None) is not None:
+                                                        r_el.set('ht', str(float(src_row_obj.height)))
+                                                        r_el.set('customHeight', '1')
+                                                    else:
+                                                        try:
+                                                            dflt = getattr(self.sheet.sheet_format, 'defaultRowHeight', None)
+                                                            if dflt is not None:
+                                                                r_el.set('ht', str(float(dflt)))
+                                                        except (ValueError, TypeError):
+                                                            pass
+                                                except (ValueError, TypeError):
+                                                    pass
+                                                
+                                                sheet_data3.append(r_el)
+                                            except (ValueError, TypeError):
+                                                pass
+                                            out_r += 1
+                                    except (ValueError, TypeError):
+                                        pass
+                                    
+                                    tree3.write(sheet_path, encoding='utf-8', xml_declaration=True)
+                            except Exception:
+                                pass
                     except Exception as e:
                         pass
                     
