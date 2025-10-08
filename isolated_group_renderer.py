@@ -1317,34 +1317,6 @@ class IsolatedGroupRenderer:
                                 except (ValueError, TypeError):
                                     pass
                                 
-                                for c in list(row_el):
-                                    if c.tag.split('}')[-1] != 'c':
-                                        continue
-                                    cell_r = c.attrib.get('r', '')
-                                    col_letters = ''.join([ch for ch in cell_r if ch.isalpha()]) if cell_r else None
-                                    if not col_letters:
-                                        continue
-                                    
-                                    col_idx = 0
-                                    for ch in col_letters:
-                                        col_idx = col_idx * 26 + (ord(ch.upper()) - 64)
-                                    
-                                    if col_idx < s_col or col_idx > e_col:
-                                        continue
-                                    
-                                    new_col_idx = col_idx - (s_col - 1)
-                                    if new_col_idx < 1:
-                                        new_col_idx = 1
-                                    
-                                    new_col_letters = self._col_letter(new_col_idx)
-                                    
-                                    new_cell = ET.Element(f'{{{ns}}}c', dict(c.attrib))
-                                    new_cell.attrib['r'] = f"{new_col_letters}{new_r_index}"
-                                    
-                                    for cc in list(c):
-                                        new_cell.append(cc)
-                                    
-                                    new_row.append(new_cell)
                                 
                                 new_sheet_data.append(new_row)
                                 new_r_index += 1
