@@ -22,11 +22,12 @@ import shutil
 import zipfile
 import urllib.parse
 import xml.etree.ElementTree as ET
-import platform
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any
 from PIL import Image, ImageDraw, ImageFont
 import io
+
+from utils import get_libreoffice_path, get_imagemagick_command
 
 try:
     from docx import Document
@@ -43,58 +44,9 @@ except ImportError:
     print("Pillowライブラリが必要です: pip install pillow")
     sys.exit(1)
 
-def _get_libreoffice_path():
-    """プラットフォームに応じたLibreOfficeのパスを取得"""
-    system = platform.system()
-    
-    if system == "Darwin":  # macOS
-        path = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
-        if os.path.exists(path):
-            return path
-    elif system == "Linux":  # Ubuntu/Linux
-        common_paths = [
-            "/usr/bin/soffice",
-            "/usr/bin/libreoffice",
-            "/snap/bin/libreoffice",
-        ]
-        for path in common_paths:
-            if os.path.exists(path):
-                return path
-        try:
-            result = subprocess.run(["which", "soffice"], capture_output=True, text=True)
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-            result = subprocess.run(["which", "libreoffice"], capture_output=True, text=True)
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-        except Exception:
-            pass
-    elif system == "Windows":
-        common_paths = [
-            r"C:\Program Files\LibreOffice\program\soffice.exe",
-            r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
-        ]
-        for path in common_paths:
-            if os.path.exists(path):
-                return path
-    
-    return "soffice"
-
-def _get_imagemagick_command():
-    """ImageMagickのコマンド名を取得（バージョンに応じて'magick'または'convert'）"""
-    try:
-        if shutil.which('magick'):
-            return 'magick'
-        elif shutil.which('convert'):
-            return 'convert'
-        else:
-            return 'convert'
-    except Exception:
-        return 'convert'
-
 # 設定
-LIBREOFFICE_PATH = _get_libreoffice_path()
-IMAGEMAGICK_CMD = _get_imagemagick_command()
+LIBREOFFICE_PATH = get_libreoffice_path()
+IMAGEMAGICK_CMD = get_imagemagick_command()
 
 class WordToMarkdownConverter:
     def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None):

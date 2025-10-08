@@ -18,13 +18,14 @@ import tempfile
 import subprocess
 import shutil
 # import urllib.parse
-import platform
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any, Set
 # import io
 # import base64
 import zipfile
 import xml.etree.ElementTree as ET
+
+from utils import get_libreoffice_path, get_imagemagick_command
 
 try:
     import openpyxl
@@ -41,58 +42,9 @@ except ImportError:
     print("Pillowライブラリが必要です: pip install pillow")
     sys.exit(1)
 
-def _get_libreoffice_path():
-    """プラットフォームに応じたLibreOfficeのパスを取得"""
-    system = platform.system()
-    
-    if system == "Darwin":  # macOS
-        path = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
-        if os.path.exists(path):
-            return path
-    elif system == "Linux":  # Ubuntu/Linux
-        common_paths = [
-            "/usr/bin/soffice",
-            "/usr/bin/libreoffice",
-            "/snap/bin/libreoffice",
-        ]
-        for path in common_paths:
-            if os.path.exists(path):
-                return path
-        try:
-            result = subprocess.run(["which", "soffice"], capture_output=True, text=True)
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-            result = subprocess.run(["which", "libreoffice"], capture_output=True, text=True)
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-        except Exception:
-            pass  # コマンド検索失敗は無視
-    elif system == "Windows":
-        common_paths = [
-            r"C:\Program Files\LibreOffice\program\soffice.exe",
-            r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
-        ]
-        for path in common_paths:
-            if os.path.exists(path):
-                return path
-    
-    return "soffice"
-
-def _get_imagemagick_command():
-    """ImageMagickのコマンド名を取得（バージョンに応じて'magick'または'convert'）"""
-    try:
-        if shutil.which('magick'):
-            return 'magick'
-        elif shutil.which('convert'):
-            return 'convert'
-        else:
-            return 'convert'
-    except Exception:
-        return 'convert'
-
 # 設定定数
-LIBREOFFICE_PATH = _get_libreoffice_path()
-IMAGEMAGICK_CMD = _get_imagemagick_command()
+LIBREOFFICE_PATH = get_libreoffice_path()
+IMAGEMAGICK_CMD = get_imagemagick_command()
 
 # DPI設定
 DEFAULT_DPI = 600
@@ -199,6 +151,14 @@ class ExcelToMarkdownConverter:
     def _is_canonical_emit(self) -> bool:
         """Check if currently in canonical emission mode."""
         return getattr(self, '_in_canonical_emit', False)
+
+    def _col_letter(self, n: int) -> str:
+        """Convert column number to Excel column letter (1 -> A, 27 -> AA, etc.)."""
+        letters = ''
+        while n > 0:
+            n, rem = divmod(n-1, 26)
+            letters = chr(65 + rem) + letters
+        return letters
 
     def _safe_get_cell_value(self, sheet, row: int, col: int) -> Any:
         """Safely get cell value, return None if error."""
@@ -4609,14 +4569,6 @@ class ExcelToMarkdownConverter:
                             print(f"[DEBUG][_iso_v2] Found {len(src_rows)} rows in source sheet.xml")
                             cells_copied = 0
                             
-                            # Helper to convert index to letters
-                            def _col_letter(n: int) -> str:
-                                letters = ''
-                                while n > 0:
-                                    n, rem = divmod(n-1, 26)
-                                    letters = chr(65 + rem) + letters
-                                return letters
-                            
                             # Copy rows in range, keeping original row numbers
                             for row_el in src_rows:
                                 try:
@@ -4669,21 +4621,14 @@ class ExcelToMarkdownConverter:
                             sroot.append(new_sheet_data)
                             
                             # Update dimension element with ORIGINAL row/column numbers
-                            def col_letter(n: int) -> str:
-                                letters = ''
-                                while n > 0:
-                                    n, rem = divmod(n-1, 26)
-                                    letters = chr(65 + rem) + letters
-                                return letters
-                            
                             dim_tag = f'{{{ns}}}dimension'
                             dim = sroot.find(dim_tag)
                             if dim is None:
                                 dim = ET.Element(dim_tag)
                                 sroot.insert(0, dim)
                             # Use original row/col numbers
-                            start_addr = f"{col_letter(s_col)}{s_row}"
-                            end_addr = f"{col_letter(e_col)}{e_row}"
+                            start_addr = f"{self._col_letter(s_col)}{s_row}"
+                            end_addr = f"{self._col_letter(e_col)}{e_row}"
                             dim.set('ref', f"{start_addr}:{end_addr}")
                         
                         # Rebuild cols element with ORIGINAL column numbers
@@ -5928,15 +5873,8 @@ class ExcelToMarkdownConverter:
                     try:
                         s_col, e_col, s_row, e_row = cell_range
                         # compute Excel-style column letters
-                        def col_letter(n: int) -> str:
-                            letters = ''
-                            while n > 0:
-                                n, rem = divmod(n-1, 26)
-                                letters = chr(65 + rem) + letters
-                            return letters
-
-                        start_col_letter = col_letter(s_col)
-                        end_col_letter = col_letter(e_col)
+                        start_col_letter = self._col_letter(s_col)
+                        end_col_letter = self._col_letter(e_col)
                         # create print area string like 'Sheet Name'!$A$5:$D$20
                         sheet_name_escaped = sheet.title.replace("'", "''")
                         area_ref = f"'{sheet_name_escaped}'!${start_col_letter}${s_row}:${end_col_letter}${e_row}"
@@ -6091,13 +6029,7 @@ class ExcelToMarkdownConverter:
                                         if new_col_idx < 1:
                                             new_col_idx = 1
                                         # helper to compute column letters from index
-                                        def _col_letter_local(n: int) -> str:
-                                            letters = ''
-                                            while n > 0:
-                                                n, rem = divmod(n-1, 26)
-                                                letters = chr(65 + rem) + letters
-                                            return letters
-                                        new_col_letters = _col_letter_local(new_col_idx)
+                                        new_col_letters = self._col_letter(new_col_idx)
                                         # adjust cell r attribute to new column letters + new row number
                                         new_cell = ET.Element('{%s}c' % ns, dict(c.attrib))
                                         new_cell.attrib['r'] = f"{new_col_letters}{new_r_index}"
@@ -6123,15 +6055,9 @@ class ExcelToMarkdownConverter:
                                     dim = ET.Element(dim_tag)
                                     sroot4.insert(0, dim)
                                 # compute A1-style addresses for new dimension
-                                def col_letter(n: int) -> str:
-                                    letters = ''
-                                    while n > 0:
-                                        n, rem = divmod(n-1, 26)
-                                        letters = chr(65 + rem) + letters
-                                    return letters
                                 # After trimming we renumber columns so leftmost column becomes A (1)
-                                start_addr = f"{col_letter(1)}1"
-                                end_addr = f"{col_letter(e_col - s_col + 1)}{max(1, new_r_index-1)}"
+                                start_addr = f"{self._col_letter(1)}1"
+                                end_addr = f"{self._col_letter(e_col - s_col + 1)}{max(1, new_r_index-1)}"
                                 dim.set('ref', f"{start_addr}:{end_addr}")
 
                                 # rebuild cols element to include only kept columns with widths from original sheet when possible
