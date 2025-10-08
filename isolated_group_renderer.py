@@ -1171,6 +1171,14 @@ class IsolatedGroupRenderer:
             except Exception:
                 pass
         
+        styles_path = os.path.join(tmpdir, 'xl', 'styles.xml')
+        try:
+            with open(styles_path, 'w', encoding='utf-8') as f:
+                f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+                f.write('<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></styleSheet>')
+        except Exception:
+            pass
+        
         target_sheet_new_index = 0
         wb_path = os.path.join(tmpdir, 'xl/workbook.xml')
         if os.path.exists(wb_path):
