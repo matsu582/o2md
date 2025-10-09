@@ -220,10 +220,24 @@ class IsolatedGroupRenderer:
                         picked.append(all_ranges[idx])
                 
                 if picked:
-                    s_col = min(r[0] for r in picked)
-                    e_col = max(r[1] for r in picked)
-                    s_row = min(r[2] for r in picked)
-                    e_row = max(r[3] for r in picked)
+                    valid_picked = [r for r in picked if r[0] <= r[1] and r[2] <= r[3]]
+                    if not valid_picked:
+                        valid_picked = picked
+                    
+                    s_col = min(r[0] for r in valid_picked)
+                    e_col = max(r[1] for r in valid_picked)
+                    s_row = min(r[2] for r in valid_picked)
+                    e_row = max(r[3] for r in valid_picked)
+                    
+                    if s_col > e_col:
+                        s_col, e_col = e_col, s_col
+                    if s_row > e_row:
+                        s_row, e_row = e_row, s_row
+                    
+                    if e_col < s_col:
+                        e_col = s_col
+                    if e_row < s_row:
+                        e_row = s_row
                     
                     try:
                         max_data_col = 0
