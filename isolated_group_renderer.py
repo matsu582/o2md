@@ -1211,6 +1211,11 @@ class IsolatedGroupRenderer:
                             sheet_el.set('sheetId', '1')
                             sheet_el.set(f'{{{rel_ns}}}id', 'rId1')
                     
+                    # sheets要素を最後に移動（mainブランチと同じ順序にする）
+                    if sheets_el is not None:
+                        root.remove(sheets_el)
+                        root.append(sheets_el)
+                    
                     tree.write(wb_path, encoding='utf-8', xml_declaration=True)
                     
                     wb_rels_path = os.path.join(tmpdir, 'xl/_rels/workbook.xml.rels')
@@ -1276,12 +1281,15 @@ class IsolatedGroupRenderer:
                     
                     if dn is None:
                         dn = ET.Element(dn_tag)
-                        # sheets要素の後に挿入
+                        # sheets要素を最後に移動してdefinedNamesをその前に配置（mainブランチと同じ順序）
                         sheets_tag = f'{{{ns}}}sheets'
                         sheets_el = root.find(sheets_tag)
                         if sheets_el is not None:
-                            idx = list(root).index(sheets_el)
-                            root.insert(idx + 1, dn)
+                            # sheets要素を削除して最後に再追加
+                            root.remove(sheets_el)
+                            # definedNamesを追加
+                            root.append(dn)
+                            root.append(sheets_el)
                         else:
                             root.append(dn)
                     
