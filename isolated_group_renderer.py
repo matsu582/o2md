@@ -1206,22 +1206,61 @@ class IsolatedGroupRenderer:
                 sheets_el = root.find(sheets_tag)
                 
                 if sheets_el is not None:
+                    rel_ns = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+                    target_sheet_rid = None
                     sheets_to_remove = []
-                    for sheet_el in list(sheets_el.findall(f'{{{ns}}}sheet')):
-                        sheet_id = sheet_el.attrib.get('sheetId')
-                        if sheet_id and int(sheet_id) != (sheet_index + 1):
-                            sheets_to_remove.append(sheet_el)
                     
-                    for sheet_el in sheets_to_remove:
+                    # インデックスで判定（mainブランチと同じロジック）
+                    for idx, sheet_el in enumerate(list(sheets_el)):
+                        if idx == sheet_index:
+                            target_sheet_rid = sheet_el.attrib.get(f'{{{rel_ns}}}id')
+                        else:
+                            sheets_to_remove.append((idx, sheet_el))
+                    
+                    for _, sheet_el in sheets_to_remove:
                         sheets_el.remove(sheet_el)
-                        print(f"[DEBUG] Removed sheet: {sheet_el.attrib.get('name')}")
                     
-                    remaining_sheets = list(sheets_el.findall(f'{{{ns}}}sheet'))
-                    for i, sheet_el in enumerate(remaining_sheets, 1):
-                        sheet_el.set('sheetId', str(i))
+                    if sheets_el is not None:
+                        for sheet_el in list(sheets_el):
+                            sheet_el.set('sheetId', '1')
+                            sheet_el.set(f'{{{rel_ns}}}id', 'rId1')
                     
                     tree.write(wb_path, encoding='utf-8', xml_declaration=True)
-                    print(f"[DEBUG] Kept only target sheet: {sheet.title}")
+                    
+                    wb_rels_path = os.path.join(tmpdir, 'xl/_rels/workbook.xml.rels')
+                    if os.path.exists(wb_rels_path):
+                        rels_tree = ET.parse(wb_rels_path)
+                        rels_root = rels_tree.getroot()
+                        pkg_rel_ns = 'http://schemas.openxmlformats.org/package/2006/relationships'
+                        
+                        rels_to_remove = []
+                        target_sheet_rel = None
+                        for rel in list(rels_root):
+                            rid = rel.attrib.get('Id')
+                            rel_type = rel.attrib.get('Type', '')
+                            
+                            if rel_type.endswith('/worksheet'):
+                                if rid == target_sheet_rid:
+                                    target_sheet_rel = rel
+                                else:
+                                    rels_to_remove.append(rel)
+                        
+                        for rel in rels_to_remove:
+                            rels_root.remove(rel)
+                        
+                        if target_sheet_rel is not None:
+                            target_sheet_rel.set('Id', 'rId1')
+                        
+                        rels_tree.write(wb_rels_path, encoding='utf-8', xml_declaration=True)
+                    
+                    for idx, _ in sheets_to_remove:
+                        sheet_file = os.path.join(tmpdir, f'xl/worksheets/sheet{idx+1}.xml')
+                        if os.path.exists(sheet_file):
+                            os.remove(sheet_file)
+                        
+                        sheet_rels = os.path.join(tmpdir, f'xl/worksheets/_rels/sheet{idx+1}.xml.rels')
+                        if os.path.exists(sheet_rels):
+                            os.remove(sheet_rels)
             except Exception as e:
                 print(f"[WARNING] シート削除失敗: {e}")
         
@@ -1504,6 +1543,251 @@ class IsolatedGroupRenderer:
                                     row_el.text = str(new_row)
                             except (ValueError, TypeError):
                                 pass
+                    
+                    dtree.write(drawing_path_full, encoding='utf-8', xml_declaration=True)
+                    
+                    try:
+                        col_x, row_y = self.converter._compute_sheet_cell_pixel_map(self.sheet, DPI=dpi)
+                    except Exception:
+                        col_x, row_y = [0], [0]
+                    EMU_PER_INCH = 914400
+                    try:
+                        EMU_PER_PIXEL = EMU_PER_INCH / float(dpi)
+                    except (ValueError, TypeError):
+                        try:
+                            EMU_PER_PIXEL = EMU_PER_INCH / float(int(getattr(self.converter, 'dpi', dpi) or dpi))
+                        except (ValueError, TypeError):
+                            EMU_PER_PIXEL = EMU_PER_INCH / float(dpi)
+                    a_ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+                    
+                    for node2 in list(droot):
+                        lname2 = node2.tag.split('}')[-1].lower()
+                        if lname2 not in ('twocellanchor', 'onecellanchor'):
+                            continue
+                        try:
+                            if lname2 == 'twocellanchor':
+                                fr = node2.find('xdr:from', ns_xdr)
+                                to = node2.find('xdr:to', ns_xdr)
+                                if fr is None or to is None:
+                                    continue
+                                try:
+                                    col = int(fr.find('xdr:col', ns_xdr).text)
+                                except (ValueError, TypeError):
+                                    col = 0
+                                try:
+                                    row = int(fr.find('xdr:row', ns_xdr).text)
+                                except (ValueError, TypeError):
+                                    row = 0
+                                try:
+                                    colOff = int(fr.find('xdr:colOff', ns_xdr).text)
+                                except (ValueError, TypeError):
+                                    colOff = 0
+                                try:
+                                    rowOff = int(fr.find('xdr:rowOff', ns_xdr).text)
+                                except (ValueError, TypeError):
+                                    rowOff = 0
+                                try:
+                                    to_col = int(to.find('xdr:col', ns_xdr).text)
+                                except (ValueError, TypeError):
+                                    to_col = col
+                                try:
+                                    to_row = int(to.find('xdr:row', ns_xdr).text)
+                                except (ValueError, TypeError):
+                                    to_row = row
+                                try:
+                                    to_colOff = int(to.find('xdr:colOff', ns_xdr).text)
+                                except (ValueError, TypeError):
+                                    to_colOff = 0
+                                try:
+                                    to_rowOff = int(to.find('xdr:rowOff', ns_xdr).text)
+                                except (ValueError, TypeError):
+                                    to_rowOff = 0
+                                
+                                left_px = col_x[col] + (colOff / EMU_PER_PIXEL) if col < len(col_x) else col_x[-1]
+                                right_px = col_x[to_col] + (to_colOff / EMU_PER_PIXEL) if to_col < len(col_x) else col_x[-1]
+                                top_px = row_y[row] + (rowOff / EMU_PER_PIXEL) if row < len(row_y) else row_y[-1]
+                                bottom_px = row_y[to_row] + (to_rowOff / EMU_PER_PIXEL) if to_row < len(row_y) else row_y[-1]
+                            else:
+                                fr = node2.find('xdr:from', ns_xdr)
+                                ext = node2.find('xdr:ext', ns_xdr)
+                                if fr is None or ext is None:
+                                    continue
+                                try:
+                                    col = int(fr.find('xdr:col', ns_xdr).text)
+                                except (ValueError, TypeError):
+                                    col = 0
+                                try:
+                                    row = int(fr.find('xdr:row', ns_xdr).text)
+                                except (ValueError, TypeError):
+                                    row = 0
+                                try:
+                                    colOff = int(fr.find('xdr:colOff', ns_xdr).text)
+                                except (ValueError, TypeError):
+                                    colOff = 0
+                                cx = int(ext.attrib.get('cx', '0'))
+                                cy = int(ext.attrib.get('cy', '0'))
+                                left_px = col_x[col] + (colOff / EMU_PER_PIXEL) if col < len(col_x) else col_x[-1]
+                                top_px = row_y[row] if row < len(row_y) else row_y[-1]
+                                right_px = left_px + (cx / EMU_PER_PIXEL)
+                                bottom_px = top_px + (cy / EMU_PER_PIXEL)
+                        except (ValueError, TypeError):
+                            continue
+                        
+                        try:
+                            grp_node = node2.find('xdr:grpSp', ns_xdr)
+                            target_w_px = max(0.0, (right_px - left_px))
+                            target_h_px = max(0.0, (bottom_px - top_px))
+                            if grp_node is not None:
+                                try:
+                                    grp_xfrm = grp_node.find('.//{%s}xfrm' % a_ns)
+                                    chExt = None
+                                    orig_ch_cx = orig_ch_cy = None
+                                    if grp_xfrm is not None:
+                                        chExt = grp_xfrm.find('{%s}chExt' % a_ns)
+                                        ext_el = grp_xfrm.find('{%s}ext' % a_ns)
+                                        orig_cx = orig_cy = None
+                                        try:
+                                            if ext_el is not None:
+                                                ocx = ext_el.attrib.get('cx')
+                                                ocy = ext_el.attrib.get('cy')
+                                                if ocx is not None:
+                                                    orig_cx = int(ocx)
+                                                if ocy is not None:
+                                                    orig_cy = int(ocy)
+                                        except (ValueError, TypeError):
+                                            orig_cx = orig_cy = None
+                                        try:
+                                            if chExt is not None:
+                                                cccx = chExt.attrib.get('cx')
+                                                cccy = chExt.attrib.get('cy')
+                                                if cccx is not None:
+                                                    orig_ch_cx = int(cccx)
+                                                if cccy is not None:
+                                                    orig_ch_cy = int(cccy)
+                                        except (ValueError, TypeError):
+                                            orig_ch_cx = orig_ch_cy = None
+                                        
+                                        try:
+                                            if orig_cx and orig_cy and orig_cx > 0 and orig_cy > 0:
+                                                orig_w_px = float(orig_cx) / float(EMU_PER_PIXEL)
+                                                orig_h_px = float(orig_cy) / float(EMU_PER_PIXEL)
+                                                if orig_w_px > 0 and orig_h_px > 0:
+                                                    scale_w = target_w_px / orig_w_px if orig_w_px > 0 else 1.0
+                                                    scale_h = target_h_px / orig_h_px if orig_h_px > 0 else 1.0
+                                                    uniform_scale = min(scale_w, scale_h) if scale_w > 0 and scale_h > 0 else 1.0
+                                                    new_cx_emu = int(round(float(orig_cx) * float(uniform_scale)))
+                                                    new_cy_emu = int(round(float(orig_cy) * float(uniform_scale)))
+                                                else:
+                                                    new_cx_emu = int(round(target_w_px * EMU_PER_PIXEL))
+                                                    new_cy_emu = int(round(target_h_px * EMU_PER_PIXEL))
+                                            else:
+                                                new_cx_emu = int(round(target_w_px * EMU_PER_PIXEL))
+                                                new_cy_emu = int(round(target_h_px * EMU_PER_PIXEL))
+                                        except (ValueError, TypeError):
+                                            new_cx_emu = int(round(max(1.0, target_w_px) * EMU_PER_PIXEL))
+                                            new_cy_emu = int(round(max(1.0, target_h_px) * EMU_PER_PIXEL))
+                                        
+                                        try:
+                                            new_cx_emu = self.converter._to_positive(new_cx_emu, orig_cx, orig_ch_cx, target_w_px)
+                                            new_cy_emu = self.converter._to_positive(new_cy_emu, orig_cy, orig_ch_cy, target_h_px)
+                                        except (ValueError, TypeError):
+                                            new_cx_emu = int(round(max(1.0, target_w_px) * EMU_PER_PIXEL))
+                                            new_cy_emu = int(round(max(1.0, target_h_px) * EMU_PER_PIXEL))
+                                        
+                                        try:
+                                            min_emu = int(round(float(EMU_PER_PIXEL))) if EMU_PER_PIXEL and EMU_PER_PIXEL > 0 else 1
+                                            if not new_cx_emu or int(new_cx_emu) < min_emu:
+                                                new_cx_emu = min_emu
+                                            if not new_cy_emu or int(new_cy_emu) < min_emu:
+                                                new_cy_emu = min_emu
+                                        except (ValueError, TypeError):
+                                            pass
+                                        
+                                        try:
+                                            off = grp_xfrm.find('{%s}off' % a_ns)
+                                            if off is None:
+                                                off = ET.SubElement(grp_xfrm, '{%s}off' % a_ns)
+                                            off.set('x', str(int(round(left_px * EMU_PER_PIXEL))))
+                                            off.set('y', str(int(round(top_px * EMU_PER_PIXEL))))
+                                        except (ValueError, TypeError):
+                                            pass
+                                        try:
+                                            ext_el = grp_xfrm.find('{%s}ext' % a_ns)
+                                            if ext_el is None:
+                                                ext_el = ET.SubElement(grp_xfrm, '{%s}ext' % a_ns)
+                                            ext_el.set('cx', str(int(new_cx_emu)))
+                                            ext_el.set('cy', str(int(new_cy_emu)))
+                                        except (ValueError, TypeError):
+                                            pass
+                                        
+                                        try:
+                                            if chExt is not None and orig_ch_cx and orig_ch_cy and orig_ch_cx > 0 and orig_ch_cy > 0:
+                                                try:
+                                                    if 'uniform_scale' in locals():
+                                                        ch_scale = uniform_scale
+                                                    else:
+                                                        ch_scale = min(float(new_cx_emu) / float(orig_ch_cx), float(new_cy_emu) / float(orig_ch_cy))
+                                                except (ValueError, TypeError):
+                                                    ch_scale = 1.0
+                                                try:
+                                                    new_ch_cx = int(round(float(orig_ch_cx) * float(ch_scale)))
+                                                    new_ch_cy = int(round(float(orig_ch_cy) * float(ch_scale)))
+                                                    chExt.set('cx', str(new_ch_cx))
+                                                    chExt.set('cy', str(new_ch_cy))
+                                                except (ValueError, TypeError):
+                                                    pass
+                                        except (ValueError, TypeError):
+                                            pass
+                                except (ValueError, TypeError):
+                                    pass
+                            else:
+                                for sp in node2.findall('.//{%s}sp' % a_ns):
+                                    try:
+                                        xfrm = sp.find('.//{%s}xfrm' % a_ns)
+                                        if xfrm is not None:
+                                            try:
+                                                off = xfrm.find('{%s}off' % a_ns)
+                                                if off is None:
+                                                    off = ET.SubElement(xfrm, '{%s}off' % a_ns)
+                                                off.set('x', str(int(round(left_px * EMU_PER_PIXEL))))
+                                                off.set('y', str(int(round(top_px * EMU_PER_PIXEL))))
+                                            except (ValueError, TypeError):
+                                                pass
+                                            try:
+                                                ext_elem = xfrm.find('{%s}ext' % a_ns)
+                                                if ext_elem is None:
+                                                    ext_elem = ET.SubElement(xfrm, '{%s}ext' % a_ns)
+                                                ext_elem.set('cx', str(int(round(target_w_px * EMU_PER_PIXEL))))
+                                                ext_elem.set('cy', str(int(round(target_h_px * EMU_PER_PIXEL))))
+                                            except (ValueError, TypeError):
+                                                pass
+                                    except (ValueError, TypeError):
+                                        pass
+                                
+                                for pic in node2.findall('.//{%s}pic' % a_ns):
+                                    try:
+                                        xfrm = pic.find('.//{%s}xfrm' % a_ns)
+                                        if xfrm is not None:
+                                            try:
+                                                off = xfrm.find('{%s}off' % a_ns)
+                                                if off is None:
+                                                    off = ET.SubElement(xfrm, '{%s}off' % a_ns)
+                                                off.set('x', str(int(round(left_px * EMU_PER_PIXEL))))
+                                                off.set('y', str(int(round(top_px * EMU_PER_PIXEL))))
+                                            except (ValueError, TypeError):
+                                                pass
+                                            try:
+                                                ext_elem = xfrm.find('{%s}ext' % a_ns)
+                                                if ext_elem is None:
+                                                    ext_elem = ET.SubElement(xfrm, '{%s}ext' % a_ns)
+                                                ext_elem.set('cx', str(int(round(target_w_px * EMU_PER_PIXEL))))
+                                                ext_elem.set('cy', str(int(round(target_h_px * EMU_PER_PIXEL))))
+                                            except (ValueError, TypeError):
+                                                pass
+                                    except (ValueError, TypeError):
+                                        pass
+                        except (ValueError, TypeError):
+                            pass
                     
                     dtree.write(drawing_path_full, encoding='utf-8', xml_declaration=True)
                     
