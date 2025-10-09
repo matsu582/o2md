@@ -1998,7 +1998,6 @@ class ExcelToMarkdownConverter:
                                                             if isinstance(result, tuple) and len(result) == 2:
                                                                 img_name, cluster_row = result
                                                             else:
-                                                                # Fallback for old code path (if any)
                                                                 img_name = result
                                                                 cluster_row = 1
                                                             
@@ -2012,7 +2011,6 @@ class ExcelToMarkdownConverter:
                                                     # isolated group画像をMarkdownに追加するため、images_foundをTrueに設定
                                                     images_found = True
                                                     # 各画像を登録（row情報を使用）
-                                                    # isolated_imagesは(start_row, filename)のタプルのリスト
                                                     for cluster_row, img_name in isolated_images:
                                                         print(f"[DEBUG] Processing isolated group image: {img_name} at row={cluster_row}")
                                                         try:
@@ -3499,24 +3497,6 @@ class ExcelToMarkdownConverter:
                         to_row = int(to.find('xdr:row', ns).text)
                     except (ValueError, TypeError):
                         continue
-                    
-                    start_col = col + 1
-                    start_row = row + 1
-                    end_col = to_col + 1
-                    end_row = to_row + 1
-                    
-                    # Clamp to sheet bounds
-                    if start_col < 1:
-                        start_col = 1
-                    if start_row < 1:
-                        start_row = 1
-                    if end_col > sheet.max_column:
-                        end_col = sheet.max_column
-                    if end_row > sheet.max_row:
-                        end_row = sheet.max_row
-                    
-                    ranges.append((start_col, end_col, start_row, end_row))
-                    continue
                     # Use the colOff/rowOff EMU offsets to compute precise pixel
                     # positions for the anchor extents, then map those pixels to
                     # enclosing cell indices using col_x and row_y arrays. This
@@ -3550,22 +3530,7 @@ class ExcelToMarkdownConverter:
                     top_px = row_y[row] + (rowOff / EMU_PER_PIXEL) if row < len(row_y) else row_y[-1]
                     bottom_px = row_y[to_row] + (to_rowOff / EMU_PER_PIXEL) if to_row < len(row_y) else row_y[-1]
 
-                    ext_elem = node.find('.//xdr:ext', ns)
-                    if ext_elem is None:
-                        continue
-                    try:
-                        ext_cx = int(ext_elem.get('cx', 0))
-                        ext_cy = int(ext_elem.get('cy', 0))
-                    except (ValueError, TypeError):
-                        continue
-                    
-                    if ext_cx <= 0 or ext_cy <= 0:
-                        continue
-                    
-                    EMU_PER_PIXEL = 9525
-                    right_px = left_px + (ext_cx / EMU_PER_PIXEL)
-                    bottom_px = top_px + (ext_cy / EMU_PER_PIXEL)
-                    
+                    # map pixels to cell indices (1-based inclusive)
                     start_col = 1
                     for ci in range(1, len(col_x)):
                         if col_x[ci] >= left_px:
@@ -3600,6 +3565,7 @@ class ExcelToMarkdownConverter:
 
                     ranges.append((start_col, end_col, start_row, end_row))
                 else:
+                    # oneCellAnchor: use from.col/from.row and ext cx/cy to derive end cell
                     fr = node.find('xdr:from', ns)
                     ext = node.find('xdr:ext', ns)
                     if fr is None or ext is None:
@@ -3607,38 +3573,37 @@ class ExcelToMarkdownConverter:
                     try:
                         col = int(fr.find('xdr:col', ns).text)
                         row = int(fr.find('xdr:row', ns).text)
+                        colOff = int(fr.find('xdr:colOff', ns).text)
                     except (ValueError, TypeError):
                         continue
-                    try:
-                        cx = int(ext.attrib.get('cx', '0'))
-                        cy = int(ext.attrib.get('cy', '0'))
-                    except (ValueError, TypeError):
-                        continue
-                    
-                    if cx <= 0 or cy <= 0:
-                        continue
-                    
-                    start_col = col + 1
-                    start_row = row + 1
-                    
-                    EMU_PER_COL = 914400
-                    EMU_PER_ROW = 914400 * 0.75
-                    
-                    cols_spanned = max(1, int((cx + EMU_PER_COL - 1) / EMU_PER_COL))
-                    rows_spanned = max(1, int((cy + EMU_PER_ROW - 1) / EMU_PER_ROW))
-                    
-                    end_col = start_col + cols_spanned
-                    end_row = start_row + rows_spanned
-                    
-                    if start_col < 1:
-                        start_col = 1
-                    if start_row < 1:
-                        start_row = 1
-                    if end_col > sheet.max_column:
-                        end_col = sheet.max_column
-                    if end_row > sheet.max_row:
-                        end_row = sheet.max_row
-                    
+                    cx = int(ext.attrib.get('cx', '0'))
+                    cy = int(ext.attrib.get('cy', '0'))
+                    left_px = col_x[col] + (colOff / EMU_PER_PIXEL) if col < len(col_x) else col_x[-1]
+                    right_px = left_px + (cx / EMU_PER_PIXEL)
+                    top_px = row_y[row] if row < len(row_y) else row_y[-1]
+                    bottom_px = top_px + (cy / EMU_PER_PIXEL)
+                    # map pixels to cell indices
+                    # find start_col index
+                    start_col = 1
+                    for ci in range(1, len(col_x)):
+                        if col_x[ci] >= left_px:
+                            start_col = ci
+                            break
+                    end_col = len(col_x)-1
+                    for ci in range(1, len(col_x)):
+                        if col_x[ci] >= right_px:
+                            end_col = ci
+                            break
+                    start_row = 1
+                    for ri in range(1, len(row_y)):
+                        if row_y[ri] >= top_px:
+                            start_row = ri
+                            break
+                    end_row = len(row_y)-1
+                    for ri in range(1, len(row_y)):
+                        if row_y[ri] >= bottom_px:
+                            end_row = ri
+                            break
                     ranges.append((start_col, end_col, start_row, end_row))
         except Exception:
             pass  # データ構造操作失敗は無視
