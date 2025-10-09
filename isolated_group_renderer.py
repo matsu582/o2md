@@ -1882,6 +1882,12 @@ class IsolatedGroupRenderer:
             except (ValueError, TypeError):
                 pass
             
+            try:
+                self._set_page_setup_and_margins(src_for_conv)
+                print(f"[DEBUG] Applied fit-to-page settings to: {src_for_conv}")
+            except Exception as e:
+                print(f"[WARNING] fit-to-page設定失敗: {e}")
+            
             return src_for_conv
         except Exception as e:
             print(f"[ERROR] 一時xlsxファイル作成失敗: {e}")
@@ -2178,6 +2184,67 @@ class IsolatedGroupRenderer:
             return (png_name, 1)
 
 
+    def _set_page_setup_and_margins(self, xlsx_path):
+        """ExcelファイルのpageSetupとpageMarginsを設定"""
+        import zipfile
+        import tempfile
+        import shutil
+        import xml.etree.ElementTree as ET
+        
+        tmpdir = tempfile.mkdtemp(prefix='xls2md_fitpage_')
+        try:
+            with zipfile.ZipFile(xlsx_path, 'r') as zin:
+                zin.extractall(tmpdir)
+            
+            xl_worksheets = os.path.join(tmpdir, 'xl', 'worksheets')
+            if os.path.exists(xl_worksheets):
+                for fname in os.listdir(xl_worksheets):
+                    if fname.endswith('.xml') and fname.startswith('sheet'):
+                        sheet_path = os.path.join(xl_worksheets, fname)
+                        try:
+                            tree = ET.parse(sheet_path)
+                            root = tree.getroot()
+                            ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+                            
+                            for ps in root.findall(f'.//{{{ns}}}pageSetup'):
+                                root.remove(ps)
+                            
+                            ps = ET.Element(f'{{{ns}}}pageSetup')
+                            ps.set('scale', '25')
+                            ps.set('orientation', 'landscape')
+                            ps.set('paperSize', '9')
+                            ps.set('useFirstPageNumber', '1')
+                            root.append(ps)
+                            
+                            for pm in root.findall(f'.//{{{ns}}}pageMargins'):
+                                root.remove(pm)
+                            pm = ET.Element(f'{{{ns}}}pageMargins')
+                            pm.set('left', '0.25')
+                            pm.set('right', '0.25')
+                            pm.set('top', '0.25')
+                            pm.set('bottom', '0.25')
+                            pm.set('header', '0.0')
+                            pm.set('footer', '0.0')
+                            root.append(pm)
+                            
+                            tree.write(sheet_path, encoding='utf-8', xml_declaration=True)
+                        except Exception as e:
+                            print(f"[WARNING] {fname} のpageSetup設定に失敗: {e}")
+            
+            with zipfile.ZipFile(xlsx_path, 'w', zipfile.ZIP_DEFLATED) as zout:
+                for root_dir, dirs, files in os.walk(tmpdir):
+                    for file in files:
+                        file_path = os.path.join(root_dir, file)
+                        arcname = os.path.relpath(file_path, tmpdir)
+                        zout.write(file_path, arcname)
+            
+            return True
+        finally:
+            try:
+                shutil.rmtree(tmpdir)
+            except Exception:
+                pass
+    
     def _col_letter(self, col_num):
         """列番号をExcelの列文字に変換（1→'A', 27→'AA'）"""
         result = []
