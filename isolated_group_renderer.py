@@ -1355,38 +1355,38 @@ class IsolatedGroupRenderer:
                     sheet_data_tag = f'{{{ns}}}sheetData'
                     sheet_data = sroot4.find(sheet_data_tag)
                     if sheet_data is not None:
-                        new_sheet_data = ET.Element(sheet_data_tag)
-                        rows = sheet_data.findall(f'{{{ns}}}row')
-                        new_r_index = 1
-                        for row_el in rows:
-                            try:
-                                rnum = int(row_el.attrib.get('r', '0'))
-                            except (ValueError, TypeError):
-                                continue
-                            if rnum < s_row or rnum > e_row:
-                                continue
-                            new_row = ET.Element(f'{{{ns}}}row')
-                            new_row.set('r', str(new_r_index))
-                            for attr in ('ht', 'hidden', 'customHeight'):
-                                if attr in row_el.attrib:
-                                    new_row.set(attr, row_el.attrib.get(attr))
-                            try:
-                                rd = self.sheet.row_dimensions.get(rnum)
-                                if rd is not None:
-                                    rh = getattr(rd, 'height', None)
-                                    if rh is not None and 'ht' not in new_row.attrib:
-                                        new_row.set('ht', str(rh))
-                                        new_row.set('customHeight', '1')
-                            except (ValueError, TypeError):
-                                pass
-                            new_sheet_data.append(new_row)
-                            new_r_index += 1
+                        for child in list(sheet_data):
+                            if child.tag.endswith('row'):
+                                try:
+                                    sheet_data.remove(child)
+                                except Exception:
+                                    pass
                         
-                        parent = sroot4
-                        for child in list(parent):
-                            if child.tag == sheet_data_tag:
-                                parent.remove(child)
-                        parent.append(new_sheet_data)
+                        first_row = int(s_row)
+                        last_row = int(e_row)
+                        out_r = 1
+                        for src_r in range(first_row, last_row + 1):
+                            try:
+                                r_el = ET.Element(f'{{{ns}}}row')
+                                r_el.set('r', str(out_r))
+                                try:
+                                    src_row_obj = self.sheet.row_dimensions.get(src_r)
+                                    if src_row_obj is not None and getattr(src_row_obj, 'height', None) is not None:
+                                        r_el.set('ht', str(float(src_row_obj.height)))
+                                        r_el.set('customHeight', '1')
+                                    else:
+                                        try:
+                                            dflt = getattr(self.sheet.sheet_format, 'defaultRowHeight', None)
+                                            if dflt is not None:
+                                                r_el.set('ht', str(float(dflt)))
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
+                                sheet_data.append(r_el)
+                            except Exception:
+                                pass
+                            out_r += 1
                         
                         dim_tag = f'{{{ns}}}dimension'
                         dim = sroot4.find(dim_tag)
@@ -1394,7 +1394,7 @@ class IsolatedGroupRenderer:
                             dim = ET.Element(dim_tag)
                             sroot4.insert(0, dim)
                         start_addr = f"{self._col_letter(1)}1"
-                        end_addr = f"{self._col_letter(e_col - s_col + 1)}{max(1, new_r_index-1)}"
+                        end_addr = f"{self._col_letter(e_col - s_col + 1)}{e_row - s_row + 1}"
                         dim.set('ref', f"{start_addr}:{end_addr}")
                     
                     cols_tag = f'{{{ns}}}cols'
@@ -1865,19 +1865,82 @@ class IsolatedGroupRenderer:
                         arcname = os.path.relpath(full, tmpdir)
                         zout.write(full, arcname)
             
-            print(f"[DEBUG] Using ZIP-created workbook directly (preserving shapes): {src_for_conv}")
+            print(f"[DEBUG] saved group workbook: {src_for_conv}")
             
             try:
                 st = os.stat(src_for_conv)
-                print(f"[DEBUG] Workbook size: {st.st_size} bytes")
-            except (ValueError, TypeError):
-                pass
+                print(f"[DEBUG] dbg_copy exists: size={st.st_size} bytes")
+            except Exception:
+                try:
+                    print(f"[WARN] dbg_copy not found after save: {src_for_conv}")
+                except Exception:
+                    pass
+            
+            try:
+                import shutil
+                from openpyxl import load_workbook as _op_load
+                
+                fixed_candidate = src_for_conv.replace('.xlsx', '.fixed.xlsx')
+                shutil.copyfile(src_for_conv, fixed_candidate)
+                print(f"[DEBUG] created fixed workbook (inline): {fixed_candidate}")
+                
+                try:
+                    _wb_tmp = _op_load(fixed_candidate)
+                    _wb_tmp.save(fixed_candidate)
+                    print(f"[DEBUG] openpyxl resaved fixed workbook: {fixed_candidate}")
+                    
+                    src_for_conv = fixed_candidate
+                    
+                    try:
+                        import zipfile
+                        import tempfile
+                        tmpdir_fix = tempfile.mkdtemp(prefix='fix_dimension_')
+                        try:
+                            with zipfile.ZipFile(src_for_conv, 'r') as zin:
+                                zin.extractall(tmpdir_fix)
+                            
+                            sheet_xml = os.path.join(tmpdir_fix, f'xl/worksheets/sheet{target_sheet_new_index+1}.xml')
+                            if os.path.exists(sheet_xml):
+                                tree = ET.parse(sheet_xml)
+                                root = tree.getroot()
+                                ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+                                
+                                dim = root.find(f'.//{{{ns}}}dimension')
+                                if dim is not None and cell_range:
+                                    s_col, e_col, s_row, e_row = cell_range
+                                    start_addr = f"{self._col_letter(1)}1"
+                                    end_addr = f"{self._col_letter(e_col - s_col + 1)}{e_row - s_row + 1}"
+                                    dim.set('ref', f"{start_addr}:{end_addr}")
+                                    tree.write(sheet_xml, encoding='utf-8', xml_declaration=True)
+                                    print(f"[DEBUG] Fixed dimension to {start_addr}:{end_addr}")
+                            
+                            with zipfile.ZipFile(src_for_conv, 'w', zipfile.ZIP_DEFLATED) as zout:
+                                for folder, _, files in os.walk(tmpdir_fix):
+                                    for fn in files:
+                                        full = os.path.join(folder, fn)
+                                        arcname = os.path.relpath(full, tmpdir_fix)
+                                        zout.write(full, arcname)
+                        finally:
+                            shutil.rmtree(tmpdir_fix, ignore_errors=True)
+                    except Exception as _e_dim:
+                        print(f"[WARN] dimension fix failed: {_e_dim}")
+                    
+                except Exception as _e_inner:
+                    try:
+                        print(f"[WARN] openpyxl resave failed: {_e_inner}")
+                    except Exception:
+                        pass
+            except Exception as _e:
+                try:
+                    print(f"[WARN] could not create inline fixed workbook: {_e}")
+                except Exception:
+                    pass
             
             try:
                 self._set_page_setup_and_margins(src_for_conv)
                 print(f"[DEBUG] Applied fit-to-page settings to: {src_for_conv}")
             except Exception as e:
-                print(f"[WARNING] fit-to-page設定失敗: {e}")
+                print(f"[WARNING] isolated group pageSetup設定失敗: {e}")
             
             return src_for_conv
         except Exception as e:
