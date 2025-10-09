@@ -1357,13 +1357,16 @@ class IsolatedGroupRenderer:
                     if sheet_data is not None:
                         new_sheet_data = ET.Element(sheet_data_tag)
                         rows = sheet_data.findall(f'{{{ns}}}row')
+                        new_r_index = 1
                         for row_el in rows:
                             try:
                                 rnum = int(row_el.attrib.get('r', '0'))
                             except (ValueError, TypeError):
                                 continue
+                            if rnum < s_row or rnum > e_row:
+                                continue
                             new_row = ET.Element(f'{{{ns}}}row')
-                            new_row.set('r', row_el.attrib.get('r'))
+                            new_row.set('r', str(new_r_index))
                             for attr in ('ht', 'hidden', 'customHeight'):
                                 if attr in row_el.attrib:
                                     new_row.set(attr, row_el.attrib.get(attr))
@@ -1371,21 +1374,13 @@ class IsolatedGroupRenderer:
                                 rd = self.sheet.row_dimensions.get(rnum)
                                 if rd is not None:
                                     rh = getattr(rd, 'height', None)
-                                    if rh is not None:
+                                    if rh is not None and 'ht' not in new_row.attrib:
                                         new_row.set('ht', str(rh))
-                                        if 'customHeight' not in new_row.attrib:
-                                            new_row.set('customHeight', '1')
-                                    else:
-                                        default_row_h = getattr(self.sheet.sheet_format, 'defaultRowHeight', None)
-                                        if default_row_h is not None and 'ht' not in new_row.attrib:
-                                            new_row.set('ht', str(float(default_row_h)))
-                                else:
-                                    default_row_h = getattr(self.sheet.sheet_format, 'defaultRowHeight', None)
-                                    if default_row_h is not None and 'ht' not in new_row.attrib:
-                                        new_row.set('ht', str(float(default_row_h)))
+                                        new_row.set('customHeight', '1')
                             except (ValueError, TypeError):
                                 pass
                             new_sheet_data.append(new_row)
+                            new_r_index += 1
                         
                         parent = sroot4
                         for child in list(parent):
@@ -1399,7 +1394,7 @@ class IsolatedGroupRenderer:
                             dim = ET.Element(dim_tag)
                             sroot4.insert(0, dim)
                         start_addr = f"{self._col_letter(1)}1"
-                        end_addr = f"{self._col_letter(e_col - s_col + 1)}1"
+                        end_addr = f"{self._col_letter(e_col - s_col + 1)}{max(1, new_r_index-1)}"
                         dim.set('ref', f"{start_addr}:{end_addr}")
                     
                     cols_tag = f'{{{ns}}}cols'
