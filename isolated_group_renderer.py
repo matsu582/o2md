@@ -1178,20 +1178,6 @@ class IsolatedGroupRenderer:
         import tempfile
         import shutil
         
-        shared_strings_path = os.path.join(tmpdir, 'xl', 'sharedStrings.xml')
-        if os.path.exists(shared_strings_path):
-            try:
-                os.remove(shared_strings_path)
-            except Exception:
-                pass
-        
-        styles_path = os.path.join(tmpdir, 'xl', 'styles.xml')
-        try:
-            with open(styles_path, 'w', encoding='utf-8') as f:
-                f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
-                f.write('<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></styleSheet>')
-        except Exception:
-            pass
         
         target_sheet_new_index = 0
         wb_path = os.path.join(tmpdir, 'xl/workbook.xml')
@@ -1843,14 +1829,6 @@ class IsolatedGroupRenderer:
         except Exception as e:
             print(f"[WARNING] リレーションシップのクリーンアップ失敗: {e}")
         
-        try:
-            printer_dir = os.path.join(tmpdir, 'xl', 'printerSettings')
-            if os.path.exists(printer_dir):
-                import shutil
-                shutil.rmtree(printer_dir, ignore_errors=True)
-                print(f"[DEBUG] Removed printerSettings directory")
-        except Exception as e:
-            print(f"[WARNING] printerSettings削除失敗: {e}")
         
         # tmpdirをzip化して一時xlsxファイルを作成
         try:
