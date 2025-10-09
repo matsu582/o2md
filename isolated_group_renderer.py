@@ -1377,9 +1377,18 @@ class IsolatedGroupRenderer:
                                 rd = self.sheet.row_dimensions.get(rnum)
                                 if rd is not None:
                                     rh = getattr(rd, 'height', None)
-                                    if rh is not None and 'ht' not in new_row.attrib:
+                                    if rh is not None:
                                         new_row.set('ht', str(rh))
-                                        new_row.set('customHeight', '1')
+                                        if 'customHeight' not in new_row.attrib:
+                                            new_row.set('customHeight', '1')
+                                    else:
+                                        default_row_h = getattr(self.sheet.sheet_format, 'defaultRowHeight', None)
+                                        if default_row_h is not None and 'ht' not in new_row.attrib:
+                                            new_row.set('ht', str(float(default_row_h)))
+                                else:
+                                    default_row_h = getattr(self.sheet.sheet_format, 'defaultRowHeight', None)
+                                    if default_row_h is not None and 'ht' not in new_row.attrib:
+                                        new_row.set('ht', str(float(default_row_h)))
                             except (ValueError, TypeError):
                                 pass
                             new_sheet_data.append(new_row)
@@ -2226,6 +2235,9 @@ class IsolatedGroupRenderer:
                             pm.set('header', '0.0')
                             pm.set('footer', '0.0')
                             root.append(pm)
+                            
+                            for hf in root.findall(f'.//{{{ns}}}headerFooter'):
+                                root.remove(hf)
                             
                             tree.write(sheet_path, encoding='utf-8', xml_declaration=True)
                         except Exception as e:
