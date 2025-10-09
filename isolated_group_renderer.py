@@ -1343,6 +1343,28 @@ class IsolatedGroupRenderer:
                 except Exception as e:
                     print(f"[WARNING] pageSetup修正失敗: {e}")
             
+            try:
+                sheet_rel = os.path.join(tmpdir, f"xl/worksheets/sheet{target_sheet_new_index+1}.xml")
+                if os.path.exists(sheet_rel):
+                    stree2 = ET.parse(sheet_rel)
+                    sroot2 = stree2.getroot()
+                    ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+                    
+                    for br_tag in ('rowBreaks', 'colBreaks', 'pageBreaks'):
+                        for el in list(sroot2.findall(f'{{{ns}}}{br_tag}')):
+                            try:
+                                sroot2.remove(el)
+                            except Exception:
+                                pass
+                    
+                    for row_el in sroot2.findall(f'.//{{{ns}}}row'):
+                        for cell_el in list(row_el):
+                            if cell_el.tag.split('}')[-1] == 'c':
+                                row_el.remove(cell_el)
+                    
+                    stree2.write(sheet_rel, encoding='utf-8', xml_declaration=True)
+            except Exception as e:
+                print(f"[WARNING] セル削除失敗: {e}")
             
             try:
                 drawing_path_full = os.path.join(tmpdir, drawing_path)
