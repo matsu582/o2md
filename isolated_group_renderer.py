@@ -1895,9 +1895,22 @@ class IsolatedGroupRenderer:
                         import zipfile
                         import tempfile
                         tmpdir_fix = tempfile.mkdtemp(prefix='fix_dimension_')
+                        tmpdir_orig = tempfile.mkdtemp(prefix='orig_drawings_')
                         try:
                             with zipfile.ZipFile(src_for_conv, 'r') as zin:
                                 zin.extractall(tmpdir_fix)
+                            
+                            orig_file = src_for_conv.replace('.fixed.xlsx', '.xlsx')
+                            with zipfile.ZipFile(orig_file, 'r') as zin:
+                                zin.extractall(tmpdir_orig)
+                            
+                            orig_drawings_dir = os.path.join(tmpdir_orig, 'xl/drawings')
+                            fix_drawings_dir = os.path.join(tmpdir_fix, 'xl/drawings')
+                            if os.path.exists(orig_drawings_dir):
+                                if os.path.exists(fix_drawings_dir):
+                                    shutil.rmtree(fix_drawings_dir)
+                                shutil.copytree(orig_drawings_dir, fix_drawings_dir)
+                                print(f"[DEBUG] Restored drawings from original file")
                             
                             sheet_xml = os.path.join(tmpdir_fix, f'xl/worksheets/sheet{target_sheet_new_index+1}.xml')
                             if os.path.exists(sheet_xml):
@@ -1922,6 +1935,7 @@ class IsolatedGroupRenderer:
                                         zout.write(full, arcname)
                         finally:
                             shutil.rmtree(tmpdir_fix, ignore_errors=True)
+                            shutil.rmtree(tmpdir_orig, ignore_errors=True)
                     except Exception as _e_dim:
                         print(f"[WARN] dimension fix failed: {_e_dim}")
                     
