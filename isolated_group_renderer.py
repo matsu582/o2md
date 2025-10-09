@@ -1322,23 +1322,7 @@ class IsolatedGroupRenderer:
                     for child in list(parent):
                         if child.tag == sheet_data_tag:
                             parent.remove(child)
-                    
-                    drawing_tag = f'{{{ns}}}drawing'
-                    drawing_elem = parent.find(drawing_tag)
-                    if drawing_elem is not None:
-                        parent.remove(drawing_elem)
-                    
                     parent.append(new_sheet_data)
-                    
-                    if drawing_elem is not None:
-                        sheet_data_index = None
-                        for i, child in enumerate(list(parent)):
-                            if child.tag == sheet_data_tag:
-                                sheet_data_index = i
-                                break
-                        
-                        if sheet_data_index is not None:
-                            parent.insert(sheet_data_index, drawing_elem)
                     
                     dim_tag = f'{{{ns}}}dimension'
                     dim_el = root2.find(dim_tag)
@@ -1352,12 +1336,32 @@ class IsolatedGroupRenderer:
                     
                     cols_tag = f'{{{ns}}}cols'
                     col_tag = f'{{{ns}}}col'
+                    sheet_format_pr_tag = f'{{{ns}}}sheetFormatPr'
+                    page_margins_tag = f'{{{ns}}}pageMargins'
+                    header_footer_tag = f'{{{ns}}}headerFooter'
+                    page_setup_tag = f'{{{ns}}}pageSetup'
+                    
                     for child in list(root2):
                         if child.tag == cols_tag:
                             try:
                                 root2.remove(child)
                             except Exception:
                                 pass
+                    
+                    for child in list(root2):
+                        if child.tag == sheet_format_pr_tag:
+                            try:
+                                root2.remove(child)
+                            except Exception:
+                                pass
+                    
+                    for child in list(root2):
+                        if child.tag in [page_margins_tag, header_footer_tag, page_setup_tag]:
+                            try:
+                                root2.remove(child)
+                            except Exception:
+                                pass
+                    
                     cols_el = ET.Element(cols_tag)
                     try:
                         from openpyxl.utils import get_column_letter
@@ -1396,6 +1400,28 @@ class IsolatedGroupRenderer:
                             col_el.set('max', str(i_col))
                             col_el.set('width', '8.43')
                             cols_el.append(col_el)
+                    
+                    sf = ET.Element(sheet_format_pr_tag)
+                    try:
+                        from openpyxl.utils import units as _units2
+                        default_col_w = getattr(self.sheet.sheet_format, 'defaultColWidth', None) or 8.43
+                        sf.set('defaultColWidth', str(float(default_col_w)))
+                    except (ValueError, TypeError):
+                        pass
+                    try:
+                        default_row_h = getattr(self.sheet.sheet_format, 'defaultRowHeight', None) or 15.0
+                        sf.set('defaultRowHeight', str(float(default_row_h)))
+                    except (ValueError, TypeError):
+                        pass
+                    
+                    inserted_sf = False
+                    for i, child in enumerate(list(root2)):
+                        if child.tag == cols_tag or child.tag == sheet_data_tag:
+                            root2.insert(i, sf)
+                            inserted_sf = True
+                            break
+                    if not inserted_sf:
+                        root2.insert(0, sf)
                     
                     inserted = False
                     for i, child in enumerate(list(root2)):
