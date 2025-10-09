@@ -1351,56 +1351,6 @@ class IsolatedGroupRenderer:
                                 sroot4.remove(el)
                             except Exception:
                                 pass
-                    
-                    sheet_data_tag = f'{{{ns}}}sheetData'
-                    sheet_data = sroot4.find(sheet_data_tag)
-                    if sheet_data is not None:
-                        new_sheet_data = ET.Element(sheet_data_tag)
-                        rows = sheet_data.findall(f'{{{ns}}}row')
-                        for row_el in rows:
-                            try:
-                                rnum = int(row_el.attrib.get('r', '0'))
-                            except (ValueError, TypeError):
-                                continue
-                            new_row = ET.Element(f'{{{ns}}}row')
-                            new_row.set('r', row_el.attrib.get('r'))
-                            for attr in ('ht', 'hidden', 'customHeight'):
-                                if attr in row_el.attrib:
-                                    new_row.set(attr, row_el.attrib.get(attr))
-                            try:
-                                rd = self.sheet.row_dimensions.get(rnum)
-                                if rd is not None:
-                                    rh = getattr(rd, 'height', None)
-                                    if rh is not None:
-                                        new_row.set('ht', str(rh))
-                                        if 'customHeight' not in new_row.attrib:
-                                            new_row.set('customHeight', '1')
-                                    else:
-                                        default_row_h = getattr(self.sheet.sheet_format, 'defaultRowHeight', None)
-                                        if default_row_h is not None and 'ht' not in new_row.attrib:
-                                            new_row.set('ht', str(float(default_row_h)))
-                                else:
-                                    default_row_h = getattr(self.sheet.sheet_format, 'defaultRowHeight', None)
-                                    if default_row_h is not None and 'ht' not in new_row.attrib:
-                                        new_row.set('ht', str(float(default_row_h)))
-                            except (ValueError, TypeError):
-                                pass
-                            new_sheet_data.append(new_row)
-                        
-                        parent = sroot4
-                        for child in list(parent):
-                            if child.tag == sheet_data_tag:
-                                parent.remove(child)
-                        parent.append(new_sheet_data)
-                        
-                        dim_tag = f'{{{ns}}}dimension'
-                        dim = sroot4.find(dim_tag)
-                        if dim is None:
-                            dim = ET.Element(dim_tag)
-                            sroot4.insert(0, dim)
-                        start_addr = f"{self._col_letter(1)}1"
-                        end_addr = f"{self._col_letter(e_col - s_col + 1)}1"
-                        dim.set('ref', f"{start_addr}:{end_addr}")
                         
                         cols_tag = f'{{{ns}}}cols'
                         col_tag = f'{{{ns}}}col'
@@ -1451,6 +1401,7 @@ class IsolatedGroupRenderer:
                         
                         try:
                             sf_tag = f'{{{ns}}}sheetFormatPr'
+                            sheet_data_tag = f'{{{ns}}}sheetData'
                             for child in list(sroot4):
                                 if child.tag == sf_tag:
                                     try:
