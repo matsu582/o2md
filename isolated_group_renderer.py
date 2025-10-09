@@ -1404,92 +1404,92 @@ class IsolatedGroupRenderer:
                     
                     cols_tag = f'{{{ns}}}cols'
                     col_tag = f'{{{ns}}}col'
+                    for child in list(sroot4):
+                        if child.tag == cols_tag:
+                            try:
+                                sroot4.remove(child)
+                            except Exception:
+                                pass
+                    cols_el = ET.Element(cols_tag)
+                    try:
+                        from openpyxl.utils import get_column_letter
+                        default_col_w = getattr(self.sheet.sheet_format, 'defaultColWidth', None) or 8.43
+                        for c in range(s_col, e_col + 1):
+                            cd = self.sheet.column_dimensions.get(get_column_letter(c))
+                            width = None
+                            hidden = None
+                            if cd is not None:
+                                width = getattr(cd, 'width', None)
+                                hidden = getattr(cd, 'hidden', None)
+                            if width is None:
+                                width = default_col_w
+                            col_el = ET.Element(col_tag)
+                            new_idx = c - s_col + 1
+                            col_el.set('min', str(new_idx))
+                            col_el.set('max', str(new_idx))
+                            try:
+                                col_el.set('width', str(float(width)))
+                                if cd is not None and getattr(cd, 'width', None) is not None:
+                                    col_el.set('customWidth', '1')
+                            except (ValueError, TypeError):
+                                col_el.set('width', str(int(width) if width is not None else 8))
+                                if cd is not None and getattr(cd, 'width', None) is not None:
+                                    col_el.set('customWidth', '1')
+                            try:
+                                if hidden:
+                                    col_el.set('hidden', '1')
+                            except (ValueError, TypeError):
+                                pass
+                            cols_el.append(col_el)
+                    except (ValueError, TypeError):
+                        for i_col in range(1, e_col - s_col + 2):
+                            col_el = ET.Element(col_tag)
+                            col_el.set('min', str(i_col))
+                            col_el.set('max', str(i_col))
+                            col_el.set('width', '8.43')
+                            cols_el.append(col_el)
+                    
+                    try:
+                        sf_tag = f'{{{ns}}}sheetFormatPr'
+                        sheet_data_tag = f'{{{ns}}}sheetData'
                         for child in list(sroot4):
-                            if child.tag == cols_tag:
+                            if child.tag == sf_tag:
                                 try:
                                     sroot4.remove(child)
                                 except Exception:
                                     pass
-                        cols_el = ET.Element(cols_tag)
+                        sf = ET.Element(sf_tag)
                         try:
-                            from openpyxl.utils import get_column_letter
                             default_col_w = getattr(self.sheet.sheet_format, 'defaultColWidth', None) or 8.43
-                            for c in range(s_col, e_col + 1):
-                                cd = self.sheet.column_dimensions.get(get_column_letter(c))
-                                width = None
-                                hidden = None
-                                if cd is not None:
-                                    width = getattr(cd, 'width', None)
-                                    hidden = getattr(cd, 'hidden', None)
-                                if width is None:
-                                    width = default_col_w
-                                col_el = ET.Element(col_tag)
-                                new_idx = c - s_col + 1
-                                col_el.set('min', str(new_idx))
-                                col_el.set('max', str(new_idx))
-                                try:
-                                    col_el.set('width', str(float(width)))
-                                    if cd is not None and getattr(cd, 'width', None) is not None:
-                                        col_el.set('customWidth', '1')
-                                except (ValueError, TypeError):
-                                    col_el.set('width', str(int(width) if width is not None else 8))
-                                    if cd is not None and getattr(cd, 'width', None) is not None:
-                                        col_el.set('customWidth', '1')
-                                try:
-                                    if hidden:
-                                        col_el.set('hidden', '1')
-                                except (ValueError, TypeError):
-                                    pass
-                                cols_el.append(col_el)
+                            sf.set('defaultColWidth', str(float(default_col_w)))
                         except (ValueError, TypeError):
-                            for i_col in range(1, e_col - s_col + 2):
-                                col_el = ET.Element(col_tag)
-                                col_el.set('min', str(i_col))
-                                col_el.set('max', str(i_col))
-                                col_el.set('width', '8.43')
-                                cols_el.append(col_el)
-                        
-                        try:
-                            sf_tag = f'{{{ns}}}sheetFormatPr'
-                            sheet_data_tag = f'{{{ns}}}sheetData'
-                            for child in list(sroot4):
-                                if child.tag == sf_tag:
-                                    try:
-                                        sroot4.remove(child)
-                                    except Exception:
-                                        pass
-                            sf = ET.Element(sf_tag)
-                            try:
-                                default_col_w = getattr(self.sheet.sheet_format, 'defaultColWidth', None) or 8.43
-                                sf.set('defaultColWidth', str(float(default_col_w)))
-                            except (ValueError, TypeError):
-                                pass
-                            try:
-                                default_row_h = getattr(self.sheet.sheet_format, 'defaultRowHeight', None) or 15.0
-                                sf.set('defaultRowHeight', str(float(default_row_h)))
-                            except (ValueError, TypeError):
-                                pass
-                            inserted_sf = False
-                            for i, child in enumerate(list(sroot4)):
-                                if child.tag == cols_tag or child.tag == sheet_data_tag:
-                                    sroot4.insert(i, sf)
-                                    inserted_sf = True
-                                    break
-                            if not inserted_sf:
-                                sroot4.insert(0, sf)
-                        except Exception:
                             pass
-                        
-                        inserted = False
+                        try:
+                            default_row_h = getattr(self.sheet.sheet_format, 'defaultRowHeight', None) or 15.0
+                            sf.set('defaultRowHeight', str(float(default_row_h)))
+                        except (ValueError, TypeError):
+                            pass
+                        inserted_sf = False
                         for i, child in enumerate(list(sroot4)):
-                            if 'sheetPr' in child.tag:
-                                sroot4.insert(i+1, cols_el)
-                                inserted = True
+                            if child.tag == cols_tag or child.tag == sheet_data_tag:
+                                sroot4.insert(i, sf)
+                                inserted_sf = True
                                 break
-                        if not inserted:
-                            sroot4.insert(0, cols_el)
-                        
-                        stree4.write(sheet_rel, encoding='utf-8', xml_declaration=True)
+                        if not inserted_sf:
+                            sroot4.insert(0, sf)
+                    except Exception:
+                        pass
+                    
+                    inserted = False
+                    for i, child in enumerate(list(sroot4)):
+                        if 'sheetPr' in child.tag:
+                            sroot4.insert(i+1, cols_el)
+                            inserted = True
+                            break
+                    if not inserted:
+                        sroot4.insert(0, cols_el)
+                    
+                    stree4.write(sheet_rel, encoding='utf-8', xml_declaration=True)
             except Exception as e:
                 print(f"[WARNING] sheetData再構築失敗: {e}")
             
