@@ -185,8 +185,14 @@ class ExcelToMarkdownConverter:
         # シートを変換
         for sheet_name in self.workbook.sheetnames:
             try:
-                print(f"[INFO] シート変換中: {sheet_name}")
                 sheet = self.workbook[sheet_name]
+                
+                # 非表示シートをスキップ
+                if sheet.sheet_state == 'hidden':
+                    print(f"[INFO] シートをスキップ（非表示）: {sheet_name}")
+                    continue
+                
+                print(f"[INFO] シート変換中: {sheet_name}")
                 self._convert_sheet(sheet)
             except Exception as e:
                 print(f"[WARNING] シート処理中にエラーが発生しました: {sheet_name} -> {e}")
