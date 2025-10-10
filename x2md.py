@@ -4909,6 +4909,7 @@ class ExcelToMarkdownConverter:
             Optional[Tuple[str, int]]: (filename, start_row) or None on failure
         """
         renderer = IsolatedGroupRenderer(self)
+        return renderer.render(sheet, shape_indices, dpi, cell_range)
     
     def _convert_sheet_data(self, sheet, data_range: Tuple[int, int, int, int]):
         """シートデータをテーブルとして変換（複数テーブル対応）"""
