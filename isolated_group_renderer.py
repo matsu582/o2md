@@ -1914,14 +1914,6 @@ class IsolatedGroupRenderer:
                                                     off.set('y', str(int(round(top_px * EMU_PER_PIXEL))))
                                                 except (ValueError, TypeError):
                                                     pass
-                                                try:
-                                                    ext_elem = xfrm.find('{%s}ext' % a_ns)
-                                                    if ext_elem is None:
-                                                        ext_elem = ET.SubElement(xfrm, '{%s}ext' % a_ns)
-                                                    ext_elem.set('cx', str(int(round(target_w_px * EMU_PER_PIXEL))))
-                                                    ext_elem.set('cy', str(int(round(target_h_px * EMU_PER_PIXEL))))
-                                                except (ValueError, TypeError):
-                                                    pass
                                     except (ValueError, TypeError):
                                         pass
                         except (ValueError, TypeError):
