@@ -1243,7 +1243,6 @@ class IsolatedGroupRenderer:
                     if sheets_el is not None:
                         for sheet_el in list(sheets_el):
                             sheet_el.set('sheetId', '1')
-                            sheet_el.set(f'{{{rel_ns}}}id', 'rId1')
                     
                     # sheets要素を最後に移動（mainブランチと同じ順序にする）
                     if sheets_el is not None:
@@ -1272,9 +1271,6 @@ class IsolatedGroupRenderer:
                         
                         for rel in rels_to_remove:
                             rels_root.remove(rel)
-                        
-                        if target_sheet_rel is not None:
-                            target_sheet_rel.set('Id', 'rId1')
                         
                         rels_tree.write(wb_rels_path, encoding='utf-8', xml_declaration=True)
                     
@@ -1934,80 +1930,6 @@ class IsolatedGroupRenderer:
             except Exception:
                 try:
                     print(f"[WARN] dbg_copy not found after save: {src_for_conv}")
-                except Exception:
-                    pass
-            
-            try:
-                import shutil
-                from openpyxl import load_workbook as _op_load
-                
-                fixed_candidate = src_for_conv.replace('.xlsx', '.fixed.xlsx')
-                shutil.copyfile(src_for_conv, fixed_candidate)
-                print(f"[DEBUG] created fixed workbook (inline): {fixed_candidate}")
-                
-                try:
-                    _wb_tmp = _op_load(fixed_candidate)
-                    _wb_tmp.save(fixed_candidate)
-                    print(f"[DEBUG] openpyxl resaved fixed workbook: {fixed_candidate}")
-                    
-                    src_for_conv = fixed_candidate
-                    
-                    try:
-                        import zipfile
-                        import tempfile
-                        tmpdir_fix = tempfile.mkdtemp(prefix='fix_dimension_')
-                        tmpdir_orig = tempfile.mkdtemp(prefix='orig_drawings_')
-                        try:
-                            with zipfile.ZipFile(src_for_conv, 'r') as zin:
-                                zin.extractall(tmpdir_fix)
-                            
-                            orig_file = src_for_conv.replace('.fixed.xlsx', '.xlsx')
-                            with zipfile.ZipFile(orig_file, 'r') as zin:
-                                zin.extractall(tmpdir_orig)
-                            
-                            orig_drawings_dir = os.path.join(tmpdir_orig, 'xl/drawings')
-                            fix_drawings_dir = os.path.join(tmpdir_fix, 'xl/drawings')
-                            if os.path.exists(orig_drawings_dir):
-                                if os.path.exists(fix_drawings_dir):
-                                    shutil.rmtree(fix_drawings_dir)
-                                shutil.copytree(orig_drawings_dir, fix_drawings_dir)
-                                print(f"[DEBUG] Restored drawings from original file")
-                            
-                            sheet_xml = os.path.join(tmpdir_fix, f'xl/worksheets/sheet{target_sheet_new_index+1}.xml')
-                            if os.path.exists(sheet_xml):
-                                tree = ET.parse(sheet_xml)
-                                root = tree.getroot()
-                                ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-                                
-                                dim = root.find(f'.//{{{ns}}}dimension')
-                                if dim is not None and cell_range:
-                                    s_col, e_col, s_row, e_row = cell_range
-                                    start_addr = f"{self._col_letter(1)}1"
-                                    end_addr = f"{self._col_letter(e_col - s_col + 1)}{e_row - s_row + 1}"
-                                    dim.set('ref', f"{start_addr}:{end_addr}")
-                                    tree.write(sheet_xml, encoding='utf-8', xml_declaration=True)
-                                    print(f"[DEBUG] Fixed dimension to {start_addr}:{end_addr}")
-                            
-                            with zipfile.ZipFile(src_for_conv, 'w', zipfile.ZIP_DEFLATED) as zout:
-                                for folder, _, files in os.walk(tmpdir_fix):
-                                    for fn in files:
-                                        full = os.path.join(folder, fn)
-                                        arcname = os.path.relpath(full, tmpdir_fix)
-                                        zout.write(full, arcname)
-                        finally:
-                            shutil.rmtree(tmpdir_fix, ignore_errors=True)
-                            shutil.rmtree(tmpdir_orig, ignore_errors=True)
-                    except Exception as _e_dim:
-                        print(f"[WARN] dimension fix failed: {_e_dim}")
-                    
-                except Exception as _e_inner:
-                    try:
-                        print(f"[WARN] openpyxl resave failed: {_e_inner}")
-                    except Exception:
-                        pass
-            except Exception as _e:
-                try:
-                    print(f"[WARN] could not create inline fixed workbook: {_e}")
                 except Exception:
                     pass
             
