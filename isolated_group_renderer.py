@@ -2007,7 +2007,7 @@ class IsolatedGroupRenderer:
                     
                     s_col, e_col, s_row, e_row = cell_range
                     
-                    wb_temp = load_workbook(src_for_conv)
+                    wb_temp = load_workbook(src_for_conv, data_only=False, keep_vba=True)
                     
                     if wb_temp.active is None:
                         if len(wb_temp.sheetnames) > 0:
@@ -2019,39 +2019,44 @@ class IsolatedGroupRenderer:
                     else:
                         ws_temp = wb_temp.active
                     
-                    for row in ws_temp.iter_rows():
-                        for cell in row:
-                            cell.value = None
-                            from openpyxl.styles import Border
-                            cell.border = Border()
+                    has_openpyxl_compatible_objects = False
+                    if hasattr(ws_temp, '_images') and len(ws_temp._images) > 0:
+                        has_openpyxl_compatible_objects = True
+                    if hasattr(ws_temp, '_charts') and len(ws_temp._charts) > 0:
+                        has_openpyxl_compatible_objects = True
                     
-                    new_row_idx = 1
-                    for src_row in range(s_row, e_row + 1):
-                        new_col_idx = 1
-                        for src_col in range(s_col, e_col + 1):
-                            src_cell = self.sheet.cell(row=src_row, column=src_col)
-                            dest_cell = ws_temp.cell(row=new_row_idx, column=new_col_idx)
-                            
-                            if src_cell.value is not None:
-                                dest_cell.value = src_cell.value
-                            
-                            if src_cell.border:
-                                dest_cell.border = cell_copy(src_cell.border)
-                            
-                            if src_cell.font:
-                                dest_cell.font = cell_copy(src_cell.font)
-                            
-                            if src_cell.fill:
-                                dest_cell.fill = cell_copy(src_cell.fill)
-                            
-                            if src_cell.alignment:
-                                dest_cell.alignment = cell_copy(src_cell.alignment)
-                            
-                            new_col_idx += 1
-                        new_row_idx += 1
-                    
-                    wb_temp.save(src_for_conv)
-                    wb_temp.close()
+                    if not has_openpyxl_compatible_objects:
+                        wb_temp.close()
+                        print(f"[DEBUG] openpyxlが認識できる図形なし。XMLレベルの処理のみ使用")
+                    else:
+                        new_row_idx = 1
+                        for src_row in range(s_row, e_row + 1):
+                            new_col_idx = 1
+                            for src_col in range(s_col, e_col + 1):
+                                src_cell = self.sheet.cell(row=src_row, column=src_col)
+                                dest_cell = ws_temp.cell(row=new_row_idx, column=new_col_idx)
+                                
+                                if src_cell.value is not None:
+                                    dest_cell.value = src_cell.value
+                                
+                                if src_cell.border:
+                                    dest_cell.border = cell_copy(src_cell.border)
+                                
+                                if src_cell.font:
+                                    dest_cell.font = cell_copy(src_cell.font)
+                                
+                                if src_cell.fill:
+                                    dest_cell.fill = cell_copy(src_cell.fill)
+                                
+                                if src_cell.alignment:
+                                    dest_cell.alignment = cell_copy(src_cell.alignment)
+                                
+                                new_col_idx += 1
+                            new_row_idx += 1
+                        
+                        wb_temp.save(src_for_conv)
+                        wb_temp.close()
+                        print(f"[DEBUG] openpyxlでセルデータをコピー完了")
                     
                 except Exception as e:
                     print(f"[WARNING] openpyxlでのセルコピー失敗: {e}")
