@@ -1985,6 +1985,7 @@ class ExcelToMarkdownConverter:
                                                     sheet, shapes, cell_ranges=cell_ranges_all, max_groups=1
                                                 )
                                                 print(f"[DEBUG] clustered into {len(clusters)} groups: sizes={[len(c) for c in clusters]}")
+                                                print(f"[DEBUG] clustering debug_info: {debug_info}")
                                                 
                                                 # Render each cluster as an isolated group
                                                 # Using stable _render_sheet_isolated_group method (not v2)
@@ -3476,7 +3477,7 @@ class ExcelToMarkdownConverter:
                 DPI = int(getattr(self, 'dpi', DPI) or DPI)
             except (ValueError, TypeError):
                 DPI = DPI
-            col_x, row_y = self._compute_sheet_cell_pixel_map(sheet, DPI=DPI, min_cols=100, min_rows=200)
+            col_x, row_y = self._compute_sheet_cell_pixel_map(sheet, DPI=DPI)
             EMU_PER_INCH = 914400
             try:
                 EMU_PER_PIXEL = EMU_PER_INCH / float(DPI)
