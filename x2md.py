@@ -5666,6 +5666,14 @@ class ExcelToMarkdownConverter:
                                 break
                         if not kept_cid:
                             continue
+                        # will be handled by the "Extra pass" below to avoid duplication
+                        is_connector = False
+                        for child in kept:
+                            if child.tag.split('}')[-1].lower() in ('cxnsp', 'cxn'):
+                                is_connector = True
+                                break
+                        if is_connector:
+                            continue
                         if kept_cid in connector_children_by_id:
                             seen_sigs = set()
                             for ch in connector_children_by_id[kept_cid]:
