@@ -2008,7 +2008,16 @@ class IsolatedGroupRenderer:
                     s_col, e_col, s_row, e_row = cell_range
                     
                     wb_temp = load_workbook(src_for_conv)
-                    ws_temp = wb_temp.active
+                    
+                    if wb_temp.active is None:
+                        if len(wb_temp.sheetnames) > 0:
+                            ws_temp = wb_temp[wb_temp.sheetnames[0]]
+                        else:
+                            print(f"[WARNING] ワークブックにシートがありません")
+                            wb_temp.close()
+                            raise Exception("No sheets in workbook")
+                    else:
+                        ws_temp = wb_temp.active
                     
                     for row in ws_temp.iter_rows():
                         for cell in row:
