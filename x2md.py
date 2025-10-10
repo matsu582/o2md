@@ -3165,7 +3165,7 @@ class ExcelToMarkdownConverter:
             return 'image'
         return txt
 
-    def _compute_sheet_cell_pixel_map(self, sheet, DPI=300):
+    def _compute_sheet_cell_pixel_map(self, sheet, DPI=300, min_cols=None, min_rows=None):
         """Compute approximate pixel positions for column right-edges and row bottom-edges.
 
         Returns (col_x, row_y) where col_x[0] == 0 and col_x[i] is the right edge
@@ -3174,6 +3174,10 @@ class ExcelToMarkdownConverter:
         try:
             max_col = sheet.max_column
             max_row = sheet.max_row
+            if min_cols is not None:
+                max_col = max(max_col, min_cols)
+            if min_rows is not None:
+                max_row = max(max_row, min_rows)
             col_pixels = []
             from openpyxl.utils import get_column_letter
             for c in range(1, max_col+1):
@@ -3472,7 +3476,7 @@ class ExcelToMarkdownConverter:
                 DPI = int(getattr(self, 'dpi', DPI) or DPI)
             except (ValueError, TypeError):
                 DPI = DPI
-            col_x, row_y = self._compute_sheet_cell_pixel_map(sheet, DPI=DPI)
+            col_x, row_y = self._compute_sheet_cell_pixel_map(sheet, DPI=DPI, min_cols=100, min_rows=200)
             EMU_PER_INCH = 914400
             try:
                 EMU_PER_PIXEL = EMU_PER_INCH / float(DPI)
