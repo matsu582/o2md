@@ -1072,27 +1072,33 @@ class IsolatedGroupRenderer:
                     if orig_cxn is None:
                         continue
 
-                    # find first immediate cxn child in kept and replace it
-                    replaced = False
+                    first_cxn_index = None
+                    cxn_children_to_remove = []
                     for idx_child, child_candidate in enumerate(list(kept)):
                         try:
                             if child_candidate.tag.split('}')[-1].lower() in ('cxnsp', 'cxn'):
-                                try:
-                                    kept.remove(child_candidate)
-                                except Exception:
-                                    pass  # 一時ファイルの削除失敗は無視
-                                try:
-                                    kept.insert(idx_child, copy.deepcopy(orig_cxn))
-                                except Exception:
-                                    try:
-                                        kept.append(copy.deepcopy(orig_cxn))
-                                    except Exception:
-                                        pass  # 一時ファイルの削除失敗は無視
-                                replaced = True
-                                break
+                                if first_cxn_index is None:
+                                    first_cxn_index = idx_child
+                                cxn_children_to_remove.append(child_candidate)
                         except Exception:
                             continue
-                    if not replaced:
+                    
+                    # Remove all connector children
+                    for cxn_child in cxn_children_to_remove:
+                        try:
+                            kept.remove(cxn_child)
+                        except Exception:
+                            pass  # 一時ファイルの削除失敗は無視
+                    
+                    if first_cxn_index is not None:
+                        try:
+                            kept.insert(first_cxn_index, copy.deepcopy(orig_cxn))
+                        except Exception:
+                            try:
+                                kept.append(copy.deepcopy(orig_cxn))
+                            except Exception:
+                                pass  # 一時ファイルの削除失敗は無視
+                    else:
                         try:
                             kept.append(copy.deepcopy(orig_cxn))
                         except Exception:
@@ -1619,7 +1625,7 @@ class IsolatedGroupRenderer:
                                     new_row = int(row_el.text) - (s_row - 1)
                                     if new_row < 0:
                                         new_row = 0
-                                    row_el.text = str(new_row)
+                                    row_el.text = str(max(0, new_row))
                             except (ValueError, TypeError):
                                 pass
                         
@@ -1640,7 +1646,7 @@ class IsolatedGroupRenderer:
                                     new_row = int(row_el.text) - (s_row - 1)
                                     if new_row < 0:
                                         new_row = 0
-                                    row_el.text = str(new_row)
+                                    row_el.text = str(max(0, new_row))
                             except (ValueError, TypeError):
                                 pass
                     
