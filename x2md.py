@@ -556,9 +556,9 @@ class ExcelToMarkdownConverter:
         self._sheet_emitted_texts.setdefault(sheet_name, set())
         self._sheet_emitted_rows.setdefault(sheet_name, set())
         self._embedded_image_cid_by_name.setdefault(sheet_name, {})
-        # Build lightweight mapping of drawing anchor cNvPr ids (ordered) so
-        # cluster loops can quickly determine whether a candidate cluster
-        # contains anchors already preserved by earlier isolated renders.
+        # 描画アンカーcNvPr IDの軽量マッピングを構築（順序付き）することで
+        # クラスタループが候補クラスタが以前の分離レンダリングで
+        # 既に保持されたアンカーを含むかどうかを迅速に判定できます。
         anchors_cid_list = []
         try:
             try:
@@ -603,25 +603,25 @@ class ExcelToMarkdownConverter:
         # 表示順どおりに出力する。これにより「MailBoxより先の処理は」のような
         # 任意の説明文が欠落したり順序が入れ替わる問題を防止する。
         try:
-            # Emit only the contiguous non-empty rows that immediately precede the
-            # detected data_range start. This preserves the on-sheet top-to-bottom
-            # ordering while avoiding emission of unrelated header blocks that may
-            # appear far above the data. If the sheet has no data_range yet, fall
-            # back to scanning the first 12 rows as a conservative heuristic.
-            # set to the current markdown insertion index and used when requesting
-            # deferred image processing. Previously insert_pos could be referenced
-            # before assignment causing an UnboundLocalError.
+            # 検出されたdata_range開始の直前にある連続した非空行のみを出力します。
+            # これによりシート上の上から下への順序を保持しつつ、
+            # データの遥か上に表示される可能性のある無関係なヘッダーブロックの
+            # 出力を回避します。シートにまだdata_rangeがない場合は、
+            # 保守的なヒューリスティックとして最初の12行をスキャンすることにフォールバックします。
+            # 現在のmarkdown挿入インデックスに設定され、延期された
+            # 画像処理を要求する際に使用されます。以前はinsert_posが
+            # 代入前に参照されてUnboundLocalErrorを引き起こしていました。
             insert_pos = len(self.markdown_lines)
             max_head_scan = min(12, sheet.max_row)
             data_range = self._get_data_range(sheet)  # Initialize here to avoid UnboundLocalError
             head_rows = []
-            # Scan each row up to max_head_scan and collect combined non-empty
-            # cell texts per-row. Do not emit any markdown here --- emission
-            # (including the "このシートには表示可能なデータがありません" message)
-            # must be done during the canonical emission pass. Emitting during
-            # the pre-scan caused the same message to be appended repeatedly
-            # for every non-empty cell; instead, only collect the row texts now
-            # and defer insertion.
+            # max_head_scanまで各行をスキャンし、行毎に結合された非空
+            # セルテキストを収集します。ここではmarkdownを出力しません --- 出力
+            # （「このシートには表示可能なデータがありません」メッセージを含む）
+            # は正規の出力パス中に行う必要があります。
+            # プレスキャン中の出力により、同じメッセージが全ての非空セルに対して
+            # 繰り返し追加されていました; 代わりに、今は行テキストのみを収集し
+            # 挿入を延期します。
             for r in range(1, max_head_scan + 1):
                 row_texts = []
                 for c in range(1, min(20, sheet.max_column) + 1):
@@ -633,7 +633,7 @@ class ExcelToMarkdownConverter:
                         s = str(v).strip()
                         if s:
                             row_texts.append(s)
-                # combine cell values for this row; keep None for empty rows
+                # この行のセル値を結合; 空行にはNoneを保持
                 if row_texts:
                     combined = ' '.join(row_texts)
                 else:
@@ -641,13 +641,13 @@ class ExcelToMarkdownConverter:
                 head_rows.append(combined)
 
             emitted_any = False
-            # Register collected head_rows as deferred texts so that they
-            # will be emitted only during the canonical emission pass
-            # (prevents repeated per-cell emission of the same message).
+            # 収集されたhead_rowsを延期テキストとして登録し、
+            # 正規の出力パス中にのみ出力されるようにします
+            # （同じメッセージのセル毎の繰り返し出力を防ぎます）。
             for idx_row, combined in enumerate(head_rows, start=1):
                 if not combined:
                     continue
-                # Avoid duplicate adjacent identical deferred texts
+                # 隣接する同一の延期テキストの重複を回避
                 lst = self._sheet_deferred_texts.setdefault(sheet.title, [])
                 if len(lst) > 0 and lst[-1][1].strip() == combined.strip():
                     continue
@@ -655,33 +655,33 @@ class ExcelToMarkdownConverter:
 
             if data_range:
                 start_row = data_range[0]
-                # emit contiguous non-empty rows immediately before start_row (within scanned head_rows)
-                # find candidate rows among 1..min(max_head_scan, start_row-1)
+                # start_rowの直前の連続した非空行を出力（スキャンされたhead_rows内）
+                # 1..min(max_head_scan, start_row-1)の中から候補行を検索
                 cand_end = min(max_head_scan, start_row - 1)
                 if cand_end >= 1:
-                    # walk backwards from cand_end to find contiguous non-empty block
+                    # cand_endから逆方向に歩いて連続した非空ブロックを検索
                     block = []
                     for rr in range(cand_end, 0, -1):
                         content = head_rows[rr-1]
                         if content is None:
-                            # stop at first blank encountered
+                            # 最初の空白に遭遇したら停止
                             break
                         block.insert(0, (rr, content))
-                    # collect header block in deferred buffer for sorted emission later
+                    # ヘッダーブロックを後でソート出力するため延期バッファに収集
                     for (rnum, combined) in block:
                         if len(self.markdown_lines) > 0 and self.markdown_lines[-1].strip() == combined:
                             continue
                         self._sheet_deferred_texts.setdefault(sheet.title, []).append((rnum, combined))
                         emitted_any = True
             else:
-                # no data_range detected yet: fallback to original conservative behavior
+                # まだdata_rangeが検出されていません: 元の保守的な動作にフォールバック
                 for r in range(1, max_head_scan + 1):
                     combined = head_rows[r-1]
                     if not combined:
                         continue
                     if len(self.markdown_lines) > 0 and self.markdown_lines[-1].strip() == combined:
                         continue
-                    # defer emission: collect header lines for sorted emission later
+                    # 出力を延期: 後でソート出力するためヘッダー行を収集
                     self._sheet_deferred_texts.setdefault(sheet.title, []).append((r, combined))
                     emitted_any = True
 
@@ -695,19 +695,19 @@ class ExcelToMarkdownConverter:
             # シートにデータが無い場合でも、描画が存在するなら図を出力する
             try:
                 insert_pos = len(self.markdown_lines)
-                # If there are drawings, _process_sheet_images should defer insertion
-                # so that the canonical emitter (_reorder_sheet_output_by_row_order)
-                # can place images deterministically. Request deferred insertion.
+                # 描画がある場合、_process_sheet_imagesは挿入を延期し
+                # 正規エミッタ（_reorder_sheet_output_by_row_order）が
+                # 画像を決定論的に配置できるようにします。延期挿入を要求します。
                 self._process_sheet_images(sheet, insert_index=insert_pos, insert_images=False)
                 if not self._sheet_has_drawings(sheet):
-                    # Use canonical-aware free-text emitter to avoid multiple
-                    # identical messages being appended by different branches.
+                    # 複数の
+                    # 異なるブランチによる同一メッセージの追加を避けるため正規対応の自由テキストエミッタを使用します。
                     self._emit_free_text(sheet, None, "*このシートには表示可能なデータがありません*")
-                    # Add a trailing blank only when in the canonical emission pass
+                    # 正規の出力パス中のみ末尾の空行を追加
                     if getattr(self, '_in_canonical_emit', False):
                         self.markdown_lines.append("")
                 else:
-                    # drawings were handled; add separator and continue
+                    # 描画が処理されました; セパレータを追加して続行
                     self._add_separator()
                 return
             except Exception:
@@ -735,7 +735,7 @@ class ExcelToMarkdownConverter:
                 if not has_content:
                     # セル内容が無いため、図のみを挿入して終了する
                     insert_pos = len(self.markdown_lines)
-                    # Defer insertion so images are emitted during the canonical pass
+                    # 正規パス中に画像が出力されるよう挿入を延期
                     self._process_sheet_images(sheet, insert_index=insert_pos, insert_images=False)
                     if not self._sheet_has_drawings(sheet):
                         self._emit_free_text(sheet, None, "*このシートには表示可能なデータがありません*")
@@ -748,32 +748,32 @@ class ExcelToMarkdownConverter:
                 # 何か失敗した場合は従来の処理にフォールバック
                 pass
         # まずデータをテーブルとして変換（図は表の下に出力したいので後で処理）
-        # NOTE: do not return here — continue to process images and perform the
-        # canonical, row-ordered emission pass below so deferred texts and images
-        # are emitted deterministically. Previously an early return bypassed the
-        # canonical emission and caused missing table/paragraph output.
+        # 注意: ここではreturnしません — 画像の処理を続け、
+        # 延期されたテキストと画像が決定論的に出力されるよう
+        # 以下の正規の行順序出力パスを実行します。以前は早期returnが
+        # 正規出力をバイパスし、テーブル/段落出力の欠落を引き起こしていました。
         self._convert_sheet_data(sheet, data_range)
 
-        # After table output, generate shapes (without immediate insertion) and then
-        # emit sheet text and images strictly in ascending row order so that
-        # Markdown matches Excel top-to-bottom ordering. This uses each group's
-        # representative start_row stored in self._sheet_shape_images.
+        # テーブル出力後、図形を生成し（即座の挿入なし）、その後
+        # シートテキストと画像を厳密に行番号の昇順で出力し、
+        # MarkdownがExcelの上から下への順序と一致するようにします。これは各グループの
+        # self._sheet_shape_imagesに格納された代表的なstart_rowを使用します。
         try:
-            # Ensure shapes are generated and recorded; request deferred insertion
+            # 図形が生成され記録されることを確認; 延期挿入を要求
             insert_pos = len(self.markdown_lines)
             self._process_sheet_images(sheet, insert_index=insert_pos, insert_images=False)
 
-            # Now perform strict row-ordered emission: collect all textual rows
-            # (excluding those already emitted) and all image start_rows, then
-            # walk rows from 1..max_row emitting text or images when present.
+            # 厳密な行順序出力を実行: 全てのテキスト行を収集
+            # （既に出力されたものを除く）と全ての画像start_rowsを収集し、その後
+            # 1..max_rowの行を歩き、テキストまたは画像が存在する場合に出力します。
             self._reorder_sheet_output_by_row_order(sheet)
         except Exception:
-            # fallback to conservative behavior: insert any pending images and append separator
-            # Even in fallback, prefer deferred insertion so the canonical
-            # emitter controls placement and duplicate suppression.
+            # 保守的な動作にフォールバック: 保留中の画像を挿入しセパレータを追加
+            # フォールバックの場合でも、正規
+            # エミッタが配置と重複抑制を制御するよう延期挿入を優先します。
             self._process_sheet_images(sheet, insert_index=len(self.markdown_lines), insert_images=False)
         finally:
-            # final separator after processing a sheet
+            # シート処理後の最終セパレータ
             self._add_separator()
 
     def _reorder_sheet_output_by_row_order(self, sheet):
@@ -784,15 +784,15 @@ class ExcelToMarkdownConverter:
         - Updates self._cell_to_md_index so images can anchor to emitted md indices
         """
         try:
-            # Instrumentation: mark entry into reorder routine
+            # 計測: reorderルーチンへのエントリをマーク
             print(f"[DEBUG][_reorder_entry] sheet={sheet.title}")
-            # Per-run on-disk marker removed; keep only debug traces.
+            # 実行毎のディスク上マーカーを削除; デバッグトレースのみを保持。
             print(f"[DEBUG][_reorder_entry_marker] sheet={sheet.title}")
             max_row = sheet.max_row
             # avoid creating the per-sheet emitted rows set here; only the
             # canonical emitter should mutate _sheet_emitted_rows via helpers.
             emitted = self._sheet_emitted_rows.get(sheet.title, set())
-            # Build mapping: row -> list of image filenames (from _sheet_shape_images)
+            # マッピングを構築: 行 -> 画像ファイル名のリスト（_sheet_shape_imagesから）
             img_map = {}
             pairs = self._sheet_shape_images.get(sheet.title, []) or []
             # pairs may be either list of filenames or list of (row, filename)
@@ -807,25 +807,25 @@ class ExcelToMarkdownConverter:
                 else:
                     # treat as filename with start_row=1
                     normalized_pairs.append((1, str(item)))
-            # Use representative start_row from normalized_pairs directly so that
-            # emission follows the original Excel row order. This avoids any
-            # sheet-specific heuristics based on text content.
+            # normalized_pairsから代表的なstart_rowを直接使用し、
+            # 出力が元のExcel行順序に従うようにします。これにより
+            # テキスト内容に基づくシート固有のヒューリスティックを回避します。
             for r, fn in normalized_pairs:
                 img_map.setdefault(r, []).append(fn)
 
-            # Also print the current sheet_map (row->md index) so we can compare
+            # また、現在のsheet_map（行->mdインデックス）を出力して比較できるようにします
             sheet_map = self._cell_to_md_index.get(sheet.title, {})
             print(f"[DEBUG][_img_insertion_debug] sheet={sheet.title} sheet_map={sheet_map}")
 
-            # NOTE: markdown dump moved later so events log can be persisted
-            # before any debug printing of the current markdown state.
+            # 注意: eventsログを永続化できるようmarkdownダンプを後に移動
+            # 現在のmarkdown状態のデバッグ出力の前に。
 
-            # Enter canonical emission mode: deferred texts should now be
-            # actually appended to the markdown buffer by _emit_free_text.
+            # 正規出力モードに入る: 延期テキストは今
+            # _emit_free_textによって実際にmarkdownバッファに追加されるべきです。
             self._in_canonical_emit = True
 
-            # Debug: dump emitted rows and deferred texts immediately after
-            # entering canonical emission so we can see what was marked earlier.
+            # デバッグ: 出力済み行と延期テキストを
+            # 正規出力に入った直後にダンプして、以前にマークされたものを確認できるようにします。
             emitted_rows = self._sheet_emitted_rows.get(sheet.title, set()) if hasattr(self, '_sheet_emitted_rows') else set()
             deferred_texts = self._sheet_deferred_texts.get(sheet.title, []) if hasattr(self, '_sheet_deferred_texts') else []
             try:
@@ -833,10 +833,10 @@ class ExcelToMarkdownConverter:
             except (ValueError, TypeError):
                 print(f"[DEBUG][_canonical_enter] sheet={getattr(sheet, 'title', None)} emitted_rows=<error> deferred_texts_count=<error>")
 
-            # If all items collapsed to start_row==1 (common when saved list contains filenames only),
-            # try to recompute representative start_rows from drawing cell ranges and redistribute
-            # images across those computed rows in order. This produces more accurate placement
-            # when _render_sheet_fallback didn't persist start rows.
+            # 全ての項目がstart_row==1に集約された場合（保存されたリストがファイル名のみを含む場合に一般的）、
+            # 描画セル範囲から代表的なstart_rowsを再計算し、
+            # それらの計算された行に順番に画像を再分配することを試みます。これにより
+            # _render_sheet_fallbackがstart rowsを永続化しなかった場合により正確な配置が生成されます。
             try:
                 all_rows = [r for r, _ in normalized_pairs]
                 filenames_only = all(r == 1 for r in all_rows) and len(normalized_pairs) > 0
@@ -845,18 +845,18 @@ class ExcelToMarkdownConverter:
             if filenames_only:
                 cell_ranges = self._extract_drawing_cell_ranges(sheet) or []
                 if cell_ranges:
-                    # map each anchor index to its start_row
+                    # 各アンカーインデックスをそのstart_rowにマップ
                     start_rows = [cr[2] for cr in cell_ranges]
-                    # sort anchor indices by start_row
+                    # start_rowでアンカーインデックスをソート
                     idxs = list(range(len(start_rows)))
                     idxs.sort(key=lambda i: start_rows[i])
-                    # number of image groups to assign
+                    # 割り当てる画像グループの数
                     nimgs = len(normalized_pairs)
-                    # split indices into nimgs contiguous buckets by count
+                    # インデックスをnimgsの連続したバケットに分割（カウントで）
                     buckets = [[] for _ in range(nimgs)]
                     for i, idx in enumerate(idxs):
                         buckets[i % nimgs].append(idx)
-                    # compute representative row for each bucket and assign filenames in order
+                    # 各バケットの代表的な行を計算し、順番にファイル名を割り当て
                     new_img_map = {}
                     for bi, bucket in enumerate(buckets):
                         insert_r = 1
@@ -867,7 +867,7 @@ class ExcelToMarkdownConverter:
                                     insert_r = int(min(vals))
                         except (ValueError, TypeError):
                             insert_r = 1
-                        # assign filenames whose index modulo nimgs equals this bucket index
+                        # インデックスをnimgsで割った余りがこのバケットインデックスと等しいファイル名を割り当て
                         try:
                             for j, (_, fn) in enumerate(normalized_pairs):
                                 if j % nimgs == bi:
@@ -875,12 +875,12 @@ class ExcelToMarkdownConverter:
                         except (ValueError, TypeError) as e:
                             print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     img_map = new_img_map
-                    # Log both to stdout and logger if available for easier
-                    # post-run inspection.
+                    # より簡単な
+                    # 実行後の検査のため、stdoutとloggerの両方にログ出力（利用可能な場合）。
                     msg = f"[DEBUG][_img_fallback_row] sheet={sheet.title} assigned_images_row={insert_r} images={list(img_map.get(insert_r,[]))}"
                     print(msg)
-                    # Rebuild normalized_pairs from img_map so the canonical
-                    # emission loop below uses the adjusted row anchors.
+                    # 正規の
+                    # 以下の出力ループが調整された行アンカーを使用するようimg_mapからnormalized_pairsを再構築します。
                     new_normalized = []
                     for rr in sorted(img_map.keys()):
                         for fn in img_map.get(rr, []):
@@ -888,8 +888,8 @@ class ExcelToMarkdownConverter:
                     if new_normalized:
                         normalized_pairs = new_normalized
 
-            # Rebuild img_map from normalized_pairs to ensure it reflects any
-            # adjustments performed above (for example fallback re-anchors).
+            # 上記で実行された調整（例: フォールバック再アンカー）を
+            # 反映するようnormalized_pairsからimg_mapを再構築します。
             try:
                 img_map = {}
                 for r, fn in normalized_pairs:
@@ -897,10 +897,10 @@ class ExcelToMarkdownConverter:
             except (ValueError, TypeError) as e:
                 print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-            # If an iso_group (trimmed/group) image exists for the same row,
-            # prefer it and suppress individual embedded images for that row.
-            # This avoids emitting the same visual content twice when a grouped
-            # render captured embedded images into one composed PNG.
+            # 同じ行にiso_group（トリミング/グループ）画像が存在する場合、
+            # それを優先し、その行の個別の埋め込み画像を抑制します。
+            # これによりグループ化された
+            # レンダリングが埋め込み画像を1つの合成PNGにキャプチャした場合、同じビジュアルコンテンツを2回出力することを回避します。
             try:
                 for rr, fns in list(img_map.items()):
                     try:
@@ -918,8 +918,8 @@ class ExcelToMarkdownConverter:
             except (ValueError, TypeError) as e:
                 print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-            # Rebuild normalized_pairs from possibly-filtered img_map so the
-            # canonical emission loop below uses the updated set.
+            # フィルタされた可能性のあるimg_mapからnormalized_pairsを再構築し、
+            # 以下の正規出力ループが更新されたセットを使用するようにします。
             try:
                 new_normalized = []
                 for rr in sorted(img_map.keys()):
@@ -930,15 +930,15 @@ class ExcelToMarkdownConverter:
             except (ValueError, TypeError) as e:
                 print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-            # Collect text for each non-empty source row (skip already emitted rows)
-            # This must happen before we decide image anchors so that freshly-detected
-            # header/text rows (which may not yet be present in self._cell_to_md_index)
-            # can be used as anchors for nearby images. Also merge any header/text
-            # lines previously deferred during header scanning so they are emitted
-            # only in the canonical, sorted emission pass (prevents early writes).
+            # 各非空ソース行のテキストを収集（既に出力された行はスキップ）
+            # これは画像アンカーを決定する前に行う必要があり、新しく検出された
+            # ヘッダー/テキスト行（まだself._cell_to_md_indexに存在しない可能性がある）が
+            # 近くの画像のアンカーとして使用できるようにします。また、ヘッダースキャン中に
+            # 以前に延期されたヘッダー/テキスト行をマージし、それらが
+            # 正規のソート済み出力パスでのみ出力されるようにします（早期書き込みを防ぐ）。
             texts_by_row = {}
             try:
-                # Pull any deferred header/text lines collected earlier
+                # 以前に収集された延期ヘッダー/テキスト行を取得
                 deferred = []
                 if hasattr(self, '_sheet_deferred_texts'):
                     try:
@@ -947,12 +947,12 @@ class ExcelToMarkdownConverter:
                         deferred = []
                 if deferred:
                     try:
-                        # Integrate deferred texts into texts_by_row, honoring emitted set
-                        # Do NOT mark rows as emitted here; actual marking should
-                        # occur only when the text is successfully written to the
-                        # canonical markdown buffer during the emission loop. Marking
-                        # rows now caused premature population of authoritative
-                        # emitted sets and led to pruning of legitimate table rows.
+                        # 延期テキストをtexts_by_rowに統合し、出力済みセットを尊重
+                        # ここでは行を出力済みとしてマークしないでください; 実際のマーキングは
+                        # テキストが正規のmarkdownバッファに正常に書き込まれたときにのみ
+                        # 出力ループ中に行われるべきです。ここで
+                        # 行をマークすると、正式な出力済みセットが
+                        # 早期に設定され、正当なテーブル行の刈り込みにつながっていました。
                         for dr, dtxt in deferred:
                             try:
                                 rr = int(dr) if dr is not None else 1
@@ -981,15 +981,15 @@ class ExcelToMarkdownConverter:
                             row_texts.append(s)
                 if row_texts:
                     texts_by_row[r] = " ".join(row_texts)
-                    # Do NOT mark rows as emitted here. Actual authoritative
-                    # marking must happen during the canonical emission pass
-                    # (inside _emit_free_text or when images/texts are written)
-                    # to avoid premature pruning of table rows.
+                    # ここでは行を出力済みとしてマークしないでください。実際の正式な
+                    # マーキングは正規の出力パス中に行う必要があります
+                    # （_emit_free_text内、または画像/テキストが書き込まれたとき）
+                    # テーブル行の早期刈り込みを避けるため。
 
-            # Simpler deterministic emission: build a unified event list of
-            # text items (src_row -> content) and image items (start_row -> filename),
-            # then sort by row and emit in order. For identical rows, emit text
-            # before images so images appear immediately after their anchor text.
+            # よりシンプルな決定論的出力: 統一されたイベントリストを構築
+            # テキスト項目（src_row -> コンテンツ）と画像項目（start_row -> ファイル名）の、
+            # その後行でソートし順番に出力します。同一行の場合、テキストを
+            # 画像の前に出力し、画像がそのアンカーテキストの直後に表示されるようにします。
             try:
                 # Build the list of events that will actually be emitted.
                 # We avoid mutating the logging list while constructing the
@@ -1454,16 +1454,16 @@ class ExcelToMarkdownConverter:
                     self._mark_image_emitted(img)
                 except (ValueError, TypeError):
                     print(f"WARNING: Exception self._mark_image_emitted({img})")
-            # Clear deferred tables for this sheet since they've been emitted
+            # このシートの延期テーブルをクリア（既に出力済み）
             if hasattr(self, '_sheet_deferred_tables') and sheet.title in self._sheet_deferred_tables:
                 del self._sheet_deferred_tables[sheet.title]
             # final sorted-events fallback removed: no additional logging here.
         except Exception as _exc:
-            # Debug: print exception info so we can see why the simplified flow failed
+            # デバッグ: 簡略化フローが失敗した理由を確認するため例外情報を出力
             print(f"[DEBUG][_reorder_exception] sheet={sheet.title} exc={_exc!r}")
             import traceback
             traceback.print_exc()
-            # On error, fall back to immediate insertion of all deferred images
+            # エラー時は、全ての延期画像の即座挿入にフォールバック
             for item in self._sheet_shape_images.get(sheet.title, []) or []:
                 fn = item[1] if isinstance(item, (list, tuple)) and len(item) >= 2 else str(item)
                 md = f"![{sheet.title}](images/{fn})"
@@ -1494,7 +1494,7 @@ class ExcelToMarkdownConverter:
         except (ValueError, TypeError):
             emitted = set()
 
-        # Determine which of the recorded emitted rows actually have a markdown
+        # 記録された出力済み行のうち、実際にmarkdown
         # mapping. Some code paths may have added rows to the emitted set
         # conservatively (or erroneously) before a canonical write occurred.
         # Only prune rows that both appear in _sheet_emitted_rows AND have a
@@ -1507,7 +1507,7 @@ class ExcelToMarkdownConverter:
             sheet_map = {}
 
         try:
-            # Only consider rows present in both structures as authoritative
+            # 両方の構造に存在する行のみを正式なものとして扱う
             authoritative_emitted = set(r for r in emitted if r in sheet_map)
             sample_emitted = sorted(list(authoritative_emitted))[:20]
             print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} emitted_count_total={len(emitted)} emitted_count_auth={len(authoritative_emitted)} emitted_sample={sample_emitted} source_rows_count={len(source_rows) if source_rows else 0}")
@@ -1521,7 +1521,7 @@ class ExcelToMarkdownConverter:
         pruned_src = []
         for row, src in zip(table_data, source_rows):
             try:
-                # Only prune when the source row was actually emitted to markdown
+                # ソース行が実際にmarkdownに出力された場合のみ刈り込み
                 # (present in authoritative_emitted). Rows that are only listed in
                 # the broader emitted set but lack a markdown mapping will be
                 # preserved here.
@@ -1595,9 +1595,9 @@ class ExcelToMarkdownConverter:
     def _process_sheet_images(self, sheet, insert_index: Optional[int] = None, insert_images: bool = True):
         """シート内の画像を処理"""
         try:
-            # Diagnostic: record entry parameters so we can trace callers
+            # 診断: 呼び出し元をトレースできるようエントリパラメータを記録
             print(f"[DEBUG][_process_sheet_images_entry] sheet={sheet.title} insert_index={insert_index} insert_images={insert_images}")
-            # Prevent repeated heavy rendering: if shapes were already generated
+            # 重複した重い処理を防止: 図形が既に生成されている場合
             # for this sheet earlier in the run, skip processing to avoid
             # repeatedly creating tmp_xlsx and invoking external converters.
             if sheet.title in self._sheet_shapes_generated:
@@ -1607,7 +1607,7 @@ class ExcelToMarkdownConverter:
             if hasattr(sheet, '_images') and sheet._images:
                 print(f"[INFO] シート '{sheet.title}' 内の画像を処理中...")
                 images_found = True
-                # Pre-populate mapping from embedded media (from drawing rels)
+                # 埋め込みメディアからのマッピングを事前に設定（描画relsから）
                 # to cNvPr ids so that when we process embedded images below we
                 # can decide whether to suppress them if a clustered/group
                 # render already preserved the same drawing anchor.
@@ -1716,7 +1716,7 @@ class ExcelToMarkdownConverter:
                     # _process_excel_image now returns the saved image filename (basename)
                     img_name = self._process_excel_image(image, f"{sheet.title} (Image)")
                     if img_name:
-                            # Determine a representative start_row for this image (if available)
+                            # この画像の代表的なstart_rowを決定（利用可能な場合）
                             start_row = 1
                             try:
                                 pos = None
@@ -1731,20 +1731,20 @@ class ExcelToMarkdownConverter:
                             except Exception:
                                 start_row = 1
 
-                            # If we're in canonical emission pass, insert immediately so
+                            # 正規出力パス中の場合、即座に挿入し
                             # the image appears inline with emitted text. Otherwise,
                             # defer by registering into self._sheet_shape_images so the
                             # canonical emission will place it deterministically.
                             if getattr(self, '_in_canonical_emit', False):
                                 md_line = f"![{sheet.title}の図](images/{img_name})"
                                 ref = f"images/{img_name}"
-                                # If this embedded image corresponds to a drawing anchor
+                                # この埋め込み画像が描画アンカーに対応する場合
                                 # that has already been preserved by a grouped render,
                                 # skip emitting it to avoid duplicate presentation.
                                 try:
                                     cid_map = self._embedded_image_cid_by_name.get(sheet.title, {}) if hasattr(self, '_embedded_image_cid_by_name') else {}
                                     mapped_cid = cid_map.get(img_name)
-                                    # If filename contains a short hash suffix like _<sha8>.ext, extract and try that key
+                                    # ファイル名に_<sha8>.extのような短いハッシュサフィックスが含まれる場合、それを抽出してキーとして試行
                                     if mapped_cid is None:
                                         try:
                                             # try extracting trailing 8-hex from filename
@@ -1755,7 +1755,7 @@ class ExcelToMarkdownConverter:
                                                 mapped_cid = cid_map.get(maybe)
                                         except Exception as e:
                                             print(f"[WARNING] ファイル操作エラー: {e}")
-                                    # If still unknown, try computing short sha from the existing file on disk
+                                    # まだ不明な場合、ディスク上の既存ファイルから短いshaを計算して試行
                                     if mapped_cid is None:
                                         try:
                                             fp = os.path.join(self.images_dir, img_name)
@@ -1792,7 +1792,7 @@ class ExcelToMarkdownConverter:
                                             print(f"[WARNING] ファイル操作エラー: {e}")
                                     except Exception as e:
                                         print(f"[WARNING] ファイル操作エラー: {e}")
-                                # Defer insertion: register for canonical row-sorted emission
+                                # 挿入を延期: 正規の行ソート済み出力のため登録
                                 try:
                                     # check mapped cNvPr for this embedded image and
                                     # skip deferral if already preserved by a group render
@@ -1807,7 +1807,7 @@ class ExcelToMarkdownConverter:
                                 except (ValueError, TypeError) as e:
                                     print(f"[DEBUG] 型変換エラー（無視）: {e}")
                             else:
-                                # Non-canonical context: register/defer the image so the
+                                # 非正規コンテキスト: 画像を登録/延期し
                                 # canonical emitter will place it deterministically.
                                 try:
                                     md_line = f"![{sheet.title}の図](images/{img_name})"
@@ -1818,30 +1818,30 @@ class ExcelToMarkdownConverter:
                                     except Exception as e:
                                         print(f"[WARNING] ファイル操作エラー: {e}")
                                 except Exception:
-                                    # Fallback: directly register into sheet_shape_images
+                                    # フォールバック: sheet_shape_imagesに直接登録
                                     try:
                                         self._sheet_shape_images.setdefault(sheet.title, [])
                                         self._sheet_shape_images[sheet.title].append((start_row, img_name))
                                     except Exception as e:
                                         print(f"[WARNING] ファイル操作エラー: {e}")
 
-            # Check for drawing shapes (vector shapes, connectors, etc.) regardless
+            # 描画図形（ベクトル図形、コネクタなど）を確認
             # of whether embedded images were found. This ensures that sheets with
             # only vector shapes (no embedded images) are still processed correctly.
-            # Phase 2-D fix: Always check for drawing shapes, not just when images_found=True
+            # Phase 2-D修正: images_found=Trueの時だけでなく、常に描画図形を確認
             if True:  # Always execute isolated-group processing for drawing shapes
                     print(f"[DEBUG] {len(sheet._images)} 個の埋め込み画像が検出されました。描画要素を調査中...")
-                    # If there is only one (or zero) embedded image, prefer to
+                    # 埋め込み画像が1つ（またはゼロ）の場合、
                     # use that image directly rather than performing costly
                     # isolated-group clustering and trimmed workbook rendering.
-                    # This avoids creating tmp_xlsx/.fixed.xlsx and invoking
+                    # これによりtmp_xlsx/.fixed.xlsxの作成と
                     # external converters when unnecessary (common for simple
                     # sheets like input_files/three_sheet_.xlsx).
                     try:
                         emb_count = len(getattr(sheet, '_images', []) or [])
-                        # If exactly one embedded image exists, prefer that image
+                        # 埋め込み画像がちょうど1つ存在する場合、その画像を優先
                         # directly and skip heavy isolated-group/fallback rendering.
-                        # This respects the user's request to avoid clustering when
+                        # これはクラスタリングを避けるユーザーのリクエストを尊重
                         # a single embedded graphic is present.
                         if emb_count == 1:
                             print(f"[DEBUG][_process_sheet_images_shortcircuit] sheet={sheet.title} single embedded image detected; using embedded image without clustering")
@@ -1850,7 +1850,7 @@ class ExcelToMarkdownConverter:
                             except (ValueError, TypeError):
                                 pass  # データ構造操作失敗は無視
                             return True
-                        # If zero embedded images, fall through to check for drawings
+                        # 埋め込み画像がゼロの場合、描画チェックにフォールスルー
                         # and possibly run isolated-group or full-sheet fallback.
                     except (ValueError, TypeError):
                         pass  # データ構造操作失敗は無視
@@ -1876,7 +1876,7 @@ class ExcelToMarkdownConverter:
                                     drawing_path = drawing_path.replace('worksheets', 'drawings')
                                 if drawing_path in z.namelist():
                                     drawing_xml = ET.fromstring(z.read(drawing_path))
-                                    # Simplified and balanced parsing: collect anchor ids
+                                    # 簡素化されバランスの取れた解析: アンカーIDを収集
                                     # and count pic/sp anchors. Also attempt to map any
                                     # embedded image filenames to their cNvPr ids. Keep
                                     # errors non-fatal and avoid deep nesting of try/except.
@@ -1944,12 +1944,12 @@ class ExcelToMarkdownConverter:
                                         total_anchors = total_anchors if 'total_anchors' in locals() else 0
                                         pic_anchors = pic_anchors if 'pic_anchors' in locals() else 0
                                         sp_anchors = sp_anchors if 'sp_anchors' in locals() else 0
-                                    # If there are more anchors than embedded images and at least one shape,
+                                    # 埋め込み画像よりアンカーが多く、少なくとも1つの図形がある場合、
                                     # attempt isolated-group rendering to capture vector shapes
                                     if total_anchors > len(sheet._images) and sp_anchors > 0:
                                         print(f"[DEBUG] Detected additional drawing shapes (anchors={total_anchors}, pics={pic_anchors}, sps={sp_anchors}) - attempting isolated-group rendering")
                                         try:
-                                            # Extract shape bounding boxes
+                                            # 図形のバウンディングボックスを抽出
                                             shapes = None
                                             try:
                                                 shapes = self._extract_drawing_shapes(sheet)
@@ -1960,23 +1960,23 @@ class ExcelToMarkdownConverter:
                                             
                                             print(f"[DEBUG] _extract_drawing_shapes returned: {len(shapes) if shapes else 'None'} shapes")
                                             if shapes and len(shapes) > 0:
-                                                # Cluster shapes using the proper clustering logic
-                                                # Extract cell ranges for row-based gap-splitting
+                                                # 適切なクラスタリングロジックを使用して図形をクラスタリング
+                                                # 行ベースのギャップ分割のためセル範囲を抽出
                                                 try:
                                                     cell_ranges_all = self._extract_drawing_cell_ranges(sheet)
                                                 except (ValueError, TypeError):
                                                     cell_ranges_all = []
                                                 
-                                                # Use _cluster_shapes_common for proper clustering
+                                                # 適切なクラスタリングのため_cluster_shapes_commonを使用
                                                 # max_groups=1 means cluster into 1 group if possible (no splitting)
-                                                # But the method will still split if there are large gaps
+                                                # ただし、このメソッドは大きなギャップがある場合は分割します
                                                 clusters, debug_info = self._cluster_shapes_common(
                                                     sheet, shapes, cell_ranges=cell_ranges_all, max_groups=1
                                                 )
                                                 print(f"[DEBUG] clustered into {len(clusters)} groups: sizes={[len(c) for c in clusters]}")
                                                 print(f"[DEBUG] clustering debug_info: {debug_info}")
                                                 
-                                                # Render each cluster as an isolated group
+                                                # 各クラスタを分離グループとしてレンダリング
                                                 # Using stable _render_sheet_isolated_group method (not v2)
                                                 # v2 is experimental and incomplete (missing connector cosmetic processing)
                                                 isolated_produced = False
