@@ -71,6 +71,8 @@ class IsolatedGroupRenderer:
             # フェーズ3: セル範囲計算
             cell_range = self._phase3_compute_cell_range(sheet, shape_indices, anchors, cell_range)
             
+            original_cell_range = cell_range
+            
             # フェーズ4: ID収集
             keep_cnvpr_ids = self._phase4_collect_keep_ids(shape_indices, anchors)
             
@@ -106,7 +108,7 @@ class IsolatedGroupRenderer:
                 
                 # フェーズ8: ワークブック準備
                 src_for_conv = self._phase8_prepare_workbook(
-                    tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices, keep_cnvpr_ids
+                    tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices, keep_cnvpr_ids, original_cell_range
                 )
                 
                 if src_for_conv is None:
@@ -210,14 +212,43 @@ class IsolatedGroupRenderer:
         return anchors
     
     def _phase3_compute_cell_range(self, sheet, shape_indices, anchors, cell_range):
-        """フェーズ3: セル範囲計算"""
+        """フェーズ3: セル範囲計算
+        
+        オリジナルのExcelファイルから直接図形範囲を取得します。
+        これにより、Phase6で図形が移動される前の正しい範囲を取得できます。
+        """
         try:
             if cell_range is None and shape_indices:
-                all_ranges = self.converter._extract_drawing_cell_ranges(sheet)
                 picked = []
+                
                 for idx in shape_indices:
-                    if idx >= 0 and idx < len(all_ranges):
-                        picked.append(all_ranges[idx])
+                    if idx < 0 or idx >= len(anchors):
+                        continue
+                    
+                    anchor = anchors[idx]
+                    lname = anchor.tag.split('}')[-1].lower()
+                    
+                    if lname == 'twocellanchor':
+                        ns = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
+                        fr = anchor.find(f'{{{ns}}}from')
+                        to = anchor.find(f'{{{ns}}}to')
+                        
+                        if fr is not None and to is not None:
+                            try:
+                                col = int(fr.find(f'{{{ns}}}col').text)
+                                row = int(fr.find(f'{{{ns}}}row').text)
+                                to_col = int(to.find(f'{{{ns}}}col').text)
+                                to_row = int(to.find(f'{{{ns}}}row').text)
+                                
+                                start_col = col + 1
+                                end_col = to_col + 1
+                                start_row = row + 1
+                                end_row = to_row + 1
+                                
+                                picked.append((start_col, end_col, start_row, end_row))
+                            except (ValueError, TypeError, AttributeError) as e:
+                                print(f"[DEBUG][Phase3] Failed to parse anchor {idx}: {e}")
+                                continue
                 
                 if picked:
                     valid_picked = [r for r in picked if r[0] <= r[1] and r[2] <= r[3]]
@@ -228,6 +259,8 @@ class IsolatedGroupRenderer:
                     e_col = max(r[1] for r in valid_picked)
                     s_row = min(r[2] for r in valid_picked)
                     e_row = max(r[3] for r in valid_picked)
+                    
+                    print(f"[DEBUG][Phase3] Original shape range from anchors: col={s_col}-{e_col}, row={s_row}-{e_row}")
                     
                     if s_col > e_col:
                         s_col, e_col = e_col, s_col
@@ -240,6 +273,7 @@ class IsolatedGroupRenderer:
                         e_row = s_row
                     
                     cell_range = (s_col, e_col, s_row, e_row)
+                    print(f"[DEBUG][Phase3] Final cell_range: {cell_range}")
         except (ValueError, TypeError) as e:
             print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
@@ -1185,7 +1219,7 @@ class IsolatedGroupRenderer:
     
 
 
-    def _phase8_prepare_workbook(self, tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices, keep_cnvpr_ids):
+    def _phase8_prepare_workbook(self, tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices, keep_cnvpr_ids, original_cell_range=None):
         """フェーズ8: ワークブック準備
         
         cell_rangeを使用してPrint_Areaを設定し、一時的なxlsxファイルを作成
@@ -1195,11 +1229,12 @@ class IsolatedGroupRenderer:
             tmpdir: 一時ディレクトリパス
             sheet: ワークシートオブジェクト
             sheet_index: シートのインデックス
-            cell_range: セル範囲 (s_col, e_col, s_row, e_row) または None
+            cell_range: セル範囲 (s_col, e_col, s_row, e_row) または None（図形移動後）
             drawing_path: drawing XMLのパス
             dpi: 解像度
             shape_indices: シェイプのインデックスリスト
             keep_cnvpr_ids: 保持する図形IDのセット
+            original_cell_range: オリジナルの図形範囲（図形移動前）
             
         Returns:
             str: 一時xlsxファイルのパス、失敗時はNone
@@ -1365,7 +1400,8 @@ class IsolatedGroupRenderer:
                     print(f"[WARNING] pageSetup修正失敗: {e}")
             
             try:
-                s_col, e_col, s_row, e_row = cell_range
+                orig_s_col, orig_e_col, orig_s_row, orig_e_row = original_cell_range
+                print(f"[DEBUG][Phase8] Using original_cell_range: col={orig_s_col}-{orig_e_col}, row={orig_s_row}-{orig_e_row}")
                 
                 worksheets_dir = os.path.join(tmpdir, "xl/worksheets")
                 sheet_rel = None
@@ -1404,7 +1440,7 @@ class IsolatedGroupRenderer:
                             except (ValueError, TypeError):
                                 continue
                             
-                            if rnum < s_row or rnum > e_row:
+                            if rnum < orig_s_row or rnum > orig_e_row:
                                 continue
                             
                             new_row = ET.Element(f'{{{ns}}}row')
@@ -1441,10 +1477,10 @@ class IsolatedGroupRenderer:
                                 for ch in col_letters.upper():
                                     col_idx = col_idx * 26 + (ord(ch) - 64)
                                 
-                                if col_idx < s_col or col_idx > e_col:
+                                if col_idx < orig_s_col or col_idx > orig_e_col:
                                     continue
                                 
-                                new_col_idx = col_idx - s_col + 1
+                                new_col_idx = col_idx - orig_s_col + 1
                                 new_col_letters = self._col_letter(new_col_idx)
                                 
                                 new_cell = ET.Element(f'{{{ns}}}c', dict(cell_el.attrib))
@@ -1470,7 +1506,7 @@ class IsolatedGroupRenderer:
                             dim = ET.Element(dim_tag)
                             sroot4.insert(0, dim)
                         start_addr = f"{self._col_letter(1)}1"
-                        end_addr = f"{self._col_letter(e_col - s_col + 1)}{max(1, new_r_index - 1)}"
+                        end_addr = f"{self._col_letter(orig_e_col - orig_s_col + 1)}{max(1, new_r_index - 1)}"
                         dim.set('ref', f"{start_addr}:{end_addr}")
                     
                     cols_tag = f'{{{ns}}}cols'
@@ -1485,7 +1521,7 @@ class IsolatedGroupRenderer:
                     try:
                         from openpyxl.utils import get_column_letter
                         default_col_w = getattr(self.sheet.sheet_format, 'defaultColWidth', None) or 8.43
-                        for c in range(s_col, e_col + 1):
+                        for c in range(orig_s_col, orig_e_col + 1):
                             cd = self.sheet.column_dimensions.get(get_column_letter(c))
                             width = None
                             hidden = None
@@ -1495,7 +1531,7 @@ class IsolatedGroupRenderer:
                             if width is None:
                                 width = default_col_w
                             col_el = ET.Element(col_tag)
-                            new_idx = c - s_col + 1
+                            new_idx = c - orig_s_col + 1
                             col_el.set('min', str(new_idx))
                             col_el.set('max', str(new_idx))
                             try:
