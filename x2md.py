@@ -79,7 +79,7 @@ class ExcelToMarkdownConverter:
             # Append normally
             return super().append(item)
 
-    def __init__(self, excel_file_path: str, output_dir=None):
+    def __init__(self, excel_file_path: str, output_dir=None, debug_mode=False):
         """Initialize converter instance.
 
         Provides a minimal, safe constructor so the module can be used via
@@ -94,6 +94,8 @@ class ExcelToMarkdownConverter:
         else:
             self.output_dir = os.path.join(os.getcwd(), "output")
         self.images_dir = os.path.join(self.output_dir, "images")
+        
+        self.debug_mode = debug_mode
 
         # Ensure output directories exist
         os.makedirs(self.output_dir, exist_ok=True)
@@ -5420,25 +5422,26 @@ class ExcelToMarkdownConverter:
                         # conversion runs always emit a record of which cNvPr ids
                         # were preserved into this isolated group. This is useful
                         # when downstream code later decides to skip clusters.
-                        try:
-                            import csv, os as _os, hashlib
-                            out_dir = getattr(self, 'output_dir', None) or _os.path.join(_os.getcwd(), 'output')
-                            diag_dir = _os.path.join(out_dir, 'diagnostics')
-                            _os.makedirs(diag_dir, exist_ok=True)
-                            # deterministic name: base + sheet + hash of keep ids
+                        if getattr(self, 'debug_mode', False):
                             try:
-                                base = getattr(self, 'base_name')
+                                import csv, os as _os, hashlib
+                                out_dir = getattr(self, 'output_dir', None) or _os.path.join(_os.getcwd(), 'output')
+                                diag_dir = _os.path.join(out_dir, 'diagnostics')
+                                _os.makedirs(diag_dir, exist_ok=True)
+                                # deterministic name: base + sheet + hash of keep ids
+                                try:
+                                    base = getattr(self, 'base_name')
+                                except Exception:
+                                    base = _os.path.splitext(_os.path.basename(getattr(self, 'excel_file', 'workbook')))[0]
+                                ksig = hashlib.sha1((base + sheet.title + ''.join(sorted(list(map(str, keep_cnvpr_ids))))).encode('utf-8')).hexdigest()[:8]
+                                diag_path = _os.path.join(diag_dir, f"{base}_{self._sanitize_filename(sheet.title)}_iso_{ksig}.csv")
+                                with open(diag_path, 'w', newline='', encoding='utf-8') as df:
+                                    w = csv.writer(df)
+                                    w.writerow(['keep_cnvpr_ids', 'preserved_ids', 'connector_children_keys'])
+                                    w.writerow([";".join(sorted(list(map(str, keep_cnvpr_ids)))), ";".join(sorted(list(map(str, referenced_ids)))), ";".join(sorted(list(map(str, connector_children_by_id.keys()))) )])
+                                print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
                             except Exception:
-                                base = _os.path.splitext(_os.path.basename(getattr(self, 'excel_file', 'workbook')))[0]
-                            ksig = hashlib.sha1((base + sheet.title + ''.join(sorted(list(map(str, keep_cnvpr_ids))))).encode('utf-8')).hexdigest()[:8]
-                            diag_path = _os.path.join(diag_dir, f"{base}_{self._sanitize_filename(sheet.title)}_iso_{ksig}.csv")
-                            with open(diag_path, 'w', newline='', encoding='utf-8') as df:
-                                w = csv.writer(df)
-                                w.writerow(['keep_cnvpr_ids', 'preserved_ids', 'connector_children_keys'])
-                                w.writerow([";".join(sorted(list(map(str, keep_cnvpr_ids)))), ";".join(sorted(list(map(str, referenced_ids)))), ";".join(sorted(list(map(str, connector_children_by_id.keys()))) )])
-                            print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
-                        except Exception:
-                            pass
+                                pass
                     except Exception:
                         pass
                 except Exception:
@@ -7607,38 +7610,33 @@ class ExcelToMarkdownConverter:
                             zout.write(full, arcname)
 
                 # Save a copy of the generated tmp_xlsx for debugging/inspection
-                try:
-                    dbg_dir = os.path.join(self.output_dir, 'debug_workbooks')
-                    os.makedirs(dbg_dir, exist_ok=True)
-                    dbg_copy = os.path.join(dbg_dir, os.path.basename(tmp_xlsx))
-                    # atomic copy: write to a temp file in the same dir and rename
-                    tmp_dbg = dbg_copy + '.tmp'
-                    shutil.copyfile(tmp_xlsx, tmp_dbg)
+                if getattr(self, 'debug_mode', False):
                     try:
-                        os.replace(tmp_dbg, dbg_copy)
-                    except Exception:
-                        # fallback to non-atomic move
-                        shutil.move(tmp_dbg, dbg_copy)
-                    print(f"[DEBUG] saved group workbook: {dbg_copy}")
-                    try:
-                        st = os.stat(dbg_copy)
-                        print(f"[DEBUG] dbg_copy exists: size={st.st_size} bytes")
-                    except Exception:
+                        dbg_dir = os.path.join(self.output_dir, 'debug_workbooks')
+                        os.makedirs(dbg_dir, exist_ok=True)
+                        dbg_copy = os.path.join(dbg_dir, os.path.basename(tmp_xlsx))
+                        # atomic copy: write to a temp file in the same dir and rename
+                        tmp_dbg = dbg_copy + '.tmp'
+                        shutil.copyfile(tmp_xlsx, tmp_dbg)
                         try:
-                            print(f"[WARN] dbg_copy not found after save: {dbg_copy}")
+                            os.replace(tmp_dbg, dbg_copy)
                         except Exception:
-                            pass
-                    # Try to run a conservative fixer and prefer its output if available
-                    try:
-                        repair_script = os.path.join(os.path.dirname(__file__), 'tools', 'repair_xlsx.py')
-                        repaired_candidate = dbg_copy.replace('.xlsx', '.repaired.xlsx')
-                        fixed_candidate = dbg_copy.replace('.xlsx', '.fixed.xlsx')
-                        # Previously we invoked an external repair script here.
-                        # Instead, rely on the in-place OOXML fixes already applied
-                        # to the temporary package before zipping. Create a '.fixed.xlsx'
-                        # copy so downstream logic can prefer a "fixed" candidate
-                        # without spawning an external process.
+                            # fallback to non-atomic move
+                            shutil.move(tmp_dbg, dbg_copy)
+                        print(f"[DEBUG] saved group workbook: {dbg_copy}")
                         try:
+                            st = os.stat(dbg_copy)
+                            print(f"[DEBUG] dbg_copy exists: size={st.st_size} bytes")
+                        except Exception:
+                            try:
+                                print(f"[WARN] dbg_copy not found after save: {dbg_copy}")
+                            except Exception:
+                                pass
+                        # Try to run a conservative fixer and prefer its output if available
+                        try:
+                            repair_script = os.path.join(os.path.dirname(__file__), 'tools', 'repair_xlsx.py')
+                            repaired_candidate = dbg_copy.replace('.xlsx', '.repaired.xlsx')
+                            fixed_candidate = dbg_copy.replace('.xlsx', '.fixed.xlsx')
                             # Create a fixed candidate by copying and then attempt
                             # to normalize the package using openpyxl. openpyxl
                             # rewrite often fixes subtle OOXML packaging order
@@ -7646,9 +7644,6 @@ class ExcelToMarkdownConverter:
                             shutil.copyfile(dbg_copy, fixed_candidate)
                             print(f"[DEBUG] created fixed workbook (inline): {fixed_candidate}")
                             try:
-                                # Attempt an in-place normalization using openpyxl.
-                                # Use a read/load+save cycle; if it fails, leave
-                                # the copied file intact and continue.
                                 from openpyxl import load_workbook as _op_load
                                 try:
                                     _wb_tmp = _op_load(fixed_candidate)
@@ -7660,7 +7655,6 @@ class ExcelToMarkdownConverter:
                                     except Exception:
                                         pass
                             except Exception:
-                                # If import or resave fails, fall back silently
                                 pass
                         except Exception as _e:
                             try:
@@ -7701,60 +7695,52 @@ class ExcelToMarkdownConverter:
                                 print(f"[DEBUG] wrote fixed workbook ids: {ids_fn} (count={len(ids)})")
                             except Exception:
                                 pass
+
+                            src_for_conv = dbg_copy
+                            if os.path.exists(repaired_candidate):
+                                src_for_conv = repaired_candidate
+                                print(f"[DEBUG] using repaired workbook for conversion: {src_for_conv}")
+                            elif os.path.exists(fixed_candidate):
+                                src_for_conv = fixed_candidate
+                                print(f"[DEBUG] using fixed workbook for conversion: {src_for_conv}")
+                            else:
+                                src_for_conv = dbg_copy
+                            
+                            try:
+                                self._set_excel_fit_to_one_page(src_for_conv)
+                            except Exception as e:
+                                print(f"[WARNING] isolated group pageSetup設定失敗: {e}")
+
+                            if getattr(self, 'debug_mode', False):
+                                try:
+                                    compat_dir = os.path.join(self.output_dir, 'debug_workbooks_compat')
+                                    os.makedirs(compat_dir, exist_ok=True)
+                                    try:
+                                        print(f"[DEBUG][_iso_conv_choice] sheet={sheet.title} src_for_conv={src_for_conv}")
+                                    except Exception:
+                                        pass
+                                    cmd_conv = [LIBREOFFICE_PATH, '--headless', '--convert-to', 'xlsx', '--outdir', compat_dir, src_for_conv]
+                                    proc_conv = subprocess.run(cmd_conv, capture_output=True, text=True, timeout=90)
+                                    compat_path = os.path.join(compat_dir, os.path.basename(src_for_conv))
+                                    if proc_conv.returncode == 0 and os.path.exists(compat_path):
+                                        print(f"[DEBUG] saved LibreOffice-resaved compatible workbook: {compat_path}")
+                                    else:
+                                        stderr = (proc_conv.stderr or '').strip()
+                                        if stderr:
+                                            print(f"[WARN] LibreOffice conversion warning/error: {stderr}")
+                                        base = os.path.splitext(os.path.basename(src_for_conv))[0]
+                                        candidates = [os.path.join(compat_dir, f) for f in os.listdir(compat_dir) if f.startswith(base) and f.lower().endswith('.xlsx')]
+                                        if candidates:
+                                            print(f"[DEBUG] detected LibreOffice output candidate: {candidates[0]}")
+                                except Exception as _e:
+                                    try:
+                                        print(f"[WARN] LibreOffice conversion failed: {_e}")
+                                    except Exception:
+                                        pass
                         except Exception:
                             pass
-
-                        # If a more explicit '.repaired.xlsx' already exists (from other tools), prefer it.
-                        src_for_conv = dbg_copy
-                        if os.path.exists(repaired_candidate):
-                            src_for_conv = repaired_candidate
-                            print(f"[DEBUG] using repaired workbook for conversion: {src_for_conv}")
-                        elif os.path.exists(fixed_candidate):
-                            src_for_conv = fixed_candidate
-                            print(f"[DEBUG] using fixed workbook for conversion: {src_for_conv}")
-                        else:
-                            # fallback: use the original dbg_copy
-                            src_for_conv = dbg_copy
-                        
-                        # PDF変換前に縦横1ページ設定を適用(isolated group用)
-                        try:
-                            self._set_excel_fit_to_one_page(src_for_conv)
-                        except Exception as e:
-                            print(f"[WARNING] isolated group pageSetup設定失敗: {e}")
-
-                        # Additionally, create an Excel-compatible resaved copy using LibreOffice
-                        try:
-                            compat_dir = os.path.join(self.output_dir, 'debug_workbooks_compat')
-                            os.makedirs(compat_dir, exist_ok=True)
-                            try:
-                                print(f"[DEBUG][_iso_conv_choice] sheet={sheet.title} src_for_conv={src_for_conv}")
-                            except Exception:
-                                pass
-                            cmd_conv = [LIBREOFFICE_PATH, '--headless', '--convert-to', 'xlsx', '--outdir', compat_dir, src_for_conv]
-                            proc_conv = subprocess.run(cmd_conv, capture_output=True, text=True, timeout=90)
-                            # LibreOffice may create a file with the same basename under compat_dir
-                            compat_path = os.path.join(compat_dir, os.path.basename(src_for_conv))
-                            if proc_conv.returncode == 0 and os.path.exists(compat_path):
-                                print(f"[DEBUG] saved LibreOffice-resaved compatible workbook: {compat_path}")
-                            else:
-                                # If conversion failed, log stderr for diagnostics and try to detect any produced xlsx file
-                                stderr = (proc_conv.stderr or '').strip()
-                                if stderr:
-                                    print(f"[WARN] LibreOffice conversion warning/error: {stderr}")
-                                # try to pick any xlsx in compat_dir with similar base
-                                base = os.path.splitext(os.path.basename(src_for_conv))[0]
-                                candidates = [os.path.join(compat_dir, f) for f in os.listdir(compat_dir) if f.startswith(base) and f.lower().endswith('.xlsx')]
-                                if candidates:
-                                    print(f"[DEBUG] detected LibreOffice output candidate: {candidates[0]}")
-                        except Exception as _e:
-                            try:
-                                print(f"[WARN] LibreOffice conversion failed: {_e}")
-                            except Exception:
-                                pass
                     except Exception:
                         pass
-                except Exception:
-                    pass
 
                 # openpyxl resave+merge disabled: using the original trimmed workbook
                 # directly tends to preserve drawing anchors. If openpyxl-based
@@ -7988,34 +7974,35 @@ class ExcelToMarkdownConverter:
                     pass
                 
                 # PDFを確認用に保存（isolated group）
-                try:
-                    pdfs_dir = os.path.join(self.output_dir, 'pdfs')
-                    os.makedirs(pdfs_dir, exist_ok=True)
-                    safe_sheet = self._sanitize_filename(sheet.title)
-                    # shape_indicesからユニークなIDを生成
-                    import hashlib
-                    indices_str = '_'.join(map(str, sorted(shape_indices)))
-                    group_hash = hashlib.md5(indices_str.encode()).hexdigest()[:8]
-                    saved_pdf_name = f"{self.base_name}_{safe_sheet}_iso_group_{group_hash}.pdf"
-                    saved_pdf_path = os.path.join(pdfs_dir, saved_pdf_name)
-                    shutil.copyfile(pdf_path, saved_pdf_path)
-                    print(f"[INFO] 分離グループPDFを保存しました: {saved_pdf_path}")
-                    
-                    # ページ数を確認
+                if getattr(self, 'debug_mode', False):
                     try:
-                        im_check = shutil.which('magick') or shutil.which('convert')
-                        if im_check:
-                            page_count_proc = subprocess.run(
-                                [im_check, 'identify', pdf_path],
-                                capture_output=True, text=True, timeout=30
-                            )
-                            if page_count_proc.returncode == 0:
-                                page_count = len([line for line in page_count_proc.stdout.strip().split('\n') if line])
-                                print(f"[INFO] 分離グループPDFページ数: {page_count}ページ")
-                    except Exception:
-                        pass
-                except Exception as e:
-                    print(f"[WARNING] 分離グループPDF保存失敗: {e}")
+                        pdfs_dir = os.path.join(self.output_dir, 'pdfs')
+                        os.makedirs(pdfs_dir, exist_ok=True)
+                        safe_sheet = self._sanitize_filename(sheet.title)
+                        # shape_indicesからユニークなIDを生成
+                        import hashlib
+                        indices_str = '_'.join(map(str, sorted(shape_indices)))
+                        group_hash = hashlib.md5(indices_str.encode()).hexdigest()[:8]
+                        saved_pdf_name = f"{self.base_name}_{safe_sheet}_iso_group_{group_hash}.pdf"
+                        saved_pdf_path = os.path.join(pdfs_dir, saved_pdf_name)
+                        shutil.copyfile(pdf_path, saved_pdf_path)
+                        print(f"[INFO] 分離グループPDFを保存しました: {saved_pdf_path}")
+                        
+                        # ページ数を確認
+                        try:
+                            im_check = shutil.which('magick') or shutil.which('convert')
+                            if im_check:
+                                page_count_proc = subprocess.run(
+                                    [im_check, 'identify', pdf_path],
+                                    capture_output=True, text=True, timeout=30
+                                )
+                                if page_count_proc.returncode == 0:
+                                    page_count = len([line for line in page_count_proc.stdout.strip().split('\n') if line])
+                                    print(f"[INFO] 分離グループPDFページ数: {page_count}ページ")
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        print(f"[WARNING] 分離グループPDF保存失敗: {e}")
 
                 im_cmd = shutil.which('magick') or shutil.which('convert')
                 if not im_cmd:
@@ -13175,6 +13162,8 @@ def main():
     parser.add_argument('excel_file', help='変換するExcelファイル（.xlsx/.xls）')
     parser.add_argument('-o', '--output-dir', type=str, 
                        help='出力ディレクトリを指定（デフォルト: ./output）')
+    parser.add_argument('--debug', action='store_true',
+                       help='デバッグモード：debug_workbooks、pdfs、diagnosticsフォルダを出力')
     
     args = parser.parse_args()
     
@@ -13202,7 +13191,7 @@ def main():
         print(f"✅ XLS→XLSX変換完了: {converted_file}")
     
     try:
-        converter = ExcelToMarkdownConverter(processing_file, output_dir=args.output_dir)
+        converter = ExcelToMarkdownConverter(processing_file, output_dir=args.output_dir, debug_mode=args.debug)
         output_file = converter.convert()
         print("\n✅ 変換完了!")
         print(f"📄 出力ファイル: {output_file}")
