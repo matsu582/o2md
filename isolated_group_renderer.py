@@ -1666,7 +1666,10 @@ class IsolatedGroupRenderer:
             try:
                 drawing_path_full = os.path.join(tmpdir, drawing_path)
                 if os.path.exists(drawing_path_full):
-                    print(f"[DEBUG][Phase8] Moving shapes: using original range row={orig_s_row}-{orig_e_row}, col={orig_s_col}-{orig_e_col}")
+                    shape_offset_col = orig_s_col - 1
+                    shape_offset_row = orig_s_row - 1
+                    
+                    print(f"[DEBUG][Phase8] Moving shapes: offset=({shape_offset_col}, {shape_offset_row}), original range row={orig_s_row}-{orig_e_row}, col={orig_s_col}-{orig_e_col}")
                     
                     dtree = ET.parse(drawing_path_full)
                     droot = dtree.getroot()
@@ -1683,7 +1686,7 @@ class IsolatedGroupRenderer:
                             row_el = fr.find('xdr:row', ns_xdr)
                             try:
                                 if col_el is not None and col_el.text is not None:
-                                    new_col = int(col_el.text) - (orig_s_col - 1)
+                                    new_col = int(col_el.text) - shape_offset_col
                                     if new_col < 0:
                                         new_col = 0
                                     col_el.text = str(new_col)
@@ -1691,7 +1694,7 @@ class IsolatedGroupRenderer:
                                 pass
                             try:
                                 if row_el is not None and row_el.text is not None:
-                                    new_row = int(row_el.text) - (orig_s_row - 1)
+                                    new_row = int(row_el.text) - shape_offset_row
                                     if new_row < 0:
                                         new_row = 0
                                     row_el.text = str(max(0, new_row))
@@ -1704,7 +1707,7 @@ class IsolatedGroupRenderer:
                             row_el = to.find('xdr:row', ns_xdr)
                             try:
                                 if col_el is not None and col_el.text is not None:
-                                    new_col = int(col_el.text) - (orig_s_col - 1)
+                                    new_col = int(col_el.text) - shape_offset_col
                                     if new_col < 0:
                                         new_col = 0
                                     col_el.text = str(new_col)
@@ -1712,7 +1715,7 @@ class IsolatedGroupRenderer:
                                 pass
                             try:
                                 if row_el is not None and row_el.text is not None:
-                                    new_row = int(row_el.text) - (orig_s_row - 1)
+                                    new_row = int(row_el.text) - shape_offset_row
                                     if new_row < 0:
                                         new_row = 0
                                     row_el.text = str(max(0, new_row))
