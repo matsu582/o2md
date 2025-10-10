@@ -651,17 +651,17 @@ class IsolatedGroupRenderer:
                             out_dir = getattr(self.converter, 'output_dir', None) or os.path.join(os.getcwd(), 'output')
                             diag_dir = os.path.join(out_dir, 'diagnostics')
                             os.makedirs(diag_dir, exist_ok=True)
-                        # 決定論的な名前: ベース + シート + 保持IDのハッシュ
-                        try:
-                            base = getattr(self.converter, 'base_name')
-                        except Exception:
-                            base = os.path.splitext(os.path.basename(getattr(self.converter, 'excel_file', 'workbook')))[0]
-                        ksig = hashlib.sha1((base + sheet.title + ''.join(sorted(list(map(str, keep_cnvpr_ids))))).encode('utf-8')).hexdigest()[:8]
-                        diag_path = os.path.join(diag_dir, f"{base}_{self.converter._sanitize_filename(sheet.title)}_iso_{ksig}.csv")
-                        with open(diag_path, 'w', newline='', encoding='utf-8') as df:
-                            w = csv.writer(df)
-                            w.writerow(['keep_cnvpr_ids', 'preserved_ids', 'connector_children_keys'])
-                            w.writerow([";".join(sorted(list(map(str, keep_cnvpr_ids)))), ";".join(sorted(list(map(str, referenced_ids)))), ";".join(sorted(list(map(str, connector_children_by_id.keys()))) )])
+                            # 決定論的な名前: ベース + シート + 保持IDのハッシュ
+                            try:
+                                base = getattr(self.converter, 'base_name')
+                            except Exception:
+                                base = os.path.splitext(os.path.basename(getattr(self.converter, 'excel_file', 'workbook')))[0]
+                            ksig = hashlib.sha1((base + sheet.title + ''.join(sorted(list(map(str, keep_cnvpr_ids))))).encode('utf-8')).hexdigest()[:8]
+                            diag_path = os.path.join(diag_dir, f"{base}_{self.converter._sanitize_filename(sheet.title)}_iso_{ksig}.csv")
+                            with open(diag_path, 'w', newline='', encoding='utf-8') as df:
+                                w = csv.writer(df)
+                                w.writerow(['keep_cnvpr_ids', 'preserved_ids', 'connector_children_keys'])
+                                w.writerow([";".join(sorted(list(map(str, keep_cnvpr_ids)))), ";".join(sorted(list(map(str, referenced_ids)))), ";".join(sorted(list(map(str, connector_children_by_id.keys()))) )])
                             print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
                         except (OSError, IOError, FileNotFoundError):
                             print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
