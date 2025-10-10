@@ -26,6 +26,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from utils import get_libreoffice_path, get_imagemagick_command
+from isolated_group_renderer import IsolatedGroupRenderer
 
 try:
     import openpyxl
@@ -55,15 +56,13 @@ IMAGE_BORDER_SIZE = 8
 MAX_HEAD_SCAN_ROWS = 12
 MAX_SCAN_COLUMNS = 60
 
-# Note: specific-word header lists were removed to avoid sheet-specific rules.
-# Generic structural heuristics are used instead (column non-empty ratios, path-like detection, etc.).
 
 
 class ExcelToMarkdownConverter:
     class _LoggingList(list):
-        """A tiny wrapper around list to log append/insert operations for debugging.
+        """デバッグ用にappend/insert操作をログ出力するlistのラッパー
 
-        It prints to stdout and, if available, writes to the converter's debug log.
+        標準出力にログを出力し、可能であればコンバータのデバッグログにも書き込みます。
         """
         def __init__(self, owner, *args):
             super().__init__(*args)
@@ -71,25 +70,21 @@ class ExcelToMarkdownConverter:
 
         def append(self, item):
             print(f"[MD_APPEND] {repr(item)}")
-            # Minimal protective behavior: avoid adding duplicate '---' separators
             try:
                 if isinstance(item, str) and item.strip() == '---' and len(self) and isinstance(self[-1], str) and self[-1].strip() == '---':
                     return
             except (ValueError, TypeError):
-                # conservative fallback: ignore logging-related errors
                 pass
 
-            # Append normally
             return super().append(item)
 
     def __init__(self, excel_file_path: str, output_dir=None):
-        """Initialize converter instance.
+        """コンバータインスタンスの初期化
 
-        Provides a minimal, safe constructor so the module can be used via
-        the CLI. It intentionally keeps initialization conservative and
-        prepares common per-sheet ephemeral state used across methods.
+        CLIから使用できるように、最小限で安全なコンストラクタを提供します。
+        意図的に保守的な初期化を維持し、メソッド間で使用される共通のシート毎の
+        一時的な状態を準備します。
         """
-        # Basic file/paths
         self.excel_file = excel_file_path
         self.base_name = Path(excel_file_path).stem
         if output_dir:
@@ -98,29 +93,24 @@ class ExcelToMarkdownConverter:
             self.output_dir = os.path.join(os.getcwd(), "output")
         self.images_dir = os.path.join(self.output_dir, "images")
 
-        # Ensure output directories exist
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.images_dir, exist_ok=True)
 
-        # Primary buffers and counters
         self.markdown_lines = self._LoggingList(self)
         self.image_counter = 0
 
-        # Per-sheet ephemeral state (initialized here, cleared per sheet)
         self._init_per_sheet_state()
 
-        # Lightweight logger used by many debug calls in the codebase
         class _SimpleLogger:
             def debug(self, *args, **kwargs):
                 print("[LOGGER_DEBUG]", *args)
         self.logger = _SimpleLogger()
 
-        # Load workbook
         self.workbook = load_workbook(excel_file_path, data_only=True)
         print(f"[INFO] Excelワークブック読み込み完了: {excel_file_path}")
 
     def _init_per_sheet_state(self):
-        """Initialize per-sheet state variables."""
+        """シート毎の状態変数を初期化"""
         self._cell_to_md_index = {}
         self._sheet_shape_images = {}
         self._sheet_shape_next_idx = {}
@@ -179,18 +169,18 @@ class ExcelToMarkdownConverter:
         """
         print(f"[INFO] Excel文書変換開始: {self.excel_file}")
 
-        # prepend document title
+        # ドキュメントタイトルを先頭に追加
         self.markdown_lines.append(f"# {self.base_name}")
         self.markdown_lines.append("")
 
-        # generate TOC if helper exists
+        # ヘルパーが存在する場合は目次を生成
         if hasattr(self, '_generate_toc') and callable(getattr(self, '_generate_toc')):
             try:
                 self._generate_toc()
             except Exception as e:
                 print(f"[WARNING] 目次生成失敗: {e}")
 
-        # convert sheets
+        # シートを変換
         for sheet_name in self.workbook.sheetnames:
             try:
                 print(f"[INFO] シート変換中: {sheet_name}")
@@ -202,7 +192,7 @@ class ExcelToMarkdownConverter:
                 traceback.print_exc()
                 continue
 
-        # Write markdown output
+        # Markdown出力を書き込み
         output_file = os.path.join(self.output_dir, f"{self.base_name}.md")
         content = "\n".join(str(x) for x in self.markdown_lines)
         with open(output_file, 'w', encoding='utf-8') as f:
@@ -214,48 +204,48 @@ class ExcelToMarkdownConverter:
         """外枠罫線のみで囲まれた最大矩形をテーブルと判定（内部罫線は無視）"""
         tables = []
         print("[DEBUG] セル罫線情報一覧:")
-        # Minimal safe implementation: detailed bordered-table detection logic
-        # was removed during previous edits and corrupted the file structure.
-        # Returning empty 'tables' here is safe: calling code can handle no
-        # detected bordered tables and will fall back to the general table
-        # detection logic elsewhere.
+        # 最小限の安全な実装: 詳細な罫線テーブル検出ロジック
+        # は以前の編集で削除されファイル構造が破損しました。
+        # ここで空の'tables'を返すのは安全: 呼び出しコードは
+        # 検出された罫線テーブルがない場合を処理でき、一般的なテーブル
+        # 検出ロジックにフォールバックします。
         return tables
         # デッドコード削除: self.image_counter = 0
-        # mapping: sheet.title -> dict of (row_num -> markdown line index after that row's output)
-        # we'll populate this while emitting markdown for rows/regions so that drawings
-        # anchored to a cell (row) can be inserted immediately after the corresponding
-        # paragraph/table output.
+        # マッピング: sheet.title -> 辞書(行番号 -> その行の出力後のmarkdown行インデックス)
+        # 行/領域のmarkdownを出力する際にこれを設定し、描画を
+        # セル(行)に固定された描画を対応する
+        # 段落/テーブル出力の直後に挿入できるようにします。
         self._cell_to_md_index = {}
-        # mapping of sheet.title -> list of generated shape image filenames (in images_dir)
+        # マッピング: sheet.title -> 生成された図形画像ファイル名のリスト(images_dir内)
         self._sheet_shape_images = {}
-        # mapping of sheet.title -> next index to insert
+        # マッピング: sheet.title -> 次の挿入インデックス
         self._sheet_shape_next_idx = {}
-        # set of sheet titles for which shapes have been generated
+        # 図形が生成されたシートタイトルの集合
         self._sheet_shapes_generated = set()
-        # Historical code used a persisted start_map to remember where images
-        # should be inserted across runs. That behavior caused separate group
-        # images to be collapsed into a single insertion bucket in some runs.
-        # Ensure any such persisted map is disabled by default so freshly
-        # computed representative start_row values are authoritative.
+        # 過去のコードは永続化されたstart_mapを使用して画像の
+        # 挿入位置を実行間で記憶していました。この動作により別々のグループ
+        # 画像が一部の実行で単一の挿入バケットに集約されていました。
+        # このような永続化されたマップはデフォルトで無効にし、新たに
+        # 計算された代表的なstart_row値が正式なものとなるようにします。
         self._sheet_shape_image_start_rows = {}
-        # deferred free-form texts collected during early header scanning
-        # sheet.title -> list of (row, text)
+        # 初期ヘッダースキャン中に収集された延期された自由形式テキスト
+        # sheet.title -> (行, テキスト)のリスト
         self._sheet_deferred_texts = {}
-        # deferred tables collected during pre-scan: sheet.title -> list of (anchor_row, table_data, source_rows)
+        # プレスキャン中に収集された延期テーブル: sheet.title -> (アンカー行, テーブルデータ, ソース行)のリスト
         self._sheet_deferred_tables = {}
-        # track per-sheet emitted textual content (normalized) to avoid duplicate free-form text
+        # 重複する自由形式テキストを避けるためシート毎の出力済みテキストコンテンツ(正規化済み)を追跡
         self._sheet_emitted_texts = {}
-        # track per-sheet emitted row numbers (used to avoid re-emitting rows)
+        # 行の再出力を避けるためシート毎の出力済み行番号を追跡
         self._sheet_emitted_rows = {}
-        # track emitted image filenames (basename) to avoid duplicate image insertions
+        # 重複画像挿入を避けるため出力済み画像ファイル名(ベース名)を追跡
         self._emitted_images = set()
-        # mapping: sheet.title -> { image_basename: cNvPr_id }
-        # populated when parsing drawing XML so we can tell which embedded
-        # image corresponds to which drawing anchor id (cNvPr). This lets us
-        # suppress embedded images when a clustered/group render already
-        # produced an image containing the same cNvPr id.
+        # マッピング: sheet.title -> { 画像ベース名: cNvPr_id }
+        # 描画XMLを解析する際に設定され、どの埋め込み
+        # 画像がどの描画アンカーID(cNvPr)に対応するかを判別できます。これにより
+        # クラスタ化/グループレンダリングが既に
+        # 同じcNvPr IDを含む画像を生成している場合、埋め込み画像を抑制できます。
         self._embedded_image_cid_by_name = {}
-        # (removed) no per-sheet special-case flags (do not control processing by specific cell text)
+        # (削除済み) シート毎の特殊ケースフラグなし（特定のセルテキストによる処理制御を行わない）
 
         # Excelファイルを読み込み
         try:
@@ -303,7 +293,7 @@ class ExcelToMarkdownConverter:
             if text is None:
                 return ''
             t = str(text)
-            # Replace literal angle brackets with HTML entities for safe display
+            # 安全な表示のためリテラル山括弧をHTMLエンティティに置換
             t = t.replace('<', '&lt;').replace('>', '&gt;')
             return t
         except (ValueError, TypeError):
@@ -330,7 +320,7 @@ class ExcelToMarkdownConverter:
         if not self._is_canonical_emit():
             return False
 
-        # Inspect last few markdown lines to avoid emitting duplicate separators
+        # 重複セパレータの出力を避けるため最後の数行をチェック
         tail = [x for x in self.markdown_lines[-6:] if isinstance(x, str)]
         for t in reversed(tail):
             if t.strip() == '':
@@ -358,33 +348,33 @@ class ExcelToMarkdownConverter:
             if text is None:
                 return False
             norm = self._normalize_text(text)
-            # do not create authoritative emitted_texts entry here; use get to avoid
-            # mutating the authoritative store outside the canonical emitter.
+            # ここで正式なemitted_textsエントリを作成しない; getを使用して
+            # 正規エミッタの外で正式なストアを変更することを避けます。
             emitted_texts = self._sheet_emitted_texts.get(sheet.title, set())
             if norm in emitted_texts:
                 return False
 
             if self._is_canonical_emit():
-                # Canonical emission: append to markdown buffer
+                # 正規の出力: markdownバッファに追加
                 self.markdown_lines.append(self._escape_angle_brackets(text) + "  ")
                 
-                # Map source row to markdown index
+                # ソース行をmarkdownインデックスにマップ
                 if src_row is not None:
                     md_index = len(self.markdown_lines) - 1
                     self._mark_sheet_map(sheet.title, src_row, md_index)
                     self.logger.debug(f"[_text_emit] sheet={sheet.title} src_row={src_row} md_index={md_index} text_norm='{norm}'")
                     print(f"[DEBUG][_text_emit] sheet={sheet.title} src_row={src_row} md_index={md_index} text_norm='{norm}'")
                 
-                # Mark as emitted
+                # 出力済みとしてマーク
                 if src_row is not None:
                     self._mark_emitted_row(sheet.title, src_row)
                 self._mark_emitted_text(sheet.title, norm)
                 return True
             else:
-                # Defer emission for later canonical pass
+                # 後の正規パスのため出力を延期
                 lst = self._sheet_deferred_texts.setdefault(sheet.title, [])
                 
-                # Check for duplicate deferred text
+                # 重複する延期テキストをチェック
                 already_deferred = any(
                     dt is not None and self._normalize_text(dt) == norm
                     for _, dt in lst
@@ -409,35 +399,35 @@ class ExcelToMarkdownConverter:
             caller = stk[-3] if len(stk) >= 3 else None
             caller_info = f"{caller.filename}:{caller.lineno}:{caller.name}" if caller else 'unknown'
             print(f"[DEBUG][_insert_markdown_image_called] insert_at={insert_at} img_name={img_name} caller={caller_info}")
-            # If we're not in the canonical emission pass and immediate image
-            # inserts are not explicitly allowed, convert this request into a
-            # deferred registration so the canonical emitter controls placement.
+            # 正規の出力パス中でなく、即座の画像
+            # 挿入が明示的に許可されていない場合、このリクエストを
+            # 延期登録に変換し、正規エミッタが配置を制御するようにします。
             if not getattr(self, '_in_canonical_emit', False) and not getattr(self, '_allow_immediate_image_inserts', False):
                 try:
-                    # Try to infer sheet title from the markdown alt text: '![<title>](images/...)'
+                    # markdownのaltテキストからシートタイトルを推測: '![<title>](images/...)'
                     import re
                     m = re.search(r'!\[(.*?)\]', md_line or "")
                     sheet_title = None
                     if m:
                         sheet_title = m.group(1)
-                        # remove trailing 'の図' if present (common alt text pattern)
+                        # 末尾の'の図'が存在する場合は削除（一般的なaltテキストパターン）
                         if sheet_title.endswith('の図'):
                             sheet_title = sheet_title[:-2]
                 except Exception:
                     sheet_title = None
                 key = sheet_title if sheet_title is not None else 'unknown'
-                # sheet_shape_images is a deferred, non-authoritative collection
-                # and may be safely mutated here.
+                # sheet_shape_imagesは延期された非正式なコレクションで
+                # ここで安全に変更できます。
                 lst = self._sheet_shape_images.setdefault(key, [])
-                # Use representative row=1 as a safe default when unknown.
-                # Avoid registering the same image multiple times for the same sheet.
+                # 不明な場合は安全なデフォルトとして代表的な行=1を使用します。
+                # 同じシートに対して同じ画像を複数回登録することを避けます。
                 already = any((isinstance(it, (list, tuple)) and len(it) >= 2 and it[1] == img_name) or (str(it) == img_name) for it in lst)
                 if not already:
                     lst.append((1, img_name))
                     print(f"[DEBUG][_insert_markdown_image_deferred] img_name={img_name} sheet={key}")
 
-                # No mutation performed; caller expecting insertion will receive
-                # current markdown length as if appended.
+                # 変更は実行されません; 挿入を期待する呼び出し側は
+                # 追加されたかのように現在のmarkdown長を受け取ります。
                 return len(self.markdown_lines)
 
             if insert_at is None:
@@ -446,7 +436,7 @@ class ExcelToMarkdownConverter:
                 self._mark_image_emitted(img_name)
                 return len(self.markdown_lines)
 
-            # clamp insert_at
+            # insert_atをクランプ
             try:
                 if insert_at < 0:
                     insert_at = 0
@@ -455,13 +445,13 @@ class ExcelToMarkdownConverter:
             if insert_at > len(self.markdown_lines):
                 insert_at = len(self.markdown_lines)
 
-            # Insert blank then the md line to preserve relative order for multiple inserts
+            # 複数挿入の相対順序を保持するため空行とmd行を挿入
             self.markdown_lines.insert(insert_at, "")
             self.markdown_lines.insert(insert_at, md_line)
             self._mark_image_emitted(img_name)
             return insert_at + 2
         except Exception:
-            # fallback: append
+            # フォールバック: 追加
             self.markdown_lines.append(md_line)
             self.markdown_lines.append("")
             self._mark_image_emitted(img_name)
@@ -554,10 +544,10 @@ class ExcelToMarkdownConverter:
         """シートを変換"""
         sheet_name = sheet.title
         
-        # Clear previous per-sheet state and initialize defaults
+        # 前のシート毎の状態をクリアしてデフォルトを初期化
         self._clear_sheet_state(sheet_name)
         
-        # Initialize defaults for this sheet
+        # このシートのデフォルトを初期化
         self._cell_to_md_index.setdefault(sheet_name, {})
         self._sheet_shape_images.setdefault(sheet_name, [])
         self._sheet_shape_next_idx.setdefault(sheet_name, 0)
@@ -566,9 +556,9 @@ class ExcelToMarkdownConverter:
         self._sheet_emitted_texts.setdefault(sheet_name, set())
         self._sheet_emitted_rows.setdefault(sheet_name, set())
         self._embedded_image_cid_by_name.setdefault(sheet_name, {})
-        # Build lightweight mapping of drawing anchor cNvPr ids (ordered) so
-        # cluster loops can quickly determine whether a candidate cluster
-        # contains anchors already preserved by earlier isolated renders.
+        # 描画アンカーcNvPr IDの軽量マッピングを構築（順序付き）することで
+        # クラスタループが候補クラスタが以前の分離レンダリングで
+        # 既に保持されたアンカーを含むかどうかを迅速に判定できます。
         anchors_cid_list = []
         try:
             try:
@@ -613,25 +603,25 @@ class ExcelToMarkdownConverter:
         # 表示順どおりに出力する。これにより「MailBoxより先の処理は」のような
         # 任意の説明文が欠落したり順序が入れ替わる問題を防止する。
         try:
-            # Emit only the contiguous non-empty rows that immediately precede the
-            # detected data_range start. This preserves the on-sheet top-to-bottom
-            # ordering while avoiding emission of unrelated header blocks that may
-            # appear far above the data. If the sheet has no data_range yet, fall
-            # back to scanning the first 12 rows as a conservative heuristic.
-            # set to the current markdown insertion index and used when requesting
-            # deferred image processing. Previously insert_pos could be referenced
-            # before assignment causing an UnboundLocalError.
+            # 検出されたdata_range開始の直前にある連続した非空行のみを出力します。
+            # これによりシート上の上から下への順序を保持しつつ、
+            # データの遥か上に表示される可能性のある無関係なヘッダーブロックの
+            # 出力を回避します。シートにまだdata_rangeがない場合は、
+            # 保守的なヒューリスティックとして最初の12行をスキャンすることにフォールバックします。
+            # 現在のmarkdown挿入インデックスに設定され、延期された
+            # 画像処理を要求する際に使用されます。以前はinsert_posが
+            # 代入前に参照されてUnboundLocalErrorを引き起こしていました。
             insert_pos = len(self.markdown_lines)
             max_head_scan = min(12, sheet.max_row)
             data_range = self._get_data_range(sheet)  # Initialize here to avoid UnboundLocalError
             head_rows = []
-            # Scan each row up to max_head_scan and collect combined non-empty
-            # cell texts per-row. Do not emit any markdown here --- emission
-            # (including the "このシートには表示可能なデータがありません" message)
-            # must be done during the canonical emission pass. Emitting during
-            # the pre-scan caused the same message to be appended repeatedly
-            # for every non-empty cell; instead, only collect the row texts now
-            # and defer insertion.
+            # max_head_scanまで各行をスキャンし、行毎に結合された非空
+            # セルテキストを収集します。ここではmarkdownを出力しません --- 出力
+            # （「このシートには表示可能なデータがありません」メッセージを含む）
+            # は正規の出力パス中に行う必要があります。
+            # プレスキャン中の出力により、同じメッセージが全ての非空セルに対して
+            # 繰り返し追加されていました; 代わりに、今は行テキストのみを収集し
+            # 挿入を延期します。
             for r in range(1, max_head_scan + 1):
                 row_texts = []
                 for c in range(1, min(20, sheet.max_column) + 1):
@@ -643,7 +633,7 @@ class ExcelToMarkdownConverter:
                         s = str(v).strip()
                         if s:
                             row_texts.append(s)
-                # combine cell values for this row; keep None for empty rows
+                # この行のセル値を結合; 空行にはNoneを保持
                 if row_texts:
                     combined = ' '.join(row_texts)
                 else:
@@ -651,13 +641,13 @@ class ExcelToMarkdownConverter:
                 head_rows.append(combined)
 
             emitted_any = False
-            # Register collected head_rows as deferred texts so that they
-            # will be emitted only during the canonical emission pass
-            # (prevents repeated per-cell emission of the same message).
+            # 収集されたhead_rowsを延期テキストとして登録し、
+            # 正規の出力パス中にのみ出力されるようにします
+            # （同じメッセージのセル毎の繰り返し出力を防ぎます）。
             for idx_row, combined in enumerate(head_rows, start=1):
                 if not combined:
                     continue
-                # Avoid duplicate adjacent identical deferred texts
+                # 隣接する同一の延期テキストの重複を回避
                 lst = self._sheet_deferred_texts.setdefault(sheet.title, [])
                 if len(lst) > 0 and lst[-1][1].strip() == combined.strip():
                     continue
@@ -665,33 +655,33 @@ class ExcelToMarkdownConverter:
 
             if data_range:
                 start_row = data_range[0]
-                # emit contiguous non-empty rows immediately before start_row (within scanned head_rows)
-                # find candidate rows among 1..min(max_head_scan, start_row-1)
+                # start_rowの直前の連続した非空行を出力（スキャンされたhead_rows内）
+                # 1..min(max_head_scan, start_row-1)の中から候補行を検索
                 cand_end = min(max_head_scan, start_row - 1)
                 if cand_end >= 1:
-                    # walk backwards from cand_end to find contiguous non-empty block
+                    # cand_endから逆方向に歩いて連続した非空ブロックを検索
                     block = []
                     for rr in range(cand_end, 0, -1):
                         content = head_rows[rr-1]
                         if content is None:
-                            # stop at first blank encountered
+                            # 最初の空白に遭遇したら停止
                             break
                         block.insert(0, (rr, content))
-                    # collect header block in deferred buffer for sorted emission later
+                    # ヘッダーブロックを後でソート出力するため延期バッファに収集
                     for (rnum, combined) in block:
                         if len(self.markdown_lines) > 0 and self.markdown_lines[-1].strip() == combined:
                             continue
                         self._sheet_deferred_texts.setdefault(sheet.title, []).append((rnum, combined))
                         emitted_any = True
             else:
-                # no data_range detected yet: fallback to original conservative behavior
+                # まだdata_rangeが検出されていません: 元の保守的な動作にフォールバック
                 for r in range(1, max_head_scan + 1):
                     combined = head_rows[r-1]
                     if not combined:
                         continue
                     if len(self.markdown_lines) > 0 and self.markdown_lines[-1].strip() == combined:
                         continue
-                    # defer emission: collect header lines for sorted emission later
+                    # 出力を延期: 後でソート出力するためヘッダー行を収集
                     self._sheet_deferred_texts.setdefault(sheet.title, []).append((r, combined))
                     emitted_any = True
 
@@ -705,19 +695,19 @@ class ExcelToMarkdownConverter:
             # シートにデータが無い場合でも、描画が存在するなら図を出力する
             try:
                 insert_pos = len(self.markdown_lines)
-                # If there are drawings, _process_sheet_images should defer insertion
-                # so that the canonical emitter (_reorder_sheet_output_by_row_order)
-                # can place images deterministically. Request deferred insertion.
+                # 描画がある場合、_process_sheet_imagesは挿入を延期し
+                # 正規エミッタ（_reorder_sheet_output_by_row_order）が
+                # 画像を決定論的に配置できるようにします。延期挿入を要求します。
                 self._process_sheet_images(sheet, insert_index=insert_pos, insert_images=False)
                 if not self._sheet_has_drawings(sheet):
-                    # Use canonical-aware free-text emitter to avoid multiple
-                    # identical messages being appended by different branches.
+                    # 複数の
+                    # 異なるブランチによる同一メッセージの追加を避けるため正規対応の自由テキストエミッタを使用します。
                     self._emit_free_text(sheet, None, "*このシートには表示可能なデータがありません*")
-                    # Add a trailing blank only when in the canonical emission pass
+                    # 正規の出力パス中のみ末尾の空行を追加
                     if getattr(self, '_in_canonical_emit', False):
                         self.markdown_lines.append("")
                 else:
-                    # drawings were handled; add separator and continue
+                    # 描画が処理されました; セパレータを追加して続行
                     self._add_separator()
                 return
             except Exception:
@@ -745,7 +735,7 @@ class ExcelToMarkdownConverter:
                 if not has_content:
                     # セル内容が無いため、図のみを挿入して終了する
                     insert_pos = len(self.markdown_lines)
-                    # Defer insertion so images are emitted during the canonical pass
+                    # 正規パス中に画像が出力されるよう挿入を延期
                     self._process_sheet_images(sheet, insert_index=insert_pos, insert_images=False)
                     if not self._sheet_has_drawings(sheet):
                         self._emit_free_text(sheet, None, "*このシートには表示可能なデータがありません*")
@@ -758,32 +748,32 @@ class ExcelToMarkdownConverter:
                 # 何か失敗した場合は従来の処理にフォールバック
                 pass
         # まずデータをテーブルとして変換（図は表の下に出力したいので後で処理）
-        # NOTE: do not return here — continue to process images and perform the
-        # canonical, row-ordered emission pass below so deferred texts and images
-        # are emitted deterministically. Previously an early return bypassed the
-        # canonical emission and caused missing table/paragraph output.
+        # 注意: ここではreturnしません — 画像の処理を続け、
+        # 延期されたテキストと画像が決定論的に出力されるよう
+        # 以下の正規の行順序出力パスを実行します。以前は早期returnが
+        # 正規出力をバイパスし、テーブル/段落出力の欠落を引き起こしていました。
         self._convert_sheet_data(sheet, data_range)
 
-        # After table output, generate shapes (without immediate insertion) and then
-        # emit sheet text and images strictly in ascending row order so that
-        # Markdown matches Excel top-to-bottom ordering. This uses each group's
-        # representative start_row stored in self._sheet_shape_images.
+        # テーブル出力後、図形を生成し（即座の挿入なし）、その後
+        # シートテキストと画像を厳密に行番号の昇順で出力し、
+        # MarkdownがExcelの上から下への順序と一致するようにします。これは各グループの
+        # self._sheet_shape_imagesに格納された代表的なstart_rowを使用します。
         try:
-            # Ensure shapes are generated and recorded; request deferred insertion
+            # 図形が生成され記録されることを確認; 延期挿入を要求
             insert_pos = len(self.markdown_lines)
             self._process_sheet_images(sheet, insert_index=insert_pos, insert_images=False)
 
-            # Now perform strict row-ordered emission: collect all textual rows
-            # (excluding those already emitted) and all image start_rows, then
-            # walk rows from 1..max_row emitting text or images when present.
+            # 厳密な行順序出力を実行: 全てのテキスト行を収集
+            # （既に出力されたものを除く）と全ての画像start_rowsを収集し、その後
+            # 1..max_rowの行を歩き、テキストまたは画像が存在する場合に出力します。
             self._reorder_sheet_output_by_row_order(sheet)
         except Exception:
-            # fallback to conservative behavior: insert any pending images and append separator
-            # Even in fallback, prefer deferred insertion so the canonical
-            # emitter controls placement and duplicate suppression.
+            # 保守的な動作にフォールバック: 保留中の画像を挿入しセパレータを追加
+            # フォールバックの場合でも、正規
+            # エミッタが配置と重複抑制を制御するよう延期挿入を優先します。
             self._process_sheet_images(sheet, insert_index=len(self.markdown_lines), insert_images=False)
         finally:
-            # final separator after processing a sheet
+            # シート処理後の最終セパレータ
             self._add_separator()
 
     def _reorder_sheet_output_by_row_order(self, sheet):
@@ -794,15 +784,15 @@ class ExcelToMarkdownConverter:
         - Updates self._cell_to_md_index so images can anchor to emitted md indices
         """
         try:
-            # Instrumentation: mark entry into reorder routine
+            # 計測: reorderルーチンへのエントリをマーク
             print(f"[DEBUG][_reorder_entry] sheet={sheet.title}")
-            # Per-run on-disk marker removed; keep only debug traces.
+            # 実行毎のディスク上マーカーを削除; デバッグトレースのみを保持。
             print(f"[DEBUG][_reorder_entry_marker] sheet={sheet.title}")
             max_row = sheet.max_row
             # avoid creating the per-sheet emitted rows set here; only the
             # canonical emitter should mutate _sheet_emitted_rows via helpers.
             emitted = self._sheet_emitted_rows.get(sheet.title, set())
-            # Build mapping: row -> list of image filenames (from _sheet_shape_images)
+            # マッピングを構築: 行 -> 画像ファイル名のリスト（_sheet_shape_imagesから）
             img_map = {}
             pairs = self._sheet_shape_images.get(sheet.title, []) or []
             # pairs may be either list of filenames or list of (row, filename)
@@ -817,25 +807,25 @@ class ExcelToMarkdownConverter:
                 else:
                     # treat as filename with start_row=1
                     normalized_pairs.append((1, str(item)))
-            # Use representative start_row from normalized_pairs directly so that
-            # emission follows the original Excel row order. This avoids any
-            # sheet-specific heuristics based on text content.
+            # normalized_pairsから代表的なstart_rowを直接使用し、
+            # 出力が元のExcel行順序に従うようにします。これにより
+            # テキスト内容に基づくシート固有のヒューリスティックを回避します。
             for r, fn in normalized_pairs:
                 img_map.setdefault(r, []).append(fn)
 
-            # Also print the current sheet_map (row->md index) so we can compare
+            # また、現在のsheet_map（行->mdインデックス）を出力して比較できるようにします
             sheet_map = self._cell_to_md_index.get(sheet.title, {})
             print(f"[DEBUG][_img_insertion_debug] sheet={sheet.title} sheet_map={sheet_map}")
 
-            # NOTE: markdown dump moved later so events log can be persisted
-            # before any debug printing of the current markdown state.
+            # 注意: eventsログを永続化できるようmarkdownダンプを後に移動
+            # 現在のmarkdown状態のデバッグ出力の前に。
 
-            # Enter canonical emission mode: deferred texts should now be
-            # actually appended to the markdown buffer by _emit_free_text.
+            # 正規出力モードに入る: 延期テキストは今
+            # _emit_free_textによって実際にmarkdownバッファに追加されるべきです。
             self._in_canonical_emit = True
 
-            # Debug: dump emitted rows and deferred texts immediately after
-            # entering canonical emission so we can see what was marked earlier.
+            # デバッグ: 出力済み行と延期テキストを
+            # 正規出力に入った直後にダンプして、以前にマークされたものを確認できるようにします。
             emitted_rows = self._sheet_emitted_rows.get(sheet.title, set()) if hasattr(self, '_sheet_emitted_rows') else set()
             deferred_texts = self._sheet_deferred_texts.get(sheet.title, []) if hasattr(self, '_sheet_deferred_texts') else []
             try:
@@ -843,10 +833,10 @@ class ExcelToMarkdownConverter:
             except (ValueError, TypeError):
                 print(f"[DEBUG][_canonical_enter] sheet={getattr(sheet, 'title', None)} emitted_rows=<error> deferred_texts_count=<error>")
 
-            # If all items collapsed to start_row==1 (common when saved list contains filenames only),
-            # try to recompute representative start_rows from drawing cell ranges and redistribute
-            # images across those computed rows in order. This produces more accurate placement
-            # when _render_sheet_fallback didn't persist start rows.
+            # 全ての項目がstart_row==1に集約された場合（保存されたリストがファイル名のみを含む場合に一般的）、
+            # 描画セル範囲から代表的なstart_rowsを再計算し、
+            # それらの計算された行に順番に画像を再分配することを試みます。これにより
+            # _render_sheet_fallbackがstart rowsを永続化しなかった場合により正確な配置が生成されます。
             try:
                 all_rows = [r for r, _ in normalized_pairs]
                 filenames_only = all(r == 1 for r in all_rows) and len(normalized_pairs) > 0
@@ -855,18 +845,18 @@ class ExcelToMarkdownConverter:
             if filenames_only:
                 cell_ranges = self._extract_drawing_cell_ranges(sheet) or []
                 if cell_ranges:
-                    # map each anchor index to its start_row
+                    # 各アンカーインデックスをそのstart_rowにマップ
                     start_rows = [cr[2] for cr in cell_ranges]
-                    # sort anchor indices by start_row
+                    # start_rowでアンカーインデックスをソート
                     idxs = list(range(len(start_rows)))
                     idxs.sort(key=lambda i: start_rows[i])
-                    # number of image groups to assign
+                    # 割り当てる画像グループの数
                     nimgs = len(normalized_pairs)
-                    # split indices into nimgs contiguous buckets by count
+                    # インデックスをnimgsの連続したバケットに分割（カウントで）
                     buckets = [[] for _ in range(nimgs)]
                     for i, idx in enumerate(idxs):
                         buckets[i % nimgs].append(idx)
-                    # compute representative row for each bucket and assign filenames in order
+                    # 各バケットの代表的な行を計算し、順番にファイル名を割り当て
                     new_img_map = {}
                     for bi, bucket in enumerate(buckets):
                         insert_r = 1
@@ -877,7 +867,7 @@ class ExcelToMarkdownConverter:
                                     insert_r = int(min(vals))
                         except (ValueError, TypeError):
                             insert_r = 1
-                        # assign filenames whose index modulo nimgs equals this bucket index
+                        # インデックスをnimgsで割った余りがこのバケットインデックスと等しいファイル名を割り当て
                         try:
                             for j, (_, fn) in enumerate(normalized_pairs):
                                 if j % nimgs == bi:
@@ -885,12 +875,12 @@ class ExcelToMarkdownConverter:
                         except (ValueError, TypeError) as e:
                             print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     img_map = new_img_map
-                    # Log both to stdout and logger if available for easier
-                    # post-run inspection.
+                    # より簡単な
+                    # 実行後の検査のため、stdoutとloggerの両方にログ出力（利用可能な場合）。
                     msg = f"[DEBUG][_img_fallback_row] sheet={sheet.title} assigned_images_row={insert_r} images={list(img_map.get(insert_r,[]))}"
                     print(msg)
-                    # Rebuild normalized_pairs from img_map so the canonical
-                    # emission loop below uses the adjusted row anchors.
+                    # 正規の
+                    # 以下の出力ループが調整された行アンカーを使用するようimg_mapからnormalized_pairsを再構築します。
                     new_normalized = []
                     for rr in sorted(img_map.keys()):
                         for fn in img_map.get(rr, []):
@@ -898,8 +888,8 @@ class ExcelToMarkdownConverter:
                     if new_normalized:
                         normalized_pairs = new_normalized
 
-            # Rebuild img_map from normalized_pairs to ensure it reflects any
-            # adjustments performed above (for example fallback re-anchors).
+            # 上記で実行された調整（例: フォールバック再アンカー）を
+            # 反映するようnormalized_pairsからimg_mapを再構築します。
             try:
                 img_map = {}
                 for r, fn in normalized_pairs:
@@ -907,10 +897,10 @@ class ExcelToMarkdownConverter:
             except (ValueError, TypeError) as e:
                 print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-            # If an iso_group (trimmed/group) image exists for the same row,
-            # prefer it and suppress individual embedded images for that row.
-            # This avoids emitting the same visual content twice when a grouped
-            # render captured embedded images into one composed PNG.
+            # 同じ行にiso_group（トリミング/グループ）画像が存在する場合、
+            # それを優先し、その行の個別の埋め込み画像を抑制します。
+            # これによりグループ化された
+            # レンダリングが埋め込み画像を1つの合成PNGにキャプチャした場合、同じビジュアルコンテンツを2回出力することを回避します。
             try:
                 for rr, fns in list(img_map.items()):
                     try:
@@ -928,8 +918,8 @@ class ExcelToMarkdownConverter:
             except (ValueError, TypeError) as e:
                 print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-            # Rebuild normalized_pairs from possibly-filtered img_map so the
-            # canonical emission loop below uses the updated set.
+            # フィルタされた可能性のあるimg_mapからnormalized_pairsを再構築し、
+            # 以下の正規出力ループが更新されたセットを使用するようにします。
             try:
                 new_normalized = []
                 for rr in sorted(img_map.keys()):
@@ -940,15 +930,15 @@ class ExcelToMarkdownConverter:
             except (ValueError, TypeError) as e:
                 print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-            # Collect text for each non-empty source row (skip already emitted rows)
-            # This must happen before we decide image anchors so that freshly-detected
-            # header/text rows (which may not yet be present in self._cell_to_md_index)
-            # can be used as anchors for nearby images. Also merge any header/text
-            # lines previously deferred during header scanning so they are emitted
-            # only in the canonical, sorted emission pass (prevents early writes).
+            # 各非空ソース行のテキストを収集（既に出力された行はスキップ）
+            # これは画像アンカーを決定する前に行う必要があり、新しく検出された
+            # ヘッダー/テキスト行（まだself._cell_to_md_indexに存在しない可能性がある）が
+            # 近くの画像のアンカーとして使用できるようにします。また、ヘッダースキャン中に
+            # 以前に延期されたヘッダー/テキスト行をマージし、それらが
+            # 正規のソート済み出力パスでのみ出力されるようにします（早期書き込みを防ぐ）。
             texts_by_row = {}
             try:
-                # Pull any deferred header/text lines collected earlier
+                # 以前に収集された延期ヘッダー/テキスト行を取得
                 deferred = []
                 if hasattr(self, '_sheet_deferred_texts'):
                     try:
@@ -957,12 +947,12 @@ class ExcelToMarkdownConverter:
                         deferred = []
                 if deferred:
                     try:
-                        # Integrate deferred texts into texts_by_row, honoring emitted set
-                        # Do NOT mark rows as emitted here; actual marking should
-                        # occur only when the text is successfully written to the
-                        # canonical markdown buffer during the emission loop. Marking
-                        # rows now caused premature population of authoritative
-                        # emitted sets and led to pruning of legitimate table rows.
+                        # 延期テキストをtexts_by_rowに統合し、出力済みセットを尊重
+                        # ここでは行を出力済みとしてマークしないでください; 実際のマーキングは
+                        # テキストが正規のmarkdownバッファに正常に書き込まれたときにのみ
+                        # 出力ループ中に行われるべきです。ここで
+                        # 行をマークすると、正式な出力済みセットが
+                        # 早期に設定され、正当なテーブル行の刈り込みにつながっていました。
                         for dr, dtxt in deferred:
                             try:
                                 rr = int(dr) if dr is not None else 1
@@ -991,15 +981,15 @@ class ExcelToMarkdownConverter:
                             row_texts.append(s)
                 if row_texts:
                     texts_by_row[r] = " ".join(row_texts)
-                    # Do NOT mark rows as emitted here. Actual authoritative
-                    # marking must happen during the canonical emission pass
-                    # (inside _emit_free_text or when images/texts are written)
-                    # to avoid premature pruning of table rows.
+                    # ここでは行を出力済みとしてマークしないでください。実際の正式な
+                    # マーキングは正規の出力パス中に行う必要があります
+                    # （_emit_free_text内、または画像/テキストが書き込まれたとき）
+                    # テーブル行の早期刈り込みを避けるため。
 
-            # Simpler deterministic emission: build a unified event list of
-            # text items (src_row -> content) and image items (start_row -> filename),
-            # then sort by row and emit in order. For identical rows, emit text
-            # before images so images appear immediately after their anchor text.
+            # よりシンプルな決定論的出力: 統一されたイベントリストを構築
+            # テキスト項目（src_row -> コンテンツ）と画像項目（start_row -> ファイル名）の、
+            # その後行でソートし順番に出力します。同一行の場合、テキストを
+            # 画像の前に出力し、画像がそのアンカーテキストの直後に表示されるようにします。
             try:
                 # Build the list of events that will actually be emitted.
                 # We avoid mutating the logging list while constructing the
@@ -1464,16 +1454,16 @@ class ExcelToMarkdownConverter:
                     self._mark_image_emitted(img)
                 except (ValueError, TypeError):
                     print(f"WARNING: Exception self._mark_image_emitted({img})")
-            # Clear deferred tables for this sheet since they've been emitted
+            # このシートの延期テーブルをクリア（既に出力済み）
             if hasattr(self, '_sheet_deferred_tables') and sheet.title in self._sheet_deferred_tables:
                 del self._sheet_deferred_tables[sheet.title]
             # final sorted-events fallback removed: no additional logging here.
         except Exception as _exc:
-            # Debug: print exception info so we can see why the simplified flow failed
+            # デバッグ: 簡略化フローが失敗した理由を確認するため例外情報を出力
             print(f"[DEBUG][_reorder_exception] sheet={sheet.title} exc={_exc!r}")
             import traceback
             traceback.print_exc()
-            # On error, fall back to immediate insertion of all deferred images
+            # エラー時は、全ての延期画像の即座挿入にフォールバック
             for item in self._sheet_shape_images.get(sheet.title, []) or []:
                 fn = item[1] if isinstance(item, (list, tuple)) and len(item) >= 2 else str(item)
                 md = f"![{sheet.title}](images/{fn})"
@@ -1504,7 +1494,7 @@ class ExcelToMarkdownConverter:
         except (ValueError, TypeError):
             emitted = set()
 
-        # Determine which of the recorded emitted rows actually have a markdown
+        # 記録された出力済み行のうち、実際にmarkdown
         # mapping. Some code paths may have added rows to the emitted set
         # conservatively (or erroneously) before a canonical write occurred.
         # Only prune rows that both appear in _sheet_emitted_rows AND have a
@@ -1517,7 +1507,7 @@ class ExcelToMarkdownConverter:
             sheet_map = {}
 
         try:
-            # Only consider rows present in both structures as authoritative
+            # 両方の構造に存在する行のみを正式なものとして扱う
             authoritative_emitted = set(r for r in emitted if r in sheet_map)
             sample_emitted = sorted(list(authoritative_emitted))[:20]
             print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} emitted_count_total={len(emitted)} emitted_count_auth={len(authoritative_emitted)} emitted_sample={sample_emitted} source_rows_count={len(source_rows) if source_rows else 0}")
@@ -1531,7 +1521,7 @@ class ExcelToMarkdownConverter:
         pruned_src = []
         for row, src in zip(table_data, source_rows):
             try:
-                # Only prune when the source row was actually emitted to markdown
+                # ソース行が実際にmarkdownに出力された場合のみ刈り込み
                 # (present in authoritative_emitted). Rows that are only listed in
                 # the broader emitted set but lack a markdown mapping will be
                 # preserved here.
@@ -1605,9 +1595,9 @@ class ExcelToMarkdownConverter:
     def _process_sheet_images(self, sheet, insert_index: Optional[int] = None, insert_images: bool = True):
         """シート内の画像を処理"""
         try:
-            # Diagnostic: record entry parameters so we can trace callers
+            # 診断: 呼び出し元をトレースできるようエントリパラメータを記録
             print(f"[DEBUG][_process_sheet_images_entry] sheet={sheet.title} insert_index={insert_index} insert_images={insert_images}")
-            # Prevent repeated heavy rendering: if shapes were already generated
+            # 重複した重い処理を防止: 図形が既に生成されている場合
             # for this sheet earlier in the run, skip processing to avoid
             # repeatedly creating tmp_xlsx and invoking external converters.
             if sheet.title in self._sheet_shapes_generated:
@@ -1617,7 +1607,7 @@ class ExcelToMarkdownConverter:
             if hasattr(sheet, '_images') and sheet._images:
                 print(f"[INFO] シート '{sheet.title}' 内の画像を処理中...")
                 images_found = True
-                # Pre-populate mapping from embedded media (from drawing rels)
+                # 埋め込みメディアからのマッピングを事前に設定（描画relsから）
                 # to cNvPr ids so that when we process embedded images below we
                 # can decide whether to suppress them if a clustered/group
                 # render already preserved the same drawing anchor.
@@ -1726,7 +1716,7 @@ class ExcelToMarkdownConverter:
                     # _process_excel_image now returns the saved image filename (basename)
                     img_name = self._process_excel_image(image, f"{sheet.title} (Image)")
                     if img_name:
-                            # Determine a representative start_row for this image (if available)
+                            # この画像の代表的なstart_rowを決定（利用可能な場合）
                             start_row = 1
                             try:
                                 pos = None
@@ -1741,20 +1731,20 @@ class ExcelToMarkdownConverter:
                             except Exception:
                                 start_row = 1
 
-                            # If we're in canonical emission pass, insert immediately so
+                            # 正規出力パス中の場合、即座に挿入し
                             # the image appears inline with emitted text. Otherwise,
                             # defer by registering into self._sheet_shape_images so the
                             # canonical emission will place it deterministically.
                             if getattr(self, '_in_canonical_emit', False):
                                 md_line = f"![{sheet.title}の図](images/{img_name})"
                                 ref = f"images/{img_name}"
-                                # If this embedded image corresponds to a drawing anchor
+                                # この埋め込み画像が描画アンカーに対応する場合
                                 # that has already been preserved by a grouped render,
                                 # skip emitting it to avoid duplicate presentation.
                                 try:
                                     cid_map = self._embedded_image_cid_by_name.get(sheet.title, {}) if hasattr(self, '_embedded_image_cid_by_name') else {}
                                     mapped_cid = cid_map.get(img_name)
-                                    # If filename contains a short hash suffix like _<sha8>.ext, extract and try that key
+                                    # ファイル名に_<sha8>.extのような短いハッシュサフィックスが含まれる場合、それを抽出してキーとして試行
                                     if mapped_cid is None:
                                         try:
                                             # try extracting trailing 8-hex from filename
@@ -1765,7 +1755,7 @@ class ExcelToMarkdownConverter:
                                                 mapped_cid = cid_map.get(maybe)
                                         except Exception as e:
                                             print(f"[WARNING] ファイル操作エラー: {e}")
-                                    # If still unknown, try computing short sha from the existing file on disk
+                                    # まだ不明な場合、ディスク上の既存ファイルから短いshaを計算して試行
                                     if mapped_cid is None:
                                         try:
                                             fp = os.path.join(self.images_dir, img_name)
@@ -1802,7 +1792,7 @@ class ExcelToMarkdownConverter:
                                             print(f"[WARNING] ファイル操作エラー: {e}")
                                     except Exception as e:
                                         print(f"[WARNING] ファイル操作エラー: {e}")
-                                # Defer insertion: register for canonical row-sorted emission
+                                # 挿入を延期: 正規の行ソート済み出力のため登録
                                 try:
                                     # check mapped cNvPr for this embedded image and
                                     # skip deferral if already preserved by a group render
@@ -1817,7 +1807,7 @@ class ExcelToMarkdownConverter:
                                 except (ValueError, TypeError) as e:
                                     print(f"[DEBUG] 型変換エラー（無視）: {e}")
                             else:
-                                # Non-canonical context: register/defer the image so the
+                                # 非正規コンテキスト: 画像を登録/延期し
                                 # canonical emitter will place it deterministically.
                                 try:
                                     md_line = f"![{sheet.title}の図](images/{img_name})"
@@ -1828,30 +1818,30 @@ class ExcelToMarkdownConverter:
                                     except Exception as e:
                                         print(f"[WARNING] ファイル操作エラー: {e}")
                                 except Exception:
-                                    # Fallback: directly register into sheet_shape_images
+                                    # フォールバック: sheet_shape_imagesに直接登録
                                     try:
                                         self._sheet_shape_images.setdefault(sheet.title, [])
                                         self._sheet_shape_images[sheet.title].append((start_row, img_name))
                                     except Exception as e:
                                         print(f"[WARNING] ファイル操作エラー: {e}")
 
-            # Check for drawing shapes (vector shapes, connectors, etc.) regardless
+            # 描画図形（ベクトル図形、コネクタなど）を確認
             # of whether embedded images were found. This ensures that sheets with
             # only vector shapes (no embedded images) are still processed correctly.
-            # Phase 2-D fix: Always check for drawing shapes, not just when images_found=True
+            # Phase 2-D修正: images_found=Trueの時だけでなく、常に描画図形を確認
             if True:  # Always execute isolated-group processing for drawing shapes
                     print(f"[DEBUG] {len(sheet._images)} 個の埋め込み画像が検出されました。描画要素を調査中...")
-                    # If there is only one (or zero) embedded image, prefer to
+                    # 埋め込み画像が1つ（またはゼロ）の場合、
                     # use that image directly rather than performing costly
                     # isolated-group clustering and trimmed workbook rendering.
-                    # This avoids creating tmp_xlsx/.fixed.xlsx and invoking
+                    # これによりtmp_xlsx/.fixed.xlsxの作成と
                     # external converters when unnecessary (common for simple
                     # sheets like input_files/three_sheet_.xlsx).
                     try:
                         emb_count = len(getattr(sheet, '_images', []) or [])
-                        # If exactly one embedded image exists, prefer that image
+                        # 埋め込み画像がちょうど1つ存在する場合、その画像を優先
                         # directly and skip heavy isolated-group/fallback rendering.
-                        # This respects the user's request to avoid clustering when
+                        # これはクラスタリングを避けるユーザーのリクエストを尊重
                         # a single embedded graphic is present.
                         if emb_count == 1:
                             print(f"[DEBUG][_process_sheet_images_shortcircuit] sheet={sheet.title} single embedded image detected; using embedded image without clustering")
@@ -1860,7 +1850,7 @@ class ExcelToMarkdownConverter:
                             except (ValueError, TypeError):
                                 pass  # データ構造操作失敗は無視
                             return True
-                        # If zero embedded images, fall through to check for drawings
+                        # 埋め込み画像がゼロの場合、描画チェックにフォールスルー
                         # and possibly run isolated-group or full-sheet fallback.
                     except (ValueError, TypeError):
                         pass  # データ構造操作失敗は無視
@@ -1886,7 +1876,7 @@ class ExcelToMarkdownConverter:
                                     drawing_path = drawing_path.replace('worksheets', 'drawings')
                                 if drawing_path in z.namelist():
                                     drawing_xml = ET.fromstring(z.read(drawing_path))
-                                    # Simplified and balanced parsing: collect anchor ids
+                                    # 簡素化されバランスの取れた解析: アンカーIDを収集
                                     # and count pic/sp anchors. Also attempt to map any
                                     # embedded image filenames to their cNvPr ids. Keep
                                     # errors non-fatal and avoid deep nesting of try/except.
@@ -1954,12 +1944,12 @@ class ExcelToMarkdownConverter:
                                         total_anchors = total_anchors if 'total_anchors' in locals() else 0
                                         pic_anchors = pic_anchors if 'pic_anchors' in locals() else 0
                                         sp_anchors = sp_anchors if 'sp_anchors' in locals() else 0
-                                    # If there are more anchors than embedded images and at least one shape,
+                                    # 埋め込み画像よりアンカーが多く、少なくとも1つの図形がある場合、
                                     # attempt isolated-group rendering to capture vector shapes
                                     if total_anchors > len(sheet._images) and sp_anchors > 0:
                                         print(f"[DEBUG] Detected additional drawing shapes (anchors={total_anchors}, pics={pic_anchors}, sps={sp_anchors}) - attempting isolated-group rendering")
                                         try:
-                                            # Extract shape bounding boxes
+                                            # 図形のバウンディングボックスを抽出
                                             shapes = None
                                             try:
                                                 shapes = self._extract_drawing_shapes(sheet)
@@ -1970,22 +1960,23 @@ class ExcelToMarkdownConverter:
                                             
                                             print(f"[DEBUG] _extract_drawing_shapes returned: {len(shapes) if shapes else 'None'} shapes")
                                             if shapes and len(shapes) > 0:
-                                                # Cluster shapes using the proper clustering logic
-                                                # Extract cell ranges for row-based gap-splitting
+                                                # 適切なクラスタリングロジックを使用して図形をクラスタリング
+                                                # 行ベースのギャップ分割のためセル範囲を抽出
                                                 try:
                                                     cell_ranges_all = self._extract_drawing_cell_ranges(sheet)
                                                 except (ValueError, TypeError):
                                                     cell_ranges_all = []
                                                 
-                                                # Use _cluster_shapes_common for proper clustering
+                                                # 適切なクラスタリングのため_cluster_shapes_commonを使用
                                                 # max_groups=1 means cluster into 1 group if possible (no splitting)
-                                                # But the method will still split if there are large gaps
+                                                # ただし、このメソッドは大きなギャップがある場合は分割します
                                                 clusters, debug_info = self._cluster_shapes_common(
                                                     sheet, shapes, cell_ranges=cell_ranges_all, max_groups=1
                                                 )
                                                 print(f"[DEBUG] clustered into {len(clusters)} groups: sizes={[len(c) for c in clusters]}")
+                                                print(f"[DEBUG] clustering debug_info: {debug_info}")
                                                 
-                                                # Render each cluster as an isolated group
+                                                # 各クラスタを分離グループとしてレンダリング
                                                 # Using stable _render_sheet_isolated_group method (not v2)
                                                 # v2 is experimental and incomplete (missing connector cosmetic processing)
                                                 isolated_produced = False
@@ -1994,16 +1985,14 @@ class ExcelToMarkdownConverter:
                                                     if len(cluster) > 0:
                                                         result = self._render_sheet_isolated_group(sheet, cluster)
                                                         if result:
-                                                            # Original method returns (filename, cluster_min_row) tuple
                                                             if isinstance(result, tuple) and len(result) == 2:
                                                                 img_name, cluster_row = result
                                                             else:
-                                                                # Fallback for old code path (if any)
                                                                 img_name = result
                                                                 cluster_row = 1
                                                             
                                                             isolated_produced = True
-                                                            isolated_images.append((img_name, cluster_row))
+                                                            isolated_images.append((cluster_row, img_name))
                                                             print(f"[INFO] シート '{sheet.title}' のクラスタ {idx+1} をisolated groupとして出力: {img_name} (row={cluster_row})")
                                                 
                                                 if isolated_produced:
@@ -2012,7 +2001,7 @@ class ExcelToMarkdownConverter:
                                                     # isolated group画像をMarkdownに追加するため、images_foundをTrueに設定
                                                     images_found = True
                                                     # 各画像を登録（row情報を使用）
-                                                    for img_name, cluster_row in isolated_images:
+                                                    for cluster_row, img_name in isolated_images:
                                                         print(f"[DEBUG] Processing isolated group image: {img_name} at row={cluster_row}")
                                                         try:
                                                             self._mark_image_emitted(img_name)
@@ -2200,7 +2189,7 @@ class ExcelToMarkdownConverter:
                                             # no textual mapping; append sequentially at insert_base
                                             insert_at = insert_base
 
-                                    # clamp insert_at to valid markdown range
+                                    # insert_atをクランプ to valid markdown range
                                     if insert_at < 0:
                                         insert_at = 0
                                     if insert_at > len(self.markdown_lines):
@@ -3166,7 +3155,7 @@ class ExcelToMarkdownConverter:
             return 'image'
         return txt
 
-    def _compute_sheet_cell_pixel_map(self, sheet, DPI=300):
+    def _compute_sheet_cell_pixel_map(self, sheet, DPI=300, min_cols=None, min_rows=None):
         """Compute approximate pixel positions for column right-edges and row bottom-edges.
 
         Returns (col_x, row_y) where col_x[0] == 0 and col_x[i] is the right edge
@@ -3175,6 +3164,10 @@ class ExcelToMarkdownConverter:
         try:
             max_col = sheet.max_column
             max_row = sheet.max_row
+            if min_cols is not None:
+                max_col = max(max_col, min_cols)
+            if min_rows is not None:
+                max_row = max(max_row, min_rows)
             col_pixels = []
             from openpyxl.utils import get_column_letter
             for c in range(1, max_col+1):
@@ -4890,14 +4883,13 @@ class ExcelToMarkdownConverter:
             traceback.print_exc()
             return None
 
-    def _render_sheet_isolated_group(self, sheet, shape_indices: List[int], dpi: int = 600, cell_range: Optional[Tuple[int,int,int,int]] = None) -> Optional[str]:
+    def _render_sheet_isolated_group(self, sheet, shape_indices: List[int], dpi: int = 600, cell_range: Optional[Tuple[int,int,int,int]] = None) -> Optional[Tuple[str, int]]:
         """Render a group of shape indices as a single isolated image.
         
         **PRODUCTION METHOD - RECOMMENDED FOR ALL USE CASES**
         
-        This is the original, battle-tested implementation with full connector cosmetic processing.
-        A refactored version (_render_sheet_isolated_group_v2) exists but is incomplete and
-        should NOT be used for production.
+        This implementation delegates to IsolatedGroupRenderer class for better code organization.
+        The original monolithic implementation has been refactored into separate phases.
         
         Features:
         - Complete connector cosmetic processing
@@ -4911,3131 +4903,11 @@ class ExcelToMarkdownConverter:
         This preserves the spatial relationships between shapes, making it ideal for
         flowcharts and composite diagrams.
         
-        Returns generated filename (relative to images_dir) or None on failure.
+        Returns:
+            Optional[Tuple[str, int]]: (filename, start_row) or None on failure
         """
-        try:
-            # reset last preserved ids marker for this invocation
-            try:
-                self._last_iso_preserved_ids = set()
-            except Exception as e:
-                print(f"[WARNING] ファイル操作エラー: {e}")
-            # Create a single temporary workbook that keeps only the requested
-            # anchors and render that workbook once. This avoids creating one
-            # file per anchor and produces a single grouped image.
-            zpath = self.excel_file
-            z = zipfile.ZipFile(zpath, 'r')
-            sheet_index = self.workbook.sheetnames.index(sheet.title)
-            rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
-            if rels_path not in z.namelist():
-                print(f"[DEBUG][_iso_entry] sheet={sheet.title} missing rels: {rels_path}")
-                return None
-            rels_xml = ET.fromstring(z.read(rels_path))
-            drawing_target = None
-            for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
-                if rel.attrib.get('Type','').endswith('/drawing'):
-                    drawing_target = rel.attrib.get('Target')
-                    break
-            if not drawing_target:
-                print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawing relationship found in rels")
-                return None
-
-            drawing_path = drawing_target
-            if drawing_path.startswith('..'):
-                drawing_path = drawing_path.replace('../', 'xl/')
-            if drawing_path.startswith('/'):
-                drawing_path = drawing_path.lstrip('/')
-            # Diagnostic: report resolved drawing path and requested shape indices
-            print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path={drawing_path} shape_indices={shape_indices}")
-            if drawing_path not in z.namelist():
-                drawing_path = drawing_path.replace('worksheets', 'drawings')
-                if drawing_path not in z.namelist():
-                    print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path not found in archive after normalization: {drawing_path}")
-                    return None
-
-            drawing_xml_bytes = z.read(drawing_path)
-            drawing_xml = ET.fromstring(drawing_xml_bytes)
-
-            # collect anchor nodes in order, but only those that contain drawable elements
-            # Use centralized _anchor_has_drawable method for consistency
-            anchors = []
-            for node in drawing_xml:
-                lname = node.tag.split('}')[-1].lower()
-                if lname in ('twocellanchor', 'onecellanchor') and self._anchor_has_drawable(node):
-                    anchors.append(node)
-            if not anchors:
-                print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawable anchors found in drawing xml")
-                return None
-            # If no explicit cell_range supplied, compute the minimal bounding
-            # cell_range that covers the requested shape_indices using the
-            # workbook's drawing->cell-range extractor. This prevents exporting
-            # large empty regions when only a few shapes exist.
-            try:
-                if cell_range is None and shape_indices:
-                    all_ranges = self._extract_drawing_cell_ranges(sheet)
-                    # align indices
-                    picked = []
-                    for idx in shape_indices:
-                        if idx >= 0 and idx < len(all_ranges):
-                            picked.append(all_ranges[idx])
-                    if picked:
-                        # compute bounding range (start_col, end_col, start_row, end_row)
-                        s_col = min(r[0] for r in picked)
-                        e_col = max(r[1] for r in picked)
-                        s_row = min(r[2] for r in picked)
-                        e_row = max(r[3] for r in picked)
-                        
-                        # Limit cell_range to actual data range in sheet to avoid black background
-                        # when shapes extend beyond data range
-                        try:
-                            # Find max column/row with actual data
-                            max_data_col = 0
-                            max_data_row = 0
-                            for row in sheet.iter_rows():
-                                for cell in row:
-                                    if cell.value is not None:
-                                        if cell.column > max_data_col:
-                                            max_data_col = cell.column
-                                        if cell.row > max_data_row:
-                                            max_data_row = cell.row
-                            
-                            # Add some padding (e.g., 5 columns) for shapes that extend slightly beyond data
-                            if max_data_col > 0:
-                                max_allowed_col = max_data_col + 5
-                                if e_col > max_allowed_col:
-                                    print(f"[DEBUG][_iso_entry] Limiting e_col from {e_col} to {max_allowed_col} (max_data_col={max_data_col})")
-                                    e_col = max_allowed_col
-                        except Exception as limit_err:
-                            print(f"[DEBUG][_iso_entry] Failed to limit cell_range: {limit_err}")
-                        
-                        cell_range = (s_col, e_col, s_row, e_row)
-            except (ValueError, TypeError) as e:
-                print(f"[DEBUG] 型変換エラー（無視）: {e}")
-
-            # Build set for quick lookup (we'll convert requested indices to cNvPr ids)
-            # shape_indices are indices into the filtered `anchors` list; when
-            # pruning the drawing XML we must compare by cNvPr id to avoid
-            # mismatches caused by filtering. Compute keep_cnvpr_ids from the
-            # anchors list so pruning is id-based.
-            keep_set = set(shape_indices)
-            keep_cnvpr_ids = set()
-            try:
-                for si in shape_indices:
-                    if si < 0 or si >= len(anchors):
-                        continue
-                    # find cNvPr id inside the anchor node
-                    cid = None
-                    for sub in anchors[si].iter():
-                        if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                            cid = sub.attrib.get('id')
-                            break
-                    if cid is not None:
-                        keep_cnvpr_ids.add(str(cid))
-            except (ValueError, TypeError):
-                keep_cnvpr_ids = set()
-            try:
-                # Diagnostic: show how many anchors exist and which cNvPr ids will be kept
-                print(f"[DEBUG][_iso_entry] sheet={sheet.title} anchors_count={len(anchors)} keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))}")
-            except (ValueError, TypeError):
-                keep_cnvpr_ids = set()
-            # create tempdir and copy original xlsx contents there to modify
-            tmpdir = tempfile.mkdtemp(prefix='xls2md_iso_group_')
-            try:
-                with zipfile.ZipFile(zpath, 'r') as zin:
-                    zin.extractall(tmpdir)
-                # Preserve original styles and theme so style references inside drawing XML resolve
-                try:
-                    for preserve in ('xl/styles.xml', 'xl/theme/theme1.xml'):
-                        if preserve in z.namelist():
-                            tgt = os.path.join(tmpdir, preserve)
-                            os.makedirs(os.path.dirname(tgt), exist_ok=True)
-                            with open(tgt, 'wb') as _fw:
-                                _fw.write(z.read(preserve))
-                except (OSError, IOError, FileNotFoundError):
-                    print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
-
-                # When pruning anchors below, ensure that any shapes referenced by
-                # connectors in the kept indices are also preserved. We'll compute
-                # referenced ids from the anchors list first, and also gather
-                # connector cosmetic children to copy into kept anchors.
-                # We'll compute a transitive closure of anchor ids to preserve.
-                # Build mappings of anchor_id -> referenced ids (refs) and reverse refs
-                # so we can include connectors that reference kept shapes and also
-                # include endpoints referenced by kept connectors, transitively.
-                referenced_ids = set()
-                connector_children_by_id = {}
-                try:
-                    refs = {}  # anchor_id -> set(of ids it references)
-                    reverse_refs = {}  # id -> set(of anchor_ids that reference it)
-
-                    # First, build refs and connector_children_by_id from all anchor nodes
-                    for orig in list(drawing_xml):
-                        lname = orig.tag.split('}')[-1].lower()
-                        if lname not in ('twocellanchor', 'onecellanchor'):
-                            continue
-                        cid = None
-                        for sub in orig.iter():
-                            if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                                cid = str(sub.attrib.get('id'))
-                                break
-                        if cid is None:
-                            continue
-                        # find referenced ids inside this anchor (stCxn/endCxn variants)
-                        rset = set()
-                        for sub in orig.iter():
-                            st = sub.tag.split('}')[-1].lower()
-                            if st in ('stcxn', 'endcxn', 'stcxnpr', 'endcxnpr'):
-                                vid = sub.attrib.get('id') or sub.attrib.get('idx')
-                                if vid is not None:
-                                    rset.add(str(vid))
-                        if rset:
-                            refs[cid] = rset
-                            for rid in rset:
-                                reverse_refs.setdefault(rid, set()).add(cid)
-
-                        # search children for cosmetic subtrees to copy later
-                        kids = []
-                        for child in orig:
-                            for sub in child.iter():
-                                st = sub.tag.split('}')[-1].lower()
-                                if st in ('prstgeom', 'ln', 'headend', 'tailend', 'custgeom', 'sppr'):
-                                    kids.append(child)
-                                    break
-                        if kids:
-                            connector_children_by_id[cid] = kids
-
-                    # seed the BFS with explicitly requested keep ids
-                    from collections import deque
-                    preserve = set(keep_cnvpr_ids)
-                    q = deque(keep_cnvpr_ids)
-
-                    # Additionally, include anchors whose "from" row lies within
-                    # any of the shape_indices' corresponding rows for this group.
-                    # This enforces a row-based inclusion rule so connectors whose
-                    # endpoints are on the same sheet row are preserved even if
-                    # they are not transitively referenced via stCxn/endCxn tags.
-                    try:
-                        # build mapping: cNvPr id -> from_row for all anchors
-                        id_to_row = {}
-                        ns_xdr = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
-                        for an in anchors:
-                            # find cNvPr id
-                            a_cid = None
-                            for sub in an.iter():
-                                if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                                    a_cid = sub.attrib.get('id') or sub.attrib.get('idx')
-                                    break
-                            if a_cid is None:
-                                continue
-                            fr = an.find('{%s}from' % ns_xdr)
-                            if fr is not None:
-                                r = fr.find('{%s}row' % ns_xdr)
-                                if r is not None and r.text is not None:
-                                    try:
-                                        id_to_row[str(a_cid)] = int(r.text)
-                                    except (ValueError, TypeError) as e:
-                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
-
-                        # Build a fallback mapping from ALL anchors in the drawing
-                        # (not only those filtered into `anchors`) so we can find
-                        # endpoint rows for connector-only anchors that were
-                        # omitted by the drawable filter. This helps include
-                        # connectors whose endpoints are on the group's rows.
-                        all_id_to_row = {}
-                        try:
-                            for orig_an in list(drawing_xml):
-                                lname2 = orig_an.tag.split('}')[-1].lower()
-                                if lname2 not in ('twocellanchor', 'onecellanchor'):
-                                    continue
-                                a_cid2 = None
-                                for sub2 in orig_an.iter():
-                                    if sub2.tag.split('}')[-1].lower() == 'cnvpr':
-                                        a_cid2 = sub2.attrib.get('id') or sub2.attrib.get('idx')
-                                        break
-                                if a_cid2 is None:
-                                    continue
-                                fr2 = orig_an.find('{%s}from' % ns_xdr)
-                                if fr2 is not None:
-                                    r2 = fr2.find('{%s}row' % ns_xdr)
-                                    if r2 is not None and r2.text is not None:
-                                        try:
-                                            all_id_to_row[str(a_cid2)] = int(r2.text)
-                                        except (ValueError, TypeError) as e:
-                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                        except (ValueError, TypeError):
-                            all_id_to_row = {}
-
-                        # Determine group's approximate row span by inspecting the
-                        # keep_cnvpr_ids' rows and include anchors on those rows.
-                        group_rows = set()
-                        for cid in keep_cnvpr_ids:
-                            if str(cid) in id_to_row:
-                                group_rows.add(id_to_row[str(cid)])
-                        # include any anchor whose from_row is in group_rows
-                        for cid, r in id_to_row.items():
-                            if r in group_rows and cid not in preserve:
-                                preserve.add(cid)
-                                q.append(cid)
-                    except (ValueError, TypeError) as e:
-                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                    # Expand transitive closure but constrain expansion by row membership
-                    # to avoid pulling the same anchor into multiple row-based clusters.
-                    # Only include a candidate anchor/ref if its 'from' row lies within
-                    # the group's rows (group_rows) or if it was part of the original seed
-                    # (keep_cnvpr_ids). This prevents cross-cluster duplication while
-                    # keeping local endpoints.
-                    # Ensure id_to_row exists (may be empty if earlier parsing failed)
-                    try:
-                        id_to_row
-                    except NameError:
-                        id_to_row = {}
-
-                    # Protect BFS expansion from pathological inputs by
-                    # bounding the number of deque pops. If we exceed the
-                    # cap, emit a warning and stop expanding further to
-                    # avoid infinite loops observed on malformed workbooks.
-                    bfs_iter = 0
-                    bfs_max = max(1000, len(keep_cnvpr_ids) * 10 if keep_cnvpr_ids else 1000)
-                    while q:
-                        bfs_iter += 1
-                        if bfs_iter > bfs_max:
-                            print(f"[WARN][_iso_bfs] reached bfs_max={bfs_max}; aborting BFS expansion (preserve_count={len(preserve)})")
-                            break
-                        cur = q.popleft()
-                        # anchors that reference cur -> consider including them
-                        for anc in list(reverse_refs.get(str(cur), set())):
-                            if anc in preserve:
-                                continue
-                            # allow if anc was in original seed
-                            if anc in keep_cnvpr_ids:
-                                preserve.add(anc)
-                                q.append(anc)
-                                continue
-                            # otherwise require anc's from_row to be in group_rows
-                            anc_row = id_to_row.get(str(anc))
-                            if anc_row is not None and anc_row in group_rows:
-                                preserve.add(anc)
-                                q.append(anc)
-                        # ids that cur references -> consider including them
-                        for ref in list(refs.get(str(cur), set())):
-                            if ref in preserve:
-                                continue
-                            if ref in keep_cnvpr_ids:
-                                preserve.add(ref)
-                                q.append(ref)
-                                continue
-                            ref_row = id_to_row.get(str(ref))
-                            if ref_row is not None and ref_row in group_rows:
-                                preserve.add(ref)
-                                q.append(ref)
-
-                    # Before exposing the set of preserved ids, also ensure we
-                    # include connector-only anchors that were recorded in
-                    # connector_children_by_id when those connector anchors
-                    # reference any id already in the preserve set. The
-                    # earlier BFS conservatively constrains expansion by group
-                    # rows which can omit connector-only anchors whose
-                    # endpoints lie just outside the group's rows. That
-                    # causes connectors (e.g. 56,61) to be pruned; include them
-                    # here if they reference preserved shapes so they are
-                    # rendered with the group.
-                    try:
-                        for cid, kids in list(connector_children_by_id.items()):
-                            try:
-                                # If this connector (cid) already preserved, skip
-                                if cid in preserve:
-                                    continue
-                                # Inspect cosmetic children for endpoint refs
-                                added = False
-                                endpoints = set()
-                                for ch in kids:
-                                    for sub in ch.iter():
-                                        try:
-                                            t = sub.tag.split('}')[-1].lower()
-                                        except Exception:
-                                            t = ''
-                                        if t in ('stcxn', 'endcxn', 'stcxnpr', 'endcxnpr'):
-                                            vid = sub.attrib.get('id') or sub.attrib.get('idx')
-                                            if vid is not None:
-                                                endpoints.add(str(vid))
-                                # If any endpoint directly references an already-preserved id, include connector
-                                if endpoints and (endpoints & set(preserve)):
-                                    preserve.add(str(cid))
-                                    try:
-                                        q.append(str(cid))
-                                    except (ValueError, TypeError):
-                                        pass  # データ構造操作失敗は無視
-                                    continue
-                                # Also include connector if any endpoint's anchor 'from' row
-                                # is inside this group's rows (id_to_row may be empty if earlier parsing failed)
-                                try:
-                                    for vid in endpoints:
-                                        try:
-                                            # prefer id_to_row (filtered anchors) but fall back
-                                            # to all_id_to_row if not present
-                                            row_for_vid = id_to_row.get(str(vid)) or all_id_to_row.get(str(vid))
-                                        except (ValueError, TypeError):
-                                            row_for_vid = None
-                                        if row_for_vid is not None and row_for_vid in group_rows:
-                                            preserve.add(str(cid))
-                                            try:
-                                                q.append(str(cid))
-                                            except (ValueError, TypeError) as e:
-                                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                            added = True
-                                            break
-                                    if added:
-                                        continue
-                                except (ValueError, TypeError) as e:
-                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                # fallback: if endpoints empty or no match, skip
-                            except (ValueError, TypeError) as e:
-                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                    except Exception:
-                        pass  # データ構造操作失敗は無視
-
-                    # Heuristic: include connectors whose own anchor 'from' row
-                    # is inside the group's rows even when their cosmetic children
-                    # do not expose endpoint tags. This handles connector-only
-                    # anchors that were omitted from id_to_row but appear in
-                    # all_id_to_row (we built that fallback earlier).
-                    try:
-                        for cid in list(connector_children_by_id.keys()):
-                            scid = str(cid)
-                            if scid in preserve:
-                                continue
-                            try:
-                                rowc = None
-                                if 'id_to_row' in locals():
-                                    rowc = id_to_row.get(scid)
-                                if rowc is None and 'all_id_to_row' in locals():
-                                    rowc = all_id_to_row.get(scid)
-                                if rowc is not None:
-                                    # accept exact match or off-by-one to be more tolerant
-                                    accept = False
-                                    try:
-                                        if rowc in group_rows:
-                                            accept = True
-                                        else:
-                                            for gr in group_rows:
-                                                if abs(int(rowc) - int(gr)) <= 1:
-                                                    accept = True
-                                                    break
-                                    except (ValueError, TypeError):
-                                        accept = False
-                                    if accept:
-                                        preserve.add(scid)
-                                        try:
-                                            q.append(scid)
-                                        except (ValueError, TypeError) as e:
-                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                            except Exception:
-                                pass  # データ構造操作失敗は無視
-                    except Exception:
-                        pass  # データ構造操作失敗は無視
-
-                    # For debugging, expose the set of preserved ids
-                    referenced_ids = set(preserve)
-                    try:
-                        # Extra debug: dump row mappings and connector endpoint resolution
-                        try:
-                            dbg_rows = sorted(list(group_rows)) if 'group_rows' in locals() else []
-                        except Exception:
-                            dbg_rows = []
-                        try:
-                            dbg_id_to_row_keys = sorted(list(id_to_row.keys())) if 'id_to_row' in locals() else []
-                        except Exception:
-                            dbg_id_to_row_keys = []
-                        try:
-                            dbg_all_id_to_row_keys = sorted(list(all_id_to_row.keys())) if 'all_id_to_row' in locals() else []
-                        except Exception:
-                            dbg_all_id_to_row_keys = []
-                        print(f"[DEBUG][_iso_group_extra] group_rows={dbg_rows} id_to_row_keys={dbg_id_to_row_keys} all_id_to_row_keys={dbg_all_id_to_row_keys}")
-                        # For each connector cosmetic entry, list endpoints (may be empty) and mapped rows
-                        try:
-                            for ccid in sorted(list(connector_children_by_id.keys()), key=lambda x: int(x) if str(x).isdigit() else x):
-                                ckids = connector_children_by_id.get(ccid, [])
-                                eps = set()
-                                for ch in ckids:
-                                    for sub in ch.iter():
-                                        try:
-                                            t = sub.tag.split('}')[-1].lower()
-                                        except (ValueError, TypeError):
-                                            t = ''
-                                        if t in ('stcxn', 'endcxn', 'stcxnpr', 'endcxnpr'):
-                                            vid = sub.attrib.get('id') or sub.attrib.get('idx')
-                                            if vid is not None:
-                                                eps.add(str(vid))
-                                # map to rows via id_to_row or all_id_to_row (may be empty)
-                                rows_mapped = []
-                                for e in sorted(list(eps)):
-                                    try:
-                                        r = None
-                                        if 'id_to_row' in locals():
-                                            r = id_to_row.get(e)
-                                        if r is None and 'all_id_to_row' in locals():
-                                            r = all_id_to_row.get(e)
-                                        rows_mapped.append(r)
-                                    except Exception:
-                                        rows_mapped.append(None)
-                                print(f"[DEBUG][_iso_group_conn] cid={ccid} endpoints={sorted(list(eps))} mapped_rows={rows_mapped}")
-                        except (ValueError, TypeError) as e:
-                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                        # Additionally, show explicit mapping for connector-only ids that are present only in all_id_to_row
-                        try:
-                            for special in ('56','61'):
-                                if 'all_id_to_row' in locals() and special in all_id_to_row:
-                                    print(f"[DEBUG][_iso_group_idrow] id={special} all_row={all_id_to_row.get(special)} id_to_row_val={id_to_row.get(special) if 'id_to_row' in locals() else None}")
-                        except (ValueError, TypeError) as e:
-                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                        msg = f"[DEBUG][_iso_group] keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))} preserved_ids={sorted(list(referenced_ids))} connector_children_keys={sorted(list(connector_children_by_id.keys()))}"
-                        print(msg)
-                        # expose preserved ids for callers so they can avoid duplicate renders
-                        try:
-                            self._last_iso_preserved_ids = set(referenced_ids)
-                        except (ValueError, TypeError):
-                            try:
-                                self._last_iso_preserved_ids = set()
-                            except (ValueError, TypeError) as e:
-                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                        # Write a per-isolation diagnostic file (guaranteed path) so
-                        # conversion runs always emit a record of which cNvPr ids
-                        # were preserved into this isolated group. This is useful
-                        # when downstream code later decides to skip clusters.
-                        try:
-                            import csv, os as _os, hashlib
-                            out_dir = getattr(self, 'output_dir', None) or _os.path.join(_os.getcwd(), 'output')
-                            diag_dir = _os.path.join(out_dir, 'diagnostics')
-                            _os.makedirs(diag_dir, exist_ok=True)
-                            # deterministic name: base + sheet + hash of keep ids
-                            try:
-                                base = getattr(self, 'base_name')
-                            except Exception:
-                                base = _os.path.splitext(_os.path.basename(getattr(self, 'excel_file', 'workbook')))[0]
-                            ksig = hashlib.sha1((base + sheet.title + ''.join(sorted(list(map(str, keep_cnvpr_ids))))).encode('utf-8')).hexdigest()[:8]
-                            diag_path = _os.path.join(diag_dir, f"{base}_{self._sanitize_filename(sheet.title)}_iso_{ksig}.csv")
-                            with open(diag_path, 'w', newline='', encoding='utf-8') as df:
-                                w = csv.writer(df)
-                                w.writerow(['keep_cnvpr_ids', 'preserved_ids', 'connector_children_keys'])
-                                w.writerow([";".join(sorted(list(map(str, keep_cnvpr_ids)))), ";".join(sorted(list(map(str, referenced_ids)))), ";".join(sorted(list(map(str, connector_children_by_id.keys()))) )])
-                            print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
-                        except (OSError, IOError, FileNotFoundError):
-                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
-                    except (OSError, IOError, FileNotFoundError):
-                        print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
-                except (OSError, IOError, FileNotFoundError):
-                    referenced_ids = set()
-                    connector_children_by_id = {}
-
-                def node_contains_referenced_id(n):
-                    try:
-                        for sub in n.iter():
-                            lname = sub.tag.split('}')[-1].lower()
-                            # keep node if it contains a cNvPr whose id matches any referenced id
-                            if lname == 'cnvpr' or lname.endswith('cnvpr'):
-                                vid = sub.attrib.get('id') or sub.attrib.get('idx')
-                                if vid is not None and str(vid) in referenced_ids:
-                                    return True
-                            # also keep node if it contains connector endpoint refs
-                            # such as <a:stCxn id="N"/> or <a:endCxn id="M"/>
-                            if lname in ('stcxn', 'endcxn', 'stcxnpr', 'endcxnpr'):
-                                vid = sub.attrib.get('id') or sub.attrib.get('idx')
-                                if vid is not None and str(vid) in referenced_ids:
-                                    return True
-                    except (ValueError, TypeError):
-                        pass  # 一時ディレクトリ削除失敗は無視
-                    return False
-
-                drawing_relpath = os.path.join(tmpdir, drawing_path)
-                # parse drawing xml from extracted file
-                try:
-                    tree = ET.parse(drawing_relpath)
-                    root = tree.getroot()
-                except (ET.ParseError, KeyError, AttributeError):
-                    root = ET.fromstring(drawing_xml_bytes)
-                    tree = ET.ElementTree(root)
-
-                # remove anchors whose cNvPr id is not in keep_cnvpr_ids and which
-                # do not contain referenced ids (connector endpoints). This avoids
-                # relying on index positions which previously caused mismatches
-                # when anchors was built as a filtered list.
-                # If keep_cnvpr_ids is empty (index->id mapping failed), fall back
-                # to preserving anchors that lie within the computed cell_range
-                # when available. This avoids producing an empty trimmed drawing
-                # workbook for groups whose indices were synthesized from cell
-                # ranges rather than exact anchor indices.
-                # Compute group_rows from cell_range for quick membership tests.
-                group_rows = set()
-                try:
-                    if cell_range:
-                        s_col, e_col, s_row, e_row = cell_range
-                        group_rows = set(range(int(s_row), int(e_row) + 1))
-                except (ValueError, TypeError):
-                    group_rows = set()
-
-                for node in list(root):
-                    lname = node.tag.split('}')[-1].lower()
-                    if lname in ('twocellanchor', 'onecellanchor'):
-                        # find cNvPr id for this anchor
-                        this_cid = None
-                        for sub in node.iter():
-                            if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                                this_cid = sub.attrib.get('id') or sub.attrib.get('idx')
-                                break
-
-                        # If we have an explicit id and it's requested, keep it.
-                        if this_cid is not None and str(this_cid) in keep_cnvpr_ids:
-                            continue
-
-                        # If the node contains referenced ids (connector endpoints), keep it.
-                        try:
-                            if node_contains_referenced_id(node):
-                                continue
-                        except (ValueError, TypeError) as e:
-                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
-
-                        # Fallback: when keep_cnvpr_ids is empty but a cell_range
-                        # was computed for the group, preserve any anchor whose
-                        # "from" row lies within the group's rows. This handles
-                        # cases where indices were synthesized from cell ranges
-                        # and direct id matching fails.
-                        try:
-                            if (not keep_cnvpr_ids) and group_rows:
-                                ns_xdr = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
-                                fr = node.find('{%s}from' % ns_xdr)
-                                if fr is not None:
-                                    r = fr.find('{%s}row' % ns_xdr)
-                                    if r is not None and r.text is not None:
-                                        try:
-                                            from_row = int(r.text)
-                                            # accept exact or off-by-one matches
-                                            if from_row in group_rows or any(abs(from_row - gr) <= 1 for gr in group_rows):
-                                                continue
-                                        except (ValueError, TypeError) as e:
-                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                        except (ValueError, TypeError) as e:
-                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
-
-                        # otherwise remove this node from the trimmed drawing
-                        try:
-                            root.remove(node)
-                        except Exception:
-                            try:
-                                root.remove(node)
-                            except Exception:
-                                pass  # 一時ファイルの削除失敗は無視
-
-                # Additionally, clear worksheet cell text in the tmp workbook so rendered PDF
-                # contains only the drawing shapes. This prevents sheet text from appearing
-                # in isolated renders.
-                try:
-                    sheet_rel = os.path.join(tmpdir, f"xl/worksheets/sheet{sheet_index+1}.xml")
-                    if os.path.exists(sheet_rel):
-                        try:
-                            stree = ET.parse(sheet_rel)
-                            sroot = stree.getroot()
-                            # clear all <v> and inline string texts under sheetData
-                            for v in sroot.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}v'):
-                                v.text = ''
-                            for t in sroot.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t'):
-                                t.text = ''
-                                # ensure page margins and page setup are tight so exported PDF
-                                # doesn't add unexpected whitespace or scaling. Use zero margins
-                                # and 100% scale.
-                                try:
-                                    ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-                                    pm_tag = '{%s}pageMargins' % ns
-                                    ps_tag = '{%s}pageSetup' % ns
-                                    # remove existing pageMargins/pageSetup if present
-                                    for child in list(sroot):
-                                        if child.tag in (pm_tag, ps_tag):
-                                            try:
-                                                sroot.remove(child)
-                                            except Exception:
-                                                pass  # 一時ファイルの削除失敗は無視
-                                    # add pageMargins with zeros
-                                    pm = ET.Element(pm_tag)
-                                    for name, val in (('left', '0'), ('right', '0'), ('top', '0'), ('bottom', '0'), ('header', '0'), ('footer', '0')):
-                                        el = ET.SubElement(pm, '{%s}%s' % (ns, name))
-                                        el.text = val
-                                    sroot.append(pm)
-                                    # add pageSetup: prefer fit-to-page so LibreOffice
-                                    # does not create extra pages due to legacy pageBreaks.
-                                    ps = ET.Element(ps_tag)
-                                    # Use fitToPage with fitToWidth/fitToHeight to try to
-                                    # keep the trimmed area on a single PDF page.
-                                    try:
-                                        ps.set('fitToPage', '1')
-                                        ps.set('fitToWidth', '1')
-                                        ps.set('fitToHeight', '1')
-                                    except Exception:
-                                        try:
-                                            ps.set('scale', '100')
-                                        except Exception as e:
-                                            pass  # XML解析エラーは無視
-                                    sroot.append(ps)
-                                except Exception:
-                                    pass  # データ構造操作失敗は無視
-                                # Remove any header/footer elements from this sheet
-                                # node so isolated-group PDF/PNG renders do not
-                                # include workbook headers or footers. This keeps
-                                # the output image focused on the drawing shapes
-                                # only. We'll still perform a defensive sweep later
-                                # over all worksheet files in tmpdir just before
-                                # creating the tmp_xlsx to be certain none remain.
-                                try:
-                                    hf_tag = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}headerFooter'
-                                    removed = 0
-                                    for hf in list(sroot.findall(hf_tag)):
-                                        try:
-                                            sroot.remove(hf)
-                                            removed += 1
-                                        except Exception:
-                                            pass  # 一時ファイルの削除失敗は無視
-                                    if removed:
-                                        print(f"[DEBUG][_iso_hdrfoot] removed {removed} headerFooter elements from {sheet_rel}")
-                                except (ValueError, TypeError):
-                                    pass  # XML書き込み失敗は無視
-                                stree.write(sheet_rel, encoding='utf-8', xml_declaration=True)
-                        except (ValueError, TypeError):
-                            pass  # XML書き込み失敗は無視
-                except (ValueError, TypeError):
-                    pass  # XML書き込み失敗は無視
-
-                # write modified drawing xml back
-                tree.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
-
-                # If pruning removed all anchors, skip isolated rendering to avoid
-                # producing empty trimmed workbooks and placeholder images.
-                try:
-                    try:
-                        dtree_check = ET.parse(drawing_relpath)
-                        droot_check = dtree_check.getroot()
-                        kept_anchors = [n for n in list(droot_check) if n.tag.split('}')[-1].lower() in ('twocellanchor', 'onecellanchor')]
-                        if not kept_anchors:
-                            print(f"[DEBUG][_iso_entry] sheet={sheet.title} trimmed drawing has no anchors after pruning; skipping isolated group")
-                            return None
-                    except (ET.ParseError, KeyError, AttributeError) as e:
-                        print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
-                except (ET.ParseError, KeyError, AttributeError) as e:
-                    print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
-
-                # After writing, ensure kept anchors have connector cosmetic children copied
-                try:
-                    import copy
-                    # reload tree to operate on current root
-                    try:
-                        tree2 = ET.parse(drawing_relpath)
-                        root2 = tree2.getroot()
-                    except (ET.ParseError, KeyError, AttributeError):
-                        root2 = ET.fromstring(drawing_xml_bytes)
-                        tree2 = ET.ElementTree(root2)
-                    # track dedupe signatures per-kept-anchor to avoid appending the same
-                    # cosmetic subtree multiple times (was causing duplicated anchor blocks)
-                    for kept in list(root2):
-                        if kept.tag.split('}')[-1].lower() not in ('twocellanchor', 'onecellanchor'):
-                            continue
-                        kept_cid = None
-                        for sub in kept.iter():
-                            if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                                kept_cid = str(sub.attrib.get('id'))
-                                break
-                        if not kept_cid:
-                            continue
-                        if kept_cid in connector_children_by_id:
-                            seen_sigs = set()
-                            for ch in connector_children_by_id[kept_cid]:
-                                try:
-                                    new_ch = copy.deepcopy(ch)
-                                    # Replace any a:schemeClr children with explicit a:srgbClr using parsed theme
-                                    try:
-                                        a_ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
-                                        for elem in list(new_ch.iter()):
-                                            tag_lower = elem.tag.split('}')[-1].lower()
-                                            if tag_lower == 'schemeclr':
-                                                scheme_name = elem.attrib.get('val')
-                                                if scheme_name and 'theme_color_map' in locals() and theme_color_map:
-                                                    hexv = theme_color_map.get(scheme_name.lower())
-                                                    if hexv:
-                                                        elem.tag = '{%s}srgbClr' % a_ns
-                                                        elem.attrib.clear()
-                                                        elem.set('val', hexv)
-                                    except Exception as e:
-                                        print(f"[WARNING] ファイル操作エラー: {e}")
-                                    # preserve attributes for important drawing tags (ln/headEnd/tailEnd/spPr)
-                                    for sub in ch.iter():
-                                        try:
-                                            tag_lower = sub.tag.split('}')[-1].lower()
-                                            if tag_lower in ('ln', 'headend', 'tailend', 'sppr'):
-                                                for attr_k, attr_v in sub.attrib.items():
-                                                    applied = False
-                                                    for cand in new_ch.iter():
-                                                        if cand.tag.split('}')[-1].lower() == tag_lower:
-                                                            if attr_k not in cand.attrib:
-                                                                cand.attrib[attr_k] = attr_v
-                                                            applied = True
-                                                            break
-                                                    if not applied:
-                                                        if attr_k not in new_ch.attrib:
-                                                            new_ch.attrib[attr_k] = attr_v
-                                        except Exception:
-                                            pass  # データ構造操作失敗は無視
-                                    # compute a lightweight signature for deduplication:
-                                    try:
-                                        sig = ET.tostring(new_ch, encoding='utf-8')
-                                    except Exception:
-                                        sig = None
-                                    if sig is not None:
-                                        if sig in seen_sigs:
-                                            # already appended equivalent subtree
-                                            continue
-                                        seen_sigs.add(sig)
-                                    kept.append(new_ch)
-                                except Exception:
-                                    try:
-                                        kept.append(copy.deepcopy(ch))
-                                    except Exception as e:
-                                        pass  # XML解析エラーは無視
-                    tree2.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
-                except Exception as e:
-                    print(f"[WARNING] ファイル操作エラー: {e}")
-
-                # Extra pass: for any kept anchor that corresponds to an original
-                # connector anchor (cxnSp/cxn), replace the connector element in
-                # the trimmed drawing with a deep-copy of the original connector
-                # element from the source drawing. This is a conservative step to
-                # preserve exact <a:ln> children (w/prstDash/headEnd/tailEnd) and
-                # other connector-specific structure that some renderers rely on.
-                try:
-                    try:
-                        tree3 = ET.parse(drawing_relpath)
-                        root3 = tree3.getroot()
-                    except (ET.ParseError, KeyError, AttributeError):
-                        root3 = ET.fromstring(drawing_xml_bytes)
-                        tree3 = ET.ElementTree(root3)
-
-                    # build mapping from original anchor cNvPr id -> original cxnSp/cxn element
-                    orig_cxn_by_id = {}
-                    try:
-                        for orig in list(drawing_xml):
-                            try:
-                                if orig.tag.split('}')[-1].lower() not in ('twocellanchor', 'onecellanchor'):
-                                    continue
-                                orig_cid = None
-                                for sub in orig.iter():
-                                    if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                                        orig_cid = sub.attrib.get('id') or sub.attrib.get('idx')
-                                        break
-                                if orig_cid is None:
-                                    continue
-                                # find immediate connector child (cxnSp or cxn)
-                                for child in orig:
-                                    if child.tag.split('}')[-1].lower() in ('cxnsp', 'cxn'):
-                                        orig_cxn_by_id[str(orig_cid)] = child
-                                        break
-                            except (ValueError, TypeError):
-                                continue
-                    except (ValueError, TypeError):
-                        orig_cxn_by_id = {}
-
-                    # Now replace/inject in the trimmed drawing for kept anchors
-                    for kept in list(root3):
-                        try:
-                            if kept.tag.split('}')[-1].lower() not in ('twocellanchor', 'onecellanchor'):
-                                continue
-                            kept_cid = None
-                            for sub in kept.iter():
-                                if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                                    kept_cid = str(sub.attrib.get('id'))
-                                    break
-                            if not kept_cid:
-                                continue
-                            if kept_cid not in orig_cxn_by_id:
-                                continue
-                            orig_cxn = orig_cxn_by_id.get(kept_cid)
-                            if orig_cxn is None:
-                                continue
-
-                            # find first immediate cxn child in kept and replace it
-                            replaced = False
-                            for idx_child, child_candidate in enumerate(list(kept)):
-                                try:
-                                    if child_candidate.tag.split('}')[-1].lower() in ('cxnsp', 'cxn'):
-                                        try:
-                                            kept.remove(child_candidate)
-                                        except Exception:
-                                            pass  # 一時ファイルの削除失敗は無視
-                                        try:
-                                            kept.insert(idx_child, copy.deepcopy(orig_cxn))
-                                        except Exception:
-                                            try:
-                                                kept.append(copy.deepcopy(orig_cxn))
-                                            except Exception:
-                                                pass  # 一時ファイルの削除失敗は無視
-                                        replaced = True
-                                        break
-                                except Exception:
-                                    continue
-                            if not replaced:
-                                try:
-                                    kept.append(copy.deepcopy(orig_cxn))
-                                except Exception:
-                                    pass  # データ構造操作失敗は無視
-                            # Post-process the injected connector element to ensure
-                            # a single concrete <a:ln> exists under spPr and to remove
-                            # any style/<a:lnRef> entries that may cause LibreOffice
-                            # to prefer theme defaults (which can change dash/width).
-                            try:
-                                # find the (new) connector child we just inserted
-                                conn_elem = None
-                                for child_candidate in list(kept):
-                                    if child_candidate.tag.split('}')[-1].lower() in ('cxnsp', 'cxn'):
-                                        conn_elem = child_candidate
-                                        break
-                                if conn_elem is not None:
-                                    # resolve any schemeClr under conn_elem -> srgb using theme_color_map
-                                    try:
-                                        a_ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
-                                        for elem in list(conn_elem.iter()):
-                                            if elem.tag.split('}')[-1].lower() == 'schemeclr':
-                                                scheme_name = elem.attrib.get('val')
-                                                if scheme_name and 'theme_color_map' in locals() and theme_color_map:
-                                                    hexv = theme_color_map.get(scheme_name.lower())
-                                                    if hexv:
-                                                        elem.tag = '{%s}srgbClr' % a_ns
-                                                        elem.attrib.clear()
-                                                        elem.set('val', hexv)
-                                    except Exception as e:
-                                        print(f"[WARNING] ファイル操作エラー: {e}")
-
-                                    # normalize ln children: keep exactly one <ln> under spPr
-                                    try:
-                                        sppr = None
-                                        # prefer spPr child under connector (ns may vary)
-                                        for ch in list(conn_elem):
-                                            if ch.tag.split('}')[-1].lower() in ('sppr','sppr'.lower(),'sppr') or ch.tag.split('}')[-1].lower() == 'sppr' or ch.tag.split('}')[-1].lower() == 'spPr'.lower():
-                                                sppr = ch
-                                                break
-                                        # fallback: try to find any spPr-like element by tag name
-                                        if sppr is None:
-                                            for ch in list(conn_elem):
-                                                if ch.tag.split('}')[-1].lower() == 'sppr' or ch.tag.split('}')[-1].lower() == 'sppr':
-                                                    sppr = ch
-                                                    break
-                                        if sppr is not None:
-                                            ln_elems = [c for c in list(sppr) if c.tag.split('}')[-1].lower() == 'ln']
-                                            if len(ln_elems) > 1:
-                                                # choose preferred ln: one with @w, then prstDash, then head/tail
-                                                preferred = None
-                                                for ln_c in ln_elems:
-                                                    if ln_c.attrib.get('w'):
-                                                        preferred = ln_c
-                                                        break
-                                                if preferred is None:
-                                                    for ln_c in ln_elems:
-                                                        for sub in ln_c:
-                                                            if sub.tag.split('}')[-1].lower() == 'prstdash':
-                                                                preferred = ln_c
-                                                                break
-                                                        if preferred is not None:
-                                                            break
-                                                if preferred is None:
-                                                    for ln_c in ln_elems:
-                                                        for sub in ln_c:
-                                                            if sub.tag.split('}')[-1].lower() in ('headend','tailend'):
-                                                                preferred = ln_c
-                                                                break
-                                                        if preferred is not None:
-                                                            break
-                                                if preferred is None:
-                                                    preferred = ln_elems[0]
-                                                # remove others
-                                                for ln_c in ln_elems:
-                                                    if ln_c is not preferred:
-                                                        try:
-                                                            sppr.remove(ln_c)
-                                                        except Exception:
-                                                            pass  # 一時ファイルの削除失敗は無視
-
-                                    except Exception:
-                                        pass  # 一時ファイルの削除失敗は無視
-                            except Exception:
-                                pass  # 一時ファイルの削除失敗は無視
-                        except Exception as e:
-                            print(f"[WARNING] ファイル操作エラー: {e}")
-                    # write back
-                    tree3.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
-                except Exception as e:
-                    print(f"[WARNING] ファイル操作エラー: {e}")
-
-                # If a cell_range was provided, define the workbook Print_Area so LibreOffice
-                # exports only that area to PDF. This is more reliable than hiding rows.
-                if cell_range:
-                    try:
-                        s_col, e_col, s_row, e_row = cell_range
-                        # compute Excel-style column letters
-                        start_col_letter = self._col_letter(s_col)
-                        end_col_letter = self._col_letter(e_col)
-                        # create print area string like 'Sheet Name'!$A$5:$D$20
-                        sheet_name_escaped = sheet.title.replace("'", "''")
-                        area_ref = f"'{sheet_name_escaped}'!${start_col_letter}${s_row}:${end_col_letter}${e_row}"
-                        wb_rel = os.path.join(tmpdir, 'xl/workbook.xml')
-                        if os.path.exists(wb_rel):
-                            try:
-                                wtree = ET.parse(wb_rel)
-                                wroot = wtree.getroot()
-                                nsuri = wroot.tag.split('}')[0].strip('{')
-                                dn_tag = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}definedNames'
-                                dn = wroot.find(dn_tag)
-                                if dn is None:
-                                    dn = ET.Element(dn_tag)
-                                    # insert definedNames after sheets if possible
-                                    sheets_tag = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}sheets'
-                                    sheets_el = wroot.find(sheets_tag)
-                                    if sheets_el is not None:
-                                        idx = list(wroot).index(sheets_el)
-                                        wroot.insert(idx+1, dn)
-                                    else:
-                                        wroot.append(dn)
-                                # remove any existing Print_Area definedName for simplicity
-                                for existing in list(dn.findall('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}definedName')):
-                                    if existing.attrib.get('name') == '_xlnm.Print_Area':
-                                        try:
-                                            dn.remove(existing)
-                                        except Exception:
-                                            pass  # 一時ファイルの削除失敗は無視
-                                new_dn = ET.Element('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}definedName')
-                                new_dn.set('name', '_xlnm.Print_Area')
-                                # localSheetId scopes the Print_Area to a specific sheet (0-based)
-                                try:
-                                    new_dn.set('localSheetId', str(sheet_index))
-                                except (ValueError, TypeError):
-                                    pass  # XML書き込み失敗は無視
-                                new_dn.text = area_ref
-                                dn.append(new_dn)
-                                wtree.write(wb_rel, encoding='utf-8', xml_declaration=True)
-                            except (ValueError, TypeError):
-                                pass  # 一時ディレクトリ削除失敗は無視
-                    except (ValueError, TypeError):
-                        pass  # 一時ディレクトリ削除失敗は無視
-
-                # create tmp xlsx from tmpdir
-                # If a cell_range was provided, as an additional safeguard mark
-                # rows outside the range as hidden and zero-height in the
-                # temporary worksheet XML. This helps ensure LibreOffice's PDF
-                # output contains primarily the requested rows.
-                try:
-                    if cell_range:
-                        s_col, e_col, s_row, e_row = cell_range
-                        sheet_rel = os.path.join(tmpdir, f"xl/worksheets/sheet{sheet_index+1}.xml")
-                        if os.path.exists(sheet_rel):
-                            try:
-                                stree2 = ET.parse(sheet_rel)
-                                sroot2 = stree2.getroot()
-                                ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-                                # remove explicit rowBreaks/colBreaks/pageBreaks to
-                                # prevent LibreOffice from honoring legacy manual
-                                # page breaks which can force multi-page exports.
-                                try:
-                                    # remove rowBreaks/colBreaks elements if present
-                                    for br_tag in ('rowBreaks', 'colBreaks', 'pageBreaks'):
-                                        for el in list(sroot2.findall('{%s}%s' % (ns, br_tag))):
-                                            try:
-                                                sroot2.remove(el)
-                                            except Exception:
-                                                pass  # 一時ファイルの削除失敗は無視
-                                    # remove any break child elements under any br container
-                                    for br_container in sroot2.findall('.//{%s}break' % ns):
-                                        parent = br_container.getparent() if hasattr(br_container, 'getparent') else None
-                                        try:
-                                            # best-effort: remove break nodes
-                                            if parent is not None:
-                                                parent.remove(br_container)
-                                        except Exception:
-                                            try:
-                                                # fallback: attempt to remove directly from root
-                                                sroot2.remove(br_container)
-                                            except Exception:
-                                                pass  # 一時ファイルの削除失敗は無視
-                                except Exception:
-                                    pass  # 一時ファイルの削除失敗は無視
-                                for row_el in sroot2.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}row'):
-                                    try:
-                                        rnum = int(row_el.attrib.get('r', '0'))
-                                    except (ValueError, TypeError):
-                                        continue
-                                    if rnum < s_row or rnum > e_row:
-                                        # mark hidden and set zero height
-                                        row_el.set('hidden', '1')
-                                        row_el.set('ht', '0')
-                                        row_el.set('customHeight', '1')
-                                stree2.write(sheet_rel, encoding='utf-8', xml_declaration=True)
-                            except (ValueError, TypeError) as e:
-                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                        # Aggressive: reconstruct sheetData to only include rows/columns in the requested range
-                        try:
-                            stree4 = ET.parse(sheet_rel)
-                            sroot4 = stree4.getroot()
-                            ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-                            sheet_data_tag = '{%s}sheetData' % ns
-                            sheet_data = sroot4.find(sheet_data_tag)
-                            if sheet_data is not None:
-                                # build a map of columns to keep for fast check
-                                keep_cols = set(range(s_col, e_col + 1))
-                                new_sheet_data = ET.Element(sheet_data_tag)
-                                # iterate rows in original and keep only those within range
-                                rows = sheet_data.findall('{%s}row' % ns)
-                                new_r_index = 1
-                                for row_el in rows:
-                                    try:
-                                        rnum = int(row_el.attrib.get('r', '0'))
-                                    except (ValueError, TypeError):
-                                        continue
-                                    if rnum < s_row or rnum > e_row:
-                                        continue
-                                    # create new row element with updated r attribute
-                                    new_row = ET.Element('{%s}row' % ns)
-                                    new_row.set('r', str(new_r_index))
-                                    # copy row height/hidden/customHeight attrs if present
-                                    for attr in ('ht', 'hidden', 'customHeight'):
-                                        if attr in row_el.attrib:
-                                            new_row.set(attr, row_el.attrib.get(attr))
-                                    # if original XML did not include height, try to copy from openpyxl row_dimensions
-                                    try:
-                                        rd = sheet.row_dimensions.get(rnum)
-                                        if rd is not None:
-                                            rh = getattr(rd, 'height', None)
-                                            if rh is not None and 'ht' not in new_row.attrib:
-                                                new_row.set('ht', str(rh))
-                                                new_row.set('customHeight', '1')
-                                    except (ValueError, TypeError) as e:
-                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                    # copy cell elements within column range
-                                    for c in list(row_el):
-                                        if c.tag.split('}')[-1] != 'c':
-                                            continue
-                                        cell_r = c.attrib.get('r', '')
-                                        # extract column letters (e.g., 'B12' -> 'B') and convert to index
-                                        col_letters = ''.join([ch for ch in cell_r if ch.isalpha()]) if cell_r else None
-                                        if not col_letters:
-                                            continue
-                                        # convert column letters to index
-                                        col_idx = 0
-                                        for ch in col_letters:
-                                            col_idx = col_idx * 26 + (ord(ch.upper()) - 64)
-                                        if col_idx < s_col or col_idx > e_col:
-                                            continue
-                                        # compute new column index relative to trimmed sheet (1-based)
-                                        new_col_idx = col_idx - (s_col - 1)
-                                        if new_col_idx < 1:
-                                            new_col_idx = 1
-                                        # helper to compute column letters from index
-                                        new_col_letters = self._col_letter(new_col_idx)
-                                        # adjust cell r attribute to new column letters + new row number
-                                        new_cell = ET.Element('{%s}c' % ns, dict(c.attrib))
-                                        new_cell.attrib['r'] = f"{new_col_letters}{new_r_index}"
-                                        # append child nodes (v, is, t, etc.) by copying
-                                        for cc in list(c):
-                                            new_cell.append(cc)
-                                        new_row.append(new_cell)
-                                    new_sheet_data.append(new_row)
-                                    new_r_index += 1
-
-                                # replace old sheetData with new one
-                                # remove existing sheetData element
-                                parent = sroot4
-                                for child in list(parent):
-                                    if child.tag == sheet_data_tag:
-                                        parent.remove(child)
-                                parent.append(new_sheet_data)
-
-                                # update dimension element if present
-                                dim_tag = '{%s}dimension' % ns
-                                dim = sroot4.find(dim_tag)
-                                if dim is None:
-                                    dim = ET.Element(dim_tag)
-                                    sroot4.insert(0, dim)
-                                # compute A1-style addresses for new dimension
-                                # After trimming we renumber columns so leftmost column becomes A (1)
-                                start_addr = f"{self._col_letter(1)}1"
-                                end_addr = f"{self._col_letter(e_col - s_col + 1)}{max(1, new_r_index-1)}"
-                                dim.set('ref', f"{start_addr}:{end_addr}")
-
-                                # rebuild cols element to include only kept columns with widths from original sheet when possible
-                                cols_tag = '{%s}cols' % ns
-                                col_tag = '{%s}col' % ns
-                                # remove existing cols if any
-                                for child in list(sroot4):
-                                    if child.tag == cols_tag:
-                                        try:
-                                            sroot4.remove(child)
-                                        except Exception:
-                                            pass  # 一時ファイルの削除失敗は無視
-                                cols_el = ET.Element(cols_tag)
-                                # attempt to get column widths from openpyxl sheet object
-                                try:
-                                    from openpyxl.utils import get_column_letter
-                                    from openpyxl.utils import units as _units
-                                    default_col_w = getattr(sheet.sheet_format, 'defaultColWidth', None) or getattr(_units, 'DEFAULT_COLUMN_WIDTH', 8.43)
-                                    for c in range(s_col, e_col + 1):
-                                        cd = sheet.column_dimensions.get(get_column_letter(c))
-                                        # prefer explicit width on column dimension, otherwise use default
-                                        width = None
-                                        hidden = None
-                                        if cd is not None:
-                                            width = getattr(cd, 'width', None)
-                                            hidden = getattr(cd, 'hidden', None)
-                                        if width is None:
-                                            width = default_col_w
-                                        col_el = ET.Element(col_tag)
-                                        new_idx = c - s_col + 1
-                                        col_el.set('min', str(new_idx))
-                                        col_el.set('max', str(new_idx))
-                                        # write width as float-ish value; mark customWidth only if original had explicit width
-                                        try:
-                                            col_el.set('width', str(float(width)))
-                                            if cd is not None and getattr(cd, 'width', None) is not None:
-                                                col_el.set('customWidth', '1')
-                                        except (ValueError, TypeError):
-                                            # fallback: set an integer width
-                                            col_el.set('width', str(int(width) if width is not None else 8))
-                                            if cd is not None and getattr(cd, 'width', None) is not None:
-                                                col_el.set('customWidth', '1')
-                                        # preserve hidden state if present
-                                        try:
-                                            if hidden:
-                                                col_el.set('hidden', '1')
-                                        except (ValueError, TypeError) as e:
-                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                        cols_el.append(col_el)
-                                except (ValueError, TypeError):
-                                    # best-effort: set default widths
-                                    for i_col in range(1, e_col - s_col + 2):
-                                        col_el = ET.Element(col_tag)
-                                        col_el.set('min', str(i_col))
-                                        col_el.set('max', str(i_col))
-                                        col_el.set('width', '8.43')
-                                        cols_el.append(col_el)
-
-                                # insert or update sheetFormatPr to carry defaultColWidth/defaultRowHeight
-                                try:
-                                    sf_tag = '{%s}sheetFormatPr' % ns
-                                    # remove existing sheetFormatPr if any
-                                    for child in list(sroot4):
-                                        if child.tag == sf_tag:
-                                            try:
-                                                sroot4.remove(child)
-                                            except Exception:
-                                                pass  # 一時ファイルの削除失敗は無視
-                                    sf = ET.Element(sf_tag)
-                                    # default column width
-                                    try:
-                                        from openpyxl.utils import units as _units2
-                                        default_col_w = getattr(sheet.sheet_format, 'defaultColWidth', None) or getattr(_units2, 'DEFAULT_COLUMN_WIDTH', 8.43)
-                                        sf.set('defaultColWidth', str(float(default_col_w)))
-                                    except (ValueError, TypeError) as e:
-                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                    # default row height
-                                    try:
-                                        default_row_h = getattr(sheet.sheet_format, 'defaultRowHeight', None) or getattr(_units2, 'DEFAULT_ROW_HEIGHT', 15.0)
-                                        sf.set('defaultRowHeight', str(float(default_row_h)))
-                                    except (ValueError, TypeError) as e:
-                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                    # insert sheetFormatPr near the top
-                                    inserted_sf = False
-                                    for i, child in enumerate(list(sroot4)):
-                                        # place sheetFormatPr before cols or sheetData
-                                        if child.tag == cols_tag or child.tag == sheet_data_tag:
-                                            sroot4.insert(i, sf)
-                                            inserted_sf = True
-                                            break
-                                    if not inserted_sf:
-                                        sroot4.insert(0, sf)
-                                except Exception:
-                                    pass  # エラーは無視
-
-                                # insert cols_el near top (after sheetPr if present)
-                                inserted = False
-                                for i, child in enumerate(list(sroot4)):
-                                    if 'sheetPr' in child.tag:
-                                        sroot4.insert(i+1, cols_el)
-                                        inserted = True
-                                        break
-                                if not inserted:
-                                    sroot4.insert(0, cols_el)
-
-                                # copy per-row heights from original sheet where available
-                                try:
-                                    # build a rows element with explicit heights for the trimmed range
-                                    rows_tag = '{%s}sheetData' % ns
-                                    # find existing sheetData
-                                    sd = sroot4.find(sheet_data_tag)
-                                    if sd is not None:
-                                        # clear existing row elems inside sheetData in tmp (we will re-create)
-                                        for child in list(sd):
-                                            if child.tag.endswith('row'):
-                                                try:
-                                                    sd.remove(child)
-                                                except Exception:
-                                                    pass  # 一時ファイルの削除失敗は無視
-                                        # rows in trimmed sheet should start at 1..(e_row - s_row + 1)
-                                        try:
-                                            first_row = int(s_row)
-                                            last_row = int(e_row)
-                                            out_r = 1
-                                            for src_r in range(first_row, last_row + 1):
-                                                try:
-                                                    r_el = ET.Element('{%s}row' % ns)
-                                                    r_el.set('r', str(out_r))
-                                                    # try to fetch height from source workbook sheet
-                                                    try:
-                                                        src_row_obj = sheet.row_dimensions.get(src_r)
-                                                        if src_row_obj is not None and getattr(src_row_obj, 'height', None) is not None:
-                                                            r_el.set('ht', str(float(src_row_obj.height)))
-                                                            r_el.set('customHeight', '1')
-                                                        else:
-                                                            # fallback to default row height if present
-                                                            try:
-                                                                dflt = getattr(sheet.sheet_format, 'defaultRowHeight', None)
-                                                                if dflt is not None:
-                                                                    r_el.set('ht', str(float(dflt)))
-                                                            except (ValueError, TypeError) as e:
-                                                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                                    except (ValueError, TypeError) as e:
-                                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                                    sd.append(r_el)
-                                                except (ValueError, TypeError) as e:
-                                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                                out_r += 1
-                                        except (ValueError, TypeError) as e:
-                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                except Exception:
-                                    pass  # XML書き込み失敗は無視
-
-                                # write back
-                                stree4.write(sheet_rel, encoding='utf-8', xml_declaration=True)
-                        except Exception as e:
-                            pass  # XML解析エラーは無視
-                                # If we trimmed rows/columns above, also adjust the drawing anchor
-                        # cell indices so they are relative to the trimmed worksheet. This
-                        # makes the drawing coordinates consistent with the modified
-                        # sheetData (rows renumbered to start at 1 and columns treated
-                        # as zero-width outside the range).
-                        try:
-                            if cell_range:
-                                s_col, e_col, s_row, e_row = cell_range
-                                drawing_relpath_full = drawing_relpath
-                                if os.path.exists(drawing_relpath_full):
-                                    try:
-                                        dtree = ET.parse(drawing_relpath_full)
-                                        droot = dtree.getroot()
-                                        ns = {'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'}
-                                        # iterate anchors and shift col/row indices by the trimmed offsets
-                                        for node in list(droot):
-                                            lname = node.tag.split('}')[-1].lower()
-                                            if lname not in ('twocellanchor', 'onecellanchor'):
-                                                continue
-                                            fr = node.find('xdr:from', ns)
-                                            if fr is not None:
-                                                col_el = fr.find('xdr:col', ns)
-                                                row_el = fr.find('xdr:row', ns)
-                                                try:
-                                                    if col_el is not None and col_el.text is not None:
-                                                        new_col = int(col_el.text) - (s_col - 1)
-                                                        if new_col < 0:
-                                                            new_col = 0
-                                                        col_el.text = str(new_col)
-                                                except (ValueError, TypeError) as e:
-                                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                                try:
-                                                    if row_el is not None and row_el.text is not None:
-                                                        new_row = int(row_el.text) - (s_row - 1)
-                                                        if new_row < 0:
-                                                            new_row = 0
-                                                        row_el.text = str(new_row)
-                                                except (ValueError, TypeError) as e:
-                                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                            to = node.find('xdr:to', ns)
-                                            if to is not None:
-                                                col_el = to.find('xdr:col', ns)
-                                                row_el = to.find('xdr:row', ns)
-                                                try:
-                                                    if col_el is not None and col_el.text is not None:
-                                                        new_col = int(col_el.text) - (s_col - 1)
-                                                        if new_col < 0:
-                                                            new_col = 0
-                                                        col_el.text = str(new_col)
-                                                except (ValueError, TypeError) as e:
-                                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                                try:
-                                                    if row_el is not None and row_el.text is not None:
-                                                        new_row = int(row_el.text) - (s_row - 1)
-                                                        if new_row < 0:
-                                                            new_row = 0
-                                                        row_el.text = str(new_row)
-                                                except (ValueError, TypeError) as e:
-                                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                            else:
-                                                # oneCellAnchor ext is relative; adjust the from row/col only
-                                                pass
-                                        # After rebasing cell indices, also adjust shape transform
-                                        # (a:xfrm a:off / a:ext) so the drawing extents align with
-                                        # the cell-based anchor coordinates in the trimmed sheet.
-                                        try:
-                                            # compute pixel map for the sheet area using same DPI as rendering
-                                            try:
-                                                col_x, row_y = self._compute_sheet_cell_pixel_map(sheet, DPI=dpi)
-                                            except Exception:
-                                                col_x, row_y = [0], [0]
-                                            EMU_PER_INCH = 914400
-                                            # compute EMU_PER_PIXEL using runtime dpi (fallback to 300)
-                                            try:
-                                                EMU_PER_PIXEL = EMU_PER_INCH / float(dpi)
-                                            except (ValueError, TypeError):
-                                                # fallback to using the object's dpi or 300
-                                                try:
-                                                    EMU_PER_PIXEL = EMU_PER_INCH / float(int(getattr(self, 'dpi', dpi) or dpi))
-                                                except (ValueError, TypeError):
-                                                    EMU_PER_PIXEL = EMU_PER_INCH / float(dpi)
-                                            a_ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
-                                            xdr_ns = ns['xdr'] if 'xdr' in ns else 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
-                                            # iterate anchors again and set a:xfrm off/ext where present
-                                            for node2 in list(droot):
-                                                lname2 = node2.tag.split('}')[-1].lower()
-                                                if lname2 not in ('twocellanchor', 'onecellanchor'):
-                                                    continue
-                                                # compute left/top/right/bottom in pixels for this anchor
-                                                try:
-                                                    if lname2 == 'twocellanchor':
-                                                        fr = node2.find('xdr:from', ns)
-                                                        to = node2.find('xdr:to', ns)
-                                                        if fr is None or to is None:
-                                                            continue
-                                                        try:
-                                                            col = int(fr.find('xdr:col', ns).text)
-                                                        except (ValueError, TypeError):
-                                                            col = 0
-                                                        try:
-                                                            row = int(fr.find('xdr:row', ns).text)
-                                                        except (ValueError, TypeError):
-                                                            row = 0
-                                                        try:
-                                                            colOff = int(fr.find('xdr:colOff', ns).text)
-                                                        except (ValueError, TypeError):
-                                                            colOff = 0
-                                                        try:
-                                                            rowOff = int(fr.find('xdr:rowOff', ns).text)
-                                                        except (ValueError, TypeError):
-                                                            rowOff = 0
-                                                        try:
-                                                            to_col = int(to.find('xdr:col', ns).text)
-                                                        except (ValueError, TypeError):
-                                                            to_col = col
-                                                        try:
-                                                            to_row = int(to.find('xdr:row', ns).text)
-                                                        except (ValueError, TypeError):
-                                                            to_row = row
-                                                        try:
-                                                            to_colOff = int(to.find('xdr:colOff', ns).text)
-                                                        except (ValueError, TypeError):
-                                                            to_colOff = 0
-                                                        try:
-                                                            to_rowOff = int(to.find('xdr:rowOff', ns).text)
-                                                        except (ValueError, TypeError):
-                                                            to_rowOff = 0
-
-                                                        left_px = col_x[col] + (colOff / EMU_PER_PIXEL) if col < len(col_x) else col_x[-1]
-                                                        right_px = col_x[to_col] + (to_colOff / EMU_PER_PIXEL) if to_col < len(col_x) else col_x[-1]
-                                                        top_px = row_y[row] + (rowOff / EMU_PER_PIXEL) if row < len(row_y) else row_y[-1]
-                                                        bottom_px = row_y[to_row] + (to_rowOff / EMU_PER_PIXEL) if to_row < len(row_y) else row_y[-1]
-                                                    else:
-                                                        fr = node2.find('xdr:from', ns)
-                                                        ext = node2.find('xdr:ext', ns)
-                                                        if fr is None or ext is None:
-                                                            continue
-                                                        try:
-                                                            col = int(fr.find('xdr:col', ns).text)
-                                                        except (ValueError, TypeError):
-                                                            col = 0
-                                                        try:
-                                                            row = int(fr.find('xdr:row', ns).text)
-                                                        except (ValueError, TypeError):
-                                                            row = 0
-                                                        try:
-                                                            colOff = int(fr.find('xdr:colOff', ns).text)
-                                                        except (ValueError, TypeError):
-                                                            colOff = 0
-                                                        cx = int(ext.attrib.get('cx', '0'))
-                                                        cy = int(ext.attrib.get('cy', '0'))
-                                                        left_px = col_x[col] + (colOff / EMU_PER_PIXEL) if col < len(col_x) else col_x[-1]
-                                                        top_px = row_y[row] if row < len(row_y) else row_y[-1]
-                                                        right_px = left_px + (cx / EMU_PER_PIXEL)
-                                                        bottom_px = top_px + (cy / EMU_PER_PIXEL)
-                                                except (ValueError, TypeError):
-                                                    continue
-
-                                                    # Special-case grouped anchors: update only the group's xfrm/grpSpPr
-                                                    try:
-                                                        grp_node = node2.find('xdr:grpSp', ns)
-                                                        target_w_px = max(0.0, (right_px - left_px))
-                                                        target_h_px = max(0.0, (bottom_px - top_px))
-                                                        if grp_node is not None:
-                                                            try:
-                                                                # find the group's a:xfrm inside grpSpPr
-                                                                grp_xfrm = grp_node.find('.//{%s}xfrm' % a_ns)
-                                                                # find chExt under the group's xfrm (if present)
-                                                                chExt = None
-                                                                orig_ch_cx = orig_ch_cy = None
-                                                                if grp_xfrm is not None:
-                                                                    chExt = grp_xfrm.find('{%s}chExt' % a_ns)
-                                                                    # read original group ext if present
-                                                                    ext_el = grp_xfrm.find('{%s}ext' % a_ns)
-                                                                    orig_cx = orig_cy = None
-                                                                    try:
-                                                                        if ext_el is not None:
-                                                                            ocx = ext_el.attrib.get('cx')
-                                                                            ocy = ext_el.attrib.get('cy')
-                                                                            if ocx is not None:
-                                                                                orig_cx = int(ocx)
-                                                                            if ocy is not None:
-                                                                                orig_cy = int(ocy)
-                                                                    except (ValueError, TypeError):
-                                                                        orig_cx = orig_cy = None
-                                                                    try:
-                                                                        if chExt is not None:
-                                                                            cccx = chExt.attrib.get('cx')
-                                                                            cccy = chExt.attrib.get('cy')
-                                                                            if cccx is not None:
-                                                                                orig_ch_cx = int(cccx)
-                                                                            if cccy is not None:
-                                                                                orig_ch_cy = int(cccy)
-                                                                    except (ValueError, TypeError):
-                                                                        orig_ch_cx = orig_ch_cy = None
-
-                                                                    # compute new ext for the group (preserve group's aspect if possible)
-                                                                    try:
-                                                                        if orig_cx and orig_cy and orig_cx > 0 and orig_cy > 0:
-                                                                            orig_w_px = float(orig_cx) / float(EMU_PER_PIXEL)
-                                                                            orig_h_px = float(orig_cy) / float(EMU_PER_PIXEL)
-                                                                            if orig_w_px > 0 and orig_h_px > 0:
-                                                                                scale_w = target_w_px / orig_w_px if orig_w_px > 0 else 1.0
-                                                                                scale_h = target_h_px / orig_h_px if orig_h_px > 0 else 1.0
-                                                                                uniform_scale = min(scale_w, scale_h) if scale_w > 0 and scale_h > 0 else 1.0
-                                                                                new_cx_emu = int(round(float(orig_cx) * float(uniform_scale)))
-                                                                                new_cy_emu = int(round(float(orig_cy) * float(uniform_scale)))
-                                                                            else:
-                                                                                new_cx_emu = int(round(target_w_px * EMU_PER_PIXEL))
-                                                                                new_cy_emu = int(round(target_h_px * EMU_PER_PIXEL))
-                                                                        else:
-                                                                            new_cx_emu = int(round(target_w_px * EMU_PER_PIXEL))
-                                                                            new_cy_emu = int(round(target_h_px * EMU_PER_PIXEL))
-                                                                    except (ValueError, TypeError):
-                                                                        new_cx_emu = int(round(max(1.0, target_w_px) * EMU_PER_PIXEL))
-                                                                        new_cy_emu = int(round(max(1.0, target_h_px) * EMU_PER_PIXEL))
-
-                                                                    try:
-                                                                        new_cx_emu = self._to_positive(new_cx_emu, orig_cx, orig_ch_cx, target_w_px)
-                                                                        new_cy_emu = self._to_positive(new_cy_emu, orig_cy, orig_ch_cy, target_h_px)
-                                                                    except (ValueError, TypeError):
-                                                                        new_cx_emu = int(round(max(1.0, target_w_px) * EMU_PER_PIXEL))
-                                                                        new_cy_emu = int(round(max(1.0, target_h_px) * EMU_PER_PIXEL))
-
-                                                                    # Enforce a small positive minimum (at least 1 pixel in EMU)
-                                                                    try:
-                                                                        min_emu = int(round(float(EMU_PER_PIXEL))) if EMU_PER_PIXEL and EMU_PER_PIXEL > 0 else 1
-                                                                        if not new_cx_emu or int(new_cx_emu) < min_emu:
-                                                                            new_cx_emu = min_emu
-                                                                        if not new_cy_emu or int(new_cy_emu) < min_emu:
-                                                                            new_cy_emu = min_emu
-                                                                    except (ValueError, TypeError):
-                                                                        pass  # 型変換失敗は無視
-
-                                                                    # set group's off/ext
-                                                                    try:
-                                                                        off = grp_xfrm.find('{%s}off' % a_ns)
-                                                                        if off is None:
-                                                                            off = ET.SubElement(grp_xfrm, '{%s}off' % a_ns)
-                                                                        off.set('x', str(int(round(left_px * EMU_PER_PIXEL))))
-                                                                        off.set('y', str(int(round(top_px * EMU_PER_PIXEL))))
-                                                                    except (ValueError, TypeError):
-                                                                        pass  # 属性設定失敗は無視
-                                                                    try:
-                                                                        ext_el = grp_xfrm.find('{%s}ext' % a_ns)
-                                                                        if ext_el is None:
-                                                                            ext_el = ET.SubElement(grp_xfrm, '{%s}ext' % a_ns)
-                                                                        ext_el.set('cx', str(int(new_cx_emu)))
-                                                                        ext_el.set('cy', str(int(new_cy_emu)))
-                                                                    except (ValueError, TypeError):
-                                                                        pass  # 属性設定失敗は無視
-
-                                                                    # update chExt proportional to ext if present
-                                                                    try:
-                                                                        if chExt is not None and orig_ch_cx and orig_ch_cy and orig_ch_cx > 0 and orig_ch_cy > 0:
-                                                                            try:
-                                                                                if 'uniform_scale' in locals():
-                                                                                    ch_scale = uniform_scale
-                                                                                else:
-                                                                                    ch_scale = min(float(new_cx_emu) / float(orig_ch_cx), float(new_cy_emu) / float(orig_ch_cy))
-                                                                            except (ValueError, TypeError):
-                                                                                ch_scale = 1.0
-                                                                            try:
-                                                                                new_ch_cx = int(round(float(orig_ch_cx) * float(ch_scale)))
-                                                                                new_ch_cy = int(round(float(orig_ch_cy) * float(ch_scale)))
-                                                                                chExt.set('cx', str(new_ch_cx))
-                                                                                chExt.set('cy', str(new_ch_cy))
-                                                                            except (ValueError, TypeError):
-                                                                                pass  # 属性設定失敗は無視
-                                                                    except (ValueError, TypeError):
-                                                                        pass  # 属性設定失敗は無視
-                                                                    except (ValueError, TypeError):
-                                                                        pass  # 属性設定失敗は無視
-                                                            except (ValueError, TypeError):
-                                                                pass  # 属性設定失敗は無視
-
-                                                            # After setting group's ext/chExt, ensure child shapes inside
-                                                            # the grpSp have non-zero <a:ext> values. Some source
-                                                            # workbooks (or earlier processing) may contain child
-                                                            # a:ext with cx or cy == 0 which makes them invisible.
-                                                            try:
-                                                                # compute fallback ext from group's chExt if present
-                                                                try:
-                                                                    fallback_ch_cx = None
-                                                                    fallback_ch_cy = None
-                                                                    if chExt is not None:
-                                                                        cccx = chExt.attrib.get('cx')
-                                                                        cccy = chExt.attrib.get('cy')
-                                                                        if cccx is not None:
-                                                                            fallback_ch_cx = int(cccx)
-                                                                        if cccy is not None:
-                                                                            fallback_ch_cy = int(cccy)
-                                                                except (ValueError, TypeError):
-                                                                    fallback_ch_cx = fallback_ch_cy = None
-
-                                                                # fallback to group's ext if chExt missing
-                                                                try:
-                                                                    grp_ext_el = grp_xfrm.find('{%s}ext' % a_ns) if grp_xfrm is not None else None
-                                                                    fallback_grp_cx = None
-                                                                    fallback_grp_cy = None
-                                                                    if grp_ext_el is not None:
-                                                                        gcx = grp_ext_el.attrib.get('cx')
-                                                                        gcy = grp_ext_el.attrib.get('cy')
-                                                                        if gcx is not None:
-                                                                            fallback_grp_cx = int(gcx)
-                                                                        if gcy is not None:
-                                                                            fallback_grp_cy = int(gcy)
-                                                                except (ValueError, TypeError):
-                                                                    fallback_grp_cx = fallback_grp_cy = None
-
-                                                                # compute minimum non-zero EMU (1 pixel)
-                                                                try:
-                                                                    min_emu = int(round(float(EMU_PER_PIXEL))) if EMU_PER_PIXEL and EMU_PER_PIXEL > 0 else 1
-                                                                except (ValueError, TypeError):
-                                                                    min_emu = 1
-
-                                                                # iterate child xfrm elements and fix zero extents
-                                                                for child_xfrm in grp_node.findall('.//{%s}xfrm' % a_ns):
-                                                                    try:
-                                                                        child_ext = child_xfrm.find('{%s}ext' % a_ns)
-                                                                        if child_ext is None:
-                                                                            child_ext = ET.SubElement(child_xfrm, '{%s}ext' % a_ns)
-                                                                        # read current values
-                                                                        try:
-                                                                            ccx = int(child_ext.attrib.get('cx', '0'))
-                                                                        except (ValueError, TypeError):
-                                                                            ccx = 0
-                                                                        try:
-                                                                            ccy = int(child_ext.attrib.get('cy', '0'))
-                                                                        except (ValueError, TypeError):
-                                                                            ccy = 0
-
-                                                                        need_write = False
-                                                                        if not ccx or ccx <= 0:
-                                                                            # prefer chExt, then group ext, then min_emu
-                                                                            if fallback_ch_cx and fallback_ch_cx > 0:
-                                                                                new_ccx = int(fallback_ch_cx)
-                                                                            elif fallback_grp_cx and fallback_grp_cx > 0:
-                                                                                new_ccx = int(fallback_grp_cx)
-                                                                            else:
-                                                                                new_ccx = min_emu
-                                                                            child_ext.set('cx', str(int(new_ccx)))
-                                                                            need_write = True
-                                                                        if not ccy or ccy <= 0:
-                                                                            if fallback_ch_cy and fallback_ch_cy > 0:
-                                                                                new_ccy = int(fallback_ch_cy)
-                                                                            elif fallback_grp_cy and fallback_grp_cy > 0:
-                                                                                new_ccy = int(fallback_grp_cy)
-                                                                            else:
-                                                                                new_ccy = min_emu
-                                                                            child_ext.set('cy', str(int(new_ccy)))
-                                                                            need_write = True
-                                                                        if need_write:
-                                                                            # Also ensure child off exists (avoid negative/empty)
-                                                                            try:
-                                                                                off_el = child_xfrm.find('{%s}off' % a_ns)
-                                                                                if off_el is None:
-                                                                                    off_el = ET.SubElement(child_xfrm, '{%s}off' % a_ns)
-                                                                                    off_el.set('x', str(int(round(left_px * EMU_PER_PIXEL))))
-                                                                                    off_el.set('y', str(int(round(top_px * EMU_PER_PIXEL))))
-                                                                            except (ValueError, TypeError):
-                                                                                pass  # 属性設定失敗は無視
-                                                                    except (ValueError, TypeError):
-                                                                        # ignore individual child failures
-                                                                        pass
-                                                            except (ValueError, TypeError):
-                                                                pass  # 属性設定失敗は無視
-
-                                                            # skip modifying inner child xfrm elements for grouped shapes
-                                                            continue
-                                                        # non-group anchors: update xfrm elements as before
-                                                        for el in node2.iter():
-                                                            try:
-                                                                if el.tag.split('}')[-1].lower() != 'xfrm':
-                                                                    continue
-                                                                # find or create <a:off> and <a:ext>
-                                                                off = el.find('{%s}off' % a_ns)
-                                                                if off is None:
-                                                                    off = ET.SubElement(el, '{%s}off' % a_ns)
-                                                                ext_el = el.find('{%s}ext' % a_ns)
-                                                                if ext_el is None:
-                                                                    ext_el = ET.SubElement(el, '{%s}ext' % a_ns)
-                                                                chOff = el.find('{%s}chOff' % a_ns)
-                                                                chExt = el.find('{%s}chExt' % a_ns)
-
-                                                                # compute target box in pixels
-                                                                target_w_px = max(0.0, (right_px - left_px))
-                                                                target_h_px = max(0.0, (bottom_px - top_px))
-
-                                                                # read original ext if present
-                                                                orig_cx = orig_cy = None
-                                                                try:
-                                                                    ocx = ext_el.attrib.get('cx')
-                                                                    ocy = ext_el.attrib.get('cy')
-                                                                    if ocx is not None:
-                                                                        orig_cx = int(ocx)
-                                                                    if ocy is not None:
-                                                                        orig_cy = int(ocy)
-                                                                except (ValueError, TypeError):
-                                                                    orig_cx = orig_cy = None
-
-                                                                # read original chExt if present
-                                                                orig_ch_cx = orig_ch_cy = None
-                                                                try:
-                                                                    if chExt is not None:
-                                                                        cccx = chExt.attrib.get('cx')
-                                                                        cccy = chExt.attrib.get('cy')
-                                                                        if cccx is not None:
-                                                                            orig_ch_cx = int(cccx)
-                                                                        if cccy is not None:
-                                                                            orig_ch_cy = int(cccy)
-                                                                except (ValueError, TypeError):
-                                                                    orig_ch_cx = orig_ch_cy = None
-
-                                                                # compute new ext: prefer scaling original ext to preserve aspect;
-                                                                # otherwise fill target box
-                                                                try:
-                                                                    if orig_cx and orig_cy and orig_cx > 0 and orig_cy > 0:
-                                                                        try:
-                                                                            orig_w_px = float(orig_cx) / float(EMU_PER_PIXEL)
-                                                                            orig_h_px = float(orig_cy) / float(EMU_PER_PIXEL)
-                                                                        except (ValueError, TypeError):
-                                                                            orig_w_px = orig_h_px = None
-                                                                        if orig_w_px and orig_h_px and orig_w_px > 0 and orig_h_px > 0:
-                                                                            scale_w = target_w_px / orig_w_px if orig_w_px > 0 else 1.0
-                                                                            scale_h = target_h_px / orig_h_px if orig_h_px > 0 else 1.0
-                                                                            uniform_scale = min(scale_w, scale_h) if scale_w > 0 and scale_h > 0 else 1.0
-                                                                            new_cx_emu = int(round(float(orig_cx) * float(uniform_scale)))
-                                                                            new_cy_emu = int(round(float(orig_cy) * float(uniform_scale)))
-                                                                        else:
-                                                                            new_cx_emu = int(round(target_w_px * EMU_PER_PIXEL))
-                                                                            new_cy_emu = int(round(target_h_px * EMU_PER_PIXEL))
-                                                                    else:
-                                                                        new_cx_emu = int(round(target_w_px * EMU_PER_PIXEL))
-                                                                        new_cy_emu = int(round(target_h_px * EMU_PER_PIXEL))
-                                                                except (ValueError, TypeError):
-                                                                    new_cx_emu = int(round(max(1.0, target_w_px) * EMU_PER_PIXEL))
-                                                                    new_cy_emu = int(round(max(1.0, target_h_px) * EMU_PER_PIXEL))
-
-                                                                # ensure positive using fallback helper defined above
-                                                                try:
-                                                                    new_cx_emu = self._to_positive(new_cx_emu, orig_cx, orig_ch_cx, target_w_px)
-                                                                    new_cy_emu = self._to_positive(new_cy_emu, orig_cy, orig_ch_cy, target_h_px)
-                                                                except (ValueError, TypeError):
-                                                                    new_cx_emu = int(round(max(1.0, target_w_px) * EMU_PER_PIXEL))
-                                                                    new_cy_emu = int(round(max(1.0, target_h_px) * EMU_PER_PIXEL))
-
-                                                                    # Enforce a small positive minimum (at least 1 pixel in EMU)
-                                                                    try:
-                                                                        min_emu = int(round(float(EMU_PER_PIXEL))) if EMU_PER_PIXEL and EMU_PER_PIXEL > 0 else 1
-                                                                        if not new_cx_emu or int(new_cx_emu) < min_emu:
-                                                                            new_cx_emu = min_emu
-                                                                        if not new_cy_emu or int(new_cy_emu) < min_emu:
-                                                                            new_cy_emu = min_emu
-                                                                    except (ValueError, TypeError):
-                                                                        pass  # 型変換失敗は無視
-
-                                                                # debug log if still non-positive (should not happen)
-                                                                try:
-                                                                    if (not new_cx_emu or int(new_cx_emu) <= 0) or (not new_cy_emu or int(new_cy_emu) <= 0):
-                                                                        print(f"[WARN][_xfrm_guard] zero/invalid ext after fallback: orig_cx={orig_cx} orig_cy={orig_cy} target_w_px={target_w_px} target_h_px={target_h_px} new_cx_emu={new_cx_emu} new_cy_emu={new_cy_emu}")
-                                                                except (ValueError, TypeError):
-                                                                    pass  # データ構造操作失敗は無視
-
-                                                                # set off/ext
-                                                                try:
-                                                                    off.set('x', str(int(round(left_px * EMU_PER_PIXEL))))
-                                                                    off.set('y', str(int(round(top_px * EMU_PER_PIXEL))))
-                                                                except (ValueError, TypeError):
-                                                                    pass  # データ構造操作失敗は無視
-                                                                try:
-                                                                    ext_el.set('cx', str(int(new_cx_emu)))
-                                                                    ext_el.set('cy', str(int(new_cy_emu)))
-                                                                except (ValueError, TypeError):
-                                                                    pass  # 属性設定失敗は無視
-
-                                                                # update chExt proportional to ext if present
-                                                                try:
-                                                                    if chExt is not None and orig_ch_cx and orig_ch_cy and orig_ch_cx > 0 and orig_ch_cy > 0:
-                                                                        try:
-                                                                            if 'uniform_scale' in locals():
-                                                                                ch_scale = uniform_scale
-                                                                            else:
-                                                                                ch_scale = min(float(new_cx_emu) / float(orig_ch_cx), float(new_cy_emu) / float(orig_ch_cy))
-                                                                        except (ValueError, TypeError):
-                                                                            ch_scale = 1.0
-                                                                        try:
-                                                                            new_ch_cx = int(round(float(orig_ch_cx) * float(ch_scale)))
-                                                                            new_ch_cy = int(round(float(orig_ch_cy) * float(ch_scale)))
-                                                                            chExt.set('cx', str(new_ch_cx))
-                                                                            chExt.set('cy', str(new_ch_cy))
-                                                                        except (ValueError, TypeError):
-                                                                            pass  # 属性設定失敗は無視
-                                                                except (ValueError, TypeError):
-                                                                    pass  # 属性設定失敗は無視
-                                                            except (ValueError, TypeError):
-                                                                # ignore errors for this particular xfrm and continue
-                                                                pass
-                                                    except (ValueError, TypeError):
-                                                        pass  # 属性設定失敗は無視
-                                        except (ValueError, TypeError):
-                                            pass  # 属性設定失敗は無視
-
-                                        # Ensure shapes/groups/pictures have aspect-locks so Excel won't auto-stretch them
-                                        try:
-                                            # Use the a: namespace from above (a_ns) and spreadsheetDrawing ns (ns)
-                                            for anchor in list(droot):
-                                                try:
-                                                    # shapes
-                                                    for sp in anchor.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}sp'):
-                                                        cNvSpPr = sp.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}cNvSpPr')
-                                                        if cNvSpPr is None:
-                                                            cNvSpPr = sp.find('.//{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}cNvSpPr')
-                                                        if cNvSpPr is not None:
-                                                            if cNvSpPr.find('{%s}spLocks' % a_ns) is None:
-                                                                l = ET.Element('{%s}spLocks' % a_ns)
-                                                                l.set('noChangeAspect', '1')
-                                                                cNvSpPr.append(l)
-
-                                                    # groups
-                                                    for grp in anchor.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}grpSp'):
-                                                        cNvGrpSpPr = grp.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}cNvGrpSpPr')
-                                                        if cNvGrpSpPr is None:
-                                                            cNvGrpSpPr = grp.find('.//{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}cNvGrpSpPr')
-                                                        if cNvGrpSpPr is not None:
-                                                            if cNvGrpSpPr.find('{%s}grpSpLocks' % a_ns) is None:
-                                                                gl = ET.Element('{%s}grpSpLocks' % a_ns)
-                                                                gl.set('noChangeAspect', '1')
-                                                                cNvGrpSpPr.append(gl)
-
-                                                    # pictures
-                                                    for pic in anchor.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}pic'):
-                                                        cNvPicPr = pic.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}cNvPicPr')
-                                                        if cNvPicPr is None:
-                                                            cNvPicPr = pic.find('.//{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}cNvPicPr')
-                                                        if cNvPicPr is not None:
-                                                            if cNvPicPr.find('{%s}picLocks' % a_ns) is None:
-                                                                pl = ET.Element('{%s}picLocks' % a_ns)
-                                                                pl.set('noChangeAspect', '1')
-                                                                cNvPicPr.append(pl)
-                                                except Exception as e:
-                                                    print(f"[WARNING] ファイル操作エラー: {e}")
-                                        except Exception as e:
-                                            print(f"[WARNING] ファイル操作エラー: {e}")
-
-                                        # write back adjusted drawing xml
-                                        dtree.write(drawing_relpath_full, encoding='utf-8', xml_declaration=True)
-                                    except Exception as e:
-                                        print(f"[WARNING] ファイル操作エラー: {e}")
-                        except Exception as e:
-                            print(f"[WARNING] ファイル操作エラー: {e}")
-                except Exception as e:
-                    print(f"[WARNING] ファイル操作エラー: {e}")
-
-                # create a short, deterministic suffix for this group so each
-                # generated workbook is saved separately for inspection in Excel.
-                try:
-                    import hashlib
-                    keep_list = sorted(list(keep_set)) if 'keep_set' in locals() else []
-                    if keep_list:
-                        h = hashlib.sha1(','.join(map(str, keep_list)).encode('utf-8')).hexdigest()[:8]
-                        suffix = f"_grp_{h}"
-                    else:
-                        suffix = "_grp_all"
-                except Exception:
-                    suffix = "_grp"
-                tmp_xlsx = os.path.join(tmpdir, f"{self.base_name}_iso_group{suffix}.xlsx")
-                print(f"[DEBUG][_iso_entry] sheet={sheet.title} tmp_xlsx will be created at: {tmp_xlsx}")
-                # If cell_range was provided, further minimize the tmpdir contents
-                # by keeping only the target worksheet and its drawing resources.
-                try:
-                    if cell_range:
-                        try:
-                            # target original sheet filename
-                            orig_index = sheet_index + 1
-                            orig_sheet_name = f"xl/worksheets/sheet{orig_index}.xml"
-                            orig_sheet_path = os.path.join(tmpdir, orig_sheet_name)
-                            # rename target sheet to sheet1.xml
-                            new_sheet_rel = os.path.join(tmpdir, 'xl/worksheets/sheet1.xml')
-                            if os.path.exists(orig_sheet_path):
-                                shutil.move(orig_sheet_path, new_sheet_rel)
-                            # update its _rels if present
-                            orig_rels = os.path.join(tmpdir, f"xl/worksheets/_rels/sheet{orig_index}.xml.rels")
-                            if os.path.exists(orig_rels):
-                                new_rels = os.path.join(tmpdir, 'xl/worksheets/_rels/sheet1.xml.rels')
-                                os.makedirs(os.path.dirname(new_rels), exist_ok=True)
-                                shutil.move(orig_rels, new_rels)
-
-                            # parse sheet rels to find drawing target and move drawing files
-                            drawing_target = None
-                            rels_path_local = os.path.join(tmpdir, 'xl/worksheets/_rels/sheet1.xml.rels')
-                            if os.path.exists(rels_path_local):
-                                try:
-                                    rtree = ET.parse(rels_path_local)
-                                    rroot = rtree.getroot()
-                                    for rel in rroot.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
-                                        t = rel.attrib.get('Type','')
-                                        if t.endswith('/drawing'):
-                                            drawing_target = rel.attrib.get('Target')
-                                            # update target to ../drawings/drawing1.xml (relative from worksheets/_rels)
-                                            rel.set('Target', '../drawings/drawing1.xml')
-                                            rel.set('Id', rel.attrib.get('Id','rId1'))
-                                    rtree.write(rels_path_local, encoding='utf-8', xml_declaration=True)
-                                except (ET.ParseError, KeyError, AttributeError) as e:
-                                    print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
-
-                            # move drawing files if referenced
-                            if drawing_target:
-                                # normalize path
-                                dpath = drawing_target
-                                if dpath.startswith('../'):
-                                    dpath = dpath.replace('../', 'xl/')
-                                dpath = dpath.lstrip('/')
-                                orig_drawing = os.path.join(tmpdir, dpath)
-                                new_drawing_dir = os.path.join(tmpdir, 'xl/drawings')
-                                os.makedirs(new_drawing_dir, exist_ok=True)
-                                new_drawing = os.path.join(new_drawing_dir, 'drawing1.xml')
-                                if os.path.exists(orig_drawing):
-                                    shutil.move(orig_drawing, new_drawing)
-                                # move drawing rels if present
-                                orig_drawing_rels = os.path.join(tmpdir, os.path.dirname(dpath), '_rels', os.path.basename(dpath) + '.rels')
-                                if os.path.exists(orig_drawing_rels):
-                                    new_drels_dir = os.path.join(tmpdir, 'xl/drawings/_rels')
-                                    os.makedirs(new_drels_dir, exist_ok=True)
-                                    try:
-                                        shutil.move(orig_drawing_rels, os.path.join(new_drels_dir, 'drawing1.xml.rels'))
-                                    except Exception:
-                                        pass  # 一時ファイルの削除失敗は無視
-
-                            # Remove other worksheets and their rels
-                            ws_dir = os.path.join(tmpdir, 'xl/worksheets')
-                            for fname in list(os.listdir(ws_dir)):
-                                if fname.startswith('sheet') and fname != 'sheet1.xml':
-                                    try:
-                                        os.remove(os.path.join(ws_dir, fname))
-                                    except Exception:
-                                        pass  # 一時ファイルの削除失敗は無視
-                            # Remove other rels in worksheets/_rels
-                            ws_rels_dir = os.path.join(tmpdir, 'xl/worksheets/_rels')
-                            if os.path.exists(ws_rels_dir):
-                                for fname in list(os.listdir(ws_rels_dir)):
-                                    if fname != 'sheet1.xml.rels':
-                                        try:
-                                            os.remove(os.path.join(ws_rels_dir, fname))
-                                        except Exception:
-                                            pass  # 一時ファイルの削除失敗は無視
-
-                            # Update workbook.xml to only reference this single sheet
-                            wb_rel_path = os.path.join(tmpdir, 'xl/_rels/workbook.xml.rels')
-                            wb_path = os.path.join(tmpdir, 'xl/workbook.xml')
-                            if os.path.exists(wb_path):
-                                try:
-                                    wtree = ET.parse(wb_path)
-                                    wroot = wtree.getroot()
-                                    ns = wroot.tag.split('}')[0].strip('{')
-                                    sheets_tag = '{%s}sheets' % ns
-                                    # remove existing sheets and recreate single entry
-                                    for child in list(wroot):
-                                        if child.tag == sheets_tag:
-                                            wroot.remove(child)
-                                    sheets_el = ET.Element(sheets_tag)
-                                    sh = ET.Element('{%s}sheet' % ns)
-                                    sh.set('name', sheet.title)
-                                    sh.set('sheetId', '1')
-                                    sh.set('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id', 'rId1')
-                                    sheets_el.append(sh)
-                                    wroot.append(sheets_el)
-                                    wtree.write(wb_path, encoding='utf-8', xml_declaration=True)
-                                except Exception:
-                                    pass  # 一時ファイルの削除失敗は無視
-
-                            # Update workbook rels to only include the sheet relationship (and keep others like styles)
-                            if os.path.exists(wb_rel_path):
-                                try:
-                                    wr = ET.parse(wb_rel_path)
-                                    wrr = wr.getroot()
-                                    # keep non-worksheet rels and replace worksheet rel with rId1->worksheets/sheet1.xml
-                                    new_rels = []
-                                    for rel in list(wrr):
-                                        t = rel.attrib.get('Type','')
-                                        if t.endswith('/worksheet'):
-                                            # replace
-                                            rel.set('Id', 'rId1')
-                                            rel.set('Target', 'worksheets/sheet1.xml')
-                                            new_rels.append(rel)
-                                        else:
-                                            new_rels.append(rel)
-                                    # clear and append
-                                    for child in list(wrr):
-                                        wrr.remove(child)
-                                    for rel in new_rels:
-                                        wrr.append(rel)
-                                    wr.write(wb_rel_path, encoding='utf-8', xml_declaration=True)
-                                except Exception:
-                                    pass  # 一時ファイルの削除失敗は無視
-
-                            # Update [Content_Types].xml: keep overrides for sheet1 and drawing1; remove other sheet overrides
-                            ct_path = os.path.join(tmpdir, '[Content_Types].xml')
-                            if os.path.exists(ct_path):
-                                try:
-                                    ctree = ET.parse(ct_path)
-                                    croot = ctree.getroot()
-                                    ct_ns = croot.tag.split('}')[0].strip('{')
-                                    for ov in list(croot.findall('{%s}Override' % ct_ns)):
-                                        part = ov.attrib.get('PartName','')
-                                        if part.startswith('/xl/worksheets/') and not part.endswith('sheet1.xml'):
-                                            try:
-                                                croot.remove(ov)
-                                            except (ET.ParseError, KeyError, AttributeError) as e:
-                                                print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
-                                        if part.startswith('/xl/drawings/') and not part.endswith('drawing1.xml'):
-                                            try:
-                                                croot.remove(ov)
-                                            except Exception:
-                                                pass  # 一時ファイルの削除失敗は無視
-                                    ctree.write(ct_path, encoding='utf-8', xml_declaration=True)
-                                except Exception:
-                                    pass  # 一時ファイルの削除失敗は無視
-                        except Exception:
-                            pass  # 一時ファイルの削除失敗は無視
-                except Exception:
-                    pass  # 一時ファイルの削除失敗は無視
-
-                # (removed an earlier unsafe zip-write that could include the zip itself)
-
-                # Ensure minimal OOXML parts exist so Excel won't reject the package
-                try:
-                    # sharedStrings
-                    ss_path = os.path.join(tmpdir, 'xl', 'sharedStrings.xml')
-                    if not os.path.exists(ss_path):
-                        os.makedirs(os.path.dirname(ss_path), exist_ok=True)
-                        with open(ss_path, 'w', encoding='utf-8') as f:
-                            f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
-                            f.write('<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0" uniqueCount="0"></sst>')
-                    # styles
-                    styles_path = os.path.join(tmpdir, 'xl', 'styles.xml')
-                    if not os.path.exists(styles_path):
-                        with open(styles_path, 'w', encoding='utf-8') as f:
-                            f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
-                            f.write('<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></styleSheet>')
-                    # theme
-                    theme_dir = os.path.join(tmpdir, 'xl', 'theme')
-                    theme_path = os.path.join(theme_dir, 'theme1.xml')
-                    if not os.path.exists(theme_path):
-                        os.makedirs(theme_dir, exist_ok=True)
-                        with open(theme_path, 'w', encoding='utf-8') as f:
-                            f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
-                            f.write('<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme"><a:themeElements></a:themeElements></a:theme>')
-                except (OSError, IOError, FileNotFoundError):
-                    print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
-
-                # Before creating the ZIP, perform minimal in-place OOXML fixes
-                # so the produced package is more likely to be readable by Excel
-                # without requiring an external repair step.
-                try:
-                    REL_PKG = 'http://schemas.openxmlformats.org/package/2006/relationships'
-                    # Ensure [Content_Types].xml contains common overrides
-                    try:
-                        ct_path = os.path.join(tmpdir, '[Content_Types].xml')
-                        if os.path.exists(ct_path):
-                            ctree = ET.parse(ct_path)
-                            croot = ctree.getroot()
-                            ct_ns = croot.tag.split('}')[0].strip('{') if '}' in croot.tag else croot.tag
-                            def _has_override(part):
-                                for ov in croot.findall('{%s}Override' % ct_ns):
-                                    if ov.get('PartName') == part:
-                                        return True
-                                return False
-                            def _add_override(part, ctype):
-                                o = ET.SubElement(croot, '{%s}Override' % ct_ns)
-                                o.set('PartName', part)
-                                o.set('ContentType', ctype)
-                            # common parts
-                            if not _has_override('/xl/sharedStrings.xml'):
-                                _add_override('/xl/sharedStrings.xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml')
-                            if not _has_override('/xl/styles.xml'):
-                                _add_override('/xl/styles.xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml')
-                            if not _has_override('/xl/theme/theme1.xml'):
-                                _add_override('/xl/theme/theme1.xml', 'application/vnd.openxmlformats-officedocument.theme+xml')
-                            # sheet1 and drawing1 when present
-                            if os.path.exists(os.path.join(tmpdir, 'xl/worksheets/sheet1.xml')) and not _has_override('/xl/worksheets/sheet1.xml'):
-                                _add_override('/xl/worksheets/sheet1.xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml')
-                            if os.path.exists(os.path.join(tmpdir, 'xl/drawings/drawing1.xml')) and not _has_override('/xl/drawings/drawing1.xml'):
-                                _add_override('/xl/drawings/drawing1.xml', 'application/vnd.openxmlformats-officedocument.drawing+xml')
-                            ctree.write(ct_path, encoding='utf-8', xml_declaration=True)
-                    except Exception:
-                        pass  # 一時ファイルの削除失敗は無視
-
-                    # Rebuild workbook rels deterministically: assign sequential rId1..n
-                    # for only the parts that actually exist in the trimmed package.
-                    try:
-                        wb_rels_path = os.path.join(tmpdir, 'xl', '_rels', 'workbook.xml.rels')
-                        wb_path = os.path.join(tmpdir, 'xl', 'workbook.xml')
-
-                        # Build new Relationships root
-                        rels_root = ET.Element('{%s}Relationships' % REL_PKG)
-
-                        # helper: get next rId based on current rels_root children
-                        def _next_rid(root):
-                            existing = {c.attrib.get('Id') for c in root.findall('{%s}Relationship' % REL_PKG) if c.attrib.get('Id')}
-                            i = 1
-                            while f'rId{i}' in existing:
-                                i += 1
-                            return f'rId{i}'
-
-                        # helper: add rel and return rId
-                        def _add_rel(root, rtype, target, rid=None):
-                            if rid is None:
-                                rid = _next_rid(root)
-                            r = ET.SubElement(root, '{%s}Relationship' % REL_PKG)
-                            r.set('Id', rid)
-                            r.set('Type', rtype)
-                            r.set('Target', target)
-                            return rid
-
-                        # Candidate parts to include (in preferred order)
-                        candidates = []
-                        # worksheets: include any sheet*.xml (prefer sheet1 first)
-                        ws_dir = os.path.join(tmpdir, 'xl', 'worksheets')
-                        if os.path.isdir(ws_dir):
-                            sheets = sorted([f for f in os.listdir(ws_dir) if f.startswith('sheet') and f.endswith('.xml')])
-                            for s in sheets:
-                                candidates.append(('http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet', f'worksheets/{s}'))
-
-                        # essential parts
-                        if os.path.exists(os.path.join(tmpdir, 'xl', 'styles.xml')):
-                            candidates.append(('http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles', 'styles.xml'))
-                        if os.path.exists(os.path.join(tmpdir, 'xl', 'theme', 'theme1.xml')):
-                            candidates.append(('http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme', 'theme/theme1.xml'))
-                        if os.path.exists(os.path.join(tmpdir, 'xl', 'sharedStrings.xml')):
-                            candidates.append(('http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings', 'sharedStrings.xml'))
-                        # drawing
-                        if os.path.exists(os.path.join(tmpdir, 'xl', 'drawings', 'drawing1.xml')):
-                            candidates.append(('http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing', 'drawings/drawing1.xml'))
-
-                        # create rel entries and remember mapping
-                        target_to_rid = {}
-                        for rtype, target in candidates:
-                            tgt = target.lstrip('/')
-                            rid = _add_rel(rels_root, rtype, tgt)
-                            target_to_rid[tgt] = rid
-
-                        # write workbook rels
-                        try:
-                            os.makedirs(os.path.dirname(wb_rels_path), exist_ok=True)
-                            ET.ElementTree(rels_root).write(wb_rels_path, encoding='utf-8', xml_declaration=True)
-                        except Exception as e:
-                            pass  # XML解析エラーは無視
-
-                        # update workbook.xml sheets to use the new rId for sheet1 (if present)
-                        if os.path.exists(wb_path):
-                            try:
-                                wtree = ET.parse(wb_path)
-                                wroot = wtree.getroot()
-                                ns = wroot.tag.split('}')[0].strip('{')
-                                sheets_tag = '{%s}sheets' % ns
-                                sheets_el = wroot.find(sheets_tag)
-                                if sheets_el is not None:
-                                    # set first sheet to sheetId=1 and rId pointing to worksheets/sheet1.xml if mapped
-                                    for sh in list(sheets_el):
-                                        rid_attr = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id'
-                                        if os.path.exists(os.path.join(tmpdir, 'xl', 'worksheets', 'sheet1.xml')):
-                                            sh.set(rid_attr, target_to_rid.get('worksheets/sheet1.xml', sh.get(rid_attr) or 'rId1'))
-                                            sh.set('sheetId', '1')
-                                wtree.write(wb_path, encoding='utf-8', xml_declaration=True)
-                            except Exception:
-                                pass  # 一時ファイルの削除失敗は無視
-
-                        # Normalize definedNames localSheetId values so they refer to
-                        # valid sheet indices within the trimmed package. Some
-                        # workbooks produced during trimming may carry a
-                        # localSheetId that is out-of-range for the new sheet
-                        # order (observed as a cause of LibreOffice I/O errors).
-                        try:
-                            if os.path.exists(wb_path):
-                                wtree = ET.parse(wb_path)
-                                wroot = wtree.getroot()
-                                # determine namespace (if any)
-                                ns = ''
-                                if '}' in wroot.tag:
-                                    ns = wroot.tag.split('}')[0].strip('{')
-                                sheets_tag = '{%s}sheets' % ns if ns else 'sheets'
-                                dnames_tag = '{%s}definedNames' % ns if ns else 'definedNames'
-
-                                # collect sheet names in document order
-                                sheet_names = []
-                                sheets_el = wroot.find(sheets_tag)
-                                if sheets_el is not None:
-                                    for sh in list(sheets_el):
-                                        try:
-                                            sheet_names.append(sh.attrib.get('name'))
-                                        except Exception:
-                                            pass  # データ構造操作失敗は無視
-                                num_sheets = max(1, len(sheet_names))
-
-                                # clamp any definedName localSheetId to a valid index
-                                dnames_el = wroot.find(dnames_tag)
-                                if dnames_el is not None:
-                                    for dn in list(dnames_el):
-                                        if 'localSheetId' in dn.attrib:
-                                            try:
-                                                v = int(dn.attrib.get('localSheetId', '0'))
-                                                if v < 0 or v >= num_sheets:
-                                                    # set to last sheet index (zero-based)
-                                                    dn.set('localSheetId', str(max(0, num_sheets - 1)))
-                                            except (ValueError, TypeError):
-                                                # on parse error, default to first sheet
-                                                dn.set('localSheetId', '0')
-                                # write back workbook.xml with normalized definedNames
-                                wtree.write(wb_path, encoding='utf-8', xml_declaration=True)
-                        except (ValueError, TypeError):
-                            pass  # 一時ディレクトリ削除失敗は無視
-
-                        # regenerate sheet1.xml.rels deterministically: if drawing1 exists, add a drawing rel
-                        sheet_rels = os.path.join(tmpdir, 'xl', 'worksheets', '_rels', 'sheet1.xml.rels')
-                        if os.path.exists(os.path.join(tmpdir, 'xl', 'worksheets', 'sheet1.xml')):
-                            try:
-                                sroot = ET.Element('{%s}Relationships' % REL_PKG)
-                                new_draw_rel_id = None
-                                if os.path.exists(os.path.join(tmpdir, 'xl', 'drawings', 'drawing1.xml')):
-                                    # add drawing rel and capture assigned Id
-                                    new_draw_rel_id = _add_rel(sroot, 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing', '../drawings/drawing1.xml')
-                                os.makedirs(os.path.dirname(sheet_rels), exist_ok=True)
-                                ET.ElementTree(sroot).write(sheet_rels, encoding='utf-8', xml_declaration=True)
-
-                                # If we created a drawing rel, update the worksheet XML so its
-                                # <drawing> element uses the same relationship Id. Without this,
-                                # the sheet may reference a non-existent rId and Excel will not
-                                # show the drawing.
-                                try:
-                                    if new_draw_rel_id:
-                                        sheet_xml_path = os.path.join(tmpdir, 'xl', 'worksheets', 'sheet1.xml')
-                                        if os.path.exists(sheet_xml_path):
-                                            stree = ET.parse(sheet_xml_path)
-                                            sroot = stree.getroot()
-                                            # namespace for r:id attribute
-                                            r_ns = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-                                            # find drawing element and set namespaced id attribute
-                                            for elem in sroot.iter():
-                                                if elem.tag.split('}')[-1].lower() == 'drawing':
-                                                    try:
-                                                        elem.set('{%s}id' % r_ns, new_draw_rel_id)
-                                                    except (ET.ParseError, KeyError, AttributeError):
-                                                        # fallback: set attribute with common prefix if present
-                                                        try:
-                                                            elem.set('r:id', new_draw_rel_id)
-                                                        except Exception as e:
-                                                            print(f"[WARNING] ファイル操作エラー: {e}")
-                                                    break
-                                            stree.write(sheet_xml_path, encoding='utf-8', xml_declaration=True)
-                                except Exception as e:
-                                    print(f"[WARNING] ファイル操作エラー: {e}")
-                            except Exception as e:
-                                pass  # XML解析エラーは無視
-                    except Exception as e:
-                        pass  # XML解析エラーは無視
-
-                    # Ensure sheet rels point to ../drawings/drawing1.xml when appropriate
-                    try:
-                        sheet_rels = os.path.join(tmpdir, 'xl', 'worksheets', '_rels', 'sheet1.xml.rels')
-                        if os.path.exists(sheet_rels):
-                            srt = ET.parse(sheet_rels)
-                            sroot = srt.getroot()
-                            for rel in sroot.findall('{%s}Relationship' % REL_PKG):
-                                t = rel.attrib.get('Type','')
-                                if t.endswith('/drawing'):
-                                    # make target relative from worksheets/_rels to drawings
-                                    rel.set('Target', '../drawings/drawing1.xml')
-                            srt.write(sheet_rels, encoding='utf-8', xml_declaration=True)
-                    except (ET.ParseError, KeyError, AttributeError) as e:
-                        print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
-                except (ET.ParseError, KeyError, AttributeError) as e:
-                    print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
-
-                # Before zipping the trimmed package, attempt to copy visual
-                # layout properties (row heights, column widths, pageSetup,
-                # pageMargins) from the original sheet into the trimmed
-                # sheet1.xml. This helps LibreOffice render with the same
-                # physical proportions and avoids tall drawings being split
-                # across PDF pages.
-                try:
-                    sheet_xml_path = os.path.join(tmpdir, 'xl', 'worksheets', 'sheet1.xml')
-                    if os.path.exists(sheet_xml_path):
-                        try:
-                            stree = ET.parse(sheet_xml_path)
-                            sroot = stree.getroot()
-                            ns = sroot.tag.split('}')[0].strip('{') if '}' in sroot.tag else ''
-                            # copy default row height
-                            try:
-                                sf_tag = '{%s}sheetFormatPr' % ns if ns else 'sheetFormatPr'
-                                sf = sroot.find(sf_tag)
-                                if sf is None:
-                                    sf = ET.Element(sf_tag)
-                                    sroot.insert(0, sf)
-                                try:
-                                    default_row_h = getattr(sheet.sheet_format, 'defaultRowHeight', None)
-                                    if default_row_h is not None:
-                                        sf.set('defaultRowHeight', str(float(default_row_h)))
-                                except (ValueError, TypeError) as e:
-                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                            except (ValueError, TypeError) as e:
-                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                            # copy explicit column widths from the original sheet
-                            try:
-                                try:
-                                    from openpyxl.utils import column_index_from_string
-                                except (ValueError, TypeError):
-                                    column_index_from_string = None
-                                cols_tag = '{%s}cols' % ns if ns else 'cols'
-                                col_tag = '{%s}col' % ns if ns else 'col'
-                                cols_el = sroot.find(cols_tag)
-                                if cols_el is None:
-                                    # insert cols before sheetData if possible
-                                    cols_el = ET.Element(cols_tag)
-                                    sheetData = sroot.find('{%s}sheetData' % ns if ns else 'sheetData')
-                                    if sheetData is not None:
-                                        try:
-                                            idx = list(sroot).index(sheetData)
-                                            sroot.insert(idx, cols_el)
-                                        except Exception:
-                                            sroot.append(cols_el)
-                                    else:
-                                        sroot.append(cols_el)
-                                # iterate column_dimensions; keys are column letters
-                                try:
-                                    col_dims = getattr(sheet, 'column_dimensions', {}) or {}
-                                    for col_letter, dim in list(col_dims.items()):
-                                        try:
-                                            width = getattr(dim, 'width', None)
-                                            if width is None:
-                                                continue
-                                            if column_index_from_string:
-                                                try:
-                                                    cidx = column_index_from_string(col_letter)
-                                                except Exception:
-                                                    # if key is already a number-like string, try int
-                                                    try:
-                                                        cidx = int(col_letter)
-                                                    except (ValueError, TypeError):
-                                                        continue
-                                            else:
-                                                try:
-                                                    cidx = int(col_letter)
-                                                except (ValueError, TypeError):
-                                                    continue
-                                            # avoid duplicate col entries
-                                            exists = False
-                                            for existing in cols_el.findall(col_tag):
-                                                if existing.attrib.get('min') == str(cidx) and existing.attrib.get('max') == str(cidx):
-                                                    exists = True
-                                                    break
-                                            if exists:
-                                                continue
-                                            col_el = ET.Element(col_tag)
-                                            col_el.set('min', str(cidx))
-                                            col_el.set('max', str(cidx))
-                                            col_el.set('width', str(float(width)))
-                                            col_el.set('customWidth', '1')
-                                            cols_el.append(col_el)
-                                        except (ValueError, TypeError) as e:
-                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                except (ValueError, TypeError) as e:
-                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                            except (ValueError, TypeError) as e:
-                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
-
-                            # copy explicit row heights from the original sheet
-                            try:
-                                row_tag = '{%s}row' % ns if ns else 'row'
-                                sheetData = sroot.find('{%s}sheetData' % ns if ns else 'sheetData')
-                                if sheetData is None:
-                                    sheetData = ET.Element('{%s}sheetData' % ns if ns else 'sheetData')
-                                    sroot.append(sheetData)
-                                # gather existing row elements by r attribute
-                                existing_rows = {}
-                                for r_el in sheetData.findall(row_tag):
-                                    try:
-                                        rnum = int(r_el.attrib.get('r'))
-                                        existing_rows[rnum] = r_el
-                                    except (ValueError, TypeError) as e:
-                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                try:
-                                    row_dims = getattr(sheet, 'row_dimensions', {}) or {}
-                                    for rk, rd in list(row_dims.items()):
-                                        try:
-                                            # keys can be int or string
-                                            rnum = int(rk)
-                                            height = getattr(rd, 'height', None)
-                                            if height is None:
-                                                continue
-                                            er = existing_rows.get(rnum)
-                                            if er is None:
-                                                er = ET.Element(row_tag)
-                                                er.set('r', str(rnum))
-                                                sheetData.append(er)
-                                            er.set('ht', str(float(height)))
-                                            er.set('customHeight', '1')
-                                        except (ValueError, TypeError) as e:
-                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                except (ValueError, TypeError) as e:
-                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                            except (ValueError, TypeError) as e:
-                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                            # copy pageMargins and pageSetup where available
-                            try:
-                                # pageSetup
-                                ps = sroot.find('.//{%s}pageSetup' % ns) if ns else sroot.find('.//pageSetup')
-                                if ps is None:
-                                    ps = ET.Element('{%s}pageSetup' % ns if ns else 'pageSetup')
-                                    sroot.append(ps)
-                                try:
-                                    psetup = getattr(sheet, 'page_setup', None)
-                                    if psetup is not None:
-                                        if getattr(psetup, 'orientation', None):
-                                            ps.set('orientation', str(psetup.orientation))
-                                        if getattr(psetup, 'paperSize', None):
-                                            ps.set('paperSize', str(psetup.paperSize))
-                                        # keep fitToHeight/fitToWidth set earlier; remove manual scale
-                                        if 'scale' in ps.attrib:
-                                            try:
-                                                del ps.attrib['scale']
-                                            except (ValueError, TypeError):
-                                                pass  # データ構造操作失敗は無視
-                                except (ValueError, TypeError):
-                                    pass  # データ構造操作失敗は無視
-                                # pageMargins
-                                pm = sroot.find('.//{%s}pageMargins' % ns) if ns else sroot.find('.//pageMargins')
-                                if pm is None:
-                                    pm = ET.Element('{%s}pageMargins' % ns if ns else 'pageMargins')
-                                    sroot.append(pm)
-                                try:
-                                    margins = getattr(sheet, 'page_margins', None)
-                                    if margins is not None:
-                                        for attr in ('left','right','top','bottom','header','footer'):
-                                            val = getattr(margins, attr, None)
-                                            if val is not None:
-                                                pm.set(attr, str(float(val)))
-                                except (ValueError, TypeError):
-                                    pass  # データ構造操作失敗は無視
-                            except (ValueError, TypeError):
-                                pass  # XML書き込み失敗は無視
-                            # write back
-                            try:
-                                stree.write(sheet_xml_path, encoding='utf-8', xml_declaration=True)
-                            except (ValueError, TypeError):
-                                pass  # XML書き込み失敗は無視
-                        except (ValueError, TypeError):
-                            pass  # 一時ディレクトリ削除失敗は無視
-                except Exception as e:
-                    pass  # XML解析エラーは無視
-
-                # Defensive sweep: ensure no worksheet XML in tmpdir still
-                # contains headerFooter nodes. Some input workbooks or later
-                # resaves can reintroduce header/footer content, so remove
-                # them proactively from every sheet file here.
-                try:
-                    ws_dir = os.path.join(tmpdir, 'xl', 'worksheets')
-                    if os.path.isdir(ws_dir):
-                        for fname in os.listdir(ws_dir):
-                            if not fname.lower().endswith('.xml'):
-                                continue
-                            relp = os.path.join(ws_dir, fname)
-                            try:
-                                wtree = ET.parse(relp)
-                                wroot = wtree.getroot()
-                                hf_tag = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}headerFooter'
-                                hfs = list(wroot.findall(hf_tag))
-                                if hfs:
-                                    removed_count = 0
-                                    for hf in hfs:
-                                        try:
-                                            wroot.remove(hf)
-                                            removed_count += 1
-                                        except (ET.ParseError, KeyError, AttributeError) as e:
-                                            print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
-                                    # Also force pageSetup fit-to-page and tighten margins
-                                    try:
-                                        ns = None
-                                        try:
-                                            ns = wroot.tag.split('}')[0].strip('{')
-                                        except Exception:
-                                            ns = None
-                                        ps_tag = '{%s}pageSetup' % ns if ns else 'pageSetup'
-                                        pm_tag = '{%s}pageMargins' % ns if ns else 'pageMargins'
-                                        # pageSetup: prefer fit-to-page
-                                        ps = wroot.find('.//' + ps_tag) if ns else wroot.find('.//pageSetup')
-                                        if ps is None:
-                                            try:
-                                                ps = ET.Element(ps_tag)
-                                                wroot.append(ps)
-                                            except Exception:
-                                                ps = None
-                                        if ps is not None:
-                                            try:
-                                                ps.set('fitToPage', '1')
-                                                ps.set('fitToHeight', '1')
-                                                ps.set('fitToWidth', '1')
-                                                # remove explicit scale which overrides fitTo* behavior
-                                                if 'scale' in ps.attrib:
-                                                    try:
-                                                        del ps.attrib['scale']
-                                                    except Exception:
-                                                        pass  # 一時ファイルの削除失敗は無視
-                                            except Exception:
-                                                pass  # 一時ファイルの削除失敗は無視
-                                        # pageMargins: make them minimal (0)
-                                        pm = wroot.find('.//' + pm_tag) if ns else wroot.find('.//pageMargins')
-                                        if pm is None:
-                                            try:
-                                                pm = ET.Element(pm_tag)
-                                                wroot.append(pm)
-                                            except Exception:
-                                                pm = None
-                                        if pm is not None:
-                                            try:
-                                                for name, val in (('left','0'),('right','0'),('top','0'),('bottom','0'),('header','0'),('footer','0')):
-                                                    pm.set(name, val)
-                                            except Exception as e:
-                                                pass  # XML解析エラーは無視
-                                    except Exception as e:
-                                        pass  # XML解析エラーは無視
-                                    try:
-                                        wtree.write(relp, encoding='utf-8', xml_declaration=True)
-                                    except Exception as e:
-                                        pass  # XML解析エラーは無視
-                                    print(f"[DEBUG][_iso_hdrfoot_sweep] removed {removed_count} headerFooter from {relp} and forced fit-to-page/margins")
-                            except (ValueError, TypeError):
-                                pass  # XML書き込み失敗は無視
-                except (ValueError, TypeError):
-                    pass  # 一時ディレクトリ削除失敗は無視
-
-                # openpyxlによる正規化を事前に実施してから保存
-                with zipfile.ZipFile(tmp_xlsx, 'w', zipfile.ZIP_DEFLATED) as zout:
-                    for folder, _, files in os.walk(tmpdir):
-                        for fn in files:
-                            full = os.path.join(folder, fn)
-                            arcname = os.path.relpath(full, tmpdir)
-                            # skip the generated tmp xlsx if present
-                            if arcname == os.path.basename(tmp_xlsx):
-                                continue
-                            zout.write(full, arcname)
-
-                dbg_dir = os.path.join(self.output_dir, 'debug_workbooks')
-                os.makedirs(dbg_dir, exist_ok=True)
-                src_for_conv = os.path.join(dbg_dir, os.path.basename(tmp_xlsx))
-                
-                print(f"[DEBUG] Using ZIP-created workbook directly (preserving shapes): {src_for_conv}")
-                shutil.copyfile(tmp_xlsx, src_for_conv)
-                
-                try:
-                    st = os.stat(src_for_conv)
-                    print(f"[DEBUG] Workbook size: {st.st_size} bytes")
-                except (ValueError, TypeError):
-                    pass
-                
-                try:
-                    self._set_excel_fit_to_one_page(src_for_conv)
-                    print(f"[DEBUG] Applied fit-to-page settings to: {src_for_conv}")
-                except Exception as e:
-                    print(f"[WARNING] fit-to-page設定失敗: {e}")
-
-                # openpyxl resave+merge disabled: using the original trimmed workbook
-                # directly tends to preserve drawing anchors. If openpyxl-based
-                # normalization is required later, re-enable this section.
-                try:
-                    ENABLE_RESAVE = False
-                except Exception as e:
-                    print(f"[WARNING] ファイル操作エラー: {e}")
-
-                # export tmp_xlsx to PDF via LibreOffice
-                # Shortcut: if the trimmed drawing contains only embedded bitmap
-                # pictures (blip/@embed -> ../media/...), we can extract the
-                # image file directly and use it as the output PNG. This avoids
-                # lossy conversion via LibreOffice+ImageMagick for simple image
-                # anchors (helps when images appear invisible after PDF render).
-                try:
-                    try_extract_image_direct = False
-                    img_src_path = None
-                    # drawing_relpath was set earlier when we extracted the .xlsx
-                    if 'drawing_relpath' in locals() and os.path.exists(drawing_relpath):
-                        try:
-                            dtree = ET.parse(drawing_relpath)
-                            droot = dtree.getroot()
-                            ns = {'dr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing',
-                                  'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'}
-                            # collect anchor elements that are picture-only
-                            anchors = [n for n in list(droot) if n.tag.split('}')[-1].lower() in ('twocellanchor', 'onecellanchor')]
-                            if anchors:
-                                all_pics = True
-                                pic_rids = []
-                                for a in anchors:
-                                    pic = a.find('.//{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}pic')
-                                    if pic is None:
-                                        # maybe namespaced differently, try drawingml 'pic' in any ns
-                                        pic = a.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}pic')
-                                    if pic is None:
-                                        all_pics = False
-                                        break
-                                    # find blip element to get embed rid
-                                    blip = pic.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}blip')
-                                    if blip is None:
-                                        # try alternate namespace
-                                        blip = pic.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}blip')
-                                    if blip is None:
-                                        all_pics = False
-                                        break
-                                    rid = blip.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed') or blip.attrib.get('r:embed') or blip.attrib.get('embed')
-                                    if not rid:
-                                        all_pics = False
-                                        break
-                                    pic_rids.append(rid)
-                                if all_pics and pic_rids:
-                                    # Map rIds to target media paths from drawing rels
-                                    rels_path = os.path.join(os.path.dirname(drawing_relpath), '_rels', os.path.basename(drawing_relpath) + '.rels')
-                                    if os.path.exists(rels_path):
-                                        rtree = ET.parse(rels_path)
-                                        rroot = rtree.getroot()
-                                        # build mapping Id -> Target
-                                        id_to_target = {rel.attrib.get('Id'): rel.attrib.get('Target') for rel in rroot.findall('{http://schemas.openxmlformats.org/package/2006/relationships}Relationship')}
-                                        targets = []
-                                        for rid in pic_rids:
-                                            tgt = id_to_target.get(rid)
-                                            if not tgt:
-                                                targets = []
-                                                break
-                                            # normalize ../media/image.png -> xl/media/image.png
-                                            norm = tgt.lstrip('/')
-                                            norm = norm.replace('..\\', '').replace('../', '')
-                                            norm = os.path.normpath(os.path.join('xl', norm))
-                                            targets.append(norm)
-                                        # If all picture anchors reference the same single media file,
-                                        # or multiple but we can composite, prefer direct extraction.
-                                        if targets:
-                                            # pick first (common case: single image)
-                                            media_rel = targets[0]
-                                            candidate = os.path.join(os.path.dirname(drawing_relpath), '..', media_rel)
-                                            candidate = os.path.normpath(candidate)
-                                            if os.path.exists(candidate):
-                                                img_src_path = candidate
-                                                try_extract_image_direct = True
-                        except Exception:
-                            try_extract_image_direct = False
-                    if try_extract_image_direct and img_src_path:
-                        # ensure images_dir exists and pick a deterministic filename
-                        os.makedirs(self.images_dir, exist_ok=True)
-                        base_fn = f"{self.base_name}_{self._sanitize_filename(sheet.title)}_shape_group_img"
-                        try:
-                            import hashlib
-                            with open(img_src_path, 'rb') as _f:
-                                data = _f.read()
-                            h = hashlib.sha1(data).hexdigest()[:8]
-                            out_img_name = f"{base_fn}_{h}.png"
-                        except (OSError, IOError, FileNotFoundError):
-                            out_img_name = f"{base_fn}.png"
-                        out_img_path = os.path.join(self.images_dir, out_img_name)
-                        print(f"[DEBUG][_iso_direct] sheet={sheet.title} direct-extract candidate={img_src_path} will produce {out_img_path}")
-                        # if source is already png, copy; else convert via PIL
-                        try:
-                            from PIL import Image as PILImage
-                            ext = os.path.splitext(img_src_path)[1].lower()
-                            if ext == '.png':
-                                shutil.copyfile(img_src_path, out_img_path)
-                            else:
-                                im = PILImage.open(img_src_path)
-                                im.convert('RGB').save(out_img_path, 'PNG')
-                            print(f"[DEBUG] extracted embedded image directly: {out_img_path}")
-                            # cleanup tmp dirs
-                            try:
-                                shutil.rmtree(tmpdir)
-                            except (OSError, IOError, FileNotFoundError):
-                                print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
-                            # return filename (caller expects png_name)
-                            print(f"[DEBUG][_iso_direct_return] sheet={sheet.title} returned_direct_image={os.path.basename(out_img_path)} src={img_src_path}")
-                            return os.path.basename(out_img_path)
-                        except (ValueError, TypeError):
-                            # fall back to normal conversion flow
-                            pass
-                except (ValueError, TypeError):
-                    pass  # 一時ディレクトリ削除失敗は無視
-
-                tmp_pdf_dir = tempfile.mkdtemp(prefix='xls2md_pdf_')
-                
-                print(f"[DEBUG][_iso_conv_invoke] sheet={sheet.title} invoking LibreOffice to convert src_for_conv={src_for_conv} to PDF in {tmp_pdf_dir}")
-                
-                pdf_path = self._convert_excel_to_pdf(src_for_conv, tmp_pdf_dir, apply_fit_to_page=False)
-                if pdf_path is None:
-                    try:
-                        print(f"[WARN][_iso_conv_fail] LibreOffice PDF conversion failed")
-                        print(f"[DEBUG][_iso_conv_fallback] sheet={sheet.title} falling back to original excel_file={getattr(self,'excel_file',None)} for conversion")
-                    except (ValueError, TypeError):
-                        pass  # 一時ディレクトリ削除失敗は無視
-                    try:
-                        shutil.rmtree(tmp_pdf_dir)
-                    except (ValueError, TypeError):
-                        pass  # 一時ディレクトリ削除失敗は無視
-                    try:
-                        shutil.rmtree(tmpdir)
-                    except (ValueError, TypeError):
-                        pass  # 一時ディレクトリ削除失敗は無視
-                    return None
-
-                # remember last generated PDF path for downstream scaling/diagnostics
-                try:
-                    self._last_temp_pdf_path = pdf_path
-                except Exception:
-                    pass  # 一時ファイルの削除失敗は無視
-                
-                # PDFを確認用に保存（isolated group）
-                try:
-                    pdfs_dir = os.path.join(self.output_dir, 'pdfs')
-                    os.makedirs(pdfs_dir, exist_ok=True)
-                    safe_sheet = self._sanitize_filename(sheet.title)
-                    # shape_indicesからユニークなIDを生成
-                    import hashlib
-                    indices_str = '_'.join(map(str, sorted(shape_indices)))
-                    group_hash = hashlib.md5(indices_str.encode()).hexdigest()[:8]
-                    saved_pdf_name = f"{self.base_name}_{safe_sheet}_iso_group_{group_hash}.pdf"
-                    saved_pdf_path = os.path.join(pdfs_dir, saved_pdf_name)
-                    shutil.copyfile(pdf_path, saved_pdf_path)
-                    print(f"[INFO] 分離グループPDFを保存しました: {saved_pdf_path}")
-                    
-                    # ページ数を確認
-                    try:
-                        im_check = IMAGEMAGICK_CMD
-                        if im_check:
-                            page_count_proc = subprocess.run(
-                                [im_check, 'identify', pdf_path],
-                                capture_output=True, text=True, timeout=30
-                            )
-                            if page_count_proc.returncode == 0:
-                                page_count = len([line for line in page_count_proc.stdout.strip().split('\n') if line])
-                                print(f"[INFO] 分離グループPDFページ数: {page_count}ページ")
-                    except (ValueError, TypeError):
-                        pass  # データ構造操作失敗は無視
-                except Exception as e:
-                    print(f"[WARNING] 分離グループPDF保存失敗: {e}")
-
-                im_cmd = IMAGEMAGICK_CMD
-                if not im_cmd:
-                    try:
-                        shutil.rmtree(tmp_pdf_dir)
-                    except (ValueError, TypeError):
-                        pass  # 一時ディレクトリ削除失敗は無視
-                    try:
-                        shutil.rmtree(tmpdir)
-                    except (ValueError, TypeError):
-                        pass  # 一時ディレクトリ削除失敗は無視
-                    return None
-
-                # Use the '.fixed.xlsx' (or src_for_conv) base name for the image
-                # so repeated runs reuse the same filename. Fall back to the
-                # sheet-based deterministic name if src_for_conv is not set.
-                try:
-                    fixed_base = None
-                    if 'src_for_conv' in locals() and src_for_conv:
-                        try:
-                            fixed_base = os.path.splitext(os.path.basename(src_for_conv))[0]
-                        except Exception:
-                            fixed_base = None
-                    if not fixed_base:
-                        fixed_base = f"{self.base_name}_{self._sanitize_filename(sheet.title)}_shape_group"
-                    png_name = f"{fixed_base}.png"
-                except Exception:
-                    png_name = f"{self.base_name}_{self._sanitize_filename(sheet.title)}_shape_group.png"
-                out_path = os.path.join(self.images_dir, png_name)
-                # Render all pages of the PDF (LibreOffice may split a long sheet over
-                # multiple pages). Previously we used pdf_path[0] which captured only
-                # the first page and caused the lower half of tall drawings to be
-                # lost. Render the whole PDF and if ImageMagick creates multiple
-                # page PNGs, stitch them vertically into a single image.
-                pdf_spec = f"{pdf_path}"
-                # Build command args robustly. If cell_range is specified, avoid adding border so coordinates match.
-                base_args = [im_cmd, '-density', str(dpi), pdf_spec, '-background', 'white', '-alpha', 'remove', '-quality', '90']
-                if not cell_range:
-                    base_args += ['+repage', '-bordercolor', 'white', '-border', '8']
-                im_cmd_full = base_args + [out_path]
-
-                # Remove any existing PNGs sharing the same base name to avoid
-                # accumulating per-run image files (e.g. base.png, base-1.png).
-                try:
-                    import glob
-                    base_noext = os.path.splitext(out_path)[0]
-                    for p in sorted(glob.glob(base_noext + "*.png")):
-                        try:
-
-                            os.remove(p)
-
-                        except (OSError, FileNotFoundError):
-
-                            pass  # ファイル削除失敗は無視
-                except Exception:
-                    pass  # 一時ファイルの削除失敗は無視
-
-                print(f"[DEBUG][_iso_imagemagick] running image magick to produce {out_path}")
-                proc2 = subprocess.run(im_cmd_full, capture_output=True, text=True, timeout=120)
-                if proc2.returncode != 0:
-                    try:
-                        stderr2 = (proc2.stderr or '').strip()
-                        print(f"[WARN][_iso_im_convert_fail] magick/convert failed rc={proc2.returncode} stderr={stderr2}")
-                    except (ValueError, TypeError):
-                        pass  # 一時ディレクトリ削除失敗は無視
-                    try:
-                        shutil.rmtree(tmp_pdf_dir)
-                    except (ValueError, TypeError):
-                        pass  # 一時ディレクトリ削除失敗は無視
-                    try:
-                        shutil.rmtree(tmpdir)
-                    except (ValueError, TypeError):
-                        pass  # 一時ディレクトリ削除失敗は無視
-                    print(f"[DEBUG][_iso_im_convert_fallback] sheet={sheet.title} will fallback to using original excel_file={getattr(self,'excel_file',None)}")
-                    return None
-
-                # ImageMagick may write one file per PDF page. Collect all files
-                # that match the intended base name (they may be named
-                # <base>.png, <base>-1.png, <base>-2.png etc.). If multiple page
-                # PNGs were produced, stitch them vertically into a single PNG.
-                try:
-                    import glob
-                    from PIL import Image as PILImage
-                    base_noext = os.path.splitext(out_path)[0]
-                    # pattern: base.png, base-0.png, base-1.png, base-*.png
-                    candidates = sorted(glob.glob(base_noext + "*.png"))
-                    # If ImageMagick produced only the exact out_path, ensure it's included
-                    if not candidates and os.path.exists(out_path):
-                        candidates = [out_path]
-                    # If multiple page files, stitch vertically
-                    if len(candidates) > 1:
-                        imgs = [PILImage.open(p).convert('RGBA') for p in candidates]
-                        widths = [im.size[0] for im in imgs]
-                        heights = [im.size[1] for im in imgs]
-                        maxw = max(widths)
-                        total_h = sum(heights)
-                        stitched = PILImage.new('RGBA', (maxw, total_h), (255,255,255,255))
-                        y = 0
-                        for im_obj in imgs:
-                            stitched.paste(im_obj, (0, y))
-                            y += im_obj.size[1]
-                        # Save stitched result to out_path (overwrite)
-                        stitched.convert('RGB').save(out_path, 'PNG')
-                        # remove per-page intermediate files except the stitched one
-                        for p in candidates:
-                            try:
-                                if os.path.abspath(p) != os.path.abspath(out_path):
-                                    os.remove(p)
-                            except Exception:
-                                pass  # 一時ファイルの削除失敗は無視
-                    else:
-                        # single-page: ensure out_path exists (ImageMagick may
-                        # have written it under the exact name already)
-                        if not os.path.exists(out_path):
-                            # try to find any png in images_dir with the base name
-                            alt = glob.glob(os.path.join(self.images_dir, f"{fixed_base}*.png"))
-                            if alt:
-                                # pick the first candidate and rename to out_path
-                                try:
-                                    os.replace(alt[0], out_path)
-                                except Exception as e:
-                                    print(f"[WARNING] ファイル操作エラー: {e}")
-                except Exception:
-                    # If stitching fails, continue with whatever was produced
-                    pass
-
-                # Post-process the produced PNG with a safe crop to preserve connectors
-                try:
-                    if os.path.exists(out_path):
-                        # First, run connector-preserving crop
-                        self._crop_image_preserving_connectors(out_path, dpi=dpi)
-
-                        # After cropping, prefer to keep the image named after the
-                        # trimmed workbook (fixed_base). If a file with the same
-                        # name already exists, compare bytes and skip/overwrite as
-                        # appropriate to avoid leaving duplicate files.
-                        try:
-                            import hashlib
-                            with open(out_path, 'rb') as _pf:
-                                png_bytes = _pf.read()
-                        except (OSError, IOError, FileNotFoundError):
-                            png_bytes = None
-
-                        final_name = png_name
-                        final_path = os.path.join(self.images_dir, final_name)
-
-                        try:
-                            if os.path.exists(final_path):
-                                # If final_path is the same as out_path (we wrote directly
-                                # to the target filename), do nothing: keep the file.
-                                if os.path.abspath(final_path) == os.path.abspath(out_path):
-                                    out_path = final_path
-                                else:
-                                    # compare content; if identical, remove new one and keep existing
-                                    try:
-                                        with open(final_path, 'rb') as _ef:
-                                            existing = _ef.read()
-                                    except (OSError, IOError, FileNotFoundError):
-                                        existing = None
-
-                                    try:
-                                        if existing is not None and png_bytes is not None and hashlib.sha1(existing).hexdigest() == hashlib.sha1(png_bytes).hexdigest():
-                                            try:
-
-                                                os.remove(p)
-
-                                            except (OSError, FileNotFoundError):
-
-                                                pass  # ファイル削除失敗は無視
-                                            out_path = final_path
-                                        else:
-                                            # different content or comparison unavailable: attempt to replace
-                                            try:
-                                                os.replace(out_path, final_path)
-                                                out_path = final_path
-                                            except Exception:
-                                                # fallback: keep out_path as-is
-                                                pass
-                                    except Exception:
-                                        try:
-                                            os.replace(out_path, final_path)
-                                            out_path = final_path
-                                        except Exception:
-                                            pass  # ファイル操作失敗は無視
-                            else:
-                                # move/rename into fixed basename
-                                try:
-                                    os.replace(out_path, final_path)
-                                    out_path = final_path
-                                except Exception:
-                                    pass  # ファイル操作失敗は無視
-                        except Exception:
-                            pass  # ファイル操作失敗は無視
-                except Exception:
-                    pass  # 一時ディレクトリ削除失敗は無視
-
-                # cleanup tmp dirs
-                try:
-                    shutil.rmtree(tmp_pdf_dir)
-                except Exception:
-                    pass  # 一時ファイルの削除失敗は無視
-                try:
-                    shutil.rmtree(tmpdir)
-                except Exception:
-                    pass  # 一時ファイルの削除失敗は無視
-
-                    # If a desired cell_range was provided, post-crop the generated PNG
-                    # to the corresponding cell pixel rectangle. Compute sheet pixel map
-                    # at the same DPI and scale to the PNG pixel dimensions.
-                    try:
-                        if cell_range:
-                            s_col, e_col, s_row, e_row = cell_range
-                            col_x, row_y = self._compute_sheet_cell_pixel_map(sheet, DPI=dpi)
-                            # Compute expected width/height for the cell range, not the entire sheet
-                            expected_w = col_x[e_col] - col_x[s_col-1] if s_col-1 < len(col_x) and e_col < len(col_x) else None
-                            expected_h = row_y[e_row] - row_y[s_row-1] if s_row-1 < len(row_y) and e_row < len(row_y) else None
-                            from PIL import Image as PILImage
-                            if os.path.exists(out_path):
-                                im = PILImage.open(out_path)
-                                w_im, h_im = im.size
-                                # compute scale between sheet pixel map and rendered PNG
-                                # Prefer to compute sheet(px) -> PDF(points) -> PNG(px) scale using PDF page box
-                                scale_x = scale_y = 1.0
-                                try:
-                                    # get PDF page box in points (1 point = 1/72 inch)
-                                    if os.path.exists(pdf_path):
-                                        page_box = self._get_pdf_page_box_points(pdf_path)
-                                    else:
-                                        page_box = None
-                                    if page_box and expected_w and expected_h and expected_w > 0 and expected_h > 0:
-                                        page_w_pts, page_h_pts = page_box
-                                        # convert expected sheet pixels to inches (we used DPI for sheet map)
-                                        dpi_for_sheet = dpi
-                                        expected_w_in = float(expected_w) / float(dpi_for_sheet)
-                                        expected_h_in = float(expected_h) / float(dpi_for_sheet)
-                                        # page points correspond to inches * 72
-                                        expected_w_pts = expected_w_in * 72.0
-                                        expected_h_pts = expected_h_in * 72.0
-                                        # PDF pts to PNG px scale = (PNGpx / PDFpts)
-                                        scale_x = float(w_im) / float(page_w_pts) if page_w_pts > 0 else float(w_im) / float(expected_w)
-                                        scale_y = float(h_im) / float(page_h_pts) if page_h_pts > 0 else float(h_im) / float(expected_h)
-                                    elif expected_w and expected_h and expected_w > 0 and expected_h > 0:
-                                        scale_x = float(w_im) / float(expected_w)
-                                        scale_y = float(h_im) / float(expected_h)
-                                    else:
-                                        scale_x = scale_y = 1.0
-                                except (ValueError, TypeError):
-                                    scale_x = scale_y = 1.0
-
-                                    # DEBUG: log scale and expected sizes
-                                    try:
-                                        print(f"[DEBUG] expected_w={expected_w} expected_h={expected_h} w_im={w_im} h_im={h_im} scale_x={scale_x} scale_y={scale_y}")
-                                        print(f"[DEBUG] page_box={page_box}")
-                                    except (ValueError, TypeError):
-                                        pass  # データ構造操作失敗は無視
-
-                                # Use a uniform scale to avoid anisotropic mapping (preserve aspect)
-                                uniform_scale = None
-                                try:
-                                    uniform_scale = min(scale_x, scale_y)
-                                    if not uniform_scale or uniform_scale <= 0:
-                                        uniform_scale = 1.0
-                                except (ValueError, TypeError):
-                                    uniform_scale = 1.0
-
-                                # First, try to detect actual content bbox within the PNG to avoid trimming whitespace
-                                content_bbox = self._find_content_bbox(im)
-                                if content_bbox:
-                                    # content bbox is in PNG pixel coords
-                                    cl, ct, cr, cb = content_bbox
-                                    # expand a little to avoid tight clipping
-                                    padx = max(4, int((cr - cl) * 0.03))
-                                    pady = max(4, int((cb - ct) * 0.03))
-                                    cl = max(0, cl - padx)
-                                    ct = max(0, ct - pady)
-                                    cr = min(w_im, cr + padx)
-                                    cb = min(h_im, cb + pady)
-                                    # Now map the content bbox back to sheet pixel coordinates by inverse-scaling
-                                    # and snap to nearest enclosing cell boundaries using col_x/row_y.
-                                    try:
-                                        # compute approximate sheet px coords corresponding to content bbox
-                                        sheet_l_px = int(cl / uniform_scale)
-                                        sheet_t_px = int(ct / uniform_scale)
-                                        sheet_r_px = int(cr / uniform_scale)
-                                        sheet_b_px = int(cb / uniform_scale)
-                                        # snap these sheet-space pixels to cell bounds
-                                        sl, st, sr, sb = self._snap_box_to_cell_bounds((sheet_l_px, sheet_t_px, sheet_r_px, sheet_b_px), col_x, row_y, DPI=dpi)
-                                        # convert snapped sheet-space cells back to PNG pixel coords
-                                        lpx = max(0, int(sl * uniform_scale))
-                                        tpx = max(0, int(st * uniform_scale))
-                                        rpx = min(w_im, int(sr * uniform_scale))
-                                        bpx = min(h_im, int(sb * uniform_scale))
-                                    except (ValueError, TypeError):
-                                        lpx = max(0, int(col_x[s_col-1] * uniform_scale))
-                                        tpx = max(0, int(row_y[s_row-1] * uniform_scale))
-                                        rpx = min(w_im, int(col_x[e_col] * uniform_scale) if e_col < len(col_x) else w_im)
-                                        bpx = min(h_im, int(row_y[e_row] * uniform_scale) if e_row < len(row_y) else h_im)
-                                    # DEBUG: report computed crop coords
-                                    try:
-                                        print(f"[DEBUG] content_bbox={content_bbox} sheet_px_box=({sheet_l_px},{sheet_t_px},{sheet_r_px},{sheet_b_px})" )
-                                    except (ValueError, TypeError):
-                                        print(f"[DEBUG] fallback sheet cell coords: sl={col_x[s_col-1]}, st={row_y[s_row-1]}, er={col_x[e_col] if e_col < len(col_x) else 'NA'}, eb={row_y[e_row] if e_row < len(row_y) else 'NA'}")
-                                    print(f"[DEBUG] crop_px=({lpx},{tpx},{rpx},{bpx})")
-                                else:
-                                    # fallback to direct cell-range mapping
-                                    lpx = max(0, int(col_x[s_col-1] * scale_x))
-                                    tpx = max(0, int(row_y[s_row-1] * scale_y))
-                                    rpx = min(w_im, int(col_x[e_col] * scale_x) if e_col < len(col_x) else w_im)
-                                    bpx = min(h_im, int(row_y[e_row] * scale_y) if e_row < len(row_y) else h_im)
-
-                                # final sanity check and crop
-                                if rpx - lpx > 4 and bpx - tpx > 4 and (rpx - lpx) < w_im and (bpx - tpx) < h_im:
-                                    cropped = im.crop((lpx, tpx, rpx, bpx))
-                                    cropped.save(out_path)
-                    except (ValueError, TypeError) as e:
-                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
-
-                # Return the actual basename of the file we ended up with on disk.
-                # During processing we may have renamed/moved out_path into a
-                # canonical filename (final_path). Ensure the caller receives the
-                # real filename rather than an earlier-generated variable.
-                try:
-                    basename = os.path.basename(out_path)
-                    # Instrumentation: attempt to log the representative start_row
-                    # pairs associated with this group render so that conversion
-                    # logs explicitly show the chosen start rows and filenames.
-                    try:
-                        # Build a compact list of (start_row, filename) pairs
-                        pairs = []
-                        # Prefer internal mapping if available
-                        if getattr(self, '_sheet_shape_images', None):
-                            imgs = self._sheet_shape_images.get(sheet.title) if isinstance(self._sheet_shape_images, dict) else None
-                            if imgs:
-                                # imgs may be list of tuples or legacy list[str]
-                                for item in imgs:
-                                    try:
-                                        if isinstance(item, tuple) and len(item) >= 2:
-                                            pairs.append((int(item[0]), str(item[1])))
-                                        elif isinstance(item, str):
-                                            pairs.append((None, item))
-                                    except (ValueError, TypeError):
-                                        continue
-                        # Fallback: if imgs_by_row constructed in local scope, try to access it
-                        if not pairs and 'imgs_by_row' in locals():
-                            try:
-                                for r, fn in imgs_by_row.items():
-                                    pairs.append((int(r), str(fn)))
-                            except (ValueError, TypeError) as e:
-                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                        # Finally, include the current generated file as evidence.
-                        # Prefer to attach a representative start_row if we can
-                        # derive one from nearby variables (group_rows or cell_range).
-                        rep = None
-                        try:
-                            if 'group_rows' in locals() and group_rows:
-                                try:
-                                    rep = int(min(group_rows))
-                                except (ValueError, TypeError):
-                                    rep = None
-                            elif 'cell_range' in locals() and cell_range:
-                                try:
-                                    # cell_range format: (s_col, e_col, s_row, e_row)
-                                    rep = int(cell_range[2])
-                                except (ValueError, TypeError):
-                                    rep = None
-                        except (ValueError, TypeError):
-                            rep = None
-                        pairs.append((rep, basename))
-                        print(f"[INFO][_iso_group_repr] sheet={sheet.title} representative_pairs={pairs}")
-                    except (ValueError, TypeError) as e:
-                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                    
-                    # Return (filename, cluster_min_row) tuple
-                    cluster_min_row = rep if rep is not None else 1
-                    return (basename, cluster_min_row)
-                except (ValueError, TypeError):
-                    return png_name
-            except (ValueError, TypeError):
-                try:
-                    shutil.rmtree(tmpdir)
-                except (ValueError, TypeError):
-                    pass  # 一時ディレクトリ削除失敗は無視
-                return None
-        except Exception:
-            return None
+        renderer = IsolatedGroupRenderer(self)
+        return renderer.render(sheet, shape_indices, dpi, cell_range)
     
     def _convert_sheet_data(self, sheet, data_range: Tuple[int, int, int, int]):
         """シートデータをテーブルとして変換（複数テーブル対応）"""
