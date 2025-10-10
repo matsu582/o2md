@@ -1437,7 +1437,14 @@ class IsolatedGroupRenderer:
             
             try:
                 orig_s_col, orig_e_col, orig_s_row, orig_e_row = original_cell_range
+                
+                cell_s_col = max(1, orig_s_col - 1)
+                cell_e_col = orig_e_col + 1
+                cell_s_row = orig_s_row
+                cell_e_row = orig_e_row
+                
                 print(f"[DEBUG][Phase8] Using original_cell_range: col={orig_s_col}-{orig_e_col}, row={orig_s_row}-{orig_e_row}")
+                print(f"[DEBUG][Phase8] Expanded cell range: col={cell_s_col}-{cell_e_col} (left+1, right+1), row={cell_s_row}-{cell_e_row}")
                 
                 worksheets_dir = os.path.join(tmpdir, "xl/worksheets")
                 sheet_rel = None
@@ -1476,10 +1483,10 @@ class IsolatedGroupRenderer:
                             except (ValueError, TypeError):
                                 continue
                             
-                            if rnum < orig_s_row or rnum > orig_e_row:
+                            if rnum < cell_s_row or rnum > cell_e_row:
                                 continue
                             
-                            new_r_index = rnum - orig_s_row + 1
+                            new_r_index = rnum - cell_s_row + 1
                             max_new_r_index = max(max_new_r_index, new_r_index)
                             
                             new_row = ET.Element(f'{{{ns}}}row')
@@ -1516,10 +1523,10 @@ class IsolatedGroupRenderer:
                                 for ch in col_letters.upper():
                                     col_idx = col_idx * 26 + (ord(ch) - 64)
                                 
-                                if col_idx < orig_s_col or col_idx > orig_e_col:
+                                if col_idx < cell_s_col or col_idx > cell_e_col:
                                     continue
                                 
-                                new_col_idx = col_idx - orig_s_col + 1
+                                new_col_idx = col_idx - cell_s_col + 1
                                 new_col_letters = self._col_letter(new_col_idx)
                                 
                                 new_cell = ET.Element(f'{{{ns}}}c', dict(cell_el.attrib))
@@ -1544,7 +1551,7 @@ class IsolatedGroupRenderer:
                             dim = ET.Element(dim_tag)
                             sroot4.insert(0, dim)
                         start_addr = f"{self._col_letter(1)}1"
-                        end_addr = f"{self._col_letter(orig_e_col - orig_s_col + 1)}{max(1, max_new_r_index)}"
+                        end_addr = f"{self._col_letter(cell_e_col - cell_s_col + 1)}{max(1, max_new_r_index)}"
                         dim.set('ref', f"{start_addr}:{end_addr}")
                     
                     cols_tag = f'{{{ns}}}cols'
@@ -1559,7 +1566,7 @@ class IsolatedGroupRenderer:
                     try:
                         from openpyxl.utils import get_column_letter
                         default_col_w = getattr(self.sheet.sheet_format, 'defaultColWidth', None) or 8.43
-                        for c in range(orig_s_col, orig_e_col + 1):
+                        for c in range(cell_s_col, cell_e_col + 1):
                             cd = self.sheet.column_dimensions.get(get_column_letter(c))
                             width = None
                             hidden = None
@@ -1569,7 +1576,7 @@ class IsolatedGroupRenderer:
                             if width is None:
                                 width = default_col_w
                             col_el = ET.Element(col_tag)
-                            new_idx = c - orig_s_col + 1
+                            new_idx = c - cell_s_col + 1
                             col_el.set('min', str(new_idx))
                             col_el.set('max', str(new_idx))
                             try:
