@@ -3448,7 +3448,8 @@ class ExcelToMarkdownConverter:
     def _extract_drawing_cell_ranges(self, sheet) -> List[Tuple[int,int,int,int]]:
         """Extract drawing cell ranges (start_col, end_col, start_row, end_row) for each drawable anchor.
 
-        Uses drawing XML when available. Returns list aligned with anchors order used in other extractors.
+        Uses drawing XML directly to extract cell indices without pixel mapping.
+        This ensures we get correct ranges even when drawings extend beyond data cells.
         """
         print(f"[INFO] シート図形セル範囲抽出: {sheet.title}")
         ranges = []
@@ -3461,150 +3462,52 @@ class ExcelToMarkdownConverter:
             z = metadata['zip']
             drawing_xml = metadata['drawing_xml']
 
-            # prepare pixel map for oneCell ext conversions
-            # Use a consistent DPI when converting EMU offsets to pixels.
-            DPI = 300
-            try:
-                DPI = int(getattr(self, 'dpi', DPI) or DPI)
-            except (ValueError, TypeError):
-                pass  # データ構造操作失敗は無視
-            try:
-                DPI = int(getattr(self, 'dpi', DPI) or DPI)
-            except (ValueError, TypeError):
-                DPI = DPI
-            col_x, row_y = self._compute_sheet_cell_pixel_map(sheet, DPI=DPI)
-            EMU_PER_INCH = 914400
-            try:
-                EMU_PER_PIXEL = EMU_PER_INCH / float(DPI)
-            except (ValueError, TypeError):
-                EMU_PER_PIXEL = EMU_PER_INCH / float(DPI)
-
             ns = {'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'}
             for node in drawing_xml:
                 lname = node.tag.split('}')[-1].lower()
                 if lname not in ('twocellanchor', 'onecellanchor'):
                     continue
-                # determine cell indices
+                
+                # This is simpler and more reliable than pixel mapping
                 if lname == 'twocellanchor':
                     fr = node.find('xdr:from', ns)
                     to = node.find('xdr:to', ns)
                     if fr is None or to is None:
                         continue
+                    
                     try:
-                        col = int(fr.find('xdr:col', ns).text)
-                        row = int(fr.find('xdr:row', ns).text)
-                        to_col = int(to.find('xdr:col', ns).text)
-                        to_row = int(to.find('xdr:row', ns).text)
-                    except (ValueError, TypeError):
+                        from_col = int(fr.find('xdr:col', ns).text) + 1
+                        from_row = int(fr.find('xdr:row', ns).text) + 1
+                        to_col = int(to.find('xdr:col', ns).text) + 1
+                        to_row = int(to.find('xdr:row', ns).text) + 1
+                        
+                        start_col = max(1, min(from_col, to_col))
+                        end_col = max(from_col, to_col)
+                        start_row = max(1, min(from_row, to_row))
+                        end_row = max(from_row, to_row)
+                        
+                        ranges.append((start_col, end_col, start_row, end_row))
+                    except (ValueError, TypeError, AttributeError):
+                        # If we can't extract valid coordinates, skip this anchor
                         continue
-                    # Use the colOff/rowOff EMU offsets to compute precise pixel
-                    # positions for the anchor extents, then map those pixels to
-                    # enclosing cell indices using col_x and row_y arrays. This
-                    # handles cases where the anchor extends partially into the
-                    # ending cell.
-                    try:
-                        colOff = int(fr.find('xdr:colOff', ns).text)
-                    except (ValueError, TypeError):
-                        colOff = 0
-                    try:
-                        rowOff = int(fr.find('xdr:rowOff', ns).text)
-                    except (ValueError, TypeError):
-                        rowOff = 0
-                    try:
-                        to_colOff = int(to.find('xdr:colOff', ns).text)
-                    except (ValueError, TypeError):
-                        to_colOff = 0
-                    try:
-                        to_rowOff = int(to.find('xdr:rowOff', ns).text)
-                    except (ValueError, TypeError):
-                        to_rowOff = 0
-
-                    # convert EMU offsets to pixels using same DPI as col/row map
-                    EMU_PER_INCH = 914400
-                    try:
-                        EMU_PER_PIXEL = EMU_PER_INCH / float(DPI)
-                    except (ValueError, TypeError):
-                        EMU_PER_PIXEL = EMU_PER_INCH / float(DPI)
-                    left_px = col_x[col] + (colOff / EMU_PER_PIXEL) if col < len(col_x) else col_x[-1]
-                    right_px = col_x[to_col] + (to_colOff / EMU_PER_PIXEL) if to_col < len(col_x) else col_x[-1]
-                    top_px = row_y[row] + (rowOff / EMU_PER_PIXEL) if row < len(row_y) else row_y[-1]
-                    bottom_px = row_y[to_row] + (to_rowOff / EMU_PER_PIXEL) if to_row < len(row_y) else row_y[-1]
-
-                    # map pixels to cell indices (1-based inclusive)
-                    start_col = 1
-                    for ci in range(1, len(col_x)):
-                        if col_x[ci] >= left_px:
-                            start_col = ci
-                            break
-                    end_col = len(col_x)-1
-                    for ci in range(1, len(col_x)):
-                        if col_x[ci] >= right_px:
-                            end_col = ci
-                            break
-
-                    start_row = 1
-                    for ri in range(1, len(row_y)):
-                        if row_y[ri] >= top_px:
-                            start_row = ri
-                            break
-                    end_row = len(row_y)-1
-                    for ri in range(1, len(row_y)):
-                        if row_y[ri] >= bottom_px:
-                            end_row = ri
-                            break
-
-                    # clamp to sheet bounds
-                    if start_col < 1:
-                        start_col = 1
-                    if start_row < 1:
-                        start_row = 1
-                    if end_col > sheet.max_column:
-                        end_col = sheet.max_column
-                    if end_row > sheet.max_row:
-                        end_row = sheet.max_row
-
-                    ranges.append((start_col, end_col, start_row, end_row))
                 else:
-                    # oneCellAnchor: use from.col/from.row and ext cx/cy to derive end cell
+                    # oneCellAnchor: use approximate range based on from cell
                     fr = node.find('xdr:from', ns)
-                    ext = node.find('xdr:ext', ns)
-                    if fr is None or ext is None:
+                    if fr is None:
                         continue
+                    
                     try:
-                        col = int(fr.find('xdr:col', ns).text)
-                        row = int(fr.find('xdr:row', ns).text)
-                        colOff = int(fr.find('xdr:colOff', ns).text)
-                    except (ValueError, TypeError):
+                        from_col = int(fr.find('xdr:col', ns).text) + 1
+                        from_row = int(fr.find('xdr:row', ns).text) + 1
+                        
+                        start_col = max(1, from_col)
+                        end_col = from_col + 1
+                        start_row = max(1, from_row)
+                        end_row = from_row + 1
+                        
+                        ranges.append((start_col, end_col, start_row, end_row))
+                    except (ValueError, TypeError, AttributeError):
                         continue
-                    cx = int(ext.attrib.get('cx', '0'))
-                    cy = int(ext.attrib.get('cy', '0'))
-                    left_px = col_x[col] + (colOff / EMU_PER_PIXEL) if col < len(col_x) else col_x[-1]
-                    right_px = left_px + (cx / EMU_PER_PIXEL)
-                    top_px = row_y[row] if row < len(row_y) else row_y[-1]
-                    bottom_px = top_px + (cy / EMU_PER_PIXEL)
-                    # map pixels to cell indices
-                    # find start_col index
-                    start_col = 1
-                    for ci in range(1, len(col_x)):
-                        if col_x[ci] >= left_px:
-                            start_col = ci
-                            break
-                    end_col = len(col_x)-1
-                    for ci in range(1, len(col_x)):
-                        if col_x[ci] >= right_px:
-                            end_col = ci
-                            break
-                    start_row = 1
-                    for ri in range(1, len(row_y)):
-                        if row_y[ri] >= top_px:
-                            start_row = ri
-                            break
-                    end_row = len(row_y)-1
-                    for ri in range(1, len(row_y)):
-                        if row_y[ri] >= bottom_px:
-                            end_row = ri
-                            break
-                    ranges.append((start_col, end_col, start_row, end_row))
         except Exception:
             pass  # データ構造操作失敗は無視
         print(f"[INFO] 抽出されたセル範囲: {ranges}")
