@@ -239,11 +239,6 @@ class IsolatedGroupRenderer:
                     if e_row < s_row:
                         e_row = s_row
                     
-                    s_row = max(1, s_row - 2)
-                    s_col = max(1, s_col - 1)
-                    e_row = e_row + 1
-                    e_col = e_col + 1
-                    
                     cell_range = (s_col, e_col, s_row, e_row)
         except (ValueError, TypeError) as e:
             print(f"[DEBUG] 型変換エラー（無視）: {e}")
