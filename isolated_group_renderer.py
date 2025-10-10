@@ -1353,9 +1353,13 @@ class IsolatedGroupRenderer:
         if cell_range:
             s_col, e_col, s_row, e_row = cell_range
             
-            # 列文字を計算
-            start_col_letter = self._col_letter(s_col)
-            end_col_letter = self._col_letter(e_col)
+            if original_cell_range:
+                orig_s_col, orig_e_col, orig_s_row, orig_e_row = original_cell_range
+                start_col_letter = self._col_letter(orig_s_col)
+                end_col_letter = self._col_letter(orig_e_col)
+            else:
+                start_col_letter = self._col_letter(s_col)
+                end_col_letter = self._col_letter(e_col)
             
             # Print_Area文字列を作成
             sheet_name_escaped = sheet.title.replace("'", "''")
@@ -1662,6 +1666,8 @@ class IsolatedGroupRenderer:
             try:
                 drawing_path_full = os.path.join(tmpdir, drawing_path)
                 if os.path.exists(drawing_path_full):
+                    print(f"[DEBUG][Phase8] Moving shapes: using original range row={orig_s_row}-{orig_e_row}, col={orig_s_col}-{orig_e_col}")
+                    
                     dtree = ET.parse(drawing_path_full)
                     droot = dtree.getroot()
                     ns_xdr = {'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'}
@@ -1677,7 +1683,7 @@ class IsolatedGroupRenderer:
                             row_el = fr.find('xdr:row', ns_xdr)
                             try:
                                 if col_el is not None and col_el.text is not None:
-                                    new_col = int(col_el.text) - (s_col - 1)
+                                    new_col = int(col_el.text) - (orig_s_col - 1)
                                     if new_col < 0:
                                         new_col = 0
                                     col_el.text = str(new_col)
@@ -1685,7 +1691,7 @@ class IsolatedGroupRenderer:
                                 pass
                             try:
                                 if row_el is not None and row_el.text is not None:
-                                    new_row = int(row_el.text) - (s_row - 1)
+                                    new_row = int(row_el.text) - (orig_s_row - 1)
                                     if new_row < 0:
                                         new_row = 0
                                     row_el.text = str(max(0, new_row))
@@ -1698,7 +1704,7 @@ class IsolatedGroupRenderer:
                             row_el = to.find('xdr:row', ns_xdr)
                             try:
                                 if col_el is not None and col_el.text is not None:
-                                    new_col = int(col_el.text) - (s_col - 1)
+                                    new_col = int(col_el.text) - (orig_s_col - 1)
                                     if new_col < 0:
                                         new_col = 0
                                     col_el.text = str(new_col)
@@ -1706,7 +1712,7 @@ class IsolatedGroupRenderer:
                                 pass
                             try:
                                 if row_el is not None and row_el.text is not None:
-                                    new_row = int(row_el.text) - (s_row - 1)
+                                    new_row = int(row_el.text) - (orig_s_row - 1)
                                     if new_row < 0:
                                         new_row = 0
                                     row_el.text = str(max(0, new_row))
