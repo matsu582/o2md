@@ -982,6 +982,59 @@ class IsolatedGroupRenderer:
         except Exception as e:
             print(f"[WARNING] ファイル操作エラー: {e}")
 
+        # Ensure shapes/groups/pictures have aspect-locks so Excel won't auto-stretch them
+        try:
+            try:
+                tree_locks = ET.parse(drawing_relpath)
+                root_locks = tree_locks.getroot()
+            except (ET.ParseError, KeyError, AttributeError):
+                root_locks = ET.fromstring(drawing_xml_bytes)
+                tree_locks = ET.ElementTree(root_locks)
+            
+            a_ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+            xdr_ns = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
+            
+            for anchor in list(root_locks):
+                try:
+                    # shapes
+                    for sp in anchor.findall('.//{%s}sp' % xdr_ns):
+                        cNvSpPr = sp.find('.//{%s}cNvSpPr' % a_ns)
+                        if cNvSpPr is None:
+                            cNvSpPr = sp.find('.//{%s}cNvSpPr' % xdr_ns)
+                        if cNvSpPr is not None:
+                            if cNvSpPr.find('{%s}spLocks' % a_ns) is None:
+                                l = ET.Element('{%s}spLocks' % a_ns)
+                                l.set('noChangeAspect', '1')
+                                cNvSpPr.append(l)
+                    
+                    # groups
+                    for grp in anchor.findall('.//{%s}grpSp' % xdr_ns):
+                        cNvGrpSpPr = grp.find('.//{%s}cNvGrpSpPr' % a_ns)
+                        if cNvGrpSpPr is None:
+                            cNvGrpSpPr = grp.find('.//{%s}cNvGrpSpPr' % xdr_ns)
+                        if cNvGrpSpPr is not None:
+                            if cNvGrpSpPr.find('{%s}grpSpLocks' % a_ns) is None:
+                                gl = ET.Element('{%s}grpSpLocks' % a_ns)
+                                gl.set('noChangeAspect', '1')
+                                cNvGrpSpPr.append(gl)
+                    
+                    # pictures
+                    for pic in anchor.findall('.//{%s}pic' % xdr_ns):
+                        cNvPicPr = pic.find('.//{%s}cNvPicPr' % a_ns)
+                        if cNvPicPr is None:
+                            cNvPicPr = pic.find('.//{%s}cNvPicPr' % xdr_ns)
+                        if cNvPicPr is not None:
+                            if cNvPicPr.find('{%s}picLocks' % a_ns) is None:
+                                pl = ET.Element('{%s}picLocks' % a_ns)
+                                pl.set('noChangeAspect', '1')
+                                cNvPicPr.append(pl)
+                except Exception:
+                    pass
+            
+            tree_locks.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
+        except Exception as e:
+            print(f"[WARNING] spLocks追加エラー: {e}")
+
         # Extra pass: for any kept anchor that corresponds to an original
         # connector anchor (cxnSp/cxn), replace the connector element in
         # the trimmed drawing with a deep-copy of the original connector
