@@ -1612,227 +1612,6 @@ class ExcelToMarkdownConverter:
                 print(f"[DEBUG][_process_sheet_images] sheet={sheet.title} shapes already generated; skipping repeated processing")
                 return False
             images_found = False
-            if hasattr(sheet, '_images') and sheet._images:
-                print(f"[INFO] シート '{sheet.title}' 内の画像を処理中...")
-                images_found = True
-                # 埋め込みメディアからのマッピングを事前に設定（描画relsから）
-                # to cNvPr ids so that when we process embedded images below we
-                # can decide whether to suppress them if a clustered/group
-                # render already preserved the same drawing anchor.
-                try:
-                    z = zipfile.ZipFile(self.excel_file)
-                    sheet_index = self.workbook.sheetnames.index(sheet.title)
-                    rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
-                    if rels_path in z.namelist():
-                        rels_xml = ET.fromstring(z.read(rels_path))
-                        drawing_target = None
-                        for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
-                            t = rel.attrib.get('Type','')
-                            if t.endswith('/drawing'):
-                                drawing_target = rel.attrib.get('Target')
-                                break
-                        if drawing_target:
-                            drawing_path = drawing_target
-                            if drawing_path.startswith('..'):
-                                drawing_path = drawing_path.replace('../', 'xl/')
-                            if drawing_path.startswith('/'):
-                                drawing_path = drawing_path.lstrip('/')
-                            if drawing_path not in z.namelist():
-                                drawing_path = drawing_path.replace('worksheets', 'drawings')
-                            if drawing_path in z.namelist():
-                                drawing_xml = ET.fromstring(z.read(drawing_path))
-                                # ensure map exists
-                                self._embedded_image_cid_by_name.setdefault(sheet.title, {})
-                                # attempt to read drawing rels if present and map rId -> target
-                                drawing_rels_path = os.path.dirname(drawing_path) + '/_rels/' + os.path.basename(drawing_path) + '.rels'
-                                if drawing_rels_path in z.namelist():
-                                    try:
-                                        rels_xml2 = ET.fromstring(z.read(drawing_rels_path))
-                                        rid_to_target = {}
-                                        for rel2 in rels_xml2.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
-                                            rid = rel2.attrib.get('Id') or rel2.attrib.get('Id')
-                                            tgt = rel2.attrib.get('Target')
-                                            if rid and tgt:
-                                                tgtp = tgt
-                                                if tgtp.startswith('..'):
-                                                    tgtp = tgtp.replace('../', 'xl/')
-                                                if tgtp.startswith('/'):
-                                                    tgtp = tgtp.lstrip('/')
-                                                rid_to_target[rid] = tgtp
-                                        # iterate anchors and map both media basename and media SHA8 -> cNvPr
-                                        import hashlib as _hashlib
-                                        for node_c in list(drawing_xml):
-                                            lname_c = node_c.tag.split('}')[-1].lower()
-                                            if lname_c not in ('twocellanchor', 'onecellanchor'):
-                                                continue
-                                            cid_val = None
-                                            for sub_c in node_c.iter():
-                                                if sub_c.tag.split('}')[-1].lower() == 'cnvpr':
-                                                    cid_val = sub_c.attrib.get('id') or sub_c.attrib.get('idx')
-                                                    break
-                                            for sub in node_c.iter():
-                                                if sub.tag.split('}')[-1].lower() == 'blip':
-                                                    rid = sub.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed') or sub.attrib.get('embed')
-                                                    if rid and rid in rid_to_target:
-                                                        target = rid_to_target[rid]
-                                                        # normalize path
-                                                        tgtp = target
-                                                        if tgtp.startswith('..'):
-                                                            tgtp = tgtp.replace('../', 'xl/')
-                                                        if tgtp.startswith('/'):
-                                                            tgtp = tgtp.lstrip('/')
-                                                        # extract basename
-                                                        fname = os.path.basename(tgtp)
-                                                        try:
-                                                            media_bytes = z.read(tgtp) if tgtp in z.namelist() else None
-                                                        except Exception:
-                                                            media_bytes = None
-                                                        sha8 = None
-                                                        if media_bytes:
-                                                            try:
-                                                                sha8 = _hashlib.sha1(media_bytes).hexdigest()[:8]
-                                                            except Exception:
-                                                                sha8 = None
-                                                        if cid_val is not None:
-                                                            try:
-                                                                # map by original basename
-                                                                self._embedded_image_cid_by_name[sheet.title][fname] = str(cid_val)
-                                                            except (ValueError, TypeError):
-                                                                pass  # データ構造操作失敗は無視
-                                                            try:
-                                                                # map by short sha if available
-                                                                if sha8:
-                                                                    self._embedded_image_cid_by_name[sheet.title][sha8] = str(cid_val)
-                                                            except (ValueError, TypeError):
-                                                                pass  # データ構造操作失敗は無視
-                                                        else:
-                                                            try:
-                                                                self._embedded_image_cid_by_name[sheet.title][fname] = None
-                                                            except (ValueError, TypeError):
-                                                                pass  # データ構造操作失敗は無視
-                                                            try:
-                                                                if sha8:
-                                                                    self._embedded_image_cid_by_name[sheet.title][sha8] = None
-                                                            except Exception as e:
-                                                                print(f"[WARNING] ファイル操作エラー: {e}")
-                                    except Exception as e:
-                                        print(f"[WARNING] ファイル操作エラー: {e}")
-                except Exception as e:
-                    print(f"[WARNING] ファイル操作エラー: {e}")
-                md_lines = []
-                for image in sheet._images:
-                    # _process_excel_image now returns the saved image filename (basename)
-                    img_name = self._process_excel_image(image, f"{sheet.title} (Image)")
-                    if img_name:
-                            # この画像の代表的なstart_rowを決定（利用可能な場合）
-                            start_row = 1
-                            try:
-                                pos = None
-                                try:
-                                    pos = self._get_image_position(image)
-                                except Exception:
-                                    pos = None
-                                if pos and isinstance(pos, dict):
-                                    # prefer explicit row if provided
-                                    if 'row' in pos and isinstance(pos['row'], int):
-                                        start_row = pos['row']
-                            except Exception:
-                                start_row = 1
-
-                            # 正規出力パス中の場合、即座に挿入し
-                            # the image appears inline with emitted text. Otherwise,
-                            # defer by registering into self._sheet_shape_images so the
-                            # canonical emission will place it deterministically.
-                            if getattr(self, '_in_canonical_emit', False):
-                                md_line = f"![{sheet.title}の図](images/{img_name})"
-                                ref = f"images/{img_name}"
-                                # この埋め込み画像が描画アンカーに対応する場合
-                                # that has already been preserved by a grouped render,
-                                # skip emitting it to avoid duplicate presentation.
-                                try:
-                                    cid_map = self._embedded_image_cid_by_name.get(sheet.title, {}) if hasattr(self, '_embedded_image_cid_by_name') else {}
-                                    mapped_cid = cid_map.get(img_name)
-                                    # ファイル名に_<sha8>.extのような短いハッシュサフィックスが含まれる場合、それを抽出してキーとして試行
-                                    if mapped_cid is None:
-                                        try:
-                                            # try extracting trailing 8-hex from filename
-                                            import re
-                                            m = re.search(r'([0-9a-f]{8})', img_name)
-                                            if m:
-                                                maybe = m.group(1)
-                                                mapped_cid = cid_map.get(maybe)
-                                        except Exception as e:
-                                            print(f"[WARNING] ファイル操作エラー: {e}")
-                                    # まだ不明な場合、ディスク上の既存ファイルから短いshaを計算して試行
-                                    if mapped_cid is None:
-                                        try:
-                                            fp = os.path.join(self.images_dir, img_name)
-                                            if os.path.exists(fp):
-                                                import hashlib as _hashlib
-                                                with open(fp, 'rb') as _f:
-                                                    d = _f.read()
-                                                sha8 = _hashlib.sha1(d).hexdigest()[:8]
-                                                mapped_cid = cid_map.get(sha8)
-                                        except (OSError, IOError, FileNotFoundError):
-                                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
-                                    global_iso_preserved_ids = getattr(self, '_global_iso_preserved_ids', set()) or set()
-                                    if mapped_cid and str(mapped_cid) in global_iso_preserved_ids:
-                                        print(f"[DEBUG][_emit_image_skip] sheet={sheet.title} embedded image {img_name} suppressed (cid={mapped_cid} already preserved)")
-                                        continue
-                                except (OSError, IOError, FileNotFoundError):
-                                    print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
-                                if ref in self._emitted_images or img_name in self._emitted_images:
-                                    continue
-                                try:
-                                    new_idx = self._insert_markdown_image(insert_index, md_line, img_name)
-                                    try:
-                                        if insert_index is not None:
-                                            insert_index = new_idx
-                                    except Exception as e:
-                                        print(f"[WARNING] ファイル操作エラー: {e}")
-                                except Exception:
-                                    try:
-                                        self.markdown_lines.append(md_line)
-                                        self.markdown_lines.append("")
-                                        try:
-                                            self._mark_image_emitted(img_name)
-                                        except Exception as e:
-                                            print(f"[WARNING] ファイル操作エラー: {e}")
-                                    except Exception as e:
-                                        print(f"[WARNING] ファイル操作エラー: {e}")
-                                # 挿入を延期: 正規の行ソート済み出力のため登録
-                                try:
-                                    # check mapped cNvPr for this embedded image and
-                                    # skip deferral if already preserved by a group render
-                                    cid_map = self._embedded_image_cid_by_name.get(sheet.title, {}) if hasattr(self, '_embedded_image_cid_by_name') else {}
-                                    mapped_cid = cid_map.get(img_name)
-                                    global_iso_preserved_ids = getattr(self, '_global_iso_preserved_ids', set()) or set()
-                                    if mapped_cid and str(mapped_cid) in global_iso_preserved_ids:
-                                        print(f"[DEBUG][_defer_image_skip] sheet={sheet.title} embedded image {img_name} suppressed on defer (cid={mapped_cid} already preserved)")
-                                    else:
-                                        self._sheet_shape_images.setdefault(sheet.title, [])
-                                        self._sheet_shape_images[sheet.title].append((start_row, img_name))
-                                except (ValueError, TypeError) as e:
-                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                            else:
-                                # 非正規コンテキスト: 画像を登録/延期し
-                                # canonical emitter will place it deterministically.
-                                try:
-                                    md_line = f"![{sheet.title}の図](images/{img_name})"
-                                    new_idx = self._insert_markdown_image(insert_index, md_line, img_name)
-                                    try:
-                                        if insert_index is not None:
-                                            insert_index = new_idx
-                                    except Exception as e:
-                                        print(f"[WARNING] ファイル操作エラー: {e}")
-                                except Exception:
-                                    # フォールバック: sheet_shape_imagesに直接登録
-                                    try:
-                                        self._sheet_shape_images.setdefault(sheet.title, [])
-                                        self._sheet_shape_images[sheet.title].append((start_row, img_name))
-                                    except Exception as e:
-                                        print(f"[WARNING] ファイル操作エラー: {e}")
-
             # 描画図形（ベクトル図形、コネクタなど）を確認
             # of whether embedded images were found. This ensures that sheets with
             # only vector shapes (no embedded images) are still processed correctly.
@@ -2044,6 +1823,254 @@ class ExcelToMarkdownConverter:
             # fallback: render the sheet to PDF via LibreOffice and rasterize the
             # corresponding PDF page to PNG using ImageMagick. This captures vector
             # shapes and drawings that openpyxl doesn't expose as images.
+            if hasattr(sheet, '_images') and sheet._images:
+                print(f"[INFO] シート '{sheet.title}' 内の画像を処理中...")
+                images_found = True
+                # 埋め込みメディアからのマッピングを事前に設定（描画relsから）
+                # to cNvPr ids so that when we process embedded images below we
+                # can decide whether to suppress them if a clustered/group
+                # render already preserved the same drawing anchor.
+                try:
+                    z = zipfile.ZipFile(self.excel_file)
+                    sheet_index = self.workbook.sheetnames.index(sheet.title)
+                    rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
+                    if rels_path in z.namelist():
+                        rels_xml = ET.fromstring(z.read(rels_path))
+                        drawing_target = None
+                        for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
+                            t = rel.attrib.get('Type','')
+                            if t.endswith('/drawing'):
+                                drawing_target = rel.attrib.get('Target')
+                                break
+                        if drawing_target:
+                            drawing_path = drawing_target
+                            if drawing_path.startswith('..'):
+                                drawing_path = drawing_path.replace('../', 'xl/')
+                            if drawing_path.startswith('/'):
+                                drawing_path = drawing_path.lstrip('/')
+                            if drawing_path not in z.namelist():
+                                drawing_path = drawing_path.replace('worksheets', 'drawings')
+                            if drawing_path in z.namelist():
+                                drawing_xml = ET.fromstring(z.read(drawing_path))
+                                # ensure map exists
+                                self._embedded_image_cid_by_name.setdefault(sheet.title, {})
+                                # attempt to read drawing rels if present and map rId -> target
+                                drawing_rels_path = os.path.dirname(drawing_path) + '/_rels/' + os.path.basename(drawing_path) + '.rels'
+                                if drawing_rels_path in z.namelist():
+                                    try:
+                                        rels_xml2 = ET.fromstring(z.read(drawing_rels_path))
+                                        rid_to_target = {}
+                                        for rel2 in rels_xml2.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
+                                            rid = rel2.attrib.get('Id') or rel2.attrib.get('Id')
+                                            tgt = rel2.attrib.get('Target')
+                                            if rid and tgt:
+                                                tgtp = tgt
+                                                if tgtp.startswith('..'):
+                                                    tgtp = tgtp.replace('../', 'xl/')
+                                                if tgtp.startswith('/'):
+                                                    tgtp = tgtp.lstrip('/')
+                                                rid_to_target[rid] = tgtp
+                                        # iterate anchors and map both media basename and media SHA8 -> cNvPr
+                                        import hashlib as _hashlib
+                                        for node_c in list(drawing_xml):
+                                            lname_c = node_c.tag.split('}')[-1].lower()
+                                            if lname_c not in ('twocellanchor', 'onecellanchor'):
+                                                continue
+                                            cid_val = None
+                                            for sub_c in node_c.iter():
+                                                if sub_c.tag.split('}')[-1].lower() == 'cnvpr':
+                                                    cid_val = sub_c.attrib.get('id') or sub_c.attrib.get('idx')
+                                                    break
+                                            for sub in node_c.iter():
+                                                if sub.tag.split('}')[-1].lower() == 'blip':
+                                                    rid = sub.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed') or sub.attrib.get('embed')
+                                                    if rid and rid in rid_to_target:
+                                                        target = rid_to_target[rid]
+                                                        # normalize path
+                                                        tgtp = target
+                                                        if tgtp.startswith('..'):
+                                                            tgtp = tgtp.replace('../', 'xl/')
+                                                        if tgtp.startswith('/'):
+                                                            tgtp = tgtp.lstrip('/')
+                                                        # extract basename
+                                                        fname = os.path.basename(tgtp)
+                                                        try:
+                                                            media_bytes = z.read(tgtp) if tgtp in z.namelist() else None
+                                                        except Exception:
+                                                            media_bytes = None
+                                                        sha8 = None
+                                                        if media_bytes:
+                                                            try:
+                                                                sha8 = _hashlib.sha1(media_bytes).hexdigest()[:8]
+                                                            except Exception:
+                                                                sha8 = None
+                                                        if cid_val is not None:
+                                                            try:
+                                                                # map by original basename
+                                                                self._embedded_image_cid_by_name[sheet.title][fname] = str(cid_val)
+                                                            except (ValueError, TypeError):
+                                                                pass  # データ構造操作失敗は無視
+                                                            try:
+                                                                # map by short sha if available
+                                                                if sha8:
+                                                                    self._embedded_image_cid_by_name[sheet.title][sha8] = str(cid_val)
+                                                            except (ValueError, TypeError):
+                                                                pass  # データ構造操作失敗は無視
+                                                        else:
+                                                            try:
+                                                                self._embedded_image_cid_by_name[sheet.title][fname] = None
+                                                            except (ValueError, TypeError):
+                                                                pass  # データ構造操作失敗は無視
+                                                            try:
+                                                                if sha8:
+                                                                    self._embedded_image_cid_by_name[sheet.title][sha8] = None
+                                                            except Exception as e:
+                                                                print(f"[WARNING] ファイル操作エラー: {e}")
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
+                except Exception as e:
+                    print(f"[WARNING] ファイル操作エラー: {e}")
+                md_lines = []
+                for image in sheet._images:
+                    # _process_excel_image now returns the saved image filename (basename)
+                    img_name = self._process_excel_image(image, f"{sheet.title} (Image)")
+                    if img_name:
+                            # この画像の代表的なstart_rowを決定（利用可能な場合）
+                            start_row = 1
+                            try:
+                                pos = None
+                                try:
+                                    pos = self._get_image_position(image)
+                                except Exception:
+                                    pos = None
+                                if pos and isinstance(pos, dict):
+                                    # prefer explicit row if provided
+                                    if 'row' in pos and isinstance(pos['row'], int):
+                                        start_row = pos['row']
+                            except Exception:
+                                start_row = 1
+
+                            # 正規出力パス中の場合、即座に挿入し
+                            # the image appears inline with emitted text. Otherwise,
+                            # defer by registering into self._sheet_shape_images so the
+                            # canonical emission will place it deterministically.
+                            if getattr(self, '_in_canonical_emit', False):
+                                md_line = f"![{sheet.title}の図](images/{img_name})"
+                                ref = f"images/{img_name}"
+                                # この埋め込み画像が描画アンカーに対応する場合
+                                # that has already been preserved by a grouped render,
+                                # skip emitting it to avoid duplicate presentation.
+                                try:
+                                    cid_map = self._embedded_image_cid_by_name.get(sheet.title, {}) if hasattr(self, '_embedded_image_cid_by_name') else {}
+                                    mapped_cid = cid_map.get(img_name)
+                                    # ファイル名に_<sha8>.extのような短いハッシュサフィックスが含まれる場合、それを抽出してキーとして試行
+                                    if mapped_cid is None:
+                                        try:
+                                            # try extracting trailing 8-hex from filename
+                                            import re
+                                            m = re.search(r'([0-9a-f]{8})', img_name)
+                                            if m:
+                                                maybe = m.group(1)
+                                                mapped_cid = cid_map.get(maybe)
+                                        except Exception as e:
+                                            print(f"[WARNING] ファイル操作エラー: {e}")
+                                    # まだ不明な場合、ディスク上の既存ファイルから短いshaを計算して試行
+                                    if mapped_cid is None:
+                                        try:
+                                            fp = os.path.join(self.images_dir, img_name)
+                                            if os.path.exists(fp):
+                                                import hashlib as _hashlib
+                                                with open(fp, 'rb') as _f:
+                                                    d = _f.read()
+                                                sha8 = _hashlib.sha1(d).hexdigest()[:8]
+                                                mapped_cid = cid_map.get(sha8)
+                                        except (OSError, IOError, FileNotFoundError):
+                                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+                                    global_iso_preserved_ids = getattr(self, '_global_iso_preserved_ids', set()) or set()
+                                    if mapped_cid and str(mapped_cid) in global_iso_preserved_ids:
+                                        print(f"[DEBUG][_emit_image_skip] sheet={sheet.title} embedded image {img_name} suppressed (cid={mapped_cid} already preserved)")
+                                        continue
+                                except (OSError, IOError, FileNotFoundError):
+                                    print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+                                if ref in self._emitted_images or img_name in self._emitted_images:
+                                    continue
+                                try:
+                                    new_idx = self._insert_markdown_image(insert_index, md_line, img_name)
+                                    try:
+                                        if insert_index is not None:
+                                            insert_index = new_idx
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
+                                except Exception:
+                                    try:
+                                        self.markdown_lines.append(md_line)
+                                        self.markdown_lines.append("")
+                                        try:
+                                            self._mark_image_emitted(img_name)
+                                        except Exception as e:
+                                            print(f"[WARNING] ファイル操作エラー: {e}")
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
+                                # 挿入を延期: 正規の行ソート済み出力のため登録
+                                try:
+                                    # check mapped cNvPr for this embedded image and
+                                    # skip deferral if already preserved by a group render
+                                    cid_map = self._embedded_image_cid_by_name.get(sheet.title, {}) if hasattr(self, '_embedded_image_cid_by_name') else {}
+                                    mapped_cid = cid_map.get(img_name)
+                                    global_iso_preserved_ids = getattr(self, '_global_iso_preserved_ids', set()) or set()
+                                    if mapped_cid and str(mapped_cid) in global_iso_preserved_ids:
+                                        print(f"[DEBUG][_defer_image_skip] sheet={sheet.title} embedded image {img_name} suppressed on defer (cid={mapped_cid} already preserved)")
+                                    else:
+                                        self._sheet_shape_images.setdefault(sheet.title, [])
+                                        self._sheet_shape_images[sheet.title].append((start_row, img_name))
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                            else:
+                                # 非正規コンテキスト: 画像を登録/延期し
+                                # canonical emitter will place it deterministically.
+                                try:
+                                    cid_map = self._embedded_image_cid_by_name.get(sheet.title, {}) if hasattr(self, '_embedded_image_cid_by_name') else {}
+                                    mapped_cid = cid_map.get(img_name)
+                                    if mapped_cid is None:
+                                        try:
+                                            import re
+                                            m = re.search(r'([0-9a-f]{8})', img_name)
+                                            if m:
+                                                maybe = m.group(1)
+                                                mapped_cid = cid_map.get(maybe)
+                                        except Exception as e:
+                                            print(f"[WARNING] ファイル操作エラー: {e}")
+                                    if mapped_cid is None:
+                                        try:
+                                            fp = os.path.join(self.images_dir, img_name)
+                                            if os.path.exists(fp):
+                                                import hashlib as _hashlib
+                                                with open(fp, 'rb') as _f:
+                                                    d = _f.read()
+                                                sha8 = _hashlib.sha1(d).hexdigest()[:8]
+                                                mapped_cid = cid_map.get(sha8)
+                                        except (OSError, IOError, FileNotFoundError):
+                                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+                                    global_iso_preserved_ids = getattr(self, '_global_iso_preserved_ids', set()) or set()
+                                    if mapped_cid and str(mapped_cid) in global_iso_preserved_ids:
+                                        print(f"[DEBUG][_noncanonical_image_skip] sheet={sheet.title} embedded image {img_name} suppressed (cid={mapped_cid} already preserved)")
+                                        continue
+                                    
+                                    md_line = f"![{sheet.title}の図](images/{img_name})"
+                                    new_idx = self._insert_markdown_image(insert_index, md_line, img_name)
+                                    try:
+                                        if insert_index is not None:
+                                            insert_index = new_idx
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
+                                except Exception:
+                                    # フォールバック: sheet_shape_imagesに直接登録
+                                    try:
+                                        self._sheet_shape_images.setdefault(sheet.title, [])
+                                        self._sheet_shape_images[sheet.title].append((start_row, img_name))
+                                    except Exception as e:
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
+
             if not images_found:
                 print(f"[DEBUG] イメージが見つかりませんでした。")
                 # Avoid rendering sheets that contain only cell text; only fallback
