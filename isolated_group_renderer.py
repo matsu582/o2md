@@ -1468,7 +1468,7 @@ class IsolatedGroupRenderer:
                         rows = sheet_data.findall(f'{{{ns}}}row')
                         
                         new_sheet_data = ET.Element(sheet_data_tag)
-                        new_r_index = 1
+                        max_new_r_index = 0
                         
                         for row_el in rows:
                             try:
@@ -1478,6 +1478,9 @@ class IsolatedGroupRenderer:
                             
                             if rnum < orig_s_row or rnum > orig_e_row:
                                 continue
+                            
+                            new_r_index = rnum - orig_s_row + 1
+                            max_new_r_index = max(max_new_r_index, new_r_index)
                             
                             new_row = ET.Element(f'{{{ns}}}row')
                             new_row.set('r', str(new_r_index))
@@ -1528,7 +1531,6 @@ class IsolatedGroupRenderer:
                                 new_row.append(new_cell)
                             
                             new_sheet_data.append(new_row)
-                            new_r_index += 1
                         
                         parent = sroot4
                         for child in list(parent):
@@ -1542,7 +1544,7 @@ class IsolatedGroupRenderer:
                             dim = ET.Element(dim_tag)
                             sroot4.insert(0, dim)
                         start_addr = f"{self._col_letter(1)}1"
-                        end_addr = f"{self._col_letter(orig_e_col - orig_s_col + 1)}{max(1, new_r_index - 1)}"
+                        end_addr = f"{self._col_letter(orig_e_col - orig_s_col + 1)}{max(1, max_new_r_index)}"
                         dim.set('ref', f"{start_addr}:{end_addr}")
                     
                     cols_tag = f'{{{ns}}}cols'
