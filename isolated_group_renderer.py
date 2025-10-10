@@ -645,25 +645,26 @@ class IsolatedGroupRenderer:
                     # 変換実行が常にどのcNvPr IDが
                     # この分離グループに保持されたかの記録を出力するようにします。これは
                     # 下流のコードが後でクラスタをスキップすることを決定する際に有用です。
-                    try:
-                        import csv
-                        out_dir = getattr(self.converter, 'output_dir', None) or os.path.join(os.getcwd(), 'output')
-                        diag_dir = os.path.join(out_dir, 'diagnostics')
-                        os.makedirs(diag_dir, exist_ok=True)
-                        # 決定論的な名前: ベース + シート + 保持IDのハッシュ
+                    if getattr(self.converter, 'debug_mode', False):
                         try:
-                            base = getattr(self.converter, 'base_name')
-                        except Exception:
-                            base = os.path.splitext(os.path.basename(getattr(self.converter, 'excel_file', 'workbook')))[0]
-                        ksig = hashlib.sha1((base + sheet.title + ''.join(sorted(list(map(str, keep_cnvpr_ids))))).encode('utf-8')).hexdigest()[:8]
-                        diag_path = os.path.join(diag_dir, f"{base}_{self.converter._sanitize_filename(sheet.title)}_iso_{ksig}.csv")
-                        with open(diag_path, 'w', newline='', encoding='utf-8') as df:
-                            w = csv.writer(df)
-                            w.writerow(['keep_cnvpr_ids', 'preserved_ids', 'connector_children_keys'])
-                            w.writerow([";".join(sorted(list(map(str, keep_cnvpr_ids)))), ";".join(sorted(list(map(str, referenced_ids)))), ";".join(sorted(list(map(str, connector_children_by_id.keys()))) )])
-                        print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
-                    except (OSError, IOError, FileNotFoundError):
-                        print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+                            import csv
+                            out_dir = getattr(self.converter, 'output_dir', None) or os.path.join(os.getcwd(), 'output')
+                            diag_dir = os.path.join(out_dir, 'diagnostics')
+                            os.makedirs(diag_dir, exist_ok=True)
+                            # 決定論的な名前: ベース + シート + 保持IDのハッシュ
+                            try:
+                                base = getattr(self.converter, 'base_name')
+                            except Exception:
+                                base = os.path.splitext(os.path.basename(getattr(self.converter, 'excel_file', 'workbook')))[0]
+                            ksig = hashlib.sha1((base + sheet.title + ''.join(sorted(list(map(str, keep_cnvpr_ids))))).encode('utf-8')).hexdigest()[:8]
+                            diag_path = os.path.join(diag_dir, f"{base}_{self.converter._sanitize_filename(sheet.title)}_iso_{ksig}.csv")
+                            with open(diag_path, 'w', newline='', encoding='utf-8') as df:
+                                w = csv.writer(df)
+                                w.writerow(['keep_cnvpr_ids', 'preserved_ids', 'connector_children_keys'])
+                                w.writerow([";".join(sorted(list(map(str, keep_cnvpr_ids)))), ";".join(sorted(list(map(str, referenced_ids)))), ";".join(sorted(list(map(str, connector_children_by_id.keys()))) )])
+                            print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
+                        except (OSError, IOError, FileNotFoundError):
+                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
                 except (OSError, IOError, FileNotFoundError):
                     print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
             except (OSError, IOError, FileNotFoundError):
@@ -1983,8 +1984,11 @@ class IsolatedGroupRenderer:
             
             excel_base = os.path.splitext(os.path.basename(self.converter.excel_file))[0]
             
-            dbg_dir = os.path.join(self.converter.output_dir, 'debug_workbooks')
-            os.makedirs(dbg_dir, exist_ok=True)
+            if getattr(self.converter, 'debug_mode', False):
+                dbg_dir = os.path.join(self.converter.output_dir, 'debug_workbooks')
+                os.makedirs(dbg_dir, exist_ok=True)
+            else:
+                dbg_dir = tempfile.mkdtemp()
             
             final_xlsx_name = f"{excel_base}_iso_group{suffix}.xlsx"
             src_for_conv = os.path.join(dbg_dir, final_xlsx_name)
@@ -2055,21 +2059,22 @@ class IsolatedGroupRenderer:
                 return None
             
             # PDFを確認用に保存（isolated group）
-            try:
-                pdfs_dir = os.path.join(self.converter.output_dir, 'pdfs')
-                os.makedirs(pdfs_dir, exist_ok=True)
-                safe_sheet = self.converter._sanitize_filename(sheet.title)
-                
-                # shape_indicesからユニークなIDを生成
-                import hashlib
-                indices_str = '_'.join(map(str, sorted(shape_indices)))
-                group_hash = hashlib.md5(indices_str.encode()).hexdigest()[:8]
-                saved_pdf_name = f"{self.converter.base_name}_{safe_sheet}_iso_group_{group_hash}.pdf"
-                saved_pdf_path = os.path.join(pdfs_dir, saved_pdf_name)
-                shutil.copyfile(pdf_path, saved_pdf_path)
-                print(f"[INFO] 分離グループPDFを保存しました: {saved_pdf_path}")
-            except Exception as e:
-                print(f"[WARNING] 分離グループPDF保存失敗: {e}")
+            if getattr(self.converter, 'debug_mode', False):
+                try:
+                    pdfs_dir = os.path.join(self.converter.output_dir, 'pdfs')
+                    os.makedirs(pdfs_dir, exist_ok=True)
+                    safe_sheet = self.converter._sanitize_filename(sheet.title)
+                    
+                    # shape_indicesからユニークなIDを生成
+                    import hashlib
+                    indices_str = '_'.join(map(str, sorted(shape_indices)))
+                    group_hash = hashlib.md5(indices_str.encode()).hexdigest()[:8]
+                    saved_pdf_name = f"{self.converter.base_name}_{safe_sheet}_iso_group_{group_hash}.pdf"
+                    saved_pdf_path = os.path.join(pdfs_dir, saved_pdf_name)
+                    shutil.copyfile(pdf_path, saved_pdf_path)
+                    print(f"[INFO] 分離グループPDFを保存しました: {saved_pdf_path}")
+                except Exception as e:
+                    print(f"[WARNING] 分離グループPDF保存失敗: {e}")
             
             png_filename = os.path.basename(src_for_conv).replace('.xlsx', '.png')
             final_png_path = os.path.join(self.converter.images_dir, png_filename)
