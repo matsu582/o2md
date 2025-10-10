@@ -271,12 +271,12 @@ class IsolatedGroupRenderer:
         zpath = self.converter.excel_file
         z = excel_zip
         
-        # create tempdir and copy original xlsx contents there to modify
+        # 一時ディレクトリを作成し、変更するため元のxlsxコンテンツをコピー
         tmpdir = tempfile.mkdtemp(prefix='xls2md_iso_group_')
         try:
             with zipfile.ZipFile(zpath, 'r') as zin:
                 zin.extractall(tmpdir)
-            # Preserve original styles and theme so style references inside drawing XML resolve
+            # 描画XML内のスタイル参照が解決されるよう元のスタイルとテーマを保持
             try:
                 for preserve in ('xl/styles.xml', 'xl/theme/theme1.xml'):
                     if preserve in z.namelist():
@@ -292,21 +292,21 @@ class IsolatedGroupRenderer:
                 import traceback
                 traceback.print_exc()
 
-            # When pruning anchors below, ensure that any shapes referenced by
-            # connectors in the kept indices are also preserved. We'll compute
-            # referenced ids from the anchors list first, and also gather
-            # connector cosmetic children to copy into kept anchors.
-            # We'll compute a transitive closure of anchor ids to preserve.
-            # Build mappings of anchor_id -> referenced ids (refs) and reverse refs
-            # so we can include connectors that reference kept shapes and also
-            # include endpoints referenced by kept connectors, transitively.
+            # 以下でアンカーを刈り込む際、保持されるインデックス内の
+            # コネクタによって参照される図形も保持されることを確認します。
+            # まずアンカーリストから参照されるIDを計算し、
+            # 保持されるアンカーにコピーするコネクタコスメティック子要素も収集します。
+            # 保持するアンカーIDの推移的閉包を計算します。
+            # anchor_id -> 参照されるID(refs)と逆参照のマッピングを構築
+            # これにより保持される図形を参照するコネクタと
+            # 保持されるコネクタによって参照される端点を推移的に含めることができます。
             referenced_ids = set()
             connector_children_by_id = {}
             try:
                 refs = {}  # anchor_id -> set(of ids it references)
                 reverse_refs = {}  # id -> set(of anchor_ids that reference it)
 
-                # First, build refs and connector_children_by_id from all anchor nodes
+                # まず、すべてのアンカーノードからrefsとconnector_children_by_idを構築
                 for orig in list(drawing_xml):
                     lname = orig.tag.split('}')[-1].lower()
                     if lname not in ('twocellanchor', 'onecellanchor'):
@@ -318,7 +318,7 @@ class IsolatedGroupRenderer:
                             break
                     if cid is None:
                         continue
-                    # find referenced ids inside this anchor (stCxn/endCxn variants)
+                    # このアンカー内の参照されるIDを検索（stCxn/endCxnのバリアント）
                     rset = set()
                     for sub in orig.iter():
                         st = sub.tag.split('}')[-1].lower()
@@ -331,7 +331,7 @@ class IsolatedGroupRenderer:
                         for rid in rset:
                             reverse_refs.setdefault(rid, set()).add(cid)
 
-                    # search children for cosmetic subtrees to copy later
+                    # 後でコピーするコスメティックサブツリーの子要素を検索
                     kids = []
                     for child in orig:
                         for sub in child.iter():
@@ -342,21 +342,21 @@ class IsolatedGroupRenderer:
                     if kids:
                         connector_children_by_id[cid] = kids
 
-                # seed the BFS with explicitly requested keep ids
+                # 明示的に要求された保持IDでBFSをシード
                 preserve = set(keep_cnvpr_ids)
                 q = deque(keep_cnvpr_ids)
 
-                # Additionally, include anchors whose "from" row lies within
-                # any of the shape_indices' corresponding rows for this group.
-                # This enforces a row-based inclusion rule so connectors whose
-                # endpoints are on the same sheet row are preserved even if
-                # they are not transitively referenced via stCxn/endCxn tags.
+                # さらに、「from」行がこのグループの
+                # shape_indicesの対応する行内にあるアンカーを含めます。
+                # これにより行ベースの包含ルールが強制され、
+                # 端点が同じシート行上にあるコネクタは
+                # stCxn/endCxnタグを介して推移的に参照されていなくても保持されます。
                 try:
-                    # build mapping: cNvPr id -> from_row for all anchors
+                    # マッピングを構築: すべてのアンカーについてcNvPr id -> from_row
                     id_to_row = {}
                     ns_xdr = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
                     for an in anchors:
-                        # find cNvPr id
+                        # cNvPr IDを検索
                         a_cid = None
                         try:
                             for sub in an.iter():
@@ -379,11 +379,11 @@ class IsolatedGroupRenderer:
                                 except (ValueError, TypeError) as e:
                                     print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-                    # Build a fallback mapping from ALL anchors in the drawing
-                    # (not only those filtered into `anchors`) so we can find
-                    # endpoint rows for connector-only anchors that were
-                    # omitted by the drawable filter. This helps include
-                    # connectors whose endpoints are on the group's rows.
+                    # 描画内のすべてのアンカーからフォールバックマッピングを構築
+                    # （`anchors`にフィルタされたもののみでなく）これにより
+                    # 描画可能フィルタで省略された
+                    # コネクタ専用アンカーの端点行を見つけることができます。これにより
+                    # 端点がグループの行上にあるコネクタを含めることができます。
                     all_id_to_row = {}
                     try:
                         for orig_an in list(drawing_xml):
@@ -408,35 +408,35 @@ class IsolatedGroupRenderer:
                     except (ValueError, TypeError):
                         all_id_to_row = {}
 
-                    # Determine group's approximate row span by inspecting the
-                    # keep_cnvpr_ids' rows and include anchors on those rows.
+                    # keep_cnvpr_idsの行を検査することでグループの
+                    # おおよその行範囲を決定し、それらの行のアンカーを含めます。
                     group_rows = set()
                     for cid in keep_cnvpr_ids:
                         if str(cid) in id_to_row:
                             group_rows.add(id_to_row[str(cid)])
-                    # include any anchor whose from_row is in group_rows
+                    # from_rowがgroup_rows内にあるアンカーを含める
                     for cid, r in id_to_row.items():
                         if r in group_rows and cid not in preserve:
                             preserve.add(cid)
                             q.append(cid)
                 except (ValueError, TypeError) as e:
                     print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                # Expand transitive closure but constrain expansion by row membership
-                # to avoid pulling the same anchor into multiple row-based clusters.
-                # Only include a candidate anchor/ref if its 'from' row lies within
-                # the group's rows (group_rows) or if it was part of the original seed
-                # (keep_cnvpr_ids). This prevents cross-cluster duplication while
-                # keeping local endpoints.
-                # Ensure id_to_row exists (may be empty if earlier parsing failed)
+                # 推移的閉包を拡張するが、行所属によって拡張を制約
+                # 同じアンカーが複数の行ベースクラスタに引き込まれることを避けます。
+                # 候補アンカー/参照の'from'行がグループの行内にある場合、
+                # または元のシード(keep_cnvpr_ids)の一部だった場合のみ含めます。
+                # これによりクラスタ間の重複を防ぎながら
+                # ローカル端点を保持します。
+                # id_to_rowが存在することを確認（以前の解析が失敗した場合は空の可能性）
                 try:
                     id_to_row
                 except NameError:
                     id_to_row = {}
 
-                # Protect BFS expansion from pathological inputs by
-                # bounding the number of deque pops. If we exceed the
-                # cap, emit a warning and stop expanding further to
-                # avoid infinite loops observed on malformed workbooks.
+                # 病的な入力からBFS拡張を保護するため
+                # dequeのポップ数に上限を設定します。上限を超えた場合、
+                # 警告を出力し、それ以上の拡張を停止して
+                # 不正なワークブックで観察された無限ループを避けます。
                 bfs_iter = 0
                 bfs_max = max(1000, len(keep_cnvpr_ids) * 10 if keep_cnvpr_ids else 1000)
                 while q:
@@ -445,21 +445,21 @@ class IsolatedGroupRenderer:
                         print(f"[WARN][_iso_bfs] reached bfs_max={bfs_max}; aborting BFS expansion (preserve_count={len(preserve)})")
                         break
                     cur = q.popleft()
-                    # anchors that reference cur -> consider including them
+                    # curを参照するアンカー -> それらを含めることを検討
                     for anc in list(reverse_refs.get(str(cur), set())):
                         if anc in preserve:
                             continue
-                        # allow if anc was in original seed
+                        # ancが元のシードにあった場合は許可
                         if anc in keep_cnvpr_ids:
                             preserve.add(anc)
                             q.append(anc)
                             continue
-                        # otherwise require anc's from_row to be in group_rows
+                        # それ以外の場合はancのfrom_rowがgroup_rows内にあることを要求
                         anc_row = id_to_row.get(str(anc))
                         if anc_row is not None and anc_row in group_rows:
                             preserve.add(anc)
                             q.append(anc)
-                    # ids that cur references -> consider including them
+                    # curが参照するID -> それらを含めることを検討
                     for ref in list(refs.get(str(cur), set())):
                         if ref in preserve:
                             continue
@@ -472,23 +472,23 @@ class IsolatedGroupRenderer:
                             preserve.add(ref)
                             q.append(ref)
 
-                # Before exposing the set of preserved ids, also ensure we
-                # include connector-only anchors that were recorded in
-                # connector_children_by_id when those connector anchors
-                # reference any id already in the preserve set. The
-                # earlier BFS conservatively constrains expansion by group
-                # rows which can omit connector-only anchors whose
-                # endpoints lie just outside the group's rows. That
-                # causes connectors (e.g. 56,61) to be pruned; include them
-                # here if they reference preserved shapes so they are
-                # rendered with the group.
+                # 保持されるIDのセットを公開する前に、
+                # connector_children_by_idに記録された
+                # コネクタ専用アンカーも含めることを確認します。
+                # これらのコネクタアンカーが既に保持セットにあるIDを参照する場合です。
+                # 以前のBFSは保守的にグループ行による拡張を制約しており、
+                # これによりグループの行のすぐ外に端点がある
+                # コネクタ専用アンカーが省略される可能性があります。それにより
+                # コネクタ(例: 56,61)が刈り込まれます; 保持される図形を
+                # 参照する場合はここでそれらを含め、
+                # グループと共にレンダリングされるようにします。
                 try:
                     for cid, kids in list(connector_children_by_id.items()):
                         try:
-                            # If this connector (cid) already preserved, skip
+                            # このコネクタ(cid)が既に保持されている場合はスキップ
                             if cid in preserve:
                                 continue
-                            # Inspect cosmetic children for endpoint refs
+                            # 端点参照のためコスメティック子要素を検査
                             added = False
                             endpoints = set()
                             for ch in kids:
@@ -501,7 +501,7 @@ class IsolatedGroupRenderer:
                                         vid = sub.attrib.get('id') or sub.attrib.get('idx')
                                         if vid is not None:
                                             endpoints.add(str(vid))
-                            # If any endpoint directly references an already-preserved id, include connector
+                            # いずれかの端点が既に保持されているIDを直接参照している場合、コネクタを含める
                             if endpoints and (endpoints & set(preserve)):
                                 preserve.add(str(cid))
                                 try:
@@ -509,13 +509,13 @@ class IsolatedGroupRenderer:
                                 except (ValueError, TypeError):
                                     pass  # データ構造操作失敗は無視
                                 continue
-                            # Also include connector if any endpoint's anchor 'from' row
-                            # is inside this group's rows (id_to_row may be empty if earlier parsing failed)
+                            # いずれかの端点のアンカーの'from'行が
+                            # このグループの行内にある場合もコネクタを含める（以前の解析が失敗した場合id_to_rowは空の可能性）
                             try:
                                 for vid in endpoints:
                                     try:
-                                        # prefer id_to_row (filtered anchors) but fall back
-                                        # to all_id_to_row if not present
+                                        # id_to_row（フィルタされたアンカー）を優先するが
+                                        # 存在しない場合はall_id_to_rowにフォールバック
                                         row_for_vid = id_to_row.get(str(vid)) or all_id_to_row.get(str(vid))
                                     except (ValueError, TypeError):
                                         row_for_vid = None
@@ -531,17 +531,17 @@ class IsolatedGroupRenderer:
                                     continue
                             except (ValueError, TypeError) as e:
                                 print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                            # fallback: if endpoints empty or no match, skip
+                            # フォールバック: 端点が空または一致しない場合はスキップ
                         except (ValueError, TypeError) as e:
                             print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 except Exception:
                     pass  # データ構造操作失敗は無視
 
-                # Heuristic: include connectors whose own anchor 'from' row
-                # is inside the group's rows even when their cosmetic children
-                # do not expose endpoint tags. This handles connector-only
-                # anchors that were omitted from id_to_row but appear in
-                # all_id_to_row (we built that fallback earlier).
+                # ヒューリスティック: 自身のアンカーの'from'行が
+                # グループの行内にあるコネクタを、そのコスメティック子要素が
+                # 端点タグを公開していない場合でも含めます。これにより
+                # id_to_rowから省略されたがall_id_to_rowに
+                # 現れるコネクタ専用アンカーを処理します（以前にそのフォールバックを構築しました）。
                 try:
                     for cid in list(connector_children_by_id.keys()):
                         scid = str(cid)
@@ -554,7 +554,7 @@ class IsolatedGroupRenderer:
                             if rowc is None and 'all_id_to_row' in locals():
                                 rowc = all_id_to_row.get(scid)
                             if rowc is not None:
-                                # accept exact match or off-by-one to be more tolerant
+                                # より寛容になるため完全一致またはオフバイワンを受け入れる
                                 accept = False
                                 try:
                                     if rowc in group_rows:
@@ -577,10 +577,10 @@ class IsolatedGroupRenderer:
                 except Exception:
                     pass  # データ構造操作失敗は無視
 
-                # For debugging, expose the set of preserved ids
+                # デバッグのため、保持されるIDのセットを公開
                 referenced_ids = set(preserve)
                 try:
-                    # Extra debug: dump row mappings and connector endpoint resolution
+                    # 追加デバッグ: 行マッピングとコネクタ端点解決をダンプ
                     try:
                         dbg_rows = sorted(list(group_rows)) if 'group_rows' in locals() else []
                     except Exception:
@@ -594,7 +594,7 @@ class IsolatedGroupRenderer:
                     except Exception:
                         dbg_all_id_to_row_keys = []
                     print(f"[DEBUG][_iso_group_extra] group_rows={dbg_rows} id_to_row_keys={dbg_id_to_row_keys} all_id_to_row_keys={dbg_all_id_to_row_keys}")
-                    # For each connector cosmetic entry, list endpoints (may be empty) and mapped rows
+                    # 各コネクタコスメティックエントリについて、端点（空の可能性）とマップされた行をリスト
                     try:
                         for ccid in sorted(list(connector_children_by_id.keys()), key=lambda x: int(x) if str(x).isdigit() else x):
                             ckids = connector_children_by_id.get(ccid, [])
@@ -609,7 +609,7 @@ class IsolatedGroupRenderer:
                                         vid = sub.attrib.get('id') or sub.attrib.get('idx')
                                         if vid is not None:
                                             eps.add(str(vid))
-                            # map to rows via id_to_row or all_id_to_row (may be empty)
+                            # id_to_rowまたはall_id_to_rowを介して行にマップ（空の可能性）
                             rows_mapped = []
                             for e in sorted(list(eps)):
                                 try:
@@ -624,7 +624,7 @@ class IsolatedGroupRenderer:
                             print(f"[DEBUG][_iso_group_conn] cid={ccid} endpoints={sorted(list(eps))} mapped_rows={rows_mapped}")
                     except (ValueError, TypeError) as e:
                         print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                    # Additionally, show explicit mapping for connector-only ids that are present only in all_id_to_row
+                    # さらに、all_id_to_rowにのみ存在するコネクタ専用IDの明示的なマッピングを表示
                     try:
                         for special in ('56','61'):
                             if 'all_id_to_row' in locals() and special in all_id_to_row:
@@ -633,7 +633,7 @@ class IsolatedGroupRenderer:
                         print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     msg = f"[DEBUG][_iso_group] keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))} preserved_ids={sorted(list(referenced_ids))} connector_children_keys={sorted(list(connector_children_by_id.keys()))}"
                     print(msg)
-                    # expose preserved ids for callers so they can avoid duplicate renders
+                    # 呼び出し側が重複レンダリングを避けられるよう保持されるIDを公開
                     try:
                         self._last_iso_preserved_ids = set(referenced_ids)
                     except (ValueError, TypeError):
@@ -641,16 +641,16 @@ class IsolatedGroupRenderer:
                             self._last_iso_preserved_ids = set()
                         except (ValueError, TypeError) as e:
                             print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                    # Write a per-isolation diagnostic file (guaranteed path) so
-                    # conversion runs always emit a record of which cNvPr ids
-                    # were preserved into this isolated group. This is useful
-                    # when downstream code later decides to skip clusters.
+                    # 分離毎の診断ファイル（保証されたパス）を書き込み、
+                    # 変換実行が常にどのcNvPr IDが
+                    # この分離グループに保持されたかの記録を出力するようにします。これは
+                    # 下流のコードが後でクラスタをスキップすることを決定する際に有用です。
                     try:
                         import csv
                         out_dir = getattr(self.converter, 'output_dir', None) or os.path.join(os.getcwd(), 'output')
                         diag_dir = os.path.join(out_dir, 'diagnostics')
                         os.makedirs(diag_dir, exist_ok=True)
-                        # deterministic name: base + sheet + hash of keep ids
+                        # 決定論的な名前: ベース + シート + 保持IDのハッシュ
                         try:
                             base = getattr(self.converter, 'base_name')
                         except Exception:
@@ -686,13 +686,13 @@ class IsolatedGroupRenderer:
             try:
                 for sub in n.iter():
                     lname = sub.tag.split('}')[-1].lower()
-                    # keep node if it contains a cNvPr whose id matches any referenced id
+                    # 参照されるIDと一致するIDを持つcNvPrを含む場合はノードを保持
                     if lname == 'cnvpr' or lname.endswith('cnvpr'):
                         vid = sub.attrib.get('id') or sub.attrib.get('idx')
                         if vid is not None and str(vid) in referenced_ids:
                             return True
-                    # also keep node if it contains connector endpoint refs
-                    # such as <a:stCxn id="N"/> or <a:endCxn id="M"/>
+                    # コネクタ端点参照を含む場合もノードを保持
+                    # <a:stCxn id="N"/>や<a:endCxn id="M"/>など
                     if lname in ('stcxn', 'endcxn', 'stcxnpr', 'endcxnpr'):
                         vid = sub.attrib.get('id') or sub.attrib.get('idx')
                         if vid is not None and str(vid) in referenced_ids:
@@ -701,7 +701,7 @@ class IsolatedGroupRenderer:
                 pass  # 一時ディレクトリ削除失敗は無視
             return False
 
-        # parse drawing xml from extracted file
+        # 抽出されたファイルから描画XMLを解析
         try:
             tree = ET.parse(drawing_relpath)
             root = tree.getroot()
@@ -710,16 +710,16 @@ class IsolatedGroupRenderer:
             root = ET.fromstring(drawing_xml_bytes)
             tree = ET.ElementTree(root)
 
-        # remove anchors whose cNvPr id is not in keep_cnvpr_ids and which
-        # do not contain referenced ids (connector endpoints). This avoids
-        # relying on index positions which previously caused mismatches
-        # when anchors was built as a filtered list.
-        # If keep_cnvpr_ids is empty (index->id mapping failed), fall back
-        # to preserving anchors that lie within the computed cell_range
-        # when available. This avoids producing an empty trimmed drawing
-        # workbook for groups whose indices were synthesized from cell
-        # ranges rather than exact anchor indices.
-        # Compute group_rows from cell_range for quick membership tests.
+        # cNvPr IDがkeep_cnvpr_idsにない、かつ
+        # 参照されるID（コネクタ端点）を含まないアンカーを削除します。これにより
+        # 以前にミスマッチを引き起こしたインデックス位置への依存を避けます。
+        # anchorsがフィルタされたリストとして構築された場合です。
+        # keep_cnvpr_idsが空の場合（index->idマッピングが失敗）、
+        # 利用可能な場合、計算されたcell_range内にある
+        # アンカーを保持することにフォールバックします。これにより
+        # セル範囲から合成されたインデックスを持つグループに対して
+        # 空のトリミングされた描画ワークブックが生成されることを避けます。
+        # 迅速なメンバーシップテストのためcell_rangeからgroup_rowsを計算
         group_rows = set()
         try:
             if cell_range:
@@ -731,18 +731,18 @@ class IsolatedGroupRenderer:
         for node in list(root):
             lname = node.tag.split('}')[-1].lower()
             if lname in ('twocellanchor', 'onecellanchor'):
-                # find cNvPr id for this anchor
+                # cNvPr IDを検索 for this anchor
                 this_cid = None
                 for sub in node.iter():
                     if sub.tag.split('}')[-1].lower() == 'cnvpr':
                         this_cid = sub.attrib.get('id') or sub.attrib.get('idx')
                         break
 
-                # If we have an explicit id and it's requested, keep it.
+                # 明示的なIDがあり、それが要求されている場合は保持します。
                 if this_cid is not None and str(this_cid) in keep_cnvpr_ids:
                     continue
 
-                # If the node contains referenced ids (connector endpoints), keep it.
+                # ノードが参照されるID（コネクタ端点）を含む場合は保持します。
                 try:
                     if node_contains_referenced_id(node):
                         continue

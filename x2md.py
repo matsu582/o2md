@@ -56,15 +56,13 @@ IMAGE_BORDER_SIZE = 8
 MAX_HEAD_SCAN_ROWS = 12
 MAX_SCAN_COLUMNS = 60
 
-# Note: specific-word header lists were removed to avoid sheet-specific rules.
-# Generic structural heuristics are used instead (column non-empty ratios, path-like detection, etc.).
 
 
 class ExcelToMarkdownConverter:
     class _LoggingList(list):
-        """A tiny wrapper around list to log append/insert operations for debugging.
+        """デバッグ用にappend/insert操作をログ出力するlistのラッパー
 
-        It prints to stdout and, if available, writes to the converter's debug log.
+        標準出力にログを出力し、可能であればコンバータのデバッグログにも書き込みます。
         """
         def __init__(self, owner, *args):
             super().__init__(*args)
@@ -72,25 +70,21 @@ class ExcelToMarkdownConverter:
 
         def append(self, item):
             print(f"[MD_APPEND] {repr(item)}")
-            # Minimal protective behavior: avoid adding duplicate '---' separators
             try:
                 if isinstance(item, str) and item.strip() == '---' and len(self) and isinstance(self[-1], str) and self[-1].strip() == '---':
                     return
             except (ValueError, TypeError):
-                # conservative fallback: ignore logging-related errors
                 pass
 
-            # Append normally
             return super().append(item)
 
     def __init__(self, excel_file_path: str, output_dir=None):
-        """Initialize converter instance.
+        """コンバータインスタンスの初期化
 
-        Provides a minimal, safe constructor so the module can be used via
-        the CLI. It intentionally keeps initialization conservative and
-        prepares common per-sheet ephemeral state used across methods.
+        CLIから使用できるように、最小限で安全なコンストラクタを提供します。
+        意図的に保守的な初期化を維持し、メソッド間で使用される共通のシート毎の
+        一時的な状態を準備します。
         """
-        # Basic file/paths
         self.excel_file = excel_file_path
         self.base_name = Path(excel_file_path).stem
         if output_dir:
@@ -99,29 +93,24 @@ class ExcelToMarkdownConverter:
             self.output_dir = os.path.join(os.getcwd(), "output")
         self.images_dir = os.path.join(self.output_dir, "images")
 
-        # Ensure output directories exist
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.images_dir, exist_ok=True)
 
-        # Primary buffers and counters
         self.markdown_lines = self._LoggingList(self)
         self.image_counter = 0
 
-        # Per-sheet ephemeral state (initialized here, cleared per sheet)
         self._init_per_sheet_state()
 
-        # Lightweight logger used by many debug calls in the codebase
         class _SimpleLogger:
             def debug(self, *args, **kwargs):
                 print("[LOGGER_DEBUG]", *args)
         self.logger = _SimpleLogger()
 
-        # Load workbook
         self.workbook = load_workbook(excel_file_path, data_only=True)
         print(f"[INFO] Excelワークブック読み込み完了: {excel_file_path}")
 
     def _init_per_sheet_state(self):
-        """Initialize per-sheet state variables."""
+        """シート毎の状態変数を初期化"""
         self._cell_to_md_index = {}
         self._sheet_shape_images = {}
         self._sheet_shape_next_idx = {}
@@ -180,18 +169,18 @@ class ExcelToMarkdownConverter:
         """
         print(f"[INFO] Excel文書変換開始: {self.excel_file}")
 
-        # prepend document title
+        # ドキュメントタイトルを先頭に追加
         self.markdown_lines.append(f"# {self.base_name}")
         self.markdown_lines.append("")
 
-        # generate TOC if helper exists
+        # ヘルパーが存在する場合は目次を生成
         if hasattr(self, '_generate_toc') and callable(getattr(self, '_generate_toc')):
             try:
                 self._generate_toc()
             except Exception as e:
                 print(f"[WARNING] 目次生成失敗: {e}")
 
-        # convert sheets
+        # シートを変換
         for sheet_name in self.workbook.sheetnames:
             try:
                 print(f"[INFO] シート変換中: {sheet_name}")
@@ -203,7 +192,7 @@ class ExcelToMarkdownConverter:
                 traceback.print_exc()
                 continue
 
-        # Write markdown output
+        # Markdown出力を書き込み
         output_file = os.path.join(self.output_dir, f"{self.base_name}.md")
         content = "\n".join(str(x) for x in self.markdown_lines)
         with open(output_file, 'w', encoding='utf-8') as f:
@@ -215,48 +204,48 @@ class ExcelToMarkdownConverter:
         """外枠罫線のみで囲まれた最大矩形をテーブルと判定（内部罫線は無視）"""
         tables = []
         print("[DEBUG] セル罫線情報一覧:")
-        # Minimal safe implementation: detailed bordered-table detection logic
-        # was removed during previous edits and corrupted the file structure.
-        # Returning empty 'tables' here is safe: calling code can handle no
-        # detected bordered tables and will fall back to the general table
-        # detection logic elsewhere.
+        # 最小限の安全な実装: 詳細な罫線テーブル検出ロジック
+        # は以前の編集で削除されファイル構造が破損しました。
+        # ここで空の'tables'を返すのは安全: 呼び出しコードは
+        # 検出された罫線テーブルがない場合を処理でき、一般的なテーブル
+        # 検出ロジックにフォールバックします。
         return tables
         # デッドコード削除: self.image_counter = 0
-        # mapping: sheet.title -> dict of (row_num -> markdown line index after that row's output)
-        # we'll populate this while emitting markdown for rows/regions so that drawings
-        # anchored to a cell (row) can be inserted immediately after the corresponding
-        # paragraph/table output.
+        # マッピング: sheet.title -> 辞書(行番号 -> その行の出力後のmarkdown行インデックス)
+        # 行/領域のmarkdownを出力する際にこれを設定し、描画を
+        # セル(行)に固定された描画を対応する
+        # 段落/テーブル出力の直後に挿入できるようにします。
         self._cell_to_md_index = {}
-        # mapping of sheet.title -> list of generated shape image filenames (in images_dir)
+        # マッピング: sheet.title -> 生成された図形画像ファイル名のリスト(images_dir内)
         self._sheet_shape_images = {}
-        # mapping of sheet.title -> next index to insert
+        # マッピング: sheet.title -> 次の挿入インデックス
         self._sheet_shape_next_idx = {}
-        # set of sheet titles for which shapes have been generated
+        # 図形が生成されたシートタイトルの集合
         self._sheet_shapes_generated = set()
-        # Historical code used a persisted start_map to remember where images
-        # should be inserted across runs. That behavior caused separate group
-        # images to be collapsed into a single insertion bucket in some runs.
-        # Ensure any such persisted map is disabled by default so freshly
-        # computed representative start_row values are authoritative.
+        # 過去のコードは永続化されたstart_mapを使用して画像の
+        # 挿入位置を実行間で記憶していました。この動作により別々のグループ
+        # 画像が一部の実行で単一の挿入バケットに集約されていました。
+        # このような永続化されたマップはデフォルトで無効にし、新たに
+        # 計算された代表的なstart_row値が正式なものとなるようにします。
         self._sheet_shape_image_start_rows = {}
-        # deferred free-form texts collected during early header scanning
-        # sheet.title -> list of (row, text)
+        # 初期ヘッダースキャン中に収集された延期された自由形式テキスト
+        # sheet.title -> (行, テキスト)のリスト
         self._sheet_deferred_texts = {}
-        # deferred tables collected during pre-scan: sheet.title -> list of (anchor_row, table_data, source_rows)
+        # プレスキャン中に収集された延期テーブル: sheet.title -> (アンカー行, テーブルデータ, ソース行)のリスト
         self._sheet_deferred_tables = {}
-        # track per-sheet emitted textual content (normalized) to avoid duplicate free-form text
+        # 重複する自由形式テキストを避けるためシート毎の出力済みテキストコンテンツ(正規化済み)を追跡
         self._sheet_emitted_texts = {}
-        # track per-sheet emitted row numbers (used to avoid re-emitting rows)
+        # 行の再出力を避けるためシート毎の出力済み行番号を追跡
         self._sheet_emitted_rows = {}
-        # track emitted image filenames (basename) to avoid duplicate image insertions
+        # 重複画像挿入を避けるため出力済み画像ファイル名(ベース名)を追跡
         self._emitted_images = set()
-        # mapping: sheet.title -> { image_basename: cNvPr_id }
-        # populated when parsing drawing XML so we can tell which embedded
-        # image corresponds to which drawing anchor id (cNvPr). This lets us
-        # suppress embedded images when a clustered/group render already
-        # produced an image containing the same cNvPr id.
+        # マッピング: sheet.title -> { 画像ベース名: cNvPr_id }
+        # 描画XMLを解析する際に設定され、どの埋め込み
+        # 画像がどの描画アンカーID(cNvPr)に対応するかを判別できます。これにより
+        # クラスタ化/グループレンダリングが既に
+        # 同じcNvPr IDを含む画像を生成している場合、埋め込み画像を抑制できます。
         self._embedded_image_cid_by_name = {}
-        # (removed) no per-sheet special-case flags (do not control processing by specific cell text)
+        # (削除済み) シート毎の特殊ケースフラグなし（特定のセルテキストによる処理制御を行わない）
 
         # Excelファイルを読み込み
         try:
@@ -304,7 +293,7 @@ class ExcelToMarkdownConverter:
             if text is None:
                 return ''
             t = str(text)
-            # Replace literal angle brackets with HTML entities for safe display
+            # 安全な表示のためリテラル山括弧をHTMLエンティティに置換
             t = t.replace('<', '&lt;').replace('>', '&gt;')
             return t
         except (ValueError, TypeError):
@@ -331,7 +320,7 @@ class ExcelToMarkdownConverter:
         if not self._is_canonical_emit():
             return False
 
-        # Inspect last few markdown lines to avoid emitting duplicate separators
+        # 重複セパレータの出力を避けるため最後の数行をチェック
         tail = [x for x in self.markdown_lines[-6:] if isinstance(x, str)]
         for t in reversed(tail):
             if t.strip() == '':
@@ -359,33 +348,33 @@ class ExcelToMarkdownConverter:
             if text is None:
                 return False
             norm = self._normalize_text(text)
-            # do not create authoritative emitted_texts entry here; use get to avoid
-            # mutating the authoritative store outside the canonical emitter.
+            # ここで正式なemitted_textsエントリを作成しない; getを使用して
+            # 正規エミッタの外で正式なストアを変更することを避けます。
             emitted_texts = self._sheet_emitted_texts.get(sheet.title, set())
             if norm in emitted_texts:
                 return False
 
             if self._is_canonical_emit():
-                # Canonical emission: append to markdown buffer
+                # 正規の出力: markdownバッファに追加
                 self.markdown_lines.append(self._escape_angle_brackets(text) + "  ")
                 
-                # Map source row to markdown index
+                # ソース行をmarkdownインデックスにマップ
                 if src_row is not None:
                     md_index = len(self.markdown_lines) - 1
                     self._mark_sheet_map(sheet.title, src_row, md_index)
                     self.logger.debug(f"[_text_emit] sheet={sheet.title} src_row={src_row} md_index={md_index} text_norm='{norm}'")
                     print(f"[DEBUG][_text_emit] sheet={sheet.title} src_row={src_row} md_index={md_index} text_norm='{norm}'")
                 
-                # Mark as emitted
+                # 出力済みとしてマーク
                 if src_row is not None:
                     self._mark_emitted_row(sheet.title, src_row)
                 self._mark_emitted_text(sheet.title, norm)
                 return True
             else:
-                # Defer emission for later canonical pass
+                # 後の正規パスのため出力を延期
                 lst = self._sheet_deferred_texts.setdefault(sheet.title, [])
                 
-                # Check for duplicate deferred text
+                # 重複する延期テキストをチェック
                 already_deferred = any(
                     dt is not None and self._normalize_text(dt) == norm
                     for _, dt in lst
@@ -410,35 +399,35 @@ class ExcelToMarkdownConverter:
             caller = stk[-3] if len(stk) >= 3 else None
             caller_info = f"{caller.filename}:{caller.lineno}:{caller.name}" if caller else 'unknown'
             print(f"[DEBUG][_insert_markdown_image_called] insert_at={insert_at} img_name={img_name} caller={caller_info}")
-            # If we're not in the canonical emission pass and immediate image
-            # inserts are not explicitly allowed, convert this request into a
-            # deferred registration so the canonical emitter controls placement.
+            # 正規の出力パス中でなく、即座の画像
+            # 挿入が明示的に許可されていない場合、このリクエストを
+            # 延期登録に変換し、正規エミッタが配置を制御するようにします。
             if not getattr(self, '_in_canonical_emit', False) and not getattr(self, '_allow_immediate_image_inserts', False):
                 try:
-                    # Try to infer sheet title from the markdown alt text: '![<title>](images/...)'
+                    # markdownのaltテキストからシートタイトルを推測: '![<title>](images/...)'
                     import re
                     m = re.search(r'!\[(.*?)\]', md_line or "")
                     sheet_title = None
                     if m:
                         sheet_title = m.group(1)
-                        # remove trailing 'の図' if present (common alt text pattern)
+                        # 末尾の'の図'が存在する場合は削除（一般的なaltテキストパターン）
                         if sheet_title.endswith('の図'):
                             sheet_title = sheet_title[:-2]
                 except Exception:
                     sheet_title = None
                 key = sheet_title if sheet_title is not None else 'unknown'
-                # sheet_shape_images is a deferred, non-authoritative collection
-                # and may be safely mutated here.
+                # sheet_shape_imagesは延期された非正式なコレクションで
+                # ここで安全に変更できます。
                 lst = self._sheet_shape_images.setdefault(key, [])
-                # Use representative row=1 as a safe default when unknown.
-                # Avoid registering the same image multiple times for the same sheet.
+                # 不明な場合は安全なデフォルトとして代表的な行=1を使用します。
+                # 同じシートに対して同じ画像を複数回登録することを避けます。
                 already = any((isinstance(it, (list, tuple)) and len(it) >= 2 and it[1] == img_name) or (str(it) == img_name) for it in lst)
                 if not already:
                     lst.append((1, img_name))
                     print(f"[DEBUG][_insert_markdown_image_deferred] img_name={img_name} sheet={key}")
 
-                # No mutation performed; caller expecting insertion will receive
-                # current markdown length as if appended.
+                # 変更は実行されません; 挿入を期待する呼び出し側は
+                # 追加されたかのように現在のmarkdown長を受け取ります。
                 return len(self.markdown_lines)
 
             if insert_at is None:
@@ -447,7 +436,7 @@ class ExcelToMarkdownConverter:
                 self._mark_image_emitted(img_name)
                 return len(self.markdown_lines)
 
-            # clamp insert_at
+            # insert_atをクランプ
             try:
                 if insert_at < 0:
                     insert_at = 0
@@ -456,13 +445,13 @@ class ExcelToMarkdownConverter:
             if insert_at > len(self.markdown_lines):
                 insert_at = len(self.markdown_lines)
 
-            # Insert blank then the md line to preserve relative order for multiple inserts
+            # 複数挿入の相対順序を保持するため空行とmd行を挿入
             self.markdown_lines.insert(insert_at, "")
             self.markdown_lines.insert(insert_at, md_line)
             self._mark_image_emitted(img_name)
             return insert_at + 2
         except Exception:
-            # fallback: append
+            # フォールバック: 追加
             self.markdown_lines.append(md_line)
             self.markdown_lines.append("")
             self._mark_image_emitted(img_name)
@@ -555,10 +544,10 @@ class ExcelToMarkdownConverter:
         """シートを変換"""
         sheet_name = sheet.title
         
-        # Clear previous per-sheet state and initialize defaults
+        # 前のシート毎の状態をクリアしてデフォルトを初期化
         self._clear_sheet_state(sheet_name)
         
-        # Initialize defaults for this sheet
+        # このシートのデフォルトを初期化
         self._cell_to_md_index.setdefault(sheet_name, {})
         self._sheet_shape_images.setdefault(sheet_name, [])
         self._sheet_shape_next_idx.setdefault(sheet_name, 0)
@@ -2200,7 +2189,7 @@ class ExcelToMarkdownConverter:
                                             # no textual mapping; append sequentially at insert_base
                                             insert_at = insert_base
 
-                                    # clamp insert_at to valid markdown range
+                                    # insert_atをクランプ to valid markdown range
                                     if insert_at < 0:
                                         insert_at = 0
                                     if insert_at > len(self.markdown_lines):
