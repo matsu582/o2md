@@ -1525,6 +1525,31 @@ class IsolatedGroupRenderer:
                 print(f"[WARNING] sheetData再構築失敗: {e}")
             
             try:
+                if os.path.exists(sheet_rel):
+                    stree_drawing = ET.parse(sheet_rel)
+                    sroot_drawing = stree_drawing.getroot()
+                    ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+                    r_ns = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+                    
+                    drawing_elem = sroot_drawing.find(f'.//{{{ns}}}drawing')
+                    
+                    if drawing_elem is None:
+                        drawing_elem = ET.Element(f'{{{ns}}}drawing')
+                        drawing_elem.set(f'{{{r_ns}}}id', 'rId1')
+                        
+                        sheet_data_elem = sroot_drawing.find(f'{{{ns}}}sheetData')
+                        if sheet_data_elem is not None:
+                            idx = list(sroot_drawing).index(sheet_data_elem)
+                            sroot_drawing.insert(idx + 1, drawing_elem)
+                        else:
+                            sroot_drawing.append(drawing_elem)
+                        
+                        stree_drawing.write(sheet_rel, encoding='utf-8', xml_declaration=True)
+                        print(f"[DEBUG] <drawing>要素を追加: {sheet_rel}")
+            except Exception as e:
+                print(f"[WARNING] <drawing>要素追加失敗: {e}")
+            
+            try:
                 drawing_path_full = os.path.join(tmpdir, drawing_path)
                 if os.path.exists(drawing_path_full):
                     dtree = ET.parse(drawing_path_full)
