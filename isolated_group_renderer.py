@@ -2024,6 +2024,23 @@ class IsolatedGroupRenderer:
                 print(f"[WARN] LibreOffice PDF変換失敗")
                 return None
             
+            # PDFを確認用に保存（isolated group）
+            try:
+                pdfs_dir = os.path.join(self.converter.output_dir, 'pdfs')
+                os.makedirs(pdfs_dir, exist_ok=True)
+                safe_sheet = self.converter._sanitize_filename(sheet.title)
+                
+                # shape_indicesからユニークなIDを生成
+                import hashlib
+                indices_str = '_'.join(map(str, sorted(shape_indices)))
+                group_hash = hashlib.md5(indices_str.encode()).hexdigest()[:8]
+                saved_pdf_name = f"{self.converter.base_name}_{safe_sheet}_iso_group_{group_hash}.pdf"
+                saved_pdf_path = os.path.join(pdfs_dir, saved_pdf_name)
+                shutil.copyfile(pdf_path, saved_pdf_path)
+                print(f"[INFO] 分離グループPDFを保存しました: {saved_pdf_path}")
+            except Exception as e:
+                print(f"[WARNING] 分離グループPDF保存失敗: {e}")
+            
             png_filename = os.path.basename(src_for_conv).replace('.xlsx', '.png')
             final_png_path = os.path.join(self.converter.images_dir, png_filename)
             
