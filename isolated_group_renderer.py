@@ -781,57 +781,40 @@ class IsolatedGroupRenderer:
                     except Exception:
                         pass  # 一時ファイルの削除失敗は無視
 
-        # Additionally, clear worksheet cell text in the tmp workbook so rendered PDF
-        # contains only the drawing shapes. This prevents sheet text from appearing
-        # in isolated renders.
         try:
             sheet_rel = os.path.join(tmpdir, f"xl/worksheets/sheet{sheet_index+1}.xml")
             if os.path.exists(sheet_rel):
                 try:
                     stree = ET.parse(sheet_rel)
                     sroot = stree.getroot()
-                    # clear all <v> and inline string texts under sheetData
-                    for v in sroot.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}v'):
-                        v.text = ''
-                    for t in sroot.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t'):
-                        t.text = ''
-                        # ensure page margins and page setup are tight so exported PDF
-                        # doesn't add unexpected whitespace or scaling. Use zero margins
-                        # and 100% scale.
-                        try:
-                            ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-                            pm_tag = '{%s}pageMargins' % ns
-                            ps_tag = '{%s}pageSetup' % ns
-                            # remove existing pageMargins/pageSetup if present
-                            for child in list(sroot):
-                                if child.tag in (pm_tag, ps_tag):
-                                    try:
-                                        sroot.remove(child)
-                                    except Exception:
-                                        pass  # 一時ファイルの削除失敗は無視
-                            # add pageMargins with zeros
-                            pm = ET.Element(pm_tag)
-                            for name, val in (('left', '0'), ('right', '0'), ('top', '0'), ('bottom', '0'), ('header', '0'), ('footer', '0')):
-                                el = ET.SubElement(pm, '{%s}%s' % (ns, name))
-                                el.text = val
-                            sroot.append(pm)
-                            # add pageSetup: prefer fit-to-page so LibreOffice
-                            # does not create extra pages due to legacy pageBreaks.
-                            ps = ET.Element(ps_tag)
-                            # Use fitToPage with fitToWidth/fitToHeight to try to
-                            # keep the trimmed area on a single PDF page.
-                            try:
-                                ps.set('fitToPage', '1')
-                                ps.set('fitToWidth', '1')
-                                ps.set('fitToHeight', '1')
-                            except Exception:
+                    try:
+                        ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+                        pm_tag = '{%s}pageMargins' % ns
+                        ps_tag = '{%s}pageSetup' % ns
+                        for child in list(sroot):
+                            if child.tag in (pm_tag, ps_tag):
                                 try:
-                                    ps.set('scale', '100')
-                                except Exception as e:
-                                    pass  # XML解析エラーは無視
-                            sroot.append(ps)
+                                    sroot.remove(child)
+                                except Exception:
+                                    pass
+                        pm = ET.Element(pm_tag)
+                        for name, val in (('left', '0'), ('right', '0'), ('top', '0'), ('bottom', '0'), ('header', '0'), ('footer', '0')):
+                            el = ET.SubElement(pm, '{%s}%s' % (ns, name))
+                            el.text = val
+                        sroot.append(pm)
+                        ps = ET.Element(ps_tag)
+                        try:
+                            ps.set('fitToPage', '1')
+                            ps.set('fitToWidth', '1')
+                            ps.set('fitToHeight', '1')
                         except Exception:
-                            pass  # データ構造操作失敗は無視
+                            try:
+                                ps.set('scale', '100')
+                            except Exception as e:
+                                pass
+                        sroot.append(ps)
+                    except Exception:
+                        pass
                         # Remove any header/footer elements from this sheet
                         # node so isolated-group PDF/PNG renders do not
                         # include workbook headers or footers. This keeps
@@ -1456,6 +1439,37 @@ class IsolatedGroupRenderer:
                             except (ValueError, TypeError):
                                 pass
                             
+                            for cell_el in list(row_el):
+                                if cell_el.tag.split('}')[-1] != 'c':
+                                    continue
+                                
+                                cell_r = cell_el.attrib.get('r', '')
+                                if not cell_r:
+                                    continue
+                                
+                                col_letters = ''.join([ch for ch in cell_r if ch.isalpha()])
+                                if not col_letters:
+                                    continue
+                                
+                                # Convert column letters to index
+                                col_idx = 0
+                                for ch in col_letters.upper():
+                                    col_idx = col_idx * 26 + (ord(ch) - 64)
+                                
+                                if col_idx < s_col or col_idx > e_col:
+                                    continue
+                                
+                                new_col_idx = col_idx - s_col + 1
+                                new_col_letters = self._col_letter(new_col_idx)
+                                
+                                new_cell = ET.Element(f'{{{ns}}}c', dict(cell_el.attrib))
+                                new_cell.attrib['r'] = f"{new_col_letters}{new_r_index}"
+                                
+                                for child in list(cell_el):
+                                    new_cell.append(child)
+                                
+                                new_row.append(new_cell)
+                            
                             new_sheet_data.append(new_row)
                             new_r_index += 1
                         
@@ -1563,13 +1577,6 @@ class IsolatedGroupRenderer:
                         if not inserted:
                             sroot4.insert(0, cols_el)
                     
-                    v_elements = sroot4.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}v')
-                    t_elements = sroot4.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t')
-                    for v in v_elements:
-                        v.text = ''
-                    for t in t_elements:
-                        t.text = ''
-                    
                     stree4.write(sheet_rel, encoding='utf-8', xml_declaration=True)
             except Exception as e:
                 print(f"[WARNING] sheetData再構築失敗: {e}")
@@ -1593,11 +1600,6 @@ class IsolatedGroupRenderer:
                             sroot_drawing.insert(idx + 1, drawing_elem)
                         else:
                             sroot_drawing.append(drawing_elem)
-                        
-                        for v in sroot_drawing.findall(f'.//{{{ns}}}v'):
-                            v.text = ''
-                        for t in sroot_drawing.findall(f'.//{{{ns}}}t'):
-                            t.text = ''
                         
                         stree_drawing.write(sheet_rel, encoding='utf-8', xml_declaration=True)
                         print(f"[DEBUG] <drawing>要素を追加: {sheet_rel}")
