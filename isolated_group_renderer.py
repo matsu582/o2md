@@ -1395,21 +1395,6 @@ class IsolatedGroupRenderer:
                     if sheet_data is not None:
                         rows = sheet_data.findall(f'{{{ns}}}row')
                         
-                        max_orig_row = 0
-                        for row_el in rows:
-                            try:
-                                rnum = int(row_el.attrib.get('r', '0'))
-                                if rnum > max_orig_row:
-                                    max_orig_row = rnum
-                            except (ValueError, TypeError):
-                                continue
-                        
-                        actual_s_row = s_row
-                        actual_e_row = e_row
-                        if max_orig_row > 0 and (e_row - s_row + 1) < max_orig_row * 0.5:
-                            actual_s_row = 1
-                            actual_e_row = max_orig_row
-                        
                         new_sheet_data = ET.Element(sheet_data_tag)
                         new_r_index = 1
                         
@@ -1419,7 +1404,7 @@ class IsolatedGroupRenderer:
                             except (ValueError, TypeError):
                                 continue
                             
-                            if rnum < actual_s_row or rnum > actual_e_row:
+                            if rnum < s_row or rnum > e_row:
                                 continue
                             
                             new_row = ET.Element(f'{{{ns}}}row')
@@ -2013,6 +1998,56 @@ class IsolatedGroupRenderer:
                     print(f"[WARN] dbg_copy not found after save: {src_for_conv}")
                 except Exception:
                     pass
+            
+            if cell_range is not None:
+                try:
+                    from openpyxl import load_workbook
+                    from openpyxl.utils import get_column_letter
+                    from copy import copy as cell_copy
+                    
+                    s_col, e_col, s_row, e_row = cell_range
+                    
+                    wb_temp = load_workbook(src_for_conv)
+                    ws_temp = wb_temp.active
+                    
+                    for row in ws_temp.iter_rows():
+                        for cell in row:
+                            cell.value = None
+                            from openpyxl.styles import Border
+                            cell.border = Border()
+                    
+                    new_row_idx = 1
+                    for src_row in range(s_row, e_row + 1):
+                        new_col_idx = 1
+                        for src_col in range(s_col, e_col + 1):
+                            src_cell = self.sheet.cell(row=src_row, column=src_col)
+                            dest_cell = ws_temp.cell(row=new_row_idx, column=new_col_idx)
+                            
+                            if src_cell.value is not None:
+                                dest_cell.value = src_cell.value
+                            
+                            if src_cell.border:
+                                dest_cell.border = cell_copy(src_cell.border)
+                            
+                            if src_cell.font:
+                                dest_cell.font = cell_copy(src_cell.font)
+                            
+                            if src_cell.fill:
+                                dest_cell.fill = cell_copy(src_cell.fill)
+                            
+                            if src_cell.alignment:
+                                dest_cell.alignment = cell_copy(src_cell.alignment)
+                            
+                            new_col_idx += 1
+                        new_row_idx += 1
+                    
+                    wb_temp.save(src_for_conv)
+                    wb_temp.close()
+                    
+                except Exception as e:
+                    print(f"[WARNING] openpyxlでのセルコピー失敗: {e}")
+                    import traceback
+                    traceback.print_exc()
             
             try:
                 self._set_page_setup_and_margins(src_for_conv)
