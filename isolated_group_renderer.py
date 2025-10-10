@@ -128,7 +128,7 @@ class IsolatedGroupRenderer:
                 png_name = os.path.basename(out_path) if out_path else "unknown.png"
                 group_rows = [cell_range[2]] if cell_range else None
                 final_result = self._phase10_postprocess(
-                    out_path, png_name, sheet, group_rows, cell_range
+                    out_path, png_name, sheet, group_rows, cell_range, keep_cnvpr_ids
                 )
                 
                 # クリーンアップ
@@ -2363,7 +2363,7 @@ class IsolatedGroupRenderer:
             return png_path
 
 
-    def _phase10_postprocess(self, out_path, png_name, sheet, group_rows=None, cell_range=None):
+    def _phase10_postprocess(self, out_path, png_name, sheet, group_rows=None, cell_range=None, keep_cnvpr_ids=None):
         """フェーズ10: 後処理
         
         生成された画像ファイルの最終処理と戻り値の準備
@@ -2374,6 +2374,7 @@ class IsolatedGroupRenderer:
             sheet: ワークシートオブジェクト
             group_rows: グループ行のリスト（オプション）
             cell_range: セル範囲 (s_col, e_col, s_row, e_row)（オプション）
+            keep_cnvpr_ids: クラスタリング対象の図形IDセット（オプション）
             
         Returns:
             Tuple[str, int]: (画像ファイル名, 開始行)
@@ -2381,6 +2382,18 @@ class IsolatedGroupRenderer:
         import os
         
         try:
+            if keep_cnvpr_ids:
+                try:
+                    if not hasattr(self.converter, '_global_iso_preserved_ids'):
+                        self.converter._global_iso_preserved_ids = set()
+                    
+                    for cid in keep_cnvpr_ids:
+                        self.converter._global_iso_preserved_ids.add(str(cid))
+                    
+                    print(f"[DEBUG][_phase10] Added {len(keep_cnvpr_ids)} shape IDs to _global_iso_preserved_ids")
+                except Exception as e:
+                    print(f"[WARNING] Failed to update _global_iso_preserved_ids: {e}")
+            
             # 実際に使用されたファイル名を取得
             basename = os.path.basename(out_path)
             
