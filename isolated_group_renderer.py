@@ -1369,7 +1369,18 @@ class IsolatedGroupRenderer:
             
             try:
                 s_col, e_col, s_row, e_row = cell_range
-                sheet_rel = os.path.join(tmpdir, f"xl/worksheets/sheet{target_sheet_new_index+1}.xml")
+                
+                worksheets_dir = os.path.join(tmpdir, "xl/worksheets")
+                sheet_rel = None
+                if os.path.exists(worksheets_dir):
+                    for fname in os.listdir(worksheets_dir):
+                        if fname.startswith('sheet') and fname.endswith('.xml') and not fname.startswith('_'):
+                            sheet_rel = os.path.join(worksheets_dir, fname)
+                            break
+                
+                if sheet_rel is None:
+                    sheet_rel = os.path.join(tmpdir, f"xl/worksheets/sheet{target_sheet_new_index+1}.xml")
+                
                 if os.path.exists(sheet_rel):
                     stree4 = ET.parse(sheet_rel)
                     sroot4 = stree4.getroot()
@@ -1538,6 +1549,13 @@ class IsolatedGroupRenderer:
                         if not inserted:
                             sroot4.insert(0, cols_el)
                     
+                    v_elements = sroot4.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}v')
+                    t_elements = sroot4.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t')
+                    for v in v_elements:
+                        v.text = ''
+                    for t in t_elements:
+                        t.text = ''
+                    
                     stree4.write(sheet_rel, encoding='utf-8', xml_declaration=True)
             except Exception as e:
                 print(f"[WARNING] sheetData再構築失敗: {e}")
@@ -1561,6 +1579,11 @@ class IsolatedGroupRenderer:
                             sroot_drawing.insert(idx + 1, drawing_elem)
                         else:
                             sroot_drawing.append(drawing_elem)
+                        
+                        for v in sroot_drawing.findall(f'.//{{{ns}}}v'):
+                            v.text = ''
+                        for t in sroot_drawing.findall(f'.//{{{ns}}}t'):
+                            t.text = ''
                         
                         stree_drawing.write(sheet_rel, encoding='utf-8', xml_declaration=True)
                         print(f"[DEBUG] <drawing>要素を追加: {sheet_rel}")
