@@ -239,6 +239,11 @@ class IsolatedGroupRenderer:
                     if e_row < s_row:
                         e_row = s_row
                     
+                    s_row = max(1, s_row - 2)
+                    s_col = max(1, s_col - 1)
+                    e_row = e_row + 1
+                    e_col = e_col + 1
+                    
                     cell_range = (s_col, e_col, s_row, e_row)
         except (ValueError, TypeError) as e:
             print(f"[DEBUG] 型変換エラー（無視）: {e}")
@@ -1999,69 +2004,6 @@ class IsolatedGroupRenderer:
                 except Exception:
                     pass
             
-            if cell_range is not None:
-                try:
-                    from openpyxl import load_workbook
-                    from openpyxl.utils import get_column_letter
-                    from copy import copy as cell_copy
-                    
-                    s_col, e_col, s_row, e_row = cell_range
-                    
-                    wb_temp = load_workbook(src_for_conv, data_only=False, keep_vba=True)
-                    
-                    if wb_temp.active is None:
-                        if len(wb_temp.sheetnames) > 0:
-                            ws_temp = wb_temp[wb_temp.sheetnames[0]]
-                        else:
-                            print(f"[WARNING] ワークブックにシートがありません")
-                            wb_temp.close()
-                            raise Exception("No sheets in workbook")
-                    else:
-                        ws_temp = wb_temp.active
-                    
-                    has_openpyxl_compatible_objects = False
-                    if hasattr(ws_temp, '_images') and len(ws_temp._images) > 0:
-                        has_openpyxl_compatible_objects = True
-                    if hasattr(ws_temp, '_charts') and len(ws_temp._charts) > 0:
-                        has_openpyxl_compatible_objects = True
-                    
-                    if not has_openpyxl_compatible_objects:
-                        wb_temp.close()
-                        print(f"[DEBUG] openpyxlが認識できる図形なし。XMLレベルの処理のみ使用")
-                    else:
-                        new_row_idx = 1
-                        for src_row in range(s_row, e_row + 1):
-                            new_col_idx = 1
-                            for src_col in range(s_col, e_col + 1):
-                                src_cell = self.sheet.cell(row=src_row, column=src_col)
-                                dest_cell = ws_temp.cell(row=new_row_idx, column=new_col_idx)
-                                
-                                if src_cell.value is not None:
-                                    dest_cell.value = src_cell.value
-                                
-                                if src_cell.border:
-                                    dest_cell.border = cell_copy(src_cell.border)
-                                
-                                if src_cell.font:
-                                    dest_cell.font = cell_copy(src_cell.font)
-                                
-                                if src_cell.fill:
-                                    dest_cell.fill = cell_copy(src_cell.fill)
-                                
-                                if src_cell.alignment:
-                                    dest_cell.alignment = cell_copy(src_cell.alignment)
-                                
-                                new_col_idx += 1
-                            new_row_idx += 1
-                        
-                        wb_temp.save(src_for_conv)
-                        wb_temp.close()
-                        print(f"[DEBUG] openpyxlでセルデータをコピー完了")
-                    
-                except Exception as e:
-                    print(f"[WARNING] openpyxlでのセルコピー失敗: {e}")
-                    import traceback
-                    traceback.print_exc()
             
             try:
                 self._set_page_setup_and_margins(src_for_conv)
