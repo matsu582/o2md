@@ -78,7 +78,7 @@ class ExcelToMarkdownConverter:
 
             return super().append(item)
 
-    def __init__(self, excel_file_path: str, output_dir=None):
+    def __init__(self, excel_file_path: str, output_dir=None, debug_mode=False):
         """コンバータインスタンスの初期化
 
         CLIから使用できるように、最小限で安全なコンストラクタを提供します。
@@ -92,6 +92,8 @@ class ExcelToMarkdownConverter:
         else:
             self.output_dir = os.path.join(os.getcwd(), "output")
         self.images_dir = os.path.join(self.output_dir, "images")
+        
+        self.debug_mode = debug_mode
 
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.images_dir, exist_ok=True)
@@ -9616,6 +9618,8 @@ def main():
     parser.add_argument('excel_file', help='変換するExcelファイル（.xlsx/.xls）')
     parser.add_argument('-o', '--output-dir', type=str, 
                        help='出力ディレクトリを指定（デフォルト: ./output）')
+    parser.add_argument('--debug', action='store_true',
+                       help='デバッグモード：debug_workbooks、pdfs、diagnosticsフォルダを出力')
     
     args = parser.parse_args()
     
@@ -9643,7 +9647,7 @@ def main():
         print(f"✅ XLS→XLSX変換完了: {converted_file}")
     
     try:
-        converter = ExcelToMarkdownConverter(processing_file, output_dir=args.output_dir)
+        converter = ExcelToMarkdownConverter(processing_file, output_dir=args.output_dir, debug_mode=args.debug)
         output_file = converter.convert()
         print("\n✅ 変換完了!")
         print(f"📄 出力ファイル: {output_file}")
