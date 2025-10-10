@@ -1383,15 +1383,6 @@ class IsolatedGroupRenderer:
             try:
                 s_col, e_col, s_row, e_row = cell_range
                 
-                import zipfile
-                orig_sheet_root = None
-                try:
-                    with zipfile.ZipFile(self.converter.excel_file, 'r') as z:
-                        orig_sheet_xml = z.read(f'xl/worksheets/sheet{sheet_index+1}.xml')
-                        orig_sheet_root = ET.fromstring(orig_sheet_xml)
-                except Exception as e:
-                    print(f"[WARNING] 元のxlsxファイルからsheet XMLを読み取れませんでした: {e}")
-                
                 worksheets_dir = os.path.join(tmpdir, "xl/worksheets")
                 sheet_rel = None
                 if os.path.exists(worksheets_dir):
@@ -1419,21 +1410,6 @@ class IsolatedGroupRenderer:
                     sheet_data = sroot4.find(sheet_data_tag)
                     if sheet_data is not None:
                         rows = sheet_data.findall(f'{{{ns}}}row')
-                        
-                        orig_rows = []
-                        if orig_sheet_root is not None:
-                            orig_sheet_data = orig_sheet_root.find(sheet_data_tag)
-                            if orig_sheet_data is not None:
-                                orig_rows = orig_sheet_data.findall(f'{{{ns}}}row')
-                        
-                        orig_rows_by_num = {}
-                        for orig_row in orig_rows:
-                            try:
-                                rnum = int(orig_row.attrib.get('r', '0'))
-                                if rnum > 0:
-                                    orig_rows_by_num[rnum] = orig_row
-                            except (ValueError, TypeError):
-                                continue
                         
                         max_orig_row = 0
                         for row_el in rows:
@@ -1478,35 +1454,6 @@ class IsolatedGroupRenderer:
                                         new_row.set('customHeight', '1')
                             except (ValueError, TypeError):
                                 pass
-                            
-                            orig_row_el = orig_rows_by_num.get(rnum)
-                            source_row = orig_row_el if orig_row_el is not None else row_el
-                            
-                            for c in list(source_row):
-                                if c.tag.split('}')[-1] != 'c':
-                                    continue
-                                cell_r = c.attrib.get('r', '')
-                                col_letters = ''.join([ch for ch in cell_r if ch.isalpha()]) if cell_r else None
-                                if not col_letters:
-                                    continue
-                                
-                                col_idx = 0
-                                for ch in col_letters:
-                                    col_idx = col_idx * 26 + (ord(ch.upper()) - 64)
-                                if col_idx < s_col or col_idx > e_col:
-                                    continue
-                                
-                                new_col_idx = col_idx - (s_col - 1)
-                                if new_col_idx < 1:
-                                    new_col_idx = 1
-                                
-                                new_col_letters = self._col_letter(new_col_idx)
-                                
-                                import copy
-                                new_cell = copy.deepcopy(c)
-                                new_cell.attrib['r'] = f"{new_col_letters}{new_r_index}"
-                                
-                                new_row.append(new_cell)
                             
                             new_sheet_data.append(new_row)
                             new_r_index += 1
