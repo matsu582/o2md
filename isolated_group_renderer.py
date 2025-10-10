@@ -2051,13 +2051,22 @@ class IsolatedGroupRenderer:
                 print(f"[WARN] PDF→PNG変換失敗")
                 return None
             
-            # cell_rangeが指定されている場合、クロップ処理
-            if cell_range and os.path.exists(png_path):
-                cropped_path = self._crop_png_to_cell_range(
-                    png_path, cell_range, sheet, dpi
-                )
-                if cropped_path:
-                    png_path = cropped_path
+            try:
+                from PIL import Image
+                if os.path.exists(png_path):
+                    im = Image.open(png_path)
+                    bbox = self.converter._find_content_bbox(im, white_thresh=250)
+                    if bbox:
+                        l, t, r, b = bbox
+                        pad = max(4, int(dpi / 300.0 * 6))
+                        l = max(0, l - pad)
+                        t = max(0, t - pad)
+                        r = min(im.width, r + pad)
+                        b = min(im.height, b + pad)
+                        cropped = im.crop((l, t, r, b))
+                        cropped.save(png_path)
+            except Exception as e:
+                print(f"[WARNING] クロップ処理失敗: {e}")
             
             return png_path
             
@@ -2148,9 +2157,10 @@ class IsolatedGroupRenderer:
             cmd = [
                 im_cmd,
                 '-density', str(dpi),
-                pdf_path,
+                pdf_path + '[0]',
                 '-background', 'white',
-                '-alpha', 'remove',
+                '-flatten',
+                '-colorspace', 'sRGB',
                 '-quality', '90',
                 output_path
             ]
