@@ -1314,6 +1314,38 @@ class IsolatedGroupRenderer:
                         sheet_rels = os.path.join(tmpdir, f'xl/worksheets/_rels/sheet{idx+1}.xml.rels')
                         if os.path.exists(sheet_rels):
                             os.remove(sheet_rels)
+                    
+                    try:
+                        target_sheet_rels_path = os.path.join(tmpdir, f'xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels')
+                        keep_drawing_files = set()
+                        
+                        if os.path.exists(target_sheet_rels_path):
+                            rels_tree = ET.parse(target_sheet_rels_path)
+                            rels_root = rels_tree.getroot()
+                            
+                            for rel in rels_root:
+                                target = rel.attrib.get('Target', '')
+                                if 'drawing' in target and '.xml' in target:
+                                    drawing_name = os.path.basename(target)
+                                    keep_drawing_files.add(drawing_name)
+                        
+                        print(f"[DEBUG] Keep drawing files: {keep_drawing_files}")
+                        
+                        drawings_dir = os.path.join(tmpdir, 'xl/drawings')
+                        if os.path.exists(drawings_dir):
+                            for fname in os.listdir(drawings_dir):
+                                if fname.startswith('drawing') and fname.endswith('.xml') and fname not in keep_drawing_files:
+                                    drawing_file = os.path.join(drawings_dir, fname)
+                                    if os.path.exists(drawing_file):
+                                        os.remove(drawing_file)
+                                        print(f"[DEBUG] Removed unused drawing file: {fname}")
+                                    
+                                    drawing_rels = os.path.join(drawings_dir, '_rels', fname + '.rels')
+                                    if os.path.exists(drawing_rels):
+                                        os.remove(drawing_rels)
+                                        print(f"[DEBUG] Removed unused drawing rels: {fname}.rels")
+                    except Exception as drawing_err:
+                        print(f"[WARNING] Drawing file cleanup failed: {drawing_err}")
             except Exception as e:
                 print(f"[WARNING] シート削除失敗: {e}")
         
