@@ -49,8 +49,6 @@ class IsolatedGroupRenderer:
         Returns:
             タプル(画像ファイル名, 開始行) またはNone
         """
-        debug_mode = getattr(self.converter, 'debug_mode', False)
-        print(f"[DEBUG_CHECK] render() called: sheet={sheet.title}, debug_mode={debug_mode}, shape_indices={shape_indices[:5] if len(shape_indices) > 5 else shape_indices}")
         try:
             # 初期化
             self.sheet = sheet  # Aggressiveセクションで使用
@@ -1986,15 +1984,11 @@ class IsolatedGroupRenderer:
             
             excel_base = os.path.splitext(os.path.basename(self.converter.excel_file))[0]
             
-            debug_mode = getattr(self.converter, 'debug_mode', False)
-            print(f"[DEBUG_CHECK] _phase8: debug_mode={debug_mode}")
-            if debug_mode:
+            if getattr(self.converter, 'debug_mode', False):
                 dbg_dir = os.path.join(self.converter.output_dir, 'debug_workbooks')
                 os.makedirs(dbg_dir, exist_ok=True)
-                print(f"[DEBUG_CHECK] Created debug_workbooks: {dbg_dir}")
             else:
                 dbg_dir = tempfile.mkdtemp()
-                print(f"[DEBUG_CHECK] Using temp dir: {dbg_dir}")
             
             final_xlsx_name = f"{excel_base}_iso_group{suffix}.xlsx"
             src_for_conv = os.path.join(dbg_dir, final_xlsx_name)
