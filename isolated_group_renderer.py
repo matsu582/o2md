@@ -1892,6 +1892,31 @@ class IsolatedGroupRenderer:
                                                 pass
                                     except (ValueError, TypeError):
                                         pass
+                                
+                                for cxnSp in node2.findall('.//{%s}cxnSp' % 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'):
+                                    try:
+                                        spPr = cxnSp.find('.//{%s}spPr' % 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing')
+                                        if spPr is not None:
+                                            xfrm = spPr.find('.//{%s}xfrm' % a_ns)
+                                            if xfrm is not None:
+                                                try:
+                                                    off = xfrm.find('{%s}off' % a_ns)
+                                                    if off is None:
+                                                        off = ET.SubElement(xfrm, '{%s}off' % a_ns)
+                                                    off.set('x', str(int(round(left_px * EMU_PER_PIXEL))))
+                                                    off.set('y', str(int(round(top_px * EMU_PER_PIXEL))))
+                                                except (ValueError, TypeError):
+                                                    pass
+                                                try:
+                                                    ext_elem = xfrm.find('{%s}ext' % a_ns)
+                                                    if ext_elem is None:
+                                                        ext_elem = ET.SubElement(xfrm, '{%s}ext' % a_ns)
+                                                    ext_elem.set('cx', str(int(round(target_w_px * EMU_PER_PIXEL))))
+                                                    ext_elem.set('cy', str(int(round(target_h_px * EMU_PER_PIXEL))))
+                                                except (ValueError, TypeError):
+                                                    pass
+                                    except (ValueError, TypeError):
+                                        pass
                         except (ValueError, TypeError):
                             pass
                     
