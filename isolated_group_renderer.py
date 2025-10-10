@@ -239,25 +239,6 @@ class IsolatedGroupRenderer:
                     if e_row < s_row:
                         e_row = s_row
                     
-                    try:
-                        max_data_col = 0
-                        max_data_row = 0
-                        for row in sheet.iter_rows():
-                            for cell in row:
-                                if cell.value is not None:
-                                    if cell.column > max_data_col:
-                                        max_data_col = cell.column
-                                    if cell.row > max_data_row:
-                                        max_data_row = cell.row
-                        
-                        if max_data_col > 0:
-                            max_allowed_col = max_data_col + 5
-                            if e_col > max_allowed_col:
-                                print(f"[DEBUG][_iso_entry] Limiting e_col from {e_col} to {max_allowed_col}")
-                                e_col = max_allowed_col
-                    except Exception as limit_err:
-                        print(f"[DEBUG][_iso_entry] Failed to limit cell_range: {limit_err}")
-                    
                     cell_range = (s_col, e_col, s_row, e_row)
         except (ValueError, TypeError) as e:
             print(f"[DEBUG] 型変換エラー（無視）: {e}")
@@ -1528,14 +1509,16 @@ class IsolatedGroupRenderer:
                     except Exception:
                         pass
                     
-                    inserted = False
-                    for i, child in enumerate(list(sroot4)):
-                        if 'sheetPr' in child.tag:
-                            sroot4.insert(i+1, cols_el)
-                            inserted = True
-                            break
-                    if not inserted:
-                        sroot4.insert(0, cols_el)
+                    col_children = list(cols_el)
+                    if col_children:
+                        inserted = False
+                        for i, child in enumerate(list(sroot4)):
+                            if 'sheetPr' in child.tag:
+                                sroot4.insert(i+1, cols_el)
+                                inserted = True
+                                break
+                        if not inserted:
+                            sroot4.insert(0, cols_el)
                     
                     stree4.write(sheet_rel, encoding='utf-8', xml_declaration=True)
             except Exception as e:
