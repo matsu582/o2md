@@ -17,15 +17,13 @@ import sys
 import tempfile
 import subprocess
 import shutil
-# import urllib.parse
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any, Set
-# import io
-# import base64
+import io
 import zipfile
 import xml.etree.ElementTree as ET
 
-from utils import get_libreoffice_path, get_imagemagick_command
+from utils import get_libreoffice_path
 from isolated_group_renderer import IsolatedGroupRenderer
 
 try:
@@ -45,9 +43,15 @@ except ImportError as e:
         "Pillowライブラリが必要です: pip install pillow または uv sync を実行してください"
     ) from e
 
+try:
+    import fitz
+except ImportError as e:
+    raise ImportError(
+        "PyMuPDFライブラリが必要です: pip install PyMuPDF または uv sync を実行してください"
+    ) from e
+
 # 設定定数
 LIBREOFFICE_PATH = get_libreoffice_path()
-IMAGEMAGICK_CMD = get_imagemagick_command()
 
 # DPI設定
 DEFAULT_DPI = 600
@@ -3023,9 +3027,9 @@ class ExcelToMarkdownConverter:
 
     def _convert_pdf_page_to_png(self, pdf_path: str, page_index: int, dpi: int,
                                   output_dir: str, filename_prefix: str) -> Optional[str]:
-        """PDFの指定ページをPNG画像に変換
+        """PDFの指定ページをPNG画像に変換（PyMuPDF使用）
         
-        ImageMagickを使用してPDFの特定ページをPNG形式に変換します。
+        PyMuPDFを使用してPDFの特定ページをPNG形式に変換します。
         複数のレンダリングメソッドで重複していた処理を統合。
         
         Args:
@@ -3042,31 +3046,42 @@ class ExcelToMarkdownConverter:
             png_filename = f"{filename_prefix}.png"
             png_path = os.path.join(output_dir, png_filename)
             
-            # ImageMagickでPNG変換
-            cmd = [
-                'convert',
-                '-density', str(dpi),
-                f'{pdf_path}[{page_index}]',
-                '-quality', '100',
-                png_path
-            ]
+            print(f"[DEBUG] PyMuPDFでPDF→PNG変換実行 (ページ {page_index}, DPI: {dpi})...")
             
-            print(f"[DEBUG] ImageMagick command: {' '.join(cmd)}")
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            
-            if proc.returncode != 0:
-                print(f"[WARNING] ImageMagick PNG変換失敗: {proc.stderr}")
+            doc = fitz.open(pdf_path)
+            if page_index >= len(doc):
+                print(f"[WARNING] ページ{page_index}が存在しません（全{len(doc)}ページ）")
+                doc.close()
                 return None
             
-            if not os.path.exists(png_path):
-                print(f"[WARNING] PNG画像が生成されませんでした: {png_path}")
-                return None
+            page = doc[page_index]
             
-            # ファイル名のみを返す(呼び出し元でパスを構築)
+            mat = fitz.Matrix(dpi/72, dpi/72)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            
+            img_data = pix.tobytes("png")
+            pix = None
+            doc.close()
+            
+            img = Image.open(io.BytesIO(img_data))
+            
+            if img.mode == 'RGBA':
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[3] if len(img.split()) > 3 else None)
+                img = background
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            img.save(png_path, 'PNG', quality=100)
+            
+            print(f"[INFO] PNG変換完了: {png_path} (サイズ: {img.size[0]}x{img.size[1]})")
+            
             return png_filename
         
         except Exception as e:
             print(f"[WARNING] PDF→PNG変換失敗: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     # ========================================================================
