@@ -2276,31 +2276,44 @@ class IsolatedGroupRenderer:
                 except (OSError, FileNotFoundError):
                     pass
             
-            im_cmd = get_imagemagick_command()
-            if not im_cmd:
-                print(f"[ERROR] ImageMagickが見つかりません")
-                return None
-            
-            cmd = [
-                im_cmd,
-                '-density', str(dpi),
-                pdf_path + '[0]',
-                '-background', 'white',
-                '-flatten',
-                '-colorspace', 'sRGB',
-                '-quality', '90',
-                output_path
-            ]
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120
-            )
-            
-            if result.returncode != 0:
-                print(f"[ERROR] ImageMagick変換失敗: {result.stderr}")
+            try:
+                import fitz
+                import io
+                from PIL import Image as PILImage
+                
+                print(f"[DEBUG] PyMuPDFでPDF→PNG変換実行... (DPI={dpi})")
+                
+                doc = fitz.open(pdf_path)
+                if len(doc) == 0:
+                    print("[ERROR] PDFにページが含まれていません")
+                    doc.close()
+                    return None
+                
+                page = doc[0]
+                
+                mat = fitz.Matrix(dpi/72, dpi/72)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                
+                img_data = pix.tobytes("png")
+                pix = None
+                doc.close()
+                
+                img = PILImage.open(io.BytesIO(img_data))
+                
+                if img.mode == 'RGBA':
+                    background = PILImage.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[3] if len(img.split()) > 3 else None)
+                    img = background
+                elif img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
+                img.save(output_path, 'PNG')
+                print(f"[SUCCESS] PNG変換完了: {output_path}")
+                
+            except Exception as e:
+                print(f"[ERROR] PyMuPDF変換エラー: {e}")
+                import traceback
+                traceback.print_exc()
                 return None
             
             candidates = sorted(glob.glob(base_noext + "*.png"))
