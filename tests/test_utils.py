@@ -2,7 +2,6 @@
 
 このテストコードは以下の機能をテストします：
 - get_libreoffice_path(): プラットフォームに応じたLibreOfficeパスの取得
-- get_imagemagick_command(): ImageMagickコマンド名の取得
 - col_letter(): Excel列番号から列文字への変換
 """
 
@@ -15,7 +14,7 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils import get_libreoffice_path, get_imagemagick_command, col_letter
+from utils import get_libreoffice_path, col_letter
 
 
 class TestGetLibreOfficePath:
@@ -118,52 +117,6 @@ class TestGetLibreOfficePath:
         
         result = get_libreoffice_path()
         assert result == 'soffice'
-
-
-class TestGetImageMagickCommand:
-    """get_imagemagick_command関数のテスト"""
-    
-    def test_function_exists(self):
-        """関数が存在することを確認"""
-        assert callable(get_imagemagick_command)
-    
-    def test_returns_string(self):
-        """戻り値が文字列であることを確認"""
-        result = get_imagemagick_command()
-        assert isinstance(result, str)
-        assert result in ('magick', 'convert')
-    
-    @patch('shutil.which')
-    def test_magick_command_available(self, mock_which):
-        """'magick'コマンドが利用可能な場合"""
-        mock_which.side_effect = lambda cmd: '/usr/bin/magick' if cmd == 'magick' else None
-        
-        result = get_imagemagick_command()
-        assert result == 'magick'
-    
-    @patch('shutil.which')
-    def test_convert_command_available(self, mock_which):
-        """'convert'コマンドのみ利用可能な場合"""
-        mock_which.side_effect = lambda cmd: '/usr/bin/convert' if cmd == 'convert' else None
-        
-        result = get_imagemagick_command()
-        assert result == 'convert'
-    
-    @patch('shutil.which')
-    def test_no_command_available(self, mock_which):
-        """いずれのコマンドも利用できない場合はデフォルト値"""
-        mock_which.return_value = None
-        
-        result = get_imagemagick_command()
-        assert result == 'convert'
-    
-    @patch('shutil.which')
-    def test_exception_handling(self, mock_which):
-        """例外が発生した場合のフォールバック"""
-        mock_which.side_effect = Exception('Test exception')
-        
-        result = get_imagemagick_command()
-        assert result == 'convert'
 
 
 class TestColLetter:

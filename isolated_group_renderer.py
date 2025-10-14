@@ -17,7 +17,7 @@ from typing import List, Dict, Tuple, Optional, Set
 from collections import deque
 import copy
 import hashlib
-from utils import get_imagemagick_command, get_libreoffice_path
+from utils import get_libreoffice_path
 
 
 class IsolatedGroupRenderer:
