@@ -18,6 +18,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from d2md import WordToMarkdownConverter, convert_doc_to_docx
+from utils import get_libreoffice_path
 
 
 class TestWordToMarkdownConverter:
@@ -189,13 +190,14 @@ class TestConvertDocToDocx:
         assert callable(convert_doc_to_docx)
 
     @pytest.mark.skipif(
-        not os.path.exists("/Applications/LibreOffice.app/Contents/MacOS/soffice"),
+        get_libreoffice_path() == "soffice",
         reason="LibreOfficeがインストールされていません"
     )
     def test_doc_conversion_requires_libreoffice(self):
         """doc変換にはLibreOfficeが必要であることを確認"""
-        libreoffice_path = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
-        assert os.path.exists(libreoffice_path) or True  # 環境に応じてスキップ
+        libreoffice_path = get_libreoffice_path()
+        assert libreoffice_path != "soffice"
+        assert os.path.exists(libreoffice_path) or shutil.which(libreoffice_path)
 
 
 class TestEdgeCases:
