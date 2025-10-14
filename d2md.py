@@ -398,9 +398,24 @@ class WordToMarkdownConverter:
                 return table
         return None
     
+    def _get_paragraph_text_without_hidden(self, paragraph) -> str:
+        """段落から隠しテキスト（vanish属性を持つrun）を除外してテキストを取得"""
+        text_parts = []
+        for run in paragraph.runs:
+            try:
+                vanish_elem = run._element.xpath('.//w:vanish')
+                if not vanish_elem:
+                    if run.text:
+                        text_parts.append(run.text)
+            except Exception:
+                if run.text:
+                    text_parts.append(run.text)
+        
+        return ''.join(text_parts)
+    
     def _convert_paragraph(self, paragraph):
         """段落を変換"""
-        text = paragraph.text.strip()
+        text = self._get_paragraph_text_without_hidden(paragraph).strip()
         style_name = paragraph.style.name.lower()
         
         if not text:
