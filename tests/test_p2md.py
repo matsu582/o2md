@@ -18,6 +18,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from p2md import PowerPointToMarkdownConverter
+from utils import get_libreoffice_path
 
 
 class TestPowerPointToMarkdownConverter:
@@ -312,7 +313,7 @@ class TestPPTConversion:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
     @pytest.mark.skipif(
-        not os.path.exists("/Applications/LibreOffice.app/Contents/MacOS/soffice"),
+        get_libreoffice_path() == "soffice",
         reason="LibreOfficeがインストールされていません"
     )
     def test_ppt_to_pptx_conversion(self, temp_output_dir):
