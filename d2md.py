@@ -34,15 +34,17 @@ try:
     from docx.shared import Inches
     from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
     from docx.enum.style import WD_STYLE_TYPE
-except ImportError:
-    print("python-docxライブラリが必要です: pip install python-docx")
-    sys.exit(1)
+except ImportError as e:
+    raise ImportError(
+        "python-docxライブラリが必要です: pip install python-docx または uv sync を実行してください"
+    ) from e
 
 try:
     from PIL import Image
-except ImportError:
-    print("Pillowライブラリが必要です: pip install pillow")
-    sys.exit(1)
+except ImportError as e:
+    raise ImportError(
+        "Pillowライブラリが必要です: pip install pillow または uv sync を実行してください"
+    ) from e
 
 # 設定
 LIBREOFFICE_PATH = get_libreoffice_path()
