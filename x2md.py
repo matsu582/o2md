@@ -33,15 +33,17 @@ try:
     from openpyxl import load_workbook
     from openpyxl.utils import get_column_letter
     from openpyxl.drawing.image import Image as XLImage
-except ImportError:
-    print("openpyxlライブラリが必要です: pip install openpyxl")
-    sys.exit(1)
+except ImportError as e:
+    raise ImportError(
+        "openpyxlライブラリが必要です: pip install openpyxl または uv sync を実行してください"
+    ) from e
 
 try:
     from PIL import Image
-except ImportError:
-    print("Pillowライブラリが必要です: pip install pillow")
-    sys.exit(1)
+except ImportError as e:
+    raise ImportError(
+        "Pillowライブラリが必要です: pip install pillow または uv sync を実行してください"
+    ) from e
 
 # 設定定数
 LIBREOFFICE_PATH = get_libreoffice_path()

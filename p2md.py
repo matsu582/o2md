@@ -29,15 +29,17 @@ from utils import get_libreoffice_path, get_imagemagick_command
 try:
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE
-except ImportError:
-    print("python-pptxライブラリが必要です: pip install python-pptx")
-    sys.exit(1)
+except ImportError as e:
+    raise ImportError(
+        "python-pptxライブラリが必要です: pip install python-pptx または uv sync を実行してください"
+    ) from e
 
 try:
     from PIL import Image
-except ImportError:
-    print("Pillowライブラリが必要です: pip install pillow")
-    sys.exit(1)
+except ImportError as e:
+    raise ImportError(
+        "Pillowライブラリが必要です: pip install pillow または uv sync を実行してください"
+    ) from e
 
 # 設定
 LIBREOFFICE_PATH = get_libreoffice_path()
