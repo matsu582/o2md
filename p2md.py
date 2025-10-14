@@ -23,8 +23,9 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any
 from collections import defaultdict
+import io
 
-from utils import get_libreoffice_path, get_imagemagick_command
+from utils import get_libreoffice_path
 
 try:
     from pptx import Presentation
@@ -41,9 +42,15 @@ except ImportError as e:
         "Pillowライブラリが必要です: pip install pillow または uv sync を実行してください"
     ) from e
 
+try:
+    import fitz
+except ImportError as e:
+    raise ImportError(
+        "PyMuPDFライブラリが必要です: pip install PyMuPDF または uv sync を実行してください"
+    ) from e
+
 # 設定
 LIBREOFFICE_PATH = get_libreoffice_path()
-IMAGEMAGICK_CMD = get_imagemagick_command()
 
 # DPI設定
 DEFAULT_DPI = 300
@@ -689,7 +696,7 @@ class PowerPointToMarkdownConverter:
             return None
     
     def _convert_pdf_page_to_png(self, pdf_path: str, page_index: int, output_path: str) -> bool:
-        """PDFの特定ページをPNGに変換
+        """PDFの特定ページをPNGに変換（PyMuPDF使用）
         
         Args:
             pdf_path: PDFファイルのパス
@@ -700,28 +707,41 @@ class PowerPointToMarkdownConverter:
             bool: 変換成功時True
         """
         try:
-            # ImageMagickで指定ページを変換
-            cmd = [
-                IMAGEMAGICK_CMD,
-                '-density', str(DEFAULT_DPI),
-                f'{pdf_path}[{page_index}]',
-                '-quality', str(IMAGE_QUALITY),
-                '-background', 'white',
-                '-alpha', 'remove',
-                '-colorspace', 'RGB',
-                output_path
-            ]
+            print(f"[DEBUG] PyMuPDFでPDF→PNG変換実行 (ページ {page_index})...")
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            
-            if result.returncode == 0 and os.path.exists(output_path):
-                return True
-            else:
-                print(f"[ERROR] PNG変換失敗: {result.stderr}")
+            doc = fitz.open(pdf_path)
+            if page_index >= len(doc):
+                print(f"[ERROR] ページ{page_index}が存在しません（全{len(doc)}ページ）")
+                doc.close()
                 return False
+            
+            page = doc[page_index]
+            
+            mat = fitz.Matrix(DEFAULT_DPI/72, DEFAULT_DPI/72)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            
+            img_data = pix.tobytes("png")
+            pix = None
+            doc.close()
+            
+            img = Image.open(io.BytesIO(img_data))
+            
+            if img.mode == 'RGBA':
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[3] if len(img.split()) > 3 else None)
+                img = background
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            img.save(output_path, 'PNG', quality=IMAGE_QUALITY)
+            
+            print(f"[INFO] PNG変換完了: {output_path} (サイズ: {img.size[0]}x{img.size[1]})")
+            return True
                 
         except Exception as e:
             print(f"[ERROR] PNG変換エラー: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def cleanup(self):
