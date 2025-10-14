@@ -71,6 +71,8 @@ class IsolatedGroupRenderer:
             # フェーズ3: セル範囲計算
             cell_range = self._phase3_compute_cell_range(sheet, shape_indices, anchors, cell_range)
             
+            original_cell_range = cell_range
+            
             # フェーズ4: ID収集
             keep_cnvpr_ids = self._phase4_collect_keep_ids(shape_indices, anchors)
             
@@ -106,7 +108,7 @@ class IsolatedGroupRenderer:
                 
                 # フェーズ8: ワークブック準備
                 src_for_conv = self._phase8_prepare_workbook(
-                    tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices, keep_cnvpr_ids
+                    tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices, keep_cnvpr_ids, original_cell_range
                 )
                 
                 if src_for_conv is None:
@@ -126,7 +128,7 @@ class IsolatedGroupRenderer:
                 png_name = os.path.basename(out_path) if out_path else "unknown.png"
                 group_rows = [cell_range[2]] if cell_range else None
                 final_result = self._phase10_postprocess(
-                    out_path, png_name, sheet, group_rows, cell_range
+                    out_path, png_name, sheet, group_rows, cell_range, keep_cnvpr_ids
                 )
                 
                 # クリーンアップ
@@ -210,14 +212,43 @@ class IsolatedGroupRenderer:
         return anchors
     
     def _phase3_compute_cell_range(self, sheet, shape_indices, anchors, cell_range):
-        """フェーズ3: セル範囲計算"""
+        """フェーズ3: セル範囲計算
+        
+        オリジナルのExcelファイルから直接図形範囲を取得します。
+        これにより、Phase6で図形が移動される前の正しい範囲を取得できます。
+        """
         try:
             if cell_range is None and shape_indices:
-                all_ranges = self.converter._extract_drawing_cell_ranges(sheet)
                 picked = []
+                
                 for idx in shape_indices:
-                    if idx >= 0 and idx < len(all_ranges):
-                        picked.append(all_ranges[idx])
+                    if idx < 0 or idx >= len(anchors):
+                        continue
+                    
+                    anchor = anchors[idx]
+                    lname = anchor.tag.split('}')[-1].lower()
+                    
+                    if lname == 'twocellanchor':
+                        ns = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
+                        fr = anchor.find(f'{{{ns}}}from')
+                        to = anchor.find(f'{{{ns}}}to')
+                        
+                        if fr is not None and to is not None:
+                            try:
+                                col = int(fr.find(f'{{{ns}}}col').text)
+                                row = int(fr.find(f'{{{ns}}}row').text)
+                                to_col = int(to.find(f'{{{ns}}}col').text)
+                                to_row = int(to.find(f'{{{ns}}}row').text)
+                                
+                                start_col = col + 1
+                                end_col = to_col + 1
+                                start_row = row + 1
+                                end_row = to_row + 1
+                                
+                                picked.append((start_col, end_col, start_row, end_row))
+                            except (ValueError, TypeError, AttributeError) as e:
+                                print(f"[DEBUG][Phase3] Failed to parse anchor {idx}: {e}")
+                                continue
                 
                 if picked:
                     valid_picked = [r for r in picked if r[0] <= r[1] and r[2] <= r[3]]
@@ -228,6 +259,8 @@ class IsolatedGroupRenderer:
                     e_col = max(r[1] for r in valid_picked)
                     s_row = min(r[2] for r in valid_picked)
                     e_row = max(r[3] for r in valid_picked)
+                    
+                    print(f"[DEBUG][Phase3] Original shape range from anchors: col={s_col}-{e_col}, row={s_row}-{e_row}")
                     
                     if s_col > e_col:
                         s_col, e_col = e_col, s_col
@@ -240,6 +273,7 @@ class IsolatedGroupRenderer:
                         e_row = s_row
                     
                     cell_range = (s_col, e_col, s_row, e_row)
+                    print(f"[DEBUG][Phase3] Final cell_range: {cell_range}")
         except (ValueError, TypeError) as e:
             print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
@@ -781,57 +815,40 @@ class IsolatedGroupRenderer:
                     except Exception:
                         pass  # 一時ファイルの削除失敗は無視
 
-        # Additionally, clear worksheet cell text in the tmp workbook so rendered PDF
-        # contains only the drawing shapes. This prevents sheet text from appearing
-        # in isolated renders.
         try:
             sheet_rel = os.path.join(tmpdir, f"xl/worksheets/sheet{sheet_index+1}.xml")
             if os.path.exists(sheet_rel):
                 try:
                     stree = ET.parse(sheet_rel)
                     sroot = stree.getroot()
-                    # clear all <v> and inline string texts under sheetData
-                    for v in sroot.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}v'):
-                        v.text = ''
-                    for t in sroot.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t'):
-                        t.text = ''
-                        # ensure page margins and page setup are tight so exported PDF
-                        # doesn't add unexpected whitespace or scaling. Use zero margins
-                        # and 100% scale.
-                        try:
-                            ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-                            pm_tag = '{%s}pageMargins' % ns
-                            ps_tag = '{%s}pageSetup' % ns
-                            # remove existing pageMargins/pageSetup if present
-                            for child in list(sroot):
-                                if child.tag in (pm_tag, ps_tag):
-                                    try:
-                                        sroot.remove(child)
-                                    except Exception:
-                                        pass  # 一時ファイルの削除失敗は無視
-                            # add pageMargins with zeros
-                            pm = ET.Element(pm_tag)
-                            for name, val in (('left', '0'), ('right', '0'), ('top', '0'), ('bottom', '0'), ('header', '0'), ('footer', '0')):
-                                el = ET.SubElement(pm, '{%s}%s' % (ns, name))
-                                el.text = val
-                            sroot.append(pm)
-                            # add pageSetup: prefer fit-to-page so LibreOffice
-                            # does not create extra pages due to legacy pageBreaks.
-                            ps = ET.Element(ps_tag)
-                            # Use fitToPage with fitToWidth/fitToHeight to try to
-                            # keep the trimmed area on a single PDF page.
-                            try:
-                                ps.set('fitToPage', '1')
-                                ps.set('fitToWidth', '1')
-                                ps.set('fitToHeight', '1')
-                            except Exception:
+                    try:
+                        ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+                        pm_tag = '{%s}pageMargins' % ns
+                        ps_tag = '{%s}pageSetup' % ns
+                        for child in list(sroot):
+                            if child.tag in (pm_tag, ps_tag):
                                 try:
-                                    ps.set('scale', '100')
-                                except Exception as e:
-                                    pass  # XML解析エラーは無視
-                            sroot.append(ps)
+                                    sroot.remove(child)
+                                except Exception:
+                                    pass
+                        pm = ET.Element(pm_tag)
+                        for name, val in (('left', '0'), ('right', '0'), ('top', '0'), ('bottom', '0'), ('header', '0'), ('footer', '0')):
+                            el = ET.SubElement(pm, '{%s}%s' % (ns, name))
+                            el.text = val
+                        sroot.append(pm)
+                        ps = ET.Element(ps_tag)
+                        try:
+                            ps.set('fitToPage', '1')
+                            ps.set('fitToWidth', '1')
+                            ps.set('fitToHeight', '1')
                         except Exception:
-                            pass  # データ構造操作失敗は無視
+                            try:
+                                ps.set('scale', '100')
+                            except Exception as e:
+                                pass
+                        sroot.append(ps)
+                    except Exception:
+                        pass
                         # Remove any header/footer elements from this sheet
                         # node so isolated-group PDF/PNG renders do not
                         # include workbook headers or footers. This keeps
@@ -1202,7 +1219,7 @@ class IsolatedGroupRenderer:
     
 
 
-    def _phase8_prepare_workbook(self, tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices, keep_cnvpr_ids):
+    def _phase8_prepare_workbook(self, tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices, keep_cnvpr_ids, original_cell_range=None):
         """フェーズ8: ワークブック準備
         
         cell_rangeを使用してPrint_Areaを設定し、一時的なxlsxファイルを作成
@@ -1212,11 +1229,12 @@ class IsolatedGroupRenderer:
             tmpdir: 一時ディレクトリパス
             sheet: ワークシートオブジェクト
             sheet_index: シートのインデックス
-            cell_range: セル範囲 (s_col, e_col, s_row, e_row) または None
+            cell_range: セル範囲 (s_col, e_col, s_row, e_row) または None（図形移動後）
             drawing_path: drawing XMLのパス
             dpi: 解像度
             shape_indices: シェイプのインデックスリスト
             keep_cnvpr_ids: 保持する図形IDのセット
+            original_cell_range: オリジナルの図形範囲（図形移動前）
             
         Returns:
             str: 一時xlsxファイルのパス、失敗時はNone
@@ -1296,6 +1314,38 @@ class IsolatedGroupRenderer:
                         sheet_rels = os.path.join(tmpdir, f'xl/worksheets/_rels/sheet{idx+1}.xml.rels')
                         if os.path.exists(sheet_rels):
                             os.remove(sheet_rels)
+                    
+                    try:
+                        target_sheet_rels_path = os.path.join(tmpdir, f'xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels')
+                        keep_drawing_files = set()
+                        
+                        if os.path.exists(target_sheet_rels_path):
+                            rels_tree = ET.parse(target_sheet_rels_path)
+                            rels_root = rels_tree.getroot()
+                            
+                            for rel in rels_root:
+                                target = rel.attrib.get('Target', '')
+                                if 'drawing' in target and '.xml' in target:
+                                    drawing_name = os.path.basename(target)
+                                    keep_drawing_files.add(drawing_name)
+                        
+                        print(f"[DEBUG] Keep drawing files: {keep_drawing_files}")
+                        
+                        drawings_dir = os.path.join(tmpdir, 'xl/drawings')
+                        if os.path.exists(drawings_dir):
+                            for fname in os.listdir(drawings_dir):
+                                if fname.startswith('drawing') and fname.endswith('.xml') and fname not in keep_drawing_files:
+                                    drawing_file = os.path.join(drawings_dir, fname)
+                                    if os.path.exists(drawing_file):
+                                        os.remove(drawing_file)
+                                        print(f"[DEBUG] Removed unused drawing file: {fname}")
+                                    
+                                    drawing_rels = os.path.join(drawings_dir, '_rels', fname + '.rels')
+                                    if os.path.exists(drawing_rels):
+                                        os.remove(drawing_rels)
+                                        print(f"[DEBUG] Removed unused drawing rels: {fname}.rels")
+                    except Exception as drawing_err:
+                        print(f"[WARNING] Drawing file cleanup failed: {drawing_err}")
             except Exception as e:
                 print(f"[WARNING] シート削除失敗: {e}")
         
@@ -1303,9 +1353,13 @@ class IsolatedGroupRenderer:
         if cell_range:
             s_col, e_col, s_row, e_row = cell_range
             
-            # 列文字を計算
-            start_col_letter = self._col_letter(s_col)
-            end_col_letter = self._col_letter(e_col)
+            if original_cell_range:
+                orig_s_col, orig_e_col, orig_s_row, orig_e_row = original_cell_range
+                start_col_letter = self._col_letter(orig_s_col)
+                end_col_letter = self._col_letter(orig_e_col)
+            else:
+                start_col_letter = self._col_letter(s_col)
+                end_col_letter = self._col_letter(e_col)
             
             # Print_Area文字列を作成
             sheet_name_escaped = sheet.title.replace("'", "''")
@@ -1382,7 +1436,19 @@ class IsolatedGroupRenderer:
                     print(f"[WARNING] pageSetup修正失敗: {e}")
             
             try:
-                s_col, e_col, s_row, e_row = cell_range
+                orig_s_col, orig_e_col, orig_s_row, orig_e_row = original_cell_range
+                
+                cell_s_col = max(1, orig_s_col - 1)
+                cell_e_col = orig_e_col + 1
+                cell_s_row = orig_s_row
+                cell_e_row = orig_e_row
+                
+                shape_offset_col = orig_s_col - 1
+                shape_offset_row = orig_s_row - 1
+                
+                print(f"[DEBUG][Phase8] Using original_cell_range: col={orig_s_col}-{orig_e_col}, row={orig_s_row}-{orig_e_row}")
+                print(f"[DEBUG][Phase8] Expanded cell range: col={cell_s_col}-{cell_e_col} (left+1, right+1), row={cell_s_row}-{cell_e_row}")
+                print(f"[DEBUG][Phase8] Shape offset: col={shape_offset_col}, row={shape_offset_row}")
                 
                 worksheets_dir = os.path.join(tmpdir, "xl/worksheets")
                 sheet_rel = None
@@ -1412,23 +1478,8 @@ class IsolatedGroupRenderer:
                     if sheet_data is not None:
                         rows = sheet_data.findall(f'{{{ns}}}row')
                         
-                        max_orig_row = 0
-                        for row_el in rows:
-                            try:
-                                rnum = int(row_el.attrib.get('r', '0'))
-                                if rnum > max_orig_row:
-                                    max_orig_row = rnum
-                            except (ValueError, TypeError):
-                                continue
-                        
-                        actual_s_row = s_row
-                        actual_e_row = e_row
-                        if max_orig_row > 0 and (e_row - s_row + 1) < max_orig_row * 0.5:
-                            actual_s_row = 1
-                            actual_e_row = max_orig_row
-                        
                         new_sheet_data = ET.Element(sheet_data_tag)
-                        new_r_index = 1
+                        max_new_r_index = 0
                         
                         for row_el in rows:
                             try:
@@ -1436,8 +1487,11 @@ class IsolatedGroupRenderer:
                             except (ValueError, TypeError):
                                 continue
                             
-                            if rnum < actual_s_row or rnum > actual_e_row:
+                            if rnum < cell_s_row or rnum > cell_e_row:
                                 continue
+                            
+                            new_r_index = rnum - shape_offset_row
+                            max_new_r_index = max(max_new_r_index, new_r_index)
                             
                             new_row = ET.Element(f'{{{ns}}}row')
                             new_row.set('r', str(new_r_index))
@@ -1456,8 +1510,52 @@ class IsolatedGroupRenderer:
                             except (ValueError, TypeError):
                                 pass
                             
+                            for cell_el in list(row_el):
+                                if cell_el.tag.split('}')[-1] != 'c':
+                                    continue
+                                
+                                cell_r = cell_el.attrib.get('r', '')
+                                if not cell_r:
+                                    continue
+                                
+                                col_letters = ''.join([ch for ch in cell_r if ch.isalpha()])
+                                if not col_letters:
+                                    continue
+                                
+                                # Convert column letters to index
+                                col_idx = 0
+                                for ch in col_letters.upper():
+                                    col_idx = col_idx * 26 + (ord(ch) - 64)
+                                
+                                if col_idx < cell_s_col or col_idx > cell_e_col:
+                                    continue
+                                
+                                if col_idx < orig_s_col or col_idx > orig_e_col:
+                                    has_content = False
+                                    v_el = cell_el.find(f'{{{ns}}}v')
+                                    if v_el is not None and v_el.text:
+                                        has_content = True
+                                    is_el = cell_el.find(f'{{{ns}}}is')
+                                    if is_el is not None:
+                                        has_content = True
+                                    if 's' in cell_el.attrib:
+                                        has_content = True
+                                    
+                                    if not has_content:
+                                        continue
+                                
+                                new_col_idx = col_idx - shape_offset_col
+                                new_col_letters = self._col_letter(new_col_idx)
+                                
+                                new_cell = ET.Element(f'{{{ns}}}c', dict(cell_el.attrib))
+                                new_cell.attrib['r'] = f"{new_col_letters}{new_r_index}"
+                                
+                                for child in list(cell_el):
+                                    new_cell.append(child)
+                                
+                                new_row.append(new_cell)
+                            
                             new_sheet_data.append(new_row)
-                            new_r_index += 1
                         
                         parent = sroot4
                         for child in list(parent):
@@ -1471,7 +1569,7 @@ class IsolatedGroupRenderer:
                             dim = ET.Element(dim_tag)
                             sroot4.insert(0, dim)
                         start_addr = f"{self._col_letter(1)}1"
-                        end_addr = f"{self._col_letter(e_col - s_col + 1)}{max(1, new_r_index - 1)}"
+                        end_addr = f"{self._col_letter(orig_e_col - orig_s_col + 1)}{max(1, max_new_r_index)}"
                         dim.set('ref', f"{start_addr}:{end_addr}")
                     
                     cols_tag = f'{{{ns}}}cols'
@@ -1486,7 +1584,7 @@ class IsolatedGroupRenderer:
                     try:
                         from openpyxl.utils import get_column_letter
                         default_col_w = getattr(self.sheet.sheet_format, 'defaultColWidth', None) or 8.43
-                        for c in range(s_col, e_col + 1):
+                        for c in range(orig_s_col, orig_e_col + 1):
                             cd = self.sheet.column_dimensions.get(get_column_letter(c))
                             width = None
                             hidden = None
@@ -1496,7 +1594,7 @@ class IsolatedGroupRenderer:
                             if width is None:
                                 width = default_col_w
                             col_el = ET.Element(col_tag)
-                            new_idx = c - s_col + 1
+                            new_idx = c - orig_s_col + 1
                             col_el.set('min', str(new_idx))
                             col_el.set('max', str(new_idx))
                             try:
@@ -1563,13 +1661,6 @@ class IsolatedGroupRenderer:
                         if not inserted:
                             sroot4.insert(0, cols_el)
                     
-                    v_elements = sroot4.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}v')
-                    t_elements = sroot4.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t')
-                    for v in v_elements:
-                        v.text = ''
-                    for t in t_elements:
-                        t.text = ''
-                    
                     stree4.write(sheet_rel, encoding='utf-8', xml_declaration=True)
             except Exception as e:
                 print(f"[WARNING] sheetData再構築失敗: {e}")
@@ -1594,11 +1685,6 @@ class IsolatedGroupRenderer:
                         else:
                             sroot_drawing.append(drawing_elem)
                         
-                        for v in sroot_drawing.findall(f'.//{{{ns}}}v'):
-                            v.text = ''
-                        for t in sroot_drawing.findall(f'.//{{{ns}}}t'):
-                            t.text = ''
-                        
                         stree_drawing.write(sheet_rel, encoding='utf-8', xml_declaration=True)
                         print(f"[DEBUG] <drawing>要素を追加: {sheet_rel}")
             except Exception as e:
@@ -1607,6 +1693,11 @@ class IsolatedGroupRenderer:
             try:
                 drawing_path_full = os.path.join(tmpdir, drawing_path)
                 if os.path.exists(drawing_path_full):
+                    shape_offset_col = orig_s_col - 1
+                    shape_offset_row = orig_s_row - 1
+                    
+                    print(f"[DEBUG][Phase8] Moving shapes: offset=({shape_offset_col}, {shape_offset_row}), original range row={orig_s_row}-{orig_e_row}, col={orig_s_col}-{orig_e_col}")
+                    
                     dtree = ET.parse(drawing_path_full)
                     droot = dtree.getroot()
                     ns_xdr = {'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'}
@@ -1622,7 +1713,7 @@ class IsolatedGroupRenderer:
                             row_el = fr.find('xdr:row', ns_xdr)
                             try:
                                 if col_el is not None and col_el.text is not None:
-                                    new_col = int(col_el.text) - (s_col - 1)
+                                    new_col = int(col_el.text) - shape_offset_col
                                     if new_col < 0:
                                         new_col = 0
                                     col_el.text = str(new_col)
@@ -1630,7 +1721,7 @@ class IsolatedGroupRenderer:
                                 pass
                             try:
                                 if row_el is not None and row_el.text is not None:
-                                    new_row = int(row_el.text) - (s_row - 1)
+                                    new_row = int(row_el.text) - shape_offset_row
                                     if new_row < 0:
                                         new_row = 0
                                     row_el.text = str(max(0, new_row))
@@ -1643,7 +1734,7 @@ class IsolatedGroupRenderer:
                             row_el = to.find('xdr:row', ns_xdr)
                             try:
                                 if col_el is not None and col_el.text is not None:
-                                    new_col = int(col_el.text) - (s_col - 1)
+                                    new_col = int(col_el.text) - shape_offset_col
                                     if new_col < 0:
                                         new_col = 0
                                     col_el.text = str(new_col)
@@ -1651,7 +1742,7 @@ class IsolatedGroupRenderer:
                                 pass
                             try:
                                 if row_el is not None and row_el.text is not None:
-                                    new_row = int(row_el.text) - (s_row - 1)
+                                    new_row = int(row_el.text) - shape_offset_row
                                     if new_row < 0:
                                         new_row = 0
                                     row_el.text = str(max(0, new_row))
@@ -2012,6 +2103,7 @@ class IsolatedGroupRenderer:
                 except Exception:
                     pass
             
+            
             try:
                 self._set_page_setup_and_margins(src_for_conv)
                 print(f"[DEBUG] Applied fit-to-page settings to: {src_for_conv}")
@@ -2289,7 +2381,7 @@ class IsolatedGroupRenderer:
             return png_path
 
 
-    def _phase10_postprocess(self, out_path, png_name, sheet, group_rows=None, cell_range=None):
+    def _phase10_postprocess(self, out_path, png_name, sheet, group_rows=None, cell_range=None, keep_cnvpr_ids=None):
         """フェーズ10: 後処理
         
         生成された画像ファイルの最終処理と戻り値の準備
@@ -2300,6 +2392,7 @@ class IsolatedGroupRenderer:
             sheet: ワークシートオブジェクト
             group_rows: グループ行のリスト（オプション）
             cell_range: セル範囲 (s_col, e_col, s_row, e_row)（オプション）
+            keep_cnvpr_ids: クラスタリング対象の図形IDセット（オプション）
             
         Returns:
             Tuple[str, int]: (画像ファイル名, 開始行)
@@ -2307,6 +2400,18 @@ class IsolatedGroupRenderer:
         import os
         
         try:
+            if keep_cnvpr_ids:
+                try:
+                    if not hasattr(self.converter, '_global_iso_preserved_ids'):
+                        self.converter._global_iso_preserved_ids = set()
+                    
+                    for cid in keep_cnvpr_ids:
+                        self.converter._global_iso_preserved_ids.add(str(cid))
+                    
+                    print(f"[DEBUG][_phase10] Added {len(keep_cnvpr_ids)} shape IDs to _global_iso_preserved_ids")
+                except Exception as e:
+                    print(f"[WARNING] Failed to update _global_iso_preserved_ids: {e}")
+            
             # 実際に使用されたファイル名を取得
             basename = os.path.basename(out_path)
             

@@ -185,8 +185,14 @@ class ExcelToMarkdownConverter:
         # シートを変換
         for sheet_name in self.workbook.sheetnames:
             try:
-                print(f"[INFO] シート変換中: {sheet_name}")
                 sheet = self.workbook[sheet_name]
+                
+                # 非表示シートをスキップ
+                if sheet.sheet_state == 'hidden':
+                    print(f"[INFO] シートをスキップ（非表示）: {sheet_name}")
+                    continue
+                
+                print(f"[INFO] シート変換中: {sheet_name}")
                 self._convert_sheet(sheet)
             except Exception as e:
                 print(f"[WARNING] シート処理中にエラーが発生しました: {sheet_name} -> {e}")
@@ -1606,6 +1612,229 @@ class ExcelToMarkdownConverter:
                 print(f"[DEBUG][_process_sheet_images] sheet={sheet.title} shapes already generated; skipping repeated processing")
                 return False
             images_found = False
+            # 描画図形（ベクトル図形、コネクタなど）を確認
+            # of whether embedded images were found. This ensures that sheets with
+            # only vector shapes (no embedded images) are still processed correctly.
+            # Phase 2-D修正: images_found=Trueの時だけでなく、常に描画図形を確認
+            if True:  # Always execute isolated-group processing for drawing shapes
+                    print(f"[DEBUG] {len(sheet._images)} 個の埋め込み画像が検出されました。描画要素を調査中...")
+                    # 埋め込み画像が1つ（またはゼロ）の場合、
+                    # use that image directly rather than performing costly
+                    # isolated-group clustering and trimmed workbook rendering.
+                    # これによりtmp_xlsx/.fixed.xlsxの作成と
+                    # external converters when unnecessary (common for simple
+                    # sheets like input_files/three_sheet_.xlsx).
+                    try:
+                        emb_count = len(getattr(sheet, '_images', []) or [])
+                        # 埋め込み画像がちょうど1つ存在する場合、その画像を優先
+                        # directly and skip heavy isolated-group/fallback rendering.
+                        # これはクラスタリングを避けるユーザーのリクエストを尊重
+                        # a single embedded graphic is present.
+                        if emb_count == 1:
+                            print(f"[DEBUG][_process_sheet_images_shortcircuit] sheet={sheet.title} single embedded image detected; using embedded image without clustering")
+                            for image in sheet._images:
+                                img_name = self._process_excel_image(image, f"{sheet.title} (Image)")
+                                if img_name:
+                                    start_row = 1
+                                    try:
+                                        pos = self._get_image_position(image)
+                                        if pos and isinstance(pos, dict) and 'row' in pos:
+                                            start_row = pos['row']
+                                    except Exception:
+                                        start_row = 1
+                                    self._sheet_shape_images.setdefault(sheet.title, [])
+                                    self._sheet_shape_images[sheet.title].append((start_row, img_name))
+                            try:
+                                self._sheet_shapes_generated.add(sheet.title)
+                            except (ValueError, TypeError):
+                                pass  # データ構造操作失敗は無視
+                            return True
+                        # 埋め込み画像がゼロの場合、描画チェックにフォールスルー
+                        # and possibly run isolated-group or full-sheet fallback.
+                    except (ValueError, TypeError):
+                        pass  # データ構造操作失敗は無視
+                    try:
+                        z = zipfile.ZipFile(self.excel_file)
+                        sheet_index = self.workbook.sheetnames.index(sheet.title)
+                        rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
+                        if rels_path in z.namelist():
+                            rels_xml = ET.fromstring(z.read(rels_path))
+                            drawing_target = None
+                            for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
+                                t = rel.attrib.get('Type','')
+                                if t.endswith('/drawing'):
+                                    drawing_target = rel.attrib.get('Target')
+                                    break
+                            if drawing_target:
+                                drawing_path = drawing_target
+                                if drawing_path.startswith('..'):
+                                    drawing_path = drawing_path.replace('../', 'xl/')
+                                if drawing_path.startswith('/'):
+                                    drawing_path = drawing_path.lstrip('/')
+                                if drawing_path not in z.namelist():
+                                    drawing_path = drawing_path.replace('worksheets', 'drawings')
+                                if drawing_path in z.namelist():
+                                    drawing_xml = ET.fromstring(z.read(drawing_path))
+                                    # 簡素化されバランスの取れた解析: アンカーIDを収集
+                                    # and count pic/sp anchors. Also attempt to map any
+                                    # embedded image filenames to their cNvPr ids. Keep
+                                    # errors non-fatal and avoid deep nesting of try/except.
+                                    anchors_cid_list = []
+                                    total_anchors = 0
+                                    pic_anchors = 0
+                                    sp_anchors = 0
+                                    try:
+                                        # collect anchor ids and basic counts
+                                        for node in list(drawing_xml):
+                                            lname = node.tag.split('}')[-1].lower()
+                                            if lname not in ('twocellanchor', 'onecellanchor'):
+                                                continue
+                                            total_anchors += 1
+                                            for sub in node.iter():
+                                                t = sub.tag.split('}')[-1].lower()
+                                                if t == 'pic':
+                                                    pic_anchors += 1
+                                                if t == 'sp':
+                                                    sp_anchors += 1
+                                                if t == 'cnvpr':
+                                                    cid_val = sub.attrib.get('id') or sub.attrib.get('idx')
+                                                    anchors_cid_list.append(str(cid_val) if cid_val is not None else None)
+
+                                        # attempt to read drawing relationships and map embedded images
+                                        self._embedded_image_cid_by_name.setdefault(sheet.title, {})
+                                        drawing_rels_path = os.path.dirname(drawing_path) + '/_rels/' + os.path.basename(drawing_path) + '.rels'
+                                        if drawing_rels_path in z.namelist():
+                                            rels_xml = ET.fromstring(z.read(drawing_rels_path))
+                                            rid_to_target = {}
+                                            for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
+                                                rid = rel.attrib.get('Id') or rel.attrib.get('Id')
+                                                tgt = rel.attrib.get('Target')
+                                                if rid and tgt:
+                                                    tgtp = tgt
+                                                    if tgtp.startswith('..'):
+                                                        tgtp = tgtp.replace('../', 'xl/')
+                                                    if tgtp.startswith('/'):
+                                                        tgtp = tgtp.lstrip('/')
+                                                    rid_to_target[rid] = tgtp
+
+                                            for node_c in list(drawing_xml):
+                                                lname_c = node_c.tag.split('}')[-1].lower()
+                                                if lname_c not in ('twocellanchor', 'onecellanchor'):
+                                                    continue
+                                                cid_val = None
+                                                for sub_c in node_c.iter():
+                                                    if sub_c.tag.split('}')[-1].lower() == 'cnvpr':
+                                                        cid_val = sub_c.attrib.get('id') or sub_c.attrib.get('idx')
+                                                        break
+                                                for sub in node_c.iter():
+                                                    if sub.tag.split('}')[-1].lower() == 'blip':
+                                                        rid = sub.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed') or sub.attrib.get('embed')
+                                                        if rid and rid in rid_to_target:
+                                                            target = rid_to_target[rid]
+                                                            fname = os.path.basename(target)
+                                                            try:
+                                                                self._embedded_image_cid_by_name[sheet.title][fname] = str(cid_val) if cid_val is not None else None
+                                                            except (ValueError, TypeError) as e:
+                                                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                                                            break
+                                    except (ValueError, TypeError):
+                                        # non-fatal: ensure we have defaults
+                                        anchors_cid_list = anchors_cid_list if 'anchors_cid_list' in locals() else []
+                                        total_anchors = total_anchors if 'total_anchors' in locals() else 0
+                                        pic_anchors = pic_anchors if 'pic_anchors' in locals() else 0
+                                        sp_anchors = sp_anchors if 'sp_anchors' in locals() else 0
+                                    # 埋め込み画像よりアンカーが多く、少なくとも1つの図形がある場合、
+                                    # attempt isolated-group rendering to capture vector shapes
+                                    if total_anchors > len(sheet._images) and sp_anchors > 0:
+                                        print(f"[DEBUG] Detected additional drawing shapes (anchors={total_anchors}, pics={pic_anchors}, sps={sp_anchors}) - attempting isolated-group rendering")
+                                        try:
+                                            # 図形のバウンディングボックスを抽出
+                                            shapes = None
+                                            try:
+                                                shapes = self._extract_drawing_shapes(sheet)
+                                            except Exception as shape_ex:
+                                                print(f"[WARNING] _extract_drawing_shapes failed: {shape_ex}")
+                                                import traceback
+                                                traceback.print_exc()
+                                            
+                                            print(f"[DEBUG] _extract_drawing_shapes returned: {len(shapes) if shapes else 'None'} shapes")
+                                            if shapes and len(shapes) > 0:
+                                                # 適切なクラスタリングロジックを使用して図形をクラスタリング
+                                                # 行ベースのギャップ分割のためセル範囲を抽出
+                                                try:
+                                                    cell_ranges_all = self._extract_drawing_cell_ranges(sheet)
+                                                except (ValueError, TypeError):
+                                                    cell_ranges_all = []
+                                                
+                                                # 適切なクラスタリングのため_cluster_shapes_commonを使用
+                                                # max_groups=1 means cluster into 1 group if possible (no splitting)
+                                                # ただし、このメソッドは大きなギャップがある場合は分割します
+                                                clusters, debug_info = self._cluster_shapes_common(
+                                                    sheet, shapes, cell_ranges=cell_ranges_all, max_groups=1
+                                                )
+                                                print(f"[DEBUG] clustered into {len(clusters)} groups: sizes={[len(c) for c in clusters]}")
+                                                print(f"[DEBUG] clustering debug_info: {debug_info}")
+                                                
+                                                # 各クラスタを分離グループとしてレンダリング
+                                                # Using stable _render_sheet_isolated_group method (not v2)
+                                                # v2 is experimental and incomplete (missing connector cosmetic processing)
+                                                isolated_produced = False
+                                                isolated_images = []  # List of (filename, row) tuples
+                                                for idx, cluster in enumerate(clusters):
+                                                    if len(cluster) > 0:
+                                                        result = self._render_sheet_isolated_group(sheet, cluster)
+                                                        if result:
+                                                            if isinstance(result, tuple) and len(result) == 2:
+                                                                img_name, cluster_row = result
+                                                            else:
+                                                                img_name = result
+                                                                cluster_row = 1
+                                                            
+                                                            isolated_produced = True
+                                                            isolated_images.append((cluster_row, img_name))
+                                                            print(f"[INFO] シート '{sheet.title}' のクラスタ {idx+1} をisolated groupとして出力: {img_name} (row={cluster_row})")
+                                                
+                                                if isolated_produced:
+                                                    print(f"[INFO] シート '{sheet.title}' の図形をisolated groupとして出力しました")
+                                                    print(f"[DEBUG] isolated_images count: {len(isolated_images)}")
+                                                    # isolated group画像をMarkdownに追加するため、images_foundをTrueに設定
+                                                    images_found = True
+                                                    # 各画像を登録（row情報を使用）
+                                                    for cluster_row, img_name in isolated_images:
+                                                        print(f"[DEBUG] Processing isolated group image: {img_name} at row={cluster_row}")
+                                                        try:
+                                                            self._mark_image_emitted(img_name)
+                                                            print(f"[DEBUG] _mark_image_emitted succeeded for: {img_name}")
+                                                        except Exception as e:
+                                                            print(f"[WARNING] _mark_image_emitted failed: {e}")
+                                                        
+                                                        try:
+                                                            # _sheet_shape_images に追加（クラスタの最小行を使用）
+                                                            if not hasattr(self, '_sheet_shape_images'):
+                                                                self._sheet_shape_images = {}
+                                                            self._sheet_shape_images.setdefault(sheet.title, [])
+                                                            # クラスタの最小行に配置
+                                                            self._sheet_shape_images[sheet.title].append((cluster_row, img_name))
+                                                            print(f"[DEBUG] isolated group画像を_sheet_shape_imagesに追加: {img_name} at row={cluster_row}")
+                                                        except Exception as e:
+                                                            print(f"[WARNING] Failed to add to _sheet_shape_images: {e}")
+                                                            import traceback
+                                                            traceback.print_exc()
+                                            else:
+                                                isolated_produced = False
+                                        except Exception as e:
+                                            print(f"[WARNING] isolated-group rendering failed: {e}")
+                                            import traceback
+                                            traceback.print_exc()
+                                            isolated_produced = False
+                                        
+                                        # end of drawing parsing block
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
+            # If no parser-detected images were found, attempt a conservative
+            # fallback: render the sheet to PDF via LibreOffice and rasterize the
+            # corresponding PDF page to PNG using ImageMagick. This captures vector
+            # shapes and drawings that openpyxl doesn't expose as images.
             if hasattr(sheet, '_images') and sheet._images:
                 print(f"[INFO] シート '{sheet.title}' 内の画像を処理中...")
                 images_found = True
@@ -1812,6 +2041,33 @@ class ExcelToMarkdownConverter:
                                 # 非正規コンテキスト: 画像を登録/延期し
                                 # canonical emitter will place it deterministically.
                                 try:
+                                    cid_map = self._embedded_image_cid_by_name.get(sheet.title, {}) if hasattr(self, '_embedded_image_cid_by_name') else {}
+                                    mapped_cid = cid_map.get(img_name)
+                                    if mapped_cid is None:
+                                        try:
+                                            import re
+                                            m = re.search(r'([0-9a-f]{8})', img_name)
+                                            if m:
+                                                maybe = m.group(1)
+                                                mapped_cid = cid_map.get(maybe)
+                                        except Exception as e:
+                                            print(f"[WARNING] ファイル操作エラー: {e}")
+                                    if mapped_cid is None:
+                                        try:
+                                            fp = os.path.join(self.images_dir, img_name)
+                                            if os.path.exists(fp):
+                                                import hashlib as _hashlib
+                                                with open(fp, 'rb') as _f:
+                                                    d = _f.read()
+                                                sha8 = _hashlib.sha1(d).hexdigest()[:8]
+                                                mapped_cid = cid_map.get(sha8)
+                                        except (OSError, IOError, FileNotFoundError):
+                                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+                                    global_iso_preserved_ids = getattr(self, '_global_iso_preserved_ids', set()) or set()
+                                    if mapped_cid and str(mapped_cid) in global_iso_preserved_ids:
+                                        print(f"[DEBUG][_noncanonical_image_skip] sheet={sheet.title} embedded image {img_name} suppressed (cid={mapped_cid} already preserved)")
+                                        continue
+                                    
                                     md_line = f"![{sheet.title}の図](images/{img_name})"
                                     new_idx = self._insert_markdown_image(insert_index, md_line, img_name)
                                     try:
@@ -1827,217 +2083,6 @@ class ExcelToMarkdownConverter:
                                     except Exception as e:
                                         print(f"[WARNING] ファイル操作エラー: {e}")
 
-            # 描画図形（ベクトル図形、コネクタなど）を確認
-            # of whether embedded images were found. This ensures that sheets with
-            # only vector shapes (no embedded images) are still processed correctly.
-            # Phase 2-D修正: images_found=Trueの時だけでなく、常に描画図形を確認
-            if True:  # Always execute isolated-group processing for drawing shapes
-                    print(f"[DEBUG] {len(sheet._images)} 個の埋め込み画像が検出されました。描画要素を調査中...")
-                    # 埋め込み画像が1つ（またはゼロ）の場合、
-                    # use that image directly rather than performing costly
-                    # isolated-group clustering and trimmed workbook rendering.
-                    # これによりtmp_xlsx/.fixed.xlsxの作成と
-                    # external converters when unnecessary (common for simple
-                    # sheets like input_files/three_sheet_.xlsx).
-                    try:
-                        emb_count = len(getattr(sheet, '_images', []) or [])
-                        # 埋め込み画像がちょうど1つ存在する場合、その画像を優先
-                        # directly and skip heavy isolated-group/fallback rendering.
-                        # これはクラスタリングを避けるユーザーのリクエストを尊重
-                        # a single embedded graphic is present.
-                        if emb_count == 1:
-                            print(f"[DEBUG][_process_sheet_images_shortcircuit] sheet={sheet.title} single embedded image detected; using embedded image without clustering")
-                            try:
-                                self._sheet_shapes_generated.add(sheet.title)
-                            except (ValueError, TypeError):
-                                pass  # データ構造操作失敗は無視
-                            return True
-                        # 埋め込み画像がゼロの場合、描画チェックにフォールスルー
-                        # and possibly run isolated-group or full-sheet fallback.
-                    except (ValueError, TypeError):
-                        pass  # データ構造操作失敗は無視
-                    try:
-                        z = zipfile.ZipFile(self.excel_file)
-                        sheet_index = self.workbook.sheetnames.index(sheet.title)
-                        rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
-                        if rels_path in z.namelist():
-                            rels_xml = ET.fromstring(z.read(rels_path))
-                            drawing_target = None
-                            for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
-                                t = rel.attrib.get('Type','')
-                                if t.endswith('/drawing'):
-                                    drawing_target = rel.attrib.get('Target')
-                                    break
-                            if drawing_target:
-                                drawing_path = drawing_target
-                                if drawing_path.startswith('..'):
-                                    drawing_path = drawing_path.replace('../', 'xl/')
-                                if drawing_path.startswith('/'):
-                                    drawing_path = drawing_path.lstrip('/')
-                                if drawing_path not in z.namelist():
-                                    drawing_path = drawing_path.replace('worksheets', 'drawings')
-                                if drawing_path in z.namelist():
-                                    drawing_xml = ET.fromstring(z.read(drawing_path))
-                                    # 簡素化されバランスの取れた解析: アンカーIDを収集
-                                    # and count pic/sp anchors. Also attempt to map any
-                                    # embedded image filenames to their cNvPr ids. Keep
-                                    # errors non-fatal and avoid deep nesting of try/except.
-                                    anchors_cid_list = []
-                                    total_anchors = 0
-                                    pic_anchors = 0
-                                    sp_anchors = 0
-                                    try:
-                                        # collect anchor ids and basic counts
-                                        for node in list(drawing_xml):
-                                            lname = node.tag.split('}')[-1].lower()
-                                            if lname not in ('twocellanchor', 'onecellanchor'):
-                                                continue
-                                            total_anchors += 1
-                                            for sub in node.iter():
-                                                t = sub.tag.split('}')[-1].lower()
-                                                if t == 'pic':
-                                                    pic_anchors += 1
-                                                if t == 'sp':
-                                                    sp_anchors += 1
-                                                if t == 'cnvpr':
-                                                    cid_val = sub.attrib.get('id') or sub.attrib.get('idx')
-                                                    anchors_cid_list.append(str(cid_val) if cid_val is not None else None)
-
-                                        # attempt to read drawing relationships and map embedded images
-                                        self._embedded_image_cid_by_name.setdefault(sheet.title, {})
-                                        drawing_rels_path = os.path.dirname(drawing_path) + '/_rels/' + os.path.basename(drawing_path) + '.rels'
-                                        if drawing_rels_path in z.namelist():
-                                            rels_xml = ET.fromstring(z.read(drawing_rels_path))
-                                            rid_to_target = {}
-                                            for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
-                                                rid = rel.attrib.get('Id') or rel.attrib.get('Id')
-                                                tgt = rel.attrib.get('Target')
-                                                if rid and tgt:
-                                                    tgtp = tgt
-                                                    if tgtp.startswith('..'):
-                                                        tgtp = tgtp.replace('../', 'xl/')
-                                                    if tgtp.startswith('/'):
-                                                        tgtp = tgtp.lstrip('/')
-                                                    rid_to_target[rid] = tgtp
-
-                                            for node_c in list(drawing_xml):
-                                                lname_c = node_c.tag.split('}')[-1].lower()
-                                                if lname_c not in ('twocellanchor', 'onecellanchor'):
-                                                    continue
-                                                cid_val = None
-                                                for sub_c in node_c.iter():
-                                                    if sub_c.tag.split('}')[-1].lower() == 'cnvpr':
-                                                        cid_val = sub_c.attrib.get('id') or sub_c.attrib.get('idx')
-                                                        break
-                                                for sub in node_c.iter():
-                                                    if sub.tag.split('}')[-1].lower() == 'blip':
-                                                        rid = sub.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed') or sub.attrib.get('embed')
-                                                        if rid and rid in rid_to_target:
-                                                            target = rid_to_target[rid]
-                                                            fname = os.path.basename(target)
-                                                            try:
-                                                                self._embedded_image_cid_by_name[sheet.title][fname] = str(cid_val) if cid_val is not None else None
-                                                            except (ValueError, TypeError) as e:
-                                                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                                                            break
-                                    except (ValueError, TypeError):
-                                        # non-fatal: ensure we have defaults
-                                        anchors_cid_list = anchors_cid_list if 'anchors_cid_list' in locals() else []
-                                        total_anchors = total_anchors if 'total_anchors' in locals() else 0
-                                        pic_anchors = pic_anchors if 'pic_anchors' in locals() else 0
-                                        sp_anchors = sp_anchors if 'sp_anchors' in locals() else 0
-                                    # 埋め込み画像よりアンカーが多く、少なくとも1つの図形がある場合、
-                                    # attempt isolated-group rendering to capture vector shapes
-                                    if total_anchors > len(sheet._images) and sp_anchors > 0:
-                                        print(f"[DEBUG] Detected additional drawing shapes (anchors={total_anchors}, pics={pic_anchors}, sps={sp_anchors}) - attempting isolated-group rendering")
-                                        try:
-                                            # 図形のバウンディングボックスを抽出
-                                            shapes = None
-                                            try:
-                                                shapes = self._extract_drawing_shapes(sheet)
-                                            except Exception as shape_ex:
-                                                print(f"[WARNING] _extract_drawing_shapes failed: {shape_ex}")
-                                                import traceback
-                                                traceback.print_exc()
-                                            
-                                            print(f"[DEBUG] _extract_drawing_shapes returned: {len(shapes) if shapes else 'None'} shapes")
-                                            if shapes and len(shapes) > 0:
-                                                # 適切なクラスタリングロジックを使用して図形をクラスタリング
-                                                # 行ベースのギャップ分割のためセル範囲を抽出
-                                                try:
-                                                    cell_ranges_all = self._extract_drawing_cell_ranges(sheet)
-                                                except (ValueError, TypeError):
-                                                    cell_ranges_all = []
-                                                
-                                                # 適切なクラスタリングのため_cluster_shapes_commonを使用
-                                                # max_groups=1 means cluster into 1 group if possible (no splitting)
-                                                # ただし、このメソッドは大きなギャップがある場合は分割します
-                                                clusters, debug_info = self._cluster_shapes_common(
-                                                    sheet, shapes, cell_ranges=cell_ranges_all, max_groups=1
-                                                )
-                                                print(f"[DEBUG] clustered into {len(clusters)} groups: sizes={[len(c) for c in clusters]}")
-                                                print(f"[DEBUG] clustering debug_info: {debug_info}")
-                                                
-                                                # 各クラスタを分離グループとしてレンダリング
-                                                # Using stable _render_sheet_isolated_group method (not v2)
-                                                # v2 is experimental and incomplete (missing connector cosmetic processing)
-                                                isolated_produced = False
-                                                isolated_images = []  # List of (filename, row) tuples
-                                                for idx, cluster in enumerate(clusters):
-                                                    if len(cluster) > 0:
-                                                        result = self._render_sheet_isolated_group(sheet, cluster)
-                                                        if result:
-                                                            if isinstance(result, tuple) and len(result) == 2:
-                                                                img_name, cluster_row = result
-                                                            else:
-                                                                img_name = result
-                                                                cluster_row = 1
-                                                            
-                                                            isolated_produced = True
-                                                            isolated_images.append((cluster_row, img_name))
-                                                            print(f"[INFO] シート '{sheet.title}' のクラスタ {idx+1} をisolated groupとして出力: {img_name} (row={cluster_row})")
-                                                
-                                                if isolated_produced:
-                                                    print(f"[INFO] シート '{sheet.title}' の図形をisolated groupとして出力しました")
-                                                    print(f"[DEBUG] isolated_images count: {len(isolated_images)}")
-                                                    # isolated group画像をMarkdownに追加するため、images_foundをTrueに設定
-                                                    images_found = True
-                                                    # 各画像を登録（row情報を使用）
-                                                    for cluster_row, img_name in isolated_images:
-                                                        print(f"[DEBUG] Processing isolated group image: {img_name} at row={cluster_row}")
-                                                        try:
-                                                            self._mark_image_emitted(img_name)
-                                                            print(f"[DEBUG] _mark_image_emitted succeeded for: {img_name}")
-                                                        except Exception as e:
-                                                            print(f"[WARNING] _mark_image_emitted failed: {e}")
-                                                        
-                                                        try:
-                                                            # _sheet_shape_images に追加（クラスタの最小行を使用）
-                                                            if not hasattr(self, '_sheet_shape_images'):
-                                                                self._sheet_shape_images = {}
-                                                            self._sheet_shape_images.setdefault(sheet.title, [])
-                                                            # クラスタの最小行に配置
-                                                            self._sheet_shape_images[sheet.title].append((cluster_row, img_name))
-                                                            print(f"[DEBUG] isolated group画像を_sheet_shape_imagesに追加: {img_name} at row={cluster_row}")
-                                                        except Exception as e:
-                                                            print(f"[WARNING] Failed to add to _sheet_shape_images: {e}")
-                                                            import traceback
-                                                            traceback.print_exc()
-                                            else:
-                                                isolated_produced = False
-                                        except Exception as e:
-                                            print(f"[WARNING] isolated-group rendering failed: {e}")
-                                            import traceback
-                                            traceback.print_exc()
-                                            isolated_produced = False
-                                        
-                                        # end of drawing parsing block
-                    except (ValueError, TypeError) as e:
-                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
-            # If no parser-detected images were found, attempt a conservative
-            # fallback: render the sheet to PDF via LibreOffice and rasterize the
-            # corresponding PDF page to PNG using ImageMagick. This captures vector
-            # shapes and drawings that openpyxl doesn't expose as images.
             if not images_found:
                 print(f"[DEBUG] イメージが見つかりませんでした。")
                 # Avoid rendering sheets that contain only cell text; only fallback
