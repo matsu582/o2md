@@ -66,8 +66,7 @@ class WordToMarkdownConverter:
         if output_dir:
             self.output_dir = output_dir
         else:
-            # 実行ディレクトリに基づく出力ディレクトリ
-            self.output_dir = os.getcwd()
+            self.output_dir = os.path.join(os.getcwd(), "output")
         
         self.images_dir = os.path.join(self.output_dir, "images")
         
