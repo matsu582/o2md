@@ -24,7 +24,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 import io
 
 from utils import get_libreoffice_path
