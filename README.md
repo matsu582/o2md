@@ -23,10 +23,10 @@ o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）をそれっぽ�
 
 ```bash
 # pip を使用する場合
-pip install openpyxl python-docx python-pptx Pillow
+pip install openpyxl python-docx python-pptx Pillow PyMuPDF
 
 # uv を使用する場合
-uv pip install openpyxl python-docx python-pptx Pillow
+uv pip install openpyxl python-docx python-pptx Pillow PyMuPDF
 ```
 
 ### 2. 外部ツール
@@ -43,20 +43,6 @@ sudo apt-get install libreoffice
 
 # Windows
 # https://www.libreoffice.org/download/download/ からダウンロード
-```
-
-#### ImageMagick
-画像処理と変換に必要（特にExcelとPowerPointの図形処理）
-
-```bash
-# macOS
-brew install imagemagick
-
-# Ubuntu/Debian
-sudo apt-get install imagemagick
-
-# Windows
-# https://imagemagick.org/script/download.php からダウンロード
 ```
 
 ## 使用方法
