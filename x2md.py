@@ -1632,6 +1632,18 @@ class ExcelToMarkdownConverter:
                         # a single embedded graphic is present.
                         if emb_count == 1:
                             print(f"[DEBUG][_process_sheet_images_shortcircuit] sheet={sheet.title} single embedded image detected; using embedded image without clustering")
+                            for image in sheet._images:
+                                img_name = self._process_excel_image(image, f"{sheet.title} (Image)")
+                                if img_name:
+                                    start_row = 1
+                                    try:
+                                        pos = self._get_image_position(image)
+                                        if pos and isinstance(pos, dict) and 'row' in pos:
+                                            start_row = pos['row']
+                                    except Exception:
+                                        start_row = 1
+                                    self._sheet_shape_images.setdefault(sheet.title, [])
+                                    self._sheet_shape_images[sheet.title].append((start_row, img_name))
                             try:
                                 self._sheet_shapes_generated.add(sheet.title)
                             except (ValueError, TypeError):
