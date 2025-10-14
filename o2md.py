@@ -52,21 +52,24 @@ from pathlib import Path
 # 各変換クラスをインポート
 try:
     from x2md import ExcelToMarkdownConverter, convert_xls_to_xlsx
-except ImportError:
-    print("エラー: x2md.pyが見つかりません。")
-    sys.exit(1)
+except ImportError as e:
+    raise ImportError(
+        "x2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
+    ) from e
 
 try:
     from d2md import WordToMarkdownConverter, convert_doc_to_docx
-except ImportError:
-    print("エラー: d2md.pyが見つかりません。")
-    sys.exit(1)
+except ImportError as e:
+    raise ImportError(
+        "d2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
+    ) from e
 
 try:
     from p2md import PowerPointToMarkdownConverter
-except ImportError:
-    print("エラー: p2md.pyが見つかりません。")
-    sys.exit(1)
+except ImportError as e:
+    raise ImportError(
+        "p2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
+    ) from e
 
 
 def detect_file_type(file_path: str) -> str:
