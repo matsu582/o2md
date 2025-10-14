@@ -235,7 +235,7 @@ class WordToMarkdownConverter:
         
         result = heading_text
         for pattern in patterns:
-            result = re.sub(pattern, '', result, 1)  # 最初の一致のみ置換
+            result = re.sub(pattern, '', result, count=1)  # 最初の一致のみ置換
         
         # 前後の空白を除去
         return result.strip()
