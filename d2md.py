@@ -27,7 +27,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from PIL import Image, ImageDraw, ImageFont
 import io
 
-from utils import get_libreoffice_path, get_imagemagick_command
+from utils import get_libreoffice_path
 
 try:
     from docx import Document
@@ -46,9 +46,15 @@ except ImportError as e:
         "Pillowライブラリが必要です: pip install pillow または uv sync を実行してください"
     ) from e
 
+try:
+    import fitz
+except ImportError as e:
+    raise ImportError(
+        "PyMuPDFライブラリが必要です: pip install PyMuPDF または uv sync を実行してください"
+    ) from e
+
 # 設定
 LIBREOFFICE_PATH = get_libreoffice_path()
-IMAGEMAGICK_CMD = get_imagemagick_command()
 
 class WordToMarkdownConverter:
     def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None):
@@ -60,8 +66,7 @@ class WordToMarkdownConverter:
         if output_dir:
             self.output_dir = output_dir
         else:
-            # 実行ディレクトリに基づく出力ディレクトリ
-            self.output_dir = os.getcwd()
+            self.output_dir = os.path.join(os.getcwd(), "output")
         
         self.images_dir = os.path.join(self.output_dir, "images")
         
@@ -1271,84 +1276,81 @@ class WordToMarkdownConverter:
             return None
     
     def _convert_pdf_to_png(self, pdf_path, output_path):
-        """PDFをPNGに変換（高速化オプション付き）"""
+        """PDFをPNGに変換（PyMuPDF使用）"""
         try:
-            # 手法1: 高速変換（品質は標準、速度重視）
-            print("[DEBUG] 高速PDF→PNG変換実行...")
-            cmd_fast = [
-                IMAGEMAGICK_CMD,
-                '-density', '300',  # 標準DPIで高速化
-                f'{pdf_path}[0]',  # 最初のページ
-                '-colorspace', 'RGB',
-                '-background', 'white',
-                '-alpha', 'remove',
-                '-resize', '200%',  # 2倍拡大（高速）
-                '-trim',  # 余白除去
-                '+repage',
-                '-quality', '90',  # 品質を少し下げて高速化
-                '-depth', '8',
-                output_path
-            ]
+            print("[DEBUG] PyMuPDFでPDF→PNG変換実行...")
             
-            result = subprocess.run(cmd_fast, capture_output=True, text=True, timeout=30)
+            doc = fitz.open(pdf_path)
+            if len(doc) == 0:
+                print("[ERROR] PDFにページが含まれていません")
+                doc.close()
+                return False
             
-            if result.returncode == 0 and os.path.exists(output_path):
-                print(f"[INFO] 高速PNG変換完了: {output_path}")
-                
-                # 画像情報を簡単に出力
-                try:
-                    identify_result = subprocess.run([IMAGEMAGICK_CMD, 'identify', output_path], 
-                                                   capture_output=True, text=True, timeout=5)
-                    if identify_result.returncode == 0:
-                        info = identify_result.stdout.strip()
-                        # ファイル名を除いて重要な情報だけ表示
-                        parts = info.split()
-                        if len(parts) >= 3:
-                            print(f"[DEBUG] 画像情報: {parts[2]} {parts[6] if len(parts) > 6 else ''}")
-                except Exception:
-                    pass
-                    
-                return True
-            else:
-                print(f"[WARNING] 高速変換失敗、代替手法を試行: {result.stderr}")
-                
-                # 手法2: pdftoppm使用（利用可能な場合）
-                if shutil.which('pdftoppm'):
-                    print("[DEBUG] pdftoppm高速変換試行...")
-                    cmd_ppm = ['pdftoppm', '-png', '-r', '200', '-singlefile', pdf_path, output_path.replace('.png', '')]
-                    
-                    result2 = subprocess.run(cmd_ppm, capture_output=True, text=True, timeout=20)
-                    if result2.returncode == 0 and os.path.exists(output_path):
-                        print(f"[INFO] pdftoppm変換完了: {output_path}")
-                        
-                        # 余白除去を後処理で実行
-                        cmd_trim = [IMAGEMAGICK_CMD, output_path, '-trim', '+repage', output_path]
-                        subprocess.run(cmd_trim, capture_output=True, text=True, timeout=10)
-                        
-                        return True
-                
-                # 手法3: 最小設定での変換
-                print("[DEBUG] 最小設定変換試行...")
-                cmd_minimal = [
-                    IMAGEMAGICK_CMD,
-                    '-density', '150',  # 低DPIで最高速
-                    f'{pdf_path}[0]',
-                    '-resize', '150%',  # 小さめの拡大
-                    '-trim',
-                    '+repage',
-                    output_path
-                ]
-                
-                result3 = subprocess.run(cmd_minimal, capture_output=True, text=True, timeout=15)
-                if result3.returncode == 0 and os.path.exists(output_path):
-                    print(f"[INFO] 最小設定変換完了: {output_path}")
-                    return True
-                    
-            return False
+            page = doc[0]
+            
+            mat = fitz.Matrix(300/72, 300/72)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            
+            img_data = pix.tobytes("png")
+            pix = None
+            doc.close()
+            
+            img = Image.open(io.BytesIO(img_data))
+            
+            if img.mode == 'RGBA':
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[3] if len(img.split()) > 3 else None)
+                img = background
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            img = self._trim_white_margins(img)
+            
+            width, height = img.size
+            new_width = int(width * 2)
+            new_height = int(height * 2)
+            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            img.save(output_path, 'PNG', quality=95)
+            
+            print(f"[INFO] PNG変換完了: {output_path} (サイズ: {img.size[0]}x{img.size[1]})")
+            return True
                 
         except Exception as e:
             print(f"[ERROR] PNG変換エラー: {e}")
+            import traceback
+            traceback.print_exc()
             return False
+    
+    def _trim_white_margins(self, img):
+        """画像の白い余白をトリミング"""
+        import numpy as np
+        
+        img_array = np.array(img)
+        
+        if len(img_array.shape) == 3:
+            gray = np.mean(img_array, axis=2)
+        else:
+            gray = img_array
+        
+        threshold = 250
+        non_white_pixels = gray < threshold
+        
+        rows = np.any(non_white_pixels, axis=1)
+        cols = np.any(non_white_pixels, axis=0)
+        
+        if not rows.any() or not cols.any():
+            return img
+        
+        row_indices = np.where(rows)[0]
+        col_indices = np.where(cols)[0]
+        
+        top = row_indices[0]
+        bottom = row_indices[-1] + 1
+        left = col_indices[0]
+        right = col_indices[-1] + 1
+        
+        return img.crop((left, top, right, bottom))
     
     def _debug_pdf_content(self, pdf_path):
         """PDFの内容をデバッグ（オプション）"""
