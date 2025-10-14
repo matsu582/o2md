@@ -1305,9 +1305,7 @@ class WordToMarkdownConverter:
             elif img.mode != 'RGB':
                 img = img.convert('RGB')
             
-            bbox = img.getbbox()
-            if bbox:
-                img = img.crop(bbox)
+            img = self._trim_white_margins(img)
             
             width, height = img.size
             new_width = int(width * 2)
@@ -1324,6 +1322,36 @@ class WordToMarkdownConverter:
             import traceback
             traceback.print_exc()
             return False
+    
+    def _trim_white_margins(self, img):
+        """画像の白い余白をトリミング"""
+        import numpy as np
+        
+        img_array = np.array(img)
+        
+        if len(img_array.shape) == 3:
+            gray = np.mean(img_array, axis=2)
+        else:
+            gray = img_array
+        
+        threshold = 250
+        non_white_pixels = gray < threshold
+        
+        rows = np.any(non_white_pixels, axis=1)
+        cols = np.any(non_white_pixels, axis=0)
+        
+        if not rows.any() or not cols.any():
+            return img
+        
+        row_indices = np.where(rows)[0]
+        col_indices = np.where(cols)[0]
+        
+        top = row_indices[0]
+        bottom = row_indices[-1] + 1
+        left = col_indices[0]
+        right = col_indices[-1] + 1
+        
+        return img.crop((left, top, right, bottom))
     
     def _debug_pdf_content(self, pdf_path):
         """PDFの内容をデバッグ（オプション）"""
