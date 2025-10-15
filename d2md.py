@@ -1464,16 +1464,18 @@ class WordToMarkdownConverter:
                 mat = fitz.Matrix(300 / 72, 300 / 72)
                 pix = page.get_pixmap(matrix=mat, alpha=False)
                 
+                from PIL import Image
                 if pix.alpha:
-                    from PIL import Image
                     img = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
                     bg = Image.new("RGB", img.size, (255, 255, 255))
                     bg.paste(img, mask=img.split()[3])
-                    bg.save(output_path, "PNG")
                 else:
-                    pix.save(output_path)
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 
                 pdf_doc.close()
+                
+                img = self._trim_white_margins(img)
+                img.save(output_path, "PNG")
                 
                 if os.path.exists(output_path):
                     print(f"[SUCCESS] ベクター画像変換完了（LibreOffice→PDF→PNG）: {output_path}")
