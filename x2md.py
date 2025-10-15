@@ -84,7 +84,7 @@ class ExcelToMarkdownConverter:
 
             return super().append(item)
 
-    def __init__(self, excel_file_path: str, output_dir=None, debug_mode=False):
+    def __init__(self, excel_file_path: str, output_dir=None, debug_mode=False, shape_metadata=False):
         """コンバータインスタンスの初期化
 
         CLIから使用できるように、最小限で安全なコンストラクタを提供します。
@@ -100,6 +100,7 @@ class ExcelToMarkdownConverter:
         self.images_dir = os.path.join(self.output_dir, "images")
         
         self.debug_mode = debug_mode
+        self.shape_metadata = shape_metadata
 
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.images_dir, exist_ok=True)
@@ -1479,8 +1480,12 @@ class ExcelToMarkdownConverter:
                         md = f"![{sheet.title}](images/{img_fn})"
                         # Insert image with metadata using helper method
                         try:
-                            filter_ids = self._image_shape_ids.get(img_fn)
-                            shapes_metadata = self._extract_all_shapes_metadata(sheet, filter_ids=filter_ids)
+                            if self.shape_metadata:
+                                filter_ids = self._image_shape_ids.get(img_fn)
+                                shapes_metadata = self._extract_all_shapes_metadata(sheet, filter_ids=filter_ids)
+                            else:
+                                shapes_metadata = []
+                            
                             if shapes_metadata:
                                 print(f"[DEBUG] 図形メタデータ抽出成功: {img_fn} -> {len(shapes_metadata)} shapes")
                                 text_metadata = self._format_shape_metadata_as_text(shapes_metadata)
@@ -10037,6 +10042,8 @@ def main():
                        help='出力ディレクトリを指定（デフォルト: ./output）')
     parser.add_argument('--debug', action='store_true',
                        help='デバッグモード：debug_workbooks、pdfs、diagnosticsフォルダを出力')
+    parser.add_argument('--shape-metadata', action='store_true',
+                       help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
     
     args = parser.parse_args()
     
@@ -10064,7 +10071,7 @@ def main():
         print(f"✅ XLS→XLSX変換完了: {converted_file}")
     
     try:
-        converter = ExcelToMarkdownConverter(processing_file, output_dir=args.output_dir, debug_mode=args.debug)
+        converter = ExcelToMarkdownConverter(processing_file, output_dir=args.output_dir, debug_mode=args.debug, shape_metadata=args.shape_metadata)
         output_file = converter.convert()
         print("\n✅ 変換完了!")
         print(f"📄 出力ファイル: {output_file}")
