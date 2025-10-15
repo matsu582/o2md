@@ -1477,19 +1477,48 @@ class ExcelToMarkdownConverter:
                         if ref in self._emitted_images or img_fn in self._emitted_images:
                             continue
                         md = f"![{sheet.title}](images/{img_fn})"
-                        # Insert image immediately into the flow (events already sorted
-                        # so images follow their text anchors). Record mapping and mark emitted.
+                        # Insert image with metadata using helper method
                         try:
+                            filter_ids = self._image_shape_ids.get(img_fn)
+                            shapes_metadata = self._extract_all_shapes_metadata(sheet, filter_ids=filter_ids)
+                            if shapes_metadata:
+                                print(f"[DEBUG] 図形メタデータ抽出成功: {img_fn} -> {len(shapes_metadata)} shapes")
+                                text_metadata = self._format_shape_metadata_as_text(shapes_metadata)
+                                json_metadata = self._format_shape_metadata_as_json(shapes_metadata)
+                                
+                                self.markdown_lines.append(md)
+                                self.markdown_lines.append("")
+                                
+                                if text_metadata:
+                                    self.markdown_lines.append("")
+                                    for line in text_metadata.split('\n'):
+                                        self.markdown_lines.append(line)
+                                    self.markdown_lines.append("")
+                                
+                                if json_metadata and json_metadata != "{}":
+                                    self.markdown_lines.append("<details>")
+                                    self.markdown_lines.append("<summary>JSON形式の図形情報</summary>")
+                                    self.markdown_lines.append("")
+                                    self.markdown_lines.append("```json")
+                                    for line in json_metadata.split('\n'):
+                                        self.markdown_lines.append(line)
+                                    self.markdown_lines.append("```")
+                                    self.markdown_lines.append("")
+                                    self.markdown_lines.append("</details>")
+                                    self.markdown_lines.append("")
+                            else:
+                                self.markdown_lines.append(md)
+                                self.markdown_lines.append("")
+                        except Exception as e:
+                            print(f"[WARNING] 図形メタデータ追加失敗: {e}")
                             self.markdown_lines.append(md)
                             self.markdown_lines.append("")
-                        except Exception:
-                            print(f"WARNING self.markdown_lines.append({md})")
                         # record authoritative mapping only via helper
                         try:
                             md_idx = len(self.markdown_lines) - 2
                             self._mark_sheet_map(sheet.title, row, md_idx)
                         except (ValueError, TypeError):
-                            print(f"WARNING self._mark_sheet_map({imgsheet.title}, {row}, {md_idx_fn})")
+                            print(f"WARNING self._mark_sheet_map({sheet.title}, {row}, {md_idx})")
                         try:
                             # Mark emitted_images regardless to prevent duplicates; it is safe
                             # because emitted_images only tracks filenames and does not affect pruning.
