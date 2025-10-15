@@ -80,7 +80,7 @@ def is_verbose() -> bool:
 def debug_print(*args, **kwargs):
     """verboseモード時のみ出力するデバッグ用print"""
     if _VERBOSE:
-        debug_print(*args, **kwargs)
+        print(*args, **kwargs)
 
 class ExcelToMarkdownConverter:
     class _LoggingList(list):
