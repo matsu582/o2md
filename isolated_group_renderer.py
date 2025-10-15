@@ -61,36 +61,55 @@ class IsolatedGroupRenderer:
         Returns:
             タプル(画像ファイル名, 開始行) またはNone
         """
+        print(f"[DEBUG][IsoRender] Entered render() for sheet='{sheet.title}' with {len(shape_indices)} shape_indices")
         try:
             # 初期化
             self.sheet = sheet  # Aggressiveセクションで使用
             self._last_iso_preserved_ids = set()
             
             # フェーズ1: 初期化とXMLロード
+            print(f"[DEBUG][IsoRender] Starting Phase 1: Initialize and load XML")
             excel_zip, drawing_xml, drawing_path, sheet_index, theme_color_map = \
                 self._phase1_initialize_and_load_xml(sheet)
             
             if drawing_xml is None:
+                print(f"[DEBUG][IsoRender] Phase 1 FAILED - drawing_xml is None, returning None")
                 return None
+            print(f"[DEBUG][IsoRender] Phase 1 SUCCESS - drawing_xml loaded")
             
             # フェーズ2: アンカー収集
+            print(f"[DEBUG][IsoRender] Starting Phase 2: Collect anchors")
             anchors = self._phase2_collect_anchors(drawing_xml)
             
             if not anchors:
+                print(f"[DEBUG][IsoRender] Phase 2 FAILED - no anchors found, returning None")
                 debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawable anchors found")
                 return None
+            print(f"[DEBUG][IsoRender] Phase 2 SUCCESS - {len(anchors)} anchors collected")
             
             # フェーズ3: セル範囲計算
+            print(f"[DEBUG][IsoRender] Starting Phase 3: Compute cell range")
             cell_range = self._phase3_compute_cell_range(sheet, shape_indices, anchors, cell_range)
             
             original_cell_range = cell_range
             
+            # cell_rangeがNoneの場合のログ
+            if original_cell_range is None:
+                print(f"[DEBUG][IsoRender] Phase 3 WARNING - cell_range is None (oneCellAnchor may be present)")
+                debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} cell_range is None - oneCellAnchor may be present, continuing with processing")
+            else:
+                print(f"[DEBUG][IsoRender] Phase 3 SUCCESS - cell_range={original_cell_range}")
+                debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} cell_range={original_cell_range}")
+            
             # フェーズ4: ID収集
+            print(f"[DEBUG][IsoRender] Starting Phase 4: Collect keep IDs")
             keep_cnvpr_ids = self._phase4_collect_keep_ids(shape_indices, anchors)
+            print(f"[DEBUG][IsoRender] Phase 4 SUCCESS - {len(keep_cnvpr_ids)} IDs collected")
             
             debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} anchors_count={len(anchors)} keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))}")
             
             # フェーズ5: 一時ディレクトリ作成とコネクタ参照解決
+            print(f"[DEBUG][IsoRender] Starting Phase 5: Create tmpdir and resolve connectors")
             tmpdir, referenced_ids, connector_children_by_id = \
                 self._phase5_create_tmpdir_and_resolve_connectors(
                     excel_zip, sheet, shape_indices, anchors, keep_cnvpr_ids, 
@@ -98,10 +117,13 @@ class IsolatedGroupRenderer:
                 )
             
             if tmpdir is None:
+                print(f"[DEBUG][IsoRender] Phase 5 FAILED - tmpdir is None, returning None")
                 return None
+            print(f"[DEBUG][IsoRender] Phase 5 SUCCESS - tmpdir created, {len(referenced_ids)} referenced IDs")
             
             try:
-                        # フェーズ6: 描画XML刈り込み
+                # フェーズ6: 描画XML刈り込み
+                print(f"[DEBUG][IsoRender] Starting Phase 6: Prune drawing XML")
                 drawing_relpath = os.path.join(tmpdir, drawing_path)
                 drawing_xml_bytes = ET.tostring(drawing_xml)
                 success = self._phase6_prune_drawing_xml(
@@ -110,38 +132,50 @@ class IsolatedGroupRenderer:
                 )
                 
                 if not success:
+                    print(f"[DEBUG][IsoRender] Phase 6 FAILED - prune failed, returning None")
                     return None
+                print(f"[DEBUG][IsoRender] Phase 6 SUCCESS - XML pruned")
                 
                 # フェーズ7: コネクタコスメティック処理
+                print(f"[DEBUG][IsoRender] Starting Phase 7: Apply connector cosmetics")
                 self._phase7_apply_connector_cosmetics(
                     drawing_relpath, referenced_ids, connector_children_by_id,
                     theme_color_map, drawing_xml_bytes, drawing_xml
                 )
+                print(f"[DEBUG][IsoRender] Phase 7 SUCCESS - cosmetics applied")
                 
                 # フェーズ8: ワークブック準備
+                print(f"[DEBUG][IsoRender] Starting Phase 8: Prepare workbook")
                 src_for_conv = self._phase8_prepare_workbook(
                     tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices, keep_cnvpr_ids, original_cell_range
                 )
                 
                 if src_for_conv is None:
+                    print(f"[DEBUG][IsoRender] Phase 8 FAILED - src_for_conv is None, returning None")
                     shutil.rmtree(tmpdir, ignore_errors=True)
                     return None
+                print(f"[DEBUG][IsoRender] Phase 8 SUCCESS - workbook prepared: {src_for_conv}")
                 
                 # フェーズ9: PDF/PNG生成
+                print(f"[DEBUG][IsoRender] Starting Phase 9: Generate PDF/PNG")
                 out_path = self._phase9_generate_pdf_png(
                     sheet, shape_indices, src_for_conv, tmpdir, dpi, cell_range
                 )
                 
                 if out_path is None:
+                    print(f"[DEBUG][IsoRender] Phase 9 FAILED - out_path is None, returning None")
                     shutil.rmtree(tmpdir, ignore_errors=True)
                     return None
+                print(f"[DEBUG][IsoRender] Phase 9 SUCCESS - PNG generated: {out_path}")
                 
                 # フェーズ10: 後処理
+                print(f"[DEBUG][IsoRender] Starting Phase 10: Postprocess")
                 png_name = os.path.basename(out_path) if out_path else "unknown.png"
                 group_rows = [cell_range[2]] if cell_range else None
                 final_result = self._phase10_postprocess(
                     out_path, png_name, sheet, group_rows, cell_range, keep_cnvpr_ids
                 )
+                print(f"[DEBUG][IsoRender] Phase 10 SUCCESS - postprocess complete, result: {final_result}")
                 
                 # クリーンアップ
                 shutil.rmtree(tmpdir, ignore_errors=True)
@@ -240,8 +274,9 @@ class IsolatedGroupRenderer:
                     anchor = anchors[idx]
                     lname = anchor.tag.split('}')[-1].lower()
                     
+                    ns = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
+                    
                     if lname == 'twocellanchor':
-                        ns = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
                         fr = anchor.find(f'{{{ns}}}from')
                         to = anchor.find(f'{{{ns}}}to')
                         
@@ -259,7 +294,27 @@ class IsolatedGroupRenderer:
                                 
                                 picked.append((start_col, end_col, start_row, end_row))
                             except (ValueError, TypeError, AttributeError) as e:
-                                debug_print(f"[DEBUG][Phase3] Failed to parse anchor {idx}: {e}")
+                                debug_print(f"[DEBUG][Phase3] Failed to parse twoCellAnchor {idx}: {e}")
+                                continue
+                    
+                    elif lname == 'onecellanchor':
+                        fr = anchor.find(f'{{{ns}}}from')
+                        ext = anchor.find(f'{{{ns}}}ext')
+                        
+                        if fr is not None and ext is not None:
+                            try:
+                                col = int(fr.find(f'{{{ns}}}col').text)
+                                row = int(fr.find(f'{{{ns}}}row').text)
+                                
+                                start_col = col + 1
+                                end_col = col + 4  # +3列
+                                start_row = row + 1
+                                end_row = row + 4  # +3行
+                                
+                                picked.append((start_col, end_col, start_row, end_row))
+                                debug_print(f"[DEBUG][Phase3] Parsed oneCellAnchor {idx}: col={start_col}-{end_col}, row={start_row}-{end_row}")
+                            except (ValueError, TypeError, AttributeError) as e:
+                                debug_print(f"[DEBUG][Phase3] Failed to parse oneCellAnchor {idx}: {e}")
                                 continue
                 
                 if picked:
@@ -2157,12 +2212,14 @@ class IsolatedGroupRenderer:
         
         try:
             # LibreOfficeでPDF生成（一時ディレクトリに出力）
+            print(f"[DEBUG][Phase9] Starting Excel to PDF conversion for sheet='{sheet.title}'")
             debug_print(f"[DEBUG] LibreOffice PDF変換開始: sheet={sheet.title}")
             pdf_path = self._convert_excel_to_pdf(src_for_conv, tmp_pdf_dir, apply_fit_to_page=False)
             
             if pdf_path is None:
-                print(f"[WARN] LibreOffice PDF変換失敗")
+                print(f"[WARN][Phase9] LibreOffice PDF変換失敗")
                 return None
+            print(f"[DEBUG][Phase9] PDF generated successfully: {pdf_path}")
             
             # PDFを確認用に保存（isolated group）
             if getattr(self.converter, 'debug_mode', False):
@@ -2184,13 +2241,15 @@ class IsolatedGroupRenderer:
             
             png_filename = os.path.basename(src_for_conv).replace('.xlsx', '.png')
             final_png_path = os.path.join(self.converter.images_dir, png_filename)
+            print(f"[DEBUG][Phase9] Starting PDF to PNG conversion: pdf={pdf_path}, output={final_png_path}")
             
             # PDFをPNGに変換（最終出力ディレクトリに直接出力）
             png_path = self._convert_pdf_to_png_with_output(pdf_path, final_png_path, dpi=dpi)
             
             if png_path is None:
-                print(f"[WARN] PDF→PNG変換失敗")
+                print(f"[WARN][Phase9] PDF→PNG変換失敗")
                 return None
+            print(f"[DEBUG][Phase9] PNG generated successfully: {png_path}")
             
             try:
                 from PIL import Image
@@ -2228,11 +2287,26 @@ class IsolatedGroupRenderer:
         import os
         import subprocess
         
+        print(f"[DEBUG][convert_excel_to_pdf] Starting conversion: excel={excel_path}, outdir={output_dir}")
+        
+        if not os.path.exists(excel_path):
+            print(f"[ERROR][convert_excel_to_pdf] Source Excel file does not exist: {excel_path}")
+            return None
+        
+        try:
+            file_size = os.path.getsize(excel_path)
+            debug_print(f"[DEBUG][convert_excel_to_pdf] Source file exists, size={file_size} bytes")
+        except Exception as e:
+            print(f"[ERROR][convert_excel_to_pdf] Cannot access source file: {e}")
+            return None
+        
         LIBREOFFICE_PATH = get_libreoffice_path()
         
         if not LIBREOFFICE_PATH or not os.path.exists(LIBREOFFICE_PATH):
             print(f"[ERROR] LibreOffice not found: {LIBREOFFICE_PATH}")
             return None
+        
+        print(f"[DEBUG][convert_excel_to_pdf] LibreOffice path: {LIBREOFFICE_PATH}")
         
         try:
             cmd = [
@@ -2243,6 +2317,8 @@ class IsolatedGroupRenderer:
                 excel_path
             ]
             
+            print(f"[DEBUG][convert_excel_to_pdf] Running command: {' '.join(cmd)}")
+            
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -2250,9 +2326,17 @@ class IsolatedGroupRenderer:
                 timeout=90
             )
             
+            print(f"[DEBUG][convert_excel_to_pdf] Command returncode: {result.returncode}")
+            if result.stdout:
+                print(f"[DEBUG][convert_excel_to_pdf] stdout: {result.stdout[:500]}")
+            if result.stderr:
+                print(f"[DEBUG][convert_excel_to_pdf] stderr: {result.stderr[:500]}")
+            
             if result.returncode == 0:
                 basename = os.path.splitext(os.path.basename(excel_path))[0]
                 pdf_path = os.path.join(output_dir, basename + '.pdf')
+                
+                print(f"[DEBUG][convert_excel_to_pdf] Expected PDF path: {pdf_path}")
                 
                 if os.path.exists(pdf_path):
                     return pdf_path
@@ -2485,6 +2569,27 @@ class IsolatedGroupRenderer:
         try:
             with zipfile.ZipFile(xlsx_path, 'r') as zin:
                 zin.extractall(tmpdir)
+            
+            workbook_path = os.path.join(tmpdir, 'xl', 'workbook.xml')
+            if os.path.exists(workbook_path):
+                try:
+                    tree = ET.parse(workbook_path)
+                    root = tree.getroot()
+                    ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+                    
+                    defined_names = root.find(f'.//{{{ns}}}definedNames')
+                    if defined_names is not None:
+                        root.remove(defined_names)
+                        debug_print(f"[DEBUG] Removed definedNames from workbook.xml to fix LibreOffice compatibility")
+                    
+                    file_recovery = root.find(f'.//{{{ns}}}fileRecoveryPr')
+                    if file_recovery is not None:
+                        root.remove(file_recovery)
+                        debug_print(f"[DEBUG] Removed fileRecoveryPr from workbook.xml")
+                    
+                    tree.write(workbook_path, encoding='utf-8', xml_declaration=True)
+                except Exception as e:
+                    print(f"[WARNING] workbook.xmlの修正に失敗: {e}")
             
             xl_worksheets = os.path.join(tmpdir, 'xl', 'worksheets')
             if os.path.exists(xl_worksheets):
