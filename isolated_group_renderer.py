@@ -183,14 +183,14 @@ class IsolatedGroupRenderer:
                 return final_result
                 
             except Exception as e:
-                debug_print(f"[ERROR][IsolatedGroupRenderer] Exception: {e}")
+                print(f"[ERROR][IsolatedGroupRenderer] Exception: {e}")
                 import traceback
                 traceback.print_exc()
                 shutil.rmtree(tmpdir, ignore_errors=True)
                 return None
                 
         except Exception as e:
-            debug_print(f"[ERROR][IsolatedGroupRenderer] Exception: {e}")
+            print(f"[ERROR][IsolatedGroupRenderer] Exception: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -243,7 +243,7 @@ class IsolatedGroupRenderer:
             
             return z, drawing_xml, drawing_path, sheet_index, theme_color_map
         except Exception as e:
-            debug_print(f"[ERROR] Phase1 failed: {e}")
+            print(f"[ERROR] Phase1 failed: {e}")
             import traceback
             traceback.print_exc()
             return None, None, None, None, None
@@ -386,9 +386,9 @@ class IsolatedGroupRenderer:
                         with open(tgt, 'wb') as _fw:
                             _fw.write(z.read(preserve))
             except (OSError, IOError, FileNotFoundError) as e:
-                debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                print(f"[WARNING] ファイル操作エラー: {e}")
             except Exception as e:
-                debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                print(f"[WARNING] ファイル操作エラー: {e}")
                 debug_print(f"[DEBUG] z type: {type(z)}, z value: {z}")
                 import traceback
                 traceback.print_exc()
@@ -465,7 +465,7 @@ class IsolatedGroupRenderer:
                                     a_cid = sub.attrib.get('id') or sub.attrib.get('idx')
                                     break
                         except AttributeError as ae:
-                            debug_print(f"[ERROR] anchors element type error: an={type(an)}, error={ae}")
+                            print(f"[ERROR] anchors element type error: an={type(an)}, error={ae}")
                             import traceback
                             traceback.print_exc()
                             continue
@@ -767,9 +767,9 @@ class IsolatedGroupRenderer:
                                 w.writerow([";".join(sorted(list(map(str, keep_cnvpr_ids)))), ";".join(sorted(list(map(str, referenced_ids)))), ";".join(sorted(list(map(str, connector_children_by_id.keys()))) )])
                             debug_print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
                         except (OSError, IOError, FileNotFoundError):
-                            debug_print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
                 except (OSError, IOError, FileNotFoundError):
-                    debug_print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+                    print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
             except (OSError, IOError, FileNotFoundError):
                 referenced_ids = set()
                 connector_children_by_id = {}
@@ -777,7 +777,7 @@ class IsolatedGroupRenderer:
             return tmpdir, referenced_ids, connector_children_by_id
             
         except Exception as e:
-            debug_print(f"[ERROR] Phase5 failed: {e}")
+            print(f"[ERROR] Phase5 failed: {e}")
             import traceback
             traceback.print_exc()
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -1001,7 +1001,7 @@ class IsolatedGroupRenderer:
                     for ch in connector_children_by_id[kept_cid]:
                         try:
                             if not hasattr(ch, 'iter'):
-                                debug_print(f"[ERROR] ch is not an XML element: type={type(ch)}, value={ch}")
+                                print(f"[ERROR] ch is not an XML element: type={type(ch)}, value={ch}")
                                 continue
                             new_ch = copy.deepcopy(ch)
                             # Replace any a:schemeClr children with explicit a:srgbClr using parsed theme
@@ -1018,7 +1018,7 @@ class IsolatedGroupRenderer:
                                                 elem.attrib.clear()
                                                 elem.set('val', hexv)
                             except Exception as e:
-                                debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                print(f"[WARNING] ファイル操作エラー: {e}")
                             # preserve attributes for important drawing tags (ln/headEnd/tailEnd/spPr)
                             for sub in ch.iter():
                                 try:
@@ -1055,7 +1055,7 @@ class IsolatedGroupRenderer:
                                 pass  # XML解析エラーは無視
             tree2.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
         except Exception as e:
-            debug_print(f"[WARNING] ファイル操作エラー: {e}")
+            print(f"[WARNING] ファイル操作エラー: {e}")
 
         # Ensure shapes/groups/pictures have aspect-locks so Excel won't auto-stretch them
         try:
@@ -1108,7 +1108,7 @@ class IsolatedGroupRenderer:
             
             tree_locks.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
         except Exception as e:
-            debug_print(f"[WARNING] spLocks追加エラー: {e}")
+            print(f"[WARNING] spLocks追加エラー: {e}")
 
         # Extra pass: for any kept anchor that corresponds to an original
         # connector anchor (cxnSp/cxn), replace the connector element in
@@ -1222,7 +1222,7 @@ class IsolatedGroupRenderer:
                                                 elem.attrib.clear()
                                                 elem.set('val', hexv)
                             except Exception as e:
-                                debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                print(f"[WARNING] ファイル操作エラー: {e}")
                                 import traceback
                                 traceback.print_exc()
 
@@ -1280,11 +1280,11 @@ class IsolatedGroupRenderer:
                     except Exception:
                         pass  # 一時ファイルの削除失敗は無視
                 except Exception as e:
-                    debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                    print(f"[WARNING] ファイル操作エラー: {e}")
             # write back
             tree3.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
         except Exception as e:
-            debug_print(f"[WARNING] ファイル操作エラー: {e}")
+            print(f"[WARNING] ファイル操作エラー: {e}")
     
 
 
@@ -1414,9 +1414,9 @@ class IsolatedGroupRenderer:
                                         os.remove(drawing_rels)
                                         debug_print(f"[DEBUG] Removed unused drawing rels: {fname}.rels")
                     except Exception as drawing_err:
-                        debug_print(f"[WARNING] Drawing file cleanup failed: {drawing_err}")
+                        print(f"[WARNING] Drawing file cleanup failed: {drawing_err}")
             except Exception as e:
-                debug_print(f"[WARNING] シート削除失敗: {e}")
+                print(f"[WARNING] シート削除失敗: {e}")
         
         # cell_rangeが指定されている場合、Print_Areaを設定
         if cell_range:
@@ -1474,7 +1474,7 @@ class IsolatedGroupRenderer:
                     
                     tree.write(wb_path, encoding='utf-8', xml_declaration=True)
                 except Exception as e:
-                    debug_print(f"[WARNING] Print_Area設定失敗: {e}")
+                    print(f"[WARNING] Print_Area設定失敗: {e}")
             
             sheet_path = os.path.join(tmpdir, f'xl/worksheets/sheet{target_sheet_new_index + 1}.xml')
             if os.path.exists(sheet_path):
@@ -1502,7 +1502,7 @@ class IsolatedGroupRenderer:
                     tree.write(sheet_path, encoding='utf-8', xml_declaration=True)
                 
                 except Exception as e:
-                    debug_print(f"[WARNING] pageSetup修正失敗: {e}")
+                    print(f"[WARNING] pageSetup修正失敗: {e}")
             
             try:
                 orig_s_col, orig_e_col, orig_s_row, orig_e_row = original_cell_range
@@ -1732,7 +1732,7 @@ class IsolatedGroupRenderer:
                     
                     stree4.write(sheet_rel, encoding='utf-8', xml_declaration=True)
             except Exception as e:
-                debug_print(f"[WARNING] sheetData再構築失敗: {e}")
+                print(f"[WARNING] sheetData再構築失敗: {e}")
             
             try:
                 if os.path.exists(sheet_rel):
@@ -1757,7 +1757,7 @@ class IsolatedGroupRenderer:
                         stree_drawing.write(sheet_rel, encoding='utf-8', xml_declaration=True)
                         debug_print(f"[DEBUG] <drawing>要素を追加: {sheet_rel}")
             except Exception as e:
-                debug_print(f"[WARNING] <drawing>要素追加失敗: {e}")
+                print(f"[WARNING] <drawing>要素追加失敗: {e}")
             
             try:
                 drawing_path_full = os.path.join(tmpdir, drawing_path)
@@ -2083,7 +2083,7 @@ class IsolatedGroupRenderer:
                     dtree.write(drawing_path_full, encoding='utf-8', xml_declaration=True)
                     
             except Exception as e:
-                debug_print(f"[WARNING] 図形座標調整失敗: {e}")
+                print(f"[WARNING] 図形座標調整失敗: {e}")
         
         try:
             sheet_rels_path = os.path.join(tmpdir, f'xl/worksheets/_rels/sheet{target_sheet_new_index + 1}.xml.rels')
@@ -2124,7 +2124,7 @@ class IsolatedGroupRenderer:
                         stree.write(sheet_path, encoding='utf-8', xml_declaration=True)
                         debug_print(f"[DEBUG] Updated sheet drawing reference to rId1")
         except Exception as e:
-            debug_print(f"[WARNING] リレーションシップのクリーンアップ失敗: {e}")
+            print(f"[WARNING] リレーションシップのクリーンアップ失敗: {e}")
         
         
         # tmpdirをzip化して一時xlsxファイルを作成
@@ -2177,11 +2177,11 @@ class IsolatedGroupRenderer:
                 self._set_page_setup_and_margins(src_for_conv)
                 debug_print(f"[DEBUG] Applied fit-to-page settings to: {src_for_conv}")
             except Exception as e:
-                debug_print(f"[WARNING] isolated group pageSetup設定失敗: {e}")
+                print(f"[WARNING] isolated group pageSetup設定失敗: {e}")
             
             return src_for_conv
         except Exception as e:
-            debug_print(f"[ERROR] 一時xlsxファイル作成失敗: {e}")
+            print(f"[ERROR] 一時xlsxファイル作成失敗: {e}")
             return None
 
 
@@ -2235,9 +2235,9 @@ class IsolatedGroupRenderer:
                     saved_pdf_name = f"{self.converter.base_name}_{safe_sheet}_iso_group_{group_hash}.pdf"
                     saved_pdf_path = os.path.join(pdfs_dir, saved_pdf_name)
                     shutil.copyfile(pdf_path, saved_pdf_path)
-                    debug_print(f"[INFO] 分離グループPDFを保存しました: {saved_pdf_path}")
+                    print(f"[INFO] 分離グループPDFを保存しました: {saved_pdf_path}")
                 except Exception as e:
-                    debug_print(f"[WARNING] 分離グループPDF保存失敗: {e}")
+                    print(f"[WARNING] 分離グループPDF保存失敗: {e}")
             
             png_filename = os.path.basename(src_for_conv).replace('.xlsx', '.png')
             final_png_path = os.path.join(self.converter.images_dir, png_filename)
@@ -2266,12 +2266,12 @@ class IsolatedGroupRenderer:
                         cropped = im.crop((l, t, r, b))
                         cropped.save(png_path)
             except Exception as e:
-                debug_print(f"[WARNING] クロップ処理失敗: {e}")
+                print(f"[WARNING] クロップ処理失敗: {e}")
             
             return png_path
             
         except Exception as e:
-            debug_print(f"[ERROR] PDF/PNG生成エラー: {e}")
+            print(f"[ERROR] PDF/PNG生成エラー: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -2290,20 +2290,20 @@ class IsolatedGroupRenderer:
         debug_print(f"[DEBUG][convert_excel_to_pdf] Starting conversion: excel={excel_path}, outdir={output_dir}")
         
         if not os.path.exists(excel_path):
-            debug_print(f"[ERROR][convert_excel_to_pdf] Source Excel file does not exist: {excel_path}")
+            print(f"[ERROR][convert_excel_to_pdf] Source Excel file does not exist: {excel_path}")
             return None
         
         try:
             file_size = os.path.getsize(excel_path)
             debug_print(f"[DEBUG][convert_excel_to_pdf] Source file exists, size={file_size} bytes")
         except Exception as e:
-            debug_print(f"[ERROR][convert_excel_to_pdf] Cannot access source file: {e}")
+            print(f"[ERROR][convert_excel_to_pdf] Cannot access source file: {e}")
             return None
         
         LIBREOFFICE_PATH = get_libreoffice_path()
         
         if not LIBREOFFICE_PATH or not os.path.exists(LIBREOFFICE_PATH):
-            debug_print(f"[ERROR] LibreOffice not found: {LIBREOFFICE_PATH}")
+            print(f"[ERROR] LibreOffice not found: {LIBREOFFICE_PATH}")
             return None
         
         debug_print(f"[DEBUG][convert_excel_to_pdf] LibreOffice path: {LIBREOFFICE_PATH}")
@@ -2341,14 +2341,14 @@ class IsolatedGroupRenderer:
                 if os.path.exists(pdf_path):
                     return pdf_path
             
-            debug_print(f"[ERROR] LibreOffice変換失敗: {result.stderr}")
+            print(f"[ERROR] LibreOffice変換失敗: {result.stderr}")
             return None
             
         except subprocess.TimeoutExpired:
-            debug_print(f"[ERROR] LibreOffice変換タイムアウト")
+            print(f"[ERROR] LibreOffice変換タイムアウト")
             return None
         except Exception as e:
-            debug_print(f"[ERROR] LibreOffice変換エラー: {e}")
+            print(f"[ERROR] LibreOffice変換エラー: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -2383,7 +2383,7 @@ class IsolatedGroupRenderer:
                 
                 doc = fitz.open(pdf_path)
                 if len(doc) == 0:
-                    debug_print("[ERROR] PDFにページが含まれていません")
+                    print("[ERROR] PDFにページが含まれていません")
                     doc.close()
                     return None
                 
@@ -2409,7 +2409,7 @@ class IsolatedGroupRenderer:
                 debug_print(f"[SUCCESS] PNG変換完了: {output_path}")
                 
             except Exception as e:
-                debug_print(f"[ERROR] PyMuPDF変換エラー: {e}")
+                print(f"[ERROR] PyMuPDF変換エラー: {e}")
                 import traceback
                 traceback.print_exc()
                 return None
@@ -2443,10 +2443,10 @@ class IsolatedGroupRenderer:
             return None
             
         except subprocess.TimeoutExpired:
-            debug_print(f"[ERROR] ImageMagick変換タイムアウト")
+            print(f"[ERROR] ImageMagick変換タイムアウト")
             return None
         except Exception as e:
-            debug_print(f"[ERROR] ImageMagick変換エラー: {e}")
+            print(f"[ERROR] ImageMagick変換エラー: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -2488,7 +2488,7 @@ class IsolatedGroupRenderer:
             return png_path
             
         except Exception as e:
-            debug_print(f"[ERROR] クロップエラー: {e}")
+            print(f"[ERROR] クロップエラー: {e}")
             return png_path
 
 
@@ -2521,7 +2521,7 @@ class IsolatedGroupRenderer:
                     
                     debug_print(f"[DEBUG][_phase10] Added {len(keep_cnvpr_ids)} shape IDs to _global_iso_preserved_ids")
                 except Exception as e:
-                    debug_print(f"[WARNING] Failed to update _global_iso_preserved_ids: {e}")
+                    print(f"[WARNING] Failed to update _global_iso_preserved_ids: {e}")
             
             # 実際に使用されたファイル名を取得
             basename = os.path.basename(out_path)
@@ -2548,12 +2548,12 @@ class IsolatedGroupRenderer:
                 rep = 1
             
             # デバッグログ
-            debug_print(f"[INFO] sheet={sheet.title} file={basename} start_row={rep}")
+            print(f"[INFO] sheet={sheet.title} file={basename} start_row={rep}")
             
             return (basename, rep)
             
         except Exception as e:
-            debug_print(f"[ERROR] 後処理エラー: {e}")
+            print(f"[ERROR] 後処理エラー: {e}")
             # フォールバック: タプルで返す
             return (png_name, 1)
 
@@ -2589,7 +2589,7 @@ class IsolatedGroupRenderer:
                     
                     tree.write(workbook_path, encoding='utf-8', xml_declaration=True)
                 except Exception as e:
-                    debug_print(f"[WARNING] workbook.xmlの修正に失敗: {e}")
+                    print(f"[WARNING] workbook.xmlの修正に失敗: {e}")
             
             xl_worksheets = os.path.join(tmpdir, 'xl', 'worksheets')
             if os.path.exists(xl_worksheets):
@@ -2627,7 +2627,7 @@ class IsolatedGroupRenderer:
                             
                             tree.write(sheet_path, encoding='utf-8', xml_declaration=True)
                         except Exception as e:
-                            debug_print(f"[WARNING] {fname} のpageSetup設定に失敗: {e}")
+                            print(f"[WARNING] {fname} のpageSetup設定に失敗: {e}")
             
             with zipfile.ZipFile(xlsx_path, 'w', zipfile.ZIP_DEFLATED) as zout:
                 for root_dir, dirs, files in os.walk(tmpdir):
