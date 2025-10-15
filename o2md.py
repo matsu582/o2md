@@ -72,6 +72,24 @@ except ImportError as e:
     ) from e
 
 
+
+# グローバルverboseフラグ
+_VERBOSE = False
+
+def set_verbose(verbose: bool):
+    """verboseモードを設定"""
+    global _VERBOSE
+    _VERBOSE = verbose
+
+def is_verbose() -> bool:
+    """verboseモードかどうかを返す"""
+    return _VERBOSE
+
+def debug_print(*args, **kwargs):
+    """verboseモード時のみ出力するデバッグ用print"""
+    if _VERBOSE:
+        print(*args, **kwargs)
+
 def detect_file_type(file_path: str) -> str:
     """ファイル拡張子からファイルタイプを判定
     
@@ -235,8 +253,12 @@ def main():
                        help='[Word専用] 章番号の代わりに見出しテキストをリンクに使用')
     parser.add_argument('--shape-metadata', action='store_true',
                        help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                       help='デバッグ情報を出力')
     
     args = parser.parse_args()
+    
+    set_verbose(args.verbose)
     
     try:
         output_file = convert_office_to_markdown(
