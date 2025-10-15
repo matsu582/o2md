@@ -355,7 +355,7 @@ class ExcelToMarkdownConverter:
             if t.strip() == '':
                 continue
             if t.strip() == '---':
-                print("[DEBUG][_add_separator] skipping duplicate separator '---'")
+                debug_print("[DEBUG][_add_separator] skipping duplicate separator '---'")
                 return False
             break
 
@@ -2641,7 +2641,7 @@ class ExcelToMarkdownConverter:
             # Debug: log image filenames and their SHA256 before building groups
             try:
                 import hashlib as _hashlib
-                print('[DEBUG][_dedupe] listing images and computing sha256 before dedupe:')
+                debug_print('[DEBUG][_dedupe] listing images and computing sha256 before dedupe:')
                 for _fn in sorted(os.listdir(img_dir)):
                     _fp = os.path.join(img_dir, _fn)
                     if not os.path.isfile(_fp):
@@ -7239,7 +7239,7 @@ class ExcelToMarkdownConverter:
             debug_print(f"[DEBUG] 罫線ベース列範囲: 列{table_start_col}〜{table_end_col}")
             return (table_start_col, table_end_col)
         
-        print("[DEBUG] 罫線ベース列検出失敗")
+        debug_print("[DEBUG] 罫線ベース列検出失敗")
         return None
     
     def _has_table_borders(self, cell) -> bool:
@@ -7560,7 +7560,7 @@ class ExcelToMarkdownConverter:
                     except Exception:
                         title_in_region = None
                     if sheet_name == 'XMLファイル自動生成' or title_in_region == 'XMLファイル自動生成':
-                        print('[DEBUG-TRACE] Detected target sheet/region for deep dump: XMLファイル自動生成')
+                        debug_print('[DEBUG-TRACE] Detected target sheet/region for deep dump: XMLファイル自動生成')
                         debug_print(f"[DEBUG-TRACE] region={region}")
                         debug_print(f"[DEBUG-TRACE] unique_cols={unique_cols}")
                         # dump first_row_vals if present
