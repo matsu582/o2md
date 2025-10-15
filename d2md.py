@@ -27,7 +27,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from PIL import Image
 import io
 
-from utils import get_libreoffice_path
+from utils import get_libreoffice_path, get_imagemagick_command
 
 try:
     from docx import Document
@@ -55,6 +55,7 @@ except ImportError as e:
 
 # 設定
 LIBREOFFICE_PATH = get_libreoffice_path()
+IMAGEMAGICK_CMD = get_imagemagick_command()
 
 class WordToMarkdownConverter:
     def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None):

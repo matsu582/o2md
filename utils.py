@@ -48,6 +48,16 @@ def get_libreoffice_path():
     return "soffice"
 
 
+def get_imagemagick_command():
+    """ImageMagickのコマンド名を取得（バージョンに応じて'magick'または'convert'）"""
+    if shutil.which('magick'):
+        return 'magick'
+    elif shutil.which('convert'):
+        return 'convert'
+    else:
+        return 'magick'
+
+
 def col_letter(n: int) -> str:
     """列番号をExcelの列文字に変換（1 -> A, 27 -> AA, etc.）"""
     letters = ''
