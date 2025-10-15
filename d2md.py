@@ -1115,6 +1115,34 @@ class WordToMarkdownConverter:
                 encoded_filename = urllib.parse.quote(image_filename)
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
                 self.markdown_lines.append("")
+                
+                if self.shape_metadata:
+                    try:
+                        metadata = self._extract_shape_metadata_from_drawing(drawing_element)
+                        if metadata.get('shapes'):
+                            text_metadata = self._format_shape_metadata_as_text(metadata)
+                            json_metadata = self._format_shape_metadata_as_json(metadata)
+                            
+                            if text_metadata:
+                                self.markdown_lines.append("")
+                                self.markdown_lines.append(text_metadata)
+                                self.markdown_lines.append("")
+                            
+                            if json_metadata and json_metadata != "{}":
+                                self.markdown_lines.append("<details>")
+                                self.markdown_lines.append("<summary>JSON形式の図形情報</summary>")
+                                self.markdown_lines.append("")
+                                self.markdown_lines.append("```json")
+                                self.markdown_lines.append(json_metadata)
+                                self.markdown_lines.append("```")
+                                self.markdown_lines.append("")
+                                self.markdown_lines.append("</details>")
+                                self.markdown_lines.append("")
+                            
+                            print(f"[DEBUG] 図形メタデータ追加: {len(metadata['shapes'])} shapes")
+                    except Exception as e:
+                        print(f"[WARNING] 図形メタデータ追加失敗: {e}")
+                
                 print(f"[SUCCESS] ベクター複合図形を処理: {image_filename}")
                 
                 # デバッグ用にPDFも保存
@@ -1393,6 +1421,85 @@ class WordToMarkdownConverter:
         except Exception as e:
             print(f"[DEBUG] 画像情報取得エラー: {e}")
 
+    def _extract_shape_metadata_from_drawing(self, drawing_element) -> Dict[str, Any]:
+        """DrawingML要素から図形メタデータを抽出"""
+        metadata = {
+            'type': 'unknown',
+            'name': '',
+            'description': '',
+            'shapes': []
+        }
+        
+        try:
+            doc_zip = zipfile.ZipFile(self.word_file, 'r')
+            
+            for shape in drawing_element.iter():
+                tag_name = shape.tag.split('}')[-1] if '}' in shape.tag else shape.tag
+                
+                if tag_name == 'cNvPr':
+                    shape_info = {
+                        'name': shape.attrib.get('name', ''),
+                        'id': shape.attrib.get('id', ''),
+                        'description': shape.attrib.get('descr', '')
+                    }
+                    
+                    parent = shape.getparent() if hasattr(shape, 'getparent') else None
+                    if parent is not None:
+                        for elem in parent.iter():
+                            elem_tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                            
+                            if elem_tag in ('rect', 'roundRect', 'ellipse', 'triangle'):
+                                shape_info['shape_type'] = elem_tag
+                            elif elem_tag == 'txBody':
+                                text_content = []
+                                for t in elem.iter():
+                                    t_tag = t.tag.split('}')[-1] if '}' in t.tag else t.tag
+                                    if t_tag == 't' and t.text:
+                                        text_content.append(t.text)
+                                if text_content:
+                                    shape_info['text'] = ' / '.join(text_content)
+                    
+                    if shape_info.get('name'):
+                        metadata['shapes'].append(shape_info)
+            
+            doc_zip.close()
+            
+        except Exception as e:
+            print(f"[DEBUG] 図形メタデータ抽出エラー: {e}")
+        
+        return metadata
+    
+    def _format_shape_metadata_as_text(self, metadata: Dict[str, Any]) -> str:
+        """図形メタデータを人間が読みやすいテキスト形式に整形"""
+        if not metadata.get('shapes'):
+            return ""
+        
+        lines = ["### 図形情報", ""]
+        
+        for shape in metadata['shapes']:
+            name = shape.get('name', '不明な図形')
+            lines.append(f"**{name}**")
+            
+            if shape.get('shape_type'):
+                lines.append(f"- 図形タイプ: {shape['shape_type']}")
+            
+            if shape.get('text'):
+                lines.append(f"- テキスト: {shape['text']}")
+            
+            if shape.get('description'):
+                lines.append(f"- 説明: {shape['description']}")
+            
+            lines.append("")
+        
+        return '\n'.join(lines)
+    
+    def _format_shape_metadata_as_json(self, metadata: Dict[str, Any]) -> str:
+        """図形メタデータをJSON形式に整形"""
+        import json
+        if not metadata.get('shapes'):
+            return "{}"
+        return json.dumps(metadata, ensure_ascii=False, indent=2)
+    
     def _detect_image_format(self, image_data: bytes, target_ref: str) -> str:
         """画像形式を検出"""
         if image_data.startswith(b'\x89PNG'):
