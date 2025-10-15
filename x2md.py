@@ -84,7 +84,7 @@ class ExcelToMarkdownConverter:
 
             return super().append(item)
 
-    def __init__(self, excel_file_path: str, output_dir=None, debug_mode=False):
+    def __init__(self, excel_file_path: str, output_dir=None, debug_mode=False, shape_metadata=False):
         """コンバータインスタンスの初期化
 
         CLIから使用できるように、最小限で安全なコンストラクタを提供します。
@@ -100,6 +100,7 @@ class ExcelToMarkdownConverter:
         self.images_dir = os.path.join(self.output_dir, "images")
         
         self.debug_mode = debug_mode
+        self.shape_metadata = shape_metadata
 
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.images_dir, exist_ok=True)
@@ -132,6 +133,7 @@ class ExcelToMarkdownConverter:
         self._embedded_image_cid_by_name = {}
         self._in_canonical_emit = False
         self._global_iso_preserved_ids = set()
+        self._image_shape_ids = {}
         self._last_iso_preserved_ids = set()
 
     def _clear_sheet_state(self, sheet_name: str):
@@ -450,7 +452,8 @@ class ExcelToMarkdownConverter:
                 
                 if sheet is not None:
                     try:
-                        shapes_metadata = self._extract_all_shapes_metadata(sheet)
+                        filter_ids = self._image_shape_ids.get(img_name)
+                        shapes_metadata = self._extract_all_shapes_metadata(sheet, filter_ids=filter_ids)
                         if shapes_metadata:
                             text_metadata = self._format_shape_metadata_as_text(shapes_metadata)
                             if text_metadata:
@@ -494,7 +497,8 @@ class ExcelToMarkdownConverter:
             
             if sheet is not None:
                 try:
-                    shapes_metadata = self._extract_all_shapes_metadata(sheet)
+                    filter_ids = self._image_shape_ids.get(img_name)
+                    shapes_metadata = self._extract_all_shapes_metadata(sheet, filter_ids=filter_ids)
                     if shapes_metadata:
                         text_metadata = self._format_shape_metadata_as_text(shapes_metadata)
                         if text_metadata:
@@ -1474,19 +1478,52 @@ class ExcelToMarkdownConverter:
                         if ref in self._emitted_images or img_fn in self._emitted_images:
                             continue
                         md = f"![{sheet.title}](images/{img_fn})"
-                        # Insert image immediately into the flow (events already sorted
-                        # so images follow their text anchors). Record mapping and mark emitted.
+                        # Insert image with metadata using helper method
                         try:
+                            if self.shape_metadata:
+                                filter_ids = self._image_shape_ids.get(img_fn)
+                                shapes_metadata = self._extract_all_shapes_metadata(sheet, filter_ids=filter_ids)
+                            else:
+                                shapes_metadata = []
+                            
+                            if shapes_metadata:
+                                print(f"[DEBUG] 図形メタデータ抽出成功: {img_fn} -> {len(shapes_metadata)} shapes")
+                                text_metadata = self._format_shape_metadata_as_text(shapes_metadata)
+                                json_metadata = self._format_shape_metadata_as_json(shapes_metadata)
+                                
+                                self.markdown_lines.append(md)
+                                self.markdown_lines.append("")
+                                
+                                if text_metadata:
+                                    self.markdown_lines.append("")
+                                    for line in text_metadata.split('\n'):
+                                        self.markdown_lines.append(line)
+                                    self.markdown_lines.append("")
+                                
+                                if json_metadata and json_metadata != "{}":
+                                    self.markdown_lines.append("<details>")
+                                    self.markdown_lines.append("<summary>JSON形式の図形情報</summary>")
+                                    self.markdown_lines.append("")
+                                    self.markdown_lines.append("```json")
+                                    for line in json_metadata.split('\n'):
+                                        self.markdown_lines.append(line)
+                                    self.markdown_lines.append("```")
+                                    self.markdown_lines.append("")
+                                    self.markdown_lines.append("</details>")
+                                    self.markdown_lines.append("")
+                            else:
+                                self.markdown_lines.append(md)
+                                self.markdown_lines.append("")
+                        except Exception as e:
+                            print(f"[WARNING] 図形メタデータ追加失敗: {e}")
                             self.markdown_lines.append(md)
                             self.markdown_lines.append("")
-                        except Exception:
-                            print(f"WARNING self.markdown_lines.append({md})")
                         # record authoritative mapping only via helper
                         try:
                             md_idx = len(self.markdown_lines) - 2
                             self._mark_sheet_map(sheet.title, row, md_idx)
                         except (ValueError, TypeError):
-                            print(f"WARNING self._mark_sheet_map({imgsheet.title}, {row}, {md_idx_fn})")
+                            print(f"WARNING self._mark_sheet_map({sheet.title}, {row}, {md_idx})")
                         try:
                             # Mark emitted_images regardless to prevent duplicates; it is safe
                             # because emitted_images only tracks filenames and does not affect pruning.
@@ -1890,6 +1927,10 @@ class ExcelToMarkdownConverter:
                                                             # クラスタの最小行に配置
                                                             self._sheet_shape_images[sheet.title].append((cluster_row, img_name))
                                                             print(f"[DEBUG] isolated group画像を_sheet_shape_imagesに追加: {img_name} at row={cluster_row}")
+                                                            
+                                                            if hasattr(self, '_last_iso_preserved_ids') and self._last_iso_preserved_ids:
+                                                                self._image_shape_ids[img_name] = set(self._last_iso_preserved_ids)
+                                                                print(f"[DEBUG] 図形IDマッピングを保存: {img_name} -> {len(self._last_iso_preserved_ids)} shapes")
                                                         except Exception as e:
                                                             print(f"[WARNING] Failed to add to _sheet_shape_images: {e}")
                                                             import traceback
@@ -2403,7 +2444,7 @@ class ExcelToMarkdownConverter:
                                             continue
                                         md = f"![{sheet.title}](images/{img_fn})"
                                         try:
-                                            new_at = self._insert_markdown_image(insert_at, md, img_fn, sheet=sheet)
+                                            new_at = self._insert_markdown_image(insert_at, md, img_fn)
                                             try:
                                                 insert_at = new_at
                                             except (ValueError, TypeError) as e:
@@ -3927,11 +3968,12 @@ class ExcelToMarkdownConverter:
             print(f"[WARNING] Shape metadata extraction failed: {e}")
             return metadata
 
-    def _extract_all_shapes_metadata(self, sheet) -> List[Dict[str, Any]]:
+    def _extract_all_shapes_metadata(self, sheet, filter_ids: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
         """シート内の全図形のメタデータを抽出
         
         Args:
             sheet: 対象シート
+            filter_ids: 抽出対象の図形IDセット（Noneの場合は全て抽出）
             
         Returns:
             図形メタデータのリスト
@@ -3949,6 +3991,15 @@ class ExcelToMarkdownConverter:
                 anchor_type = anchor.tag.split('}')[-1].lower()
                 if anchor_type in ('twocellanchor', 'onecellanchor'):
                     if self._anchor_has_drawable(anchor):
+                        if filter_ids is not None:
+                            shape_id = None
+                            for sub in anchor.iter():
+                                if sub.tag.split('}')[-1].lower() == 'cnvpr':
+                                    shape_id = sub.attrib.get('id', '')
+                                    break
+                            if shape_id and shape_id not in filter_ids:
+                                continue
+                        
                         shape_meta = self._extract_shape_metadata_from_anchor(anchor, sheet)
                         shapes_metadata.append(shape_meta)
             
@@ -4069,22 +4120,6 @@ class ExcelToMarkdownConverter:
             output_data['shapes'].append(shape_data)
         
         return json.dumps(output_data, ensure_ascii=False, indent=2)
-
-    def _col_letter(self, col_num: int) -> str:
-        """列番号をExcelの列文字に変換（例: 1→A, 27→AA）
-        
-        Args:
-            col_num: 列番号（1から開始）
-            
-        Returns:
-            列文字
-        """
-        result = ""
-        while col_num > 0:
-            col_num -= 1
-            result = chr(65 + (col_num % 26)) + result
-            col_num //= 26
-        return result or "A"
 
     def _anchor_has_drawable(self, a) -> bool:
         """Shared helper: determine whether a drawing anchor contains drawable
@@ -10007,6 +10042,8 @@ def main():
                        help='出力ディレクトリを指定（デフォルト: ./output）')
     parser.add_argument('--debug', action='store_true',
                        help='デバッグモード：debug_workbooks、pdfs、diagnosticsフォルダを出力')
+    parser.add_argument('--shape-metadata', action='store_true',
+                       help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
     
     args = parser.parse_args()
     
@@ -10034,7 +10071,7 @@ def main():
         print(f"✅ XLS→XLSX変換完了: {converted_file}")
     
     try:
-        converter = ExcelToMarkdownConverter(processing_file, output_dir=args.output_dir, debug_mode=args.debug)
+        converter = ExcelToMarkdownConverter(processing_file, output_dir=args.output_dir, debug_mode=args.debug, shape_metadata=args.shape_metadata)
         output_file = converter.convert()
         print("\n✅ 変換完了!")
         print(f"📄 出力ファイル: {output_file}")
