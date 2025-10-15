@@ -1421,7 +1421,6 @@ class ExcelToMarkdownConverter:
                                 self._mark_emitted_row(sheet.title, row)
                                 self._mark_emitted_text(sheet.title, self._normalize_text(payload))
                                 self.markdown_lines.append("")
-                                print("<< text")
                             except (ValueError, TypeError) as e:
                                 debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     elif kind == 'table':
@@ -1485,7 +1484,6 @@ class ExcelToMarkdownConverter:
                             if src_rows:
                                 for rr in src_rows:
                                     self._mark_emitted_row(sheet.title, rr)
-                            print("<< table")
                         except (ValueError, TypeError) as e:
                             debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     else:  # image
@@ -1548,8 +1546,6 @@ class ExcelToMarkdownConverter:
                             self._mark_image_emitted(img_fn)
                         except (ValueError, TypeError):
                             print(f"WARNING self._mark_image_emitted({img_fn})")
-
-                        print("<< image")
             except (ValueError, TypeError):
                 # If anything goes wrong in the simplified flow, fall back to the
                 # original complex insertion path by re-raising and letting the
@@ -5959,7 +5955,7 @@ class ExcelToMarkdownConverter:
         separated_tables, annotations = self._split_horizontal_tables_with_annotations(sheet, table_boundaries)
         
         summary = f"DET sheet={getattr(sheet,'title',None)} regions={len(separated_tables)} " + ",".join([f"{r[0]}-{r[1]}" for r in separated_tables[:10]])
-        print(summary)
+        debug_print(summary)
 
         # Postprocess: merge adjacent single-row regions that have identical non-empty column masks
         merged = []
@@ -5991,7 +5987,7 @@ class ExcelToMarkdownConverter:
                 i += 1
 
         msummary = f"DET_MERGED sheet={getattr(sheet,'title',None)} merged_regions={len(merged)} " + ",".join([f"{r[0]}-{r[1]}" for r in merged[:10]])
-        print(msummary)
+        debug_print(msummary)
 
         return merged, annotations
     
@@ -7289,7 +7285,7 @@ class ExcelToMarkdownConverter:
                 try:
                     meta = None
                     self._sheet_deferred_tables.setdefault(sheet.title, []).append((anchor, table_data, source_rows, meta))
-                    print(f"DEFER_TABLE single_table sheet={sheet.title} anchor={anchor} rows={len(table_data)}")
+                    debug_print(f"DEFER_TABLE single_table sheet={sheet.title} anchor={anchor} rows={len(table_data)}")
                 except (ValueError, TypeError):
                     # On any failure, fallback to immediate output to avoid data loss
                     self._output_markdown_table(table_data, source_rows=source_rows, sheet_title=sheet.title)
@@ -7573,7 +7569,7 @@ class ExcelToMarkdownConverter:
                     try:
                         meta = None
                         self._sheet_deferred_tables.setdefault(sheet.title, []).append((anchor, table_data, source_rows, meta))
-                        print(f"DEFER_TABLE unique_cols sheet={sheet.title} anchor={anchor} rows={len(table_data)}")
+                        debug_print(f"DEFER_TABLE unique_cols sheet={sheet.title} anchor={anchor} rows={len(table_data)}")
                     except (ValueError, TypeError):
                         # fallback to immediate output on any failure to avoid data loss
                         try:
@@ -7654,7 +7650,7 @@ class ExcelToMarkdownConverter:
                     self._last_table_title_row = None
                 except Exception as e:
                     pass  # XML解析エラーは無視
-                print(f"DEFER_TABLE sheet={sheet.title} anchor={anchor} rows={len(table_data)} title_present={bool(safe_title)}")
+                debug_print(f"DEFER_TABLE sheet={sheet.title} anchor={anchor} rows={len(table_data)} title_present={bool(safe_title)}")
             except (ValueError, TypeError):
                 # fallback to immediate output if deferral fails
                 try:
