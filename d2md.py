@@ -885,18 +885,21 @@ class WordToMarkdownConverter:
         
         # 段落内のRunを調べて画像があるかチェック
         for run in paragraph.runs:
-            for inline_shape in run._element.xpath('.//a:blip'):
-                # 画像の参照IDを取得
-                embed_id = inline_shape.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
-                if embed_id:
-                    # 対応するリレーションを探す
-                    for rel in paragraph.part.rels.values():
-                        if rel.rId == embed_id and "image" in rel.reltype:
-                            # その場で画像を処理
-                            self._extract_and_convert_image_inline(rel)
-                            return  # 1つの段落につき1つの画像のみ処理
+            # drawing要素を取得
+            drawings = run._element.xpath('.//w:drawing')
+            for drawing in drawings:
+                for inline_shape in drawing.xpath('.//a:blip'):
+                    # 画像の参照IDを取得
+                    embed_id = inline_shape.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+                    if embed_id:
+                        # 対応するリレーションを探す
+                        for rel in paragraph.part.rels.values():
+                            if rel.rId == embed_id and "image" in rel.reltype:
+                                # その場で画像を処理（drawing要素も渡す）
+                                self._extract_and_convert_image_inline(rel, drawing)
+                                return  # 1つの段落につき1つの画像のみ処理
     
-    def _extract_and_convert_image_inline(self, rel):
+    def _extract_and_convert_image_inline(self, rel, drawing_element=None):
         """インライン画像を抽出・変換"""
         try:
             # 参照されている画像として記録
@@ -944,6 +947,33 @@ class WordToMarkdownConverter:
             encoded_filename = urllib.parse.quote(image_filename)
             self.markdown_lines.append(f"![](images/{encoded_filename})")
             self.markdown_lines.append("")
+            
+            if self.shape_metadata and drawing_element is not None:
+                try:
+                    metadata = self._extract_shape_metadata_from_drawing(drawing_element)
+                    if metadata.get('shapes'):
+                        text_metadata = self._format_shape_metadata_as_text(metadata)
+                        json_metadata = self._format_shape_metadata_as_json(metadata)
+                        
+                        if text_metadata:
+                            self.markdown_lines.append("")
+                            self.markdown_lines.append(text_metadata)
+                            self.markdown_lines.append("")
+                        
+                        if json_metadata and json_metadata != "{}":
+                            self.markdown_lines.append("<details>")
+                            self.markdown_lines.append("<summary>JSON形式の図形情報</summary>")
+                            self.markdown_lines.append("")
+                            self.markdown_lines.append("```json")
+                            self.markdown_lines.append(json_metadata)
+                            self.markdown_lines.append("```")
+                            self.markdown_lines.append("")
+                            self.markdown_lines.append("</details>")
+                            self.markdown_lines.append("")
+                        
+                        print(f"[DEBUG] 図形メタデータ追加: {len(metadata['shapes'])} shapes")
+                except Exception as e:
+                    print(f"[WARNING] 図形メタデータ追加失敗: {e}")
             
             print(f"[SUCCESS] 画像をインライン処理: {image_filename}")
             
@@ -1404,20 +1434,15 @@ class WordToMarkdownConverter:
     def _debug_image_info(self, image_path):
         """生成された画像の詳細情報をデバッグ"""
         try:
-            # ImageMagickのidentifyコマンドで画像情報を取得
-            cmd = [
-                IMAGEMAGICK_CMD, 'identify', '-verbose', image_path]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            if result.returncode == 0:
-                # 重要な情報のみ抽出
-                lines = result.stdout.split('\n')
-                important_info = []
-                for line in lines:
-                    if any(keyword in line.lower() for keyword in ['geometry', 'resolution', 'colorspace', 'depth']):
-                        important_info.append(line.strip())
-                print(f"[DEBUG] 画像情報: {' | '.join(important_info)}")
-            else:
-                print(f"[DEBUG] 画像情報取得失敗: {result.stderr}")
+            from PIL import Image
+            with Image.open(image_path) as img:
+                info_parts = [
+                    f"サイズ: {img.size[0]}x{img.size[1]}",
+                    f"モード: {img.mode}",
+                ]
+                if hasattr(img, 'info') and 'dpi' in img.info:
+                    info_parts.append(f"DPI: {img.info['dpi']}")
+                print(f"[DEBUG] 画像情報: {' | '.join(info_parts)}")
         except Exception as e:
             print(f"[DEBUG] 画像情報取得エラー: {e}")
 
@@ -1704,59 +1729,34 @@ class WordToMarkdownConverter:
     def _convert_vector_image(self, image_data: bytes, original_path: str) -> Optional[str]:
         """ベクター画像をPNGに変換"""
         try:
-            # 一時ファイルに保存
             with tempfile.NamedTemporaryFile(delete=False, suffix=Path(original_path).suffix) as temp_file:
                 temp_file.write(image_data)
                 temp_path = temp_file.name
             
-            # 出力パス
             output_path = original_path.replace('.emf', '.png').replace('.wmf', '.png')
             
-            # LibreOfficeで直接変換を試す
             if self._convert_with_libreoffice(temp_path, output_path):
                 os.unlink(temp_path)
                 return output_path
             
-            # LibreOfficeが失敗した場合、ImageMagickを試す
-            cmd = [
-                IMAGEMAGICK_CMD,
-                temp_path,
-                '-density', '300',
-                '-quality', '100',
-                '-background', 'white',
-                '-alpha', 'remove',
-                output_path
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            
-            # 一時ファイルを削除
             os.unlink(temp_path)
-            
-            if result.returncode == 0 and os.path.exists(output_path):
-                print(f"[SUCCESS] ベクター画像変換完了（ImageMagick）: {output_path}")
-                return output_path
-            else:
-                print(f"[ERROR] ベクター画像変換失敗: {result.stderr}")
-                # 失敗した場合は元のデータをそのまま保存
-                with open(original_path, 'wb') as f:
-                    f.write(image_data)
-                return original_path
+            print(f"[ERROR] ベクター画像変換失敗")
+            with open(original_path, 'wb') as f:
+                f.write(image_data)
+            return original_path
                 
         except Exception as e:
             print(f"[ERROR] ベクター画像変換エラー: {e}")
-            # エラーの場合は元のデータをそのまま保存
             with open(original_path, 'wb') as f:
                 f.write(image_data)
             return original_path
 
     def _convert_with_libreoffice(self, input_path: str, output_path: str) -> bool:
         """LibreOfficeを使用してベクター画像を変換"""
+        temp_dir = None
         try:
-            # 一時的にPDFに変換
             temp_dir = tempfile.mkdtemp()
             
-            # LibreOfficeでPDFに変換
             cmd = [
                 LIBREOFFICE_PATH,
                 '--headless',
@@ -1767,7 +1767,6 @@ class WordToMarkdownConverter:
             
             subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
-            # 変換されたPDFのパスを探す
             pdf_path = None
             for file in os.listdir(temp_dir):
                 if file.endswith('.pdf'):
@@ -1775,37 +1774,37 @@ class WordToMarkdownConverter:
                     break
             
             if pdf_path and os.path.exists(pdf_path):
-                # PDFからPNGに変換（余白除去付き）
-                cmd2 = [
-                    IMAGEMAGICK_CMD,
-                    pdf_path,
-                    '-density', '300',
-                    '-quality', '100',
-                    '-background', 'white',
-                    '-alpha', 'remove',
-                    '-trim',  # 余白を自動除去
-                    '+repage',  # ページ情報をリセット
-                    output_path
-                ]
+                pdf_doc = fitz.open(pdf_path)
+                page = pdf_doc[0]
                 
-                result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=30)
+                mat = fitz.Matrix(300 / 72, 300 / 72)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
                 
-                # 一時ディレクトリを削除
-                import shutil
-                shutil.rmtree(temp_dir)
+                from PIL import Image
+                if pix.alpha:
+                    img = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
+                    bg = Image.new("RGB", img.size, (255, 255, 255))
+                    bg.paste(img, mask=img.split()[3])
+                else:
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 
-                if result2.returncode == 0 and os.path.exists(output_path):
+                pdf_doc.close()
+                
+                img = self._trim_white_margins(img)
+                img.save(output_path, "PNG")
+                
+                if os.path.exists(output_path):
                     print(f"[SUCCESS] ベクター画像変換完了（LibreOffice→PDF→PNG）: {output_path}")
                     return True
             
-            # 一時ディレクトリを削除
-            import shutil
-            shutil.rmtree(temp_dir)
             return False
             
         except Exception as e:
             print(f"[ERROR] LibreOffice変換エラー: {e}")
             return False
+        finally:
+            if temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
 
 
 def convert_doc_to_docx(doc_file_path: str) -> str:
