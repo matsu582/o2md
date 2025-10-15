@@ -670,9 +670,11 @@ class IsolatedGroupRenderer:
                     # 呼び出し側が重複レンダリングを避けられるよう保持されるIDを公開
                     try:
                         self._last_iso_preserved_ids = set(referenced_ids)
+                        self.converter._last_iso_preserved_ids = set(referenced_ids)
                     except (ValueError, TypeError):
                         try:
                             self._last_iso_preserved_ids = set()
+                            self.converter._last_iso_preserved_ids = set()
                         except (ValueError, TypeError) as e:
                             print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     # 分離毎の診断ファイル（保証されたパス）を書き込み、
