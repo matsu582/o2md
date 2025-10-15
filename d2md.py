@@ -1375,20 +1375,15 @@ class WordToMarkdownConverter:
     def _debug_image_info(self, image_path):
         """生成された画像の詳細情報をデバッグ"""
         try:
-            # ImageMagickのidentifyコマンドで画像情報を取得
-            cmd = [
-                IMAGEMAGICK_CMD, 'identify', '-verbose', image_path]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            if result.returncode == 0:
-                # 重要な情報のみ抽出
-                lines = result.stdout.split('\n')
-                important_info = []
-                for line in lines:
-                    if any(keyword in line.lower() for keyword in ['geometry', 'resolution', 'colorspace', 'depth']):
-                        important_info.append(line.strip())
-                print(f"[DEBUG] 画像情報: {' | '.join(important_info)}")
-            else:
-                print(f"[DEBUG] 画像情報取得失敗: {result.stderr}")
+            from PIL import Image
+            with Image.open(image_path) as img:
+                info_parts = [
+                    f"サイズ: {img.size[0]}x{img.size[1]}",
+                    f"モード: {img.mode}",
+                ]
+                if hasattr(img, 'info') and 'dpi' in img.info:
+                    info_parts.append(f"DPI: {img.info['dpi']}")
+                print(f"[DEBUG] 画像情報: {' | '.join(info_parts)}")
         except Exception as e:
             print(f"[DEBUG] 画像情報取得エラー: {e}")
 
@@ -1418,59 +1413,34 @@ class WordToMarkdownConverter:
     def _convert_vector_image(self, image_data: bytes, original_path: str) -> Optional[str]:
         """ベクター画像をPNGに変換"""
         try:
-            # 一時ファイルに保存
             with tempfile.NamedTemporaryFile(delete=False, suffix=Path(original_path).suffix) as temp_file:
                 temp_file.write(image_data)
                 temp_path = temp_file.name
             
-            # 出力パス
             output_path = original_path.replace('.emf', '.png').replace('.wmf', '.png')
             
-            # LibreOfficeで直接変換を試す
             if self._convert_with_libreoffice(temp_path, output_path):
                 os.unlink(temp_path)
                 return output_path
             
-            # LibreOfficeが失敗した場合、ImageMagickを試す
-            cmd = [
-                IMAGEMAGICK_CMD,
-                temp_path,
-                '-density', '300',
-                '-quality', '100',
-                '-background', 'white',
-                '-alpha', 'remove',
-                output_path
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            
-            # 一時ファイルを削除
             os.unlink(temp_path)
-            
-            if result.returncode == 0 and os.path.exists(output_path):
-                print(f"[SUCCESS] ベクター画像変換完了（ImageMagick）: {output_path}")
-                return output_path
-            else:
-                print(f"[ERROR] ベクター画像変換失敗: {result.stderr}")
-                # 失敗した場合は元のデータをそのまま保存
-                with open(original_path, 'wb') as f:
-                    f.write(image_data)
-                return original_path
+            print(f"[ERROR] ベクター画像変換失敗")
+            with open(original_path, 'wb') as f:
+                f.write(image_data)
+            return original_path
                 
         except Exception as e:
             print(f"[ERROR] ベクター画像変換エラー: {e}")
-            # エラーの場合は元のデータをそのまま保存
             with open(original_path, 'wb') as f:
                 f.write(image_data)
             return original_path
 
     def _convert_with_libreoffice(self, input_path: str, output_path: str) -> bool:
         """LibreOfficeを使用してベクター画像を変換"""
+        temp_dir = None
         try:
-            # 一時的にPDFに変換
             temp_dir = tempfile.mkdtemp()
             
-            # LibreOfficeでPDFに変換
             cmd = [
                 LIBREOFFICE_PATH,
                 '--headless',
@@ -1481,7 +1451,6 @@ class WordToMarkdownConverter:
             
             subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
-            # 変換されたPDFのパスを探す
             pdf_path = None
             for file in os.listdir(temp_dir):
                 if file.endswith('.pdf'):
@@ -1489,37 +1458,35 @@ class WordToMarkdownConverter:
                     break
             
             if pdf_path and os.path.exists(pdf_path):
-                # PDFからPNGに変換（余白除去付き）
-                cmd2 = [
-                    IMAGEMAGICK_CMD,
-                    pdf_path,
-                    '-density', '300',
-                    '-quality', '100',
-                    '-background', 'white',
-                    '-alpha', 'remove',
-                    '-trim',  # 余白を自動除去
-                    '+repage',  # ページ情報をリセット
-                    output_path
-                ]
+                pdf_doc = fitz.open(pdf_path)
+                page = pdf_doc[0]
                 
-                result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=30)
+                mat = fitz.Matrix(300 / 72, 300 / 72)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
                 
-                # 一時ディレクトリを削除
-                import shutil
-                shutil.rmtree(temp_dir)
+                if pix.alpha:
+                    from PIL import Image
+                    img = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
+                    bg = Image.new("RGB", img.size, (255, 255, 255))
+                    bg.paste(img, mask=img.split()[3])
+                    bg.save(output_path, "PNG")
+                else:
+                    pix.save(output_path)
                 
-                if result2.returncode == 0 and os.path.exists(output_path):
+                pdf_doc.close()
+                
+                if os.path.exists(output_path):
                     print(f"[SUCCESS] ベクター画像変換完了（LibreOffice→PDF→PNG）: {output_path}")
                     return True
             
-            # 一時ディレクトリを削除
-            import shutil
-            shutil.rmtree(temp_dir)
             return False
             
         except Exception as e:
             print(f"[ERROR] LibreOffice変換エラー: {e}")
             return False
+        finally:
+            if temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
 
 
 def convert_doc_to_docx(doc_file_path: str) -> str:
