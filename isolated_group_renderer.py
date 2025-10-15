@@ -6,7 +6,7 @@ except ImportError:
     _VERBOSE = False
     def debug_print(*args, **kwargs):
         if _VERBOSE:
-            print(*args, **kwargs)
+            debug_print(*args, **kwargs)
     def is_verbose():
         return _VERBOSE
 
@@ -61,55 +61,55 @@ class IsolatedGroupRenderer:
         Returns:
             タプル(画像ファイル名, 開始行) またはNone
         """
-        print(f"[DEBUG][IsoRender] Entered render() for sheet='{sheet.title}' with {len(shape_indices)} shape_indices")
+        debug_print(f"[DEBUG][IsoRender] Entered render() for sheet='{sheet.title}' with {len(shape_indices)} shape_indices")
         try:
             # 初期化
             self.sheet = sheet  # Aggressiveセクションで使用
             self._last_iso_preserved_ids = set()
             
             # フェーズ1: 初期化とXMLロード
-            print(f"[DEBUG][IsoRender] Starting Phase 1: Initialize and load XML")
+            debug_print(f"[DEBUG][IsoRender] Starting Phase 1: Initialize and load XML")
             excel_zip, drawing_xml, drawing_path, sheet_index, theme_color_map = \
                 self._phase1_initialize_and_load_xml(sheet)
             
             if drawing_xml is None:
-                print(f"[DEBUG][IsoRender] Phase 1 FAILED - drawing_xml is None, returning None")
+                debug_print(f"[DEBUG][IsoRender] Phase 1 FAILED - drawing_xml is None, returning None")
                 return None
-            print(f"[DEBUG][IsoRender] Phase 1 SUCCESS - drawing_xml loaded")
+            debug_print(f"[DEBUG][IsoRender] Phase 1 SUCCESS - drawing_xml loaded")
             
             # フェーズ2: アンカー収集
-            print(f"[DEBUG][IsoRender] Starting Phase 2: Collect anchors")
+            debug_print(f"[DEBUG][IsoRender] Starting Phase 2: Collect anchors")
             anchors = self._phase2_collect_anchors(drawing_xml)
             
             if not anchors:
-                print(f"[DEBUG][IsoRender] Phase 2 FAILED - no anchors found, returning None")
+                debug_print(f"[DEBUG][IsoRender] Phase 2 FAILED - no anchors found, returning None")
                 debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawable anchors found")
                 return None
-            print(f"[DEBUG][IsoRender] Phase 2 SUCCESS - {len(anchors)} anchors collected")
+            debug_print(f"[DEBUG][IsoRender] Phase 2 SUCCESS - {len(anchors)} anchors collected")
             
             # フェーズ3: セル範囲計算
-            print(f"[DEBUG][IsoRender] Starting Phase 3: Compute cell range")
+            debug_print(f"[DEBUG][IsoRender] Starting Phase 3: Compute cell range")
             cell_range = self._phase3_compute_cell_range(sheet, shape_indices, anchors, cell_range)
             
             original_cell_range = cell_range
             
             # cell_rangeがNoneの場合のログ
             if original_cell_range is None:
-                print(f"[DEBUG][IsoRender] Phase 3 WARNING - cell_range is None (oneCellAnchor may be present)")
+                debug_print(f"[DEBUG][IsoRender] Phase 3 WARNING - cell_range is None (oneCellAnchor may be present)")
                 debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} cell_range is None - oneCellAnchor may be present, continuing with processing")
             else:
-                print(f"[DEBUG][IsoRender] Phase 3 SUCCESS - cell_range={original_cell_range}")
+                debug_print(f"[DEBUG][IsoRender] Phase 3 SUCCESS - cell_range={original_cell_range}")
                 debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} cell_range={original_cell_range}")
             
             # フェーズ4: ID収集
-            print(f"[DEBUG][IsoRender] Starting Phase 4: Collect keep IDs")
+            debug_print(f"[DEBUG][IsoRender] Starting Phase 4: Collect keep IDs")
             keep_cnvpr_ids = self._phase4_collect_keep_ids(shape_indices, anchors)
-            print(f"[DEBUG][IsoRender] Phase 4 SUCCESS - {len(keep_cnvpr_ids)} IDs collected")
+            debug_print(f"[DEBUG][IsoRender] Phase 4 SUCCESS - {len(keep_cnvpr_ids)} IDs collected")
             
             debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} anchors_count={len(anchors)} keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))}")
             
             # フェーズ5: 一時ディレクトリ作成とコネクタ参照解決
-            print(f"[DEBUG][IsoRender] Starting Phase 5: Create tmpdir and resolve connectors")
+            debug_print(f"[DEBUG][IsoRender] Starting Phase 5: Create tmpdir and resolve connectors")
             tmpdir, referenced_ids, connector_children_by_id = \
                 self._phase5_create_tmpdir_and_resolve_connectors(
                     excel_zip, sheet, shape_indices, anchors, keep_cnvpr_ids, 
@@ -117,13 +117,13 @@ class IsolatedGroupRenderer:
                 )
             
             if tmpdir is None:
-                print(f"[DEBUG][IsoRender] Phase 5 FAILED - tmpdir is None, returning None")
+                debug_print(f"[DEBUG][IsoRender] Phase 5 FAILED - tmpdir is None, returning None")
                 return None
-            print(f"[DEBUG][IsoRender] Phase 5 SUCCESS - tmpdir created, {len(referenced_ids)} referenced IDs")
+            debug_print(f"[DEBUG][IsoRender] Phase 5 SUCCESS - tmpdir created, {len(referenced_ids)} referenced IDs")
             
             try:
                 # フェーズ6: 描画XML刈り込み
-                print(f"[DEBUG][IsoRender] Starting Phase 6: Prune drawing XML")
+                debug_print(f"[DEBUG][IsoRender] Starting Phase 6: Prune drawing XML")
                 drawing_relpath = os.path.join(tmpdir, drawing_path)
                 drawing_xml_bytes = ET.tostring(drawing_xml)
                 success = self._phase6_prune_drawing_xml(
@@ -132,50 +132,50 @@ class IsolatedGroupRenderer:
                 )
                 
                 if not success:
-                    print(f"[DEBUG][IsoRender] Phase 6 FAILED - prune failed, returning None")
+                    debug_print(f"[DEBUG][IsoRender] Phase 6 FAILED - prune failed, returning None")
                     return None
-                print(f"[DEBUG][IsoRender] Phase 6 SUCCESS - XML pruned")
+                debug_print(f"[DEBUG][IsoRender] Phase 6 SUCCESS - XML pruned")
                 
                 # フェーズ7: コネクタコスメティック処理
-                print(f"[DEBUG][IsoRender] Starting Phase 7: Apply connector cosmetics")
+                debug_print(f"[DEBUG][IsoRender] Starting Phase 7: Apply connector cosmetics")
                 self._phase7_apply_connector_cosmetics(
                     drawing_relpath, referenced_ids, connector_children_by_id,
                     theme_color_map, drawing_xml_bytes, drawing_xml
                 )
-                print(f"[DEBUG][IsoRender] Phase 7 SUCCESS - cosmetics applied")
+                debug_print(f"[DEBUG][IsoRender] Phase 7 SUCCESS - cosmetics applied")
                 
                 # フェーズ8: ワークブック準備
-                print(f"[DEBUG][IsoRender] Starting Phase 8: Prepare workbook")
+                debug_print(f"[DEBUG][IsoRender] Starting Phase 8: Prepare workbook")
                 src_for_conv = self._phase8_prepare_workbook(
                     tmpdir, sheet, sheet_index, cell_range, drawing_path, dpi, shape_indices, keep_cnvpr_ids, original_cell_range
                 )
                 
                 if src_for_conv is None:
-                    print(f"[DEBUG][IsoRender] Phase 8 FAILED - src_for_conv is None, returning None")
+                    debug_print(f"[DEBUG][IsoRender] Phase 8 FAILED - src_for_conv is None, returning None")
                     shutil.rmtree(tmpdir, ignore_errors=True)
                     return None
-                print(f"[DEBUG][IsoRender] Phase 8 SUCCESS - workbook prepared: {src_for_conv}")
+                debug_print(f"[DEBUG][IsoRender] Phase 8 SUCCESS - workbook prepared: {src_for_conv}")
                 
                 # フェーズ9: PDF/PNG生成
-                print(f"[DEBUG][IsoRender] Starting Phase 9: Generate PDF/PNG")
+                debug_print(f"[DEBUG][IsoRender] Starting Phase 9: Generate PDF/PNG")
                 out_path = self._phase9_generate_pdf_png(
                     sheet, shape_indices, src_for_conv, tmpdir, dpi, cell_range
                 )
                 
                 if out_path is None:
-                    print(f"[DEBUG][IsoRender] Phase 9 FAILED - out_path is None, returning None")
+                    debug_print(f"[DEBUG][IsoRender] Phase 9 FAILED - out_path is None, returning None")
                     shutil.rmtree(tmpdir, ignore_errors=True)
                     return None
-                print(f"[DEBUG][IsoRender] Phase 9 SUCCESS - PNG generated: {out_path}")
+                debug_print(f"[DEBUG][IsoRender] Phase 9 SUCCESS - PNG generated: {out_path}")
                 
                 # フェーズ10: 後処理
-                print(f"[DEBUG][IsoRender] Starting Phase 10: Postprocess")
+                debug_print(f"[DEBUG][IsoRender] Starting Phase 10: Postprocess")
                 png_name = os.path.basename(out_path) if out_path else "unknown.png"
                 group_rows = [cell_range[2]] if cell_range else None
                 final_result = self._phase10_postprocess(
                     out_path, png_name, sheet, group_rows, cell_range, keep_cnvpr_ids
                 )
-                print(f"[DEBUG][IsoRender] Phase 10 SUCCESS - postprocess complete, result: {final_result}")
+                debug_print(f"[DEBUG][IsoRender] Phase 10 SUCCESS - postprocess complete, result: {final_result}")
                 
                 # クリーンアップ
                 shutil.rmtree(tmpdir, ignore_errors=True)
@@ -183,14 +183,14 @@ class IsolatedGroupRenderer:
                 return final_result
                 
             except Exception as e:
-                print(f"[ERROR][IsolatedGroupRenderer] Exception: {e}")
+                debug_print(f"[ERROR][IsolatedGroupRenderer] Exception: {e}")
                 import traceback
                 traceback.print_exc()
                 shutil.rmtree(tmpdir, ignore_errors=True)
                 return None
                 
         except Exception as e:
-            print(f"[ERROR][IsolatedGroupRenderer] Exception: {e}")
+            debug_print(f"[ERROR][IsolatedGroupRenderer] Exception: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -243,7 +243,7 @@ class IsolatedGroupRenderer:
             
             return z, drawing_xml, drawing_path, sheet_index, theme_color_map
         except Exception as e:
-            print(f"[ERROR] Phase1 failed: {e}")
+            debug_print(f"[ERROR] Phase1 failed: {e}")
             import traceback
             traceback.print_exc()
             return None, None, None, None, None
@@ -386,9 +386,9 @@ class IsolatedGroupRenderer:
                         with open(tgt, 'wb') as _fw:
                             _fw.write(z.read(preserve))
             except (OSError, IOError, FileNotFoundError) as e:
-                print(f"[WARNING] ファイル操作エラー: {e}")
+                debug_print(f"[WARNING] ファイル操作エラー: {e}")
             except Exception as e:
-                print(f"[WARNING] ファイル操作エラー: {e}")
+                debug_print(f"[WARNING] ファイル操作エラー: {e}")
                 debug_print(f"[DEBUG] z type: {type(z)}, z value: {z}")
                 import traceback
                 traceback.print_exc()
@@ -465,7 +465,7 @@ class IsolatedGroupRenderer:
                                     a_cid = sub.attrib.get('id') or sub.attrib.get('idx')
                                     break
                         except AttributeError as ae:
-                            print(f"[ERROR] anchors element type error: an={type(an)}, error={ae}")
+                            debug_print(f"[ERROR] anchors element type error: an={type(an)}, error={ae}")
                             import traceback
                             traceback.print_exc()
                             continue
@@ -543,7 +543,7 @@ class IsolatedGroupRenderer:
                 while q:
                     bfs_iter += 1
                     if bfs_iter > bfs_max:
-                        print(f"[WARN][_iso_bfs] reached bfs_max={bfs_max}; aborting BFS expansion (preserve_count={len(preserve)})")
+                        debug_print(f"[WARN][_iso_bfs] reached bfs_max={bfs_max}; aborting BFS expansion (preserve_count={len(preserve)})")
                         break
                     cur = q.popleft()
                     # curを参照するアンカー -> それらを含めることを検討
@@ -767,9 +767,9 @@ class IsolatedGroupRenderer:
                                 w.writerow([";".join(sorted(list(map(str, keep_cnvpr_ids)))), ";".join(sorted(list(map(str, referenced_ids)))), ";".join(sorted(list(map(str, connector_children_by_id.keys()))) )])
                             debug_print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
                         except (OSError, IOError, FileNotFoundError):
-                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+                            debug_print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
                 except (OSError, IOError, FileNotFoundError):
-                    print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+                    debug_print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
             except (OSError, IOError, FileNotFoundError):
                 referenced_ids = set()
                 connector_children_by_id = {}
@@ -777,7 +777,7 @@ class IsolatedGroupRenderer:
             return tmpdir, referenced_ids, connector_children_by_id
             
         except Exception as e:
-            print(f"[ERROR] Phase5 failed: {e}")
+            debug_print(f"[ERROR] Phase5 failed: {e}")
             import traceback
             traceback.print_exc()
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -1001,7 +1001,7 @@ class IsolatedGroupRenderer:
                     for ch in connector_children_by_id[kept_cid]:
                         try:
                             if not hasattr(ch, 'iter'):
-                                print(f"[ERROR] ch is not an XML element: type={type(ch)}, value={ch}")
+                                debug_print(f"[ERROR] ch is not an XML element: type={type(ch)}, value={ch}")
                                 continue
                             new_ch = copy.deepcopy(ch)
                             # Replace any a:schemeClr children with explicit a:srgbClr using parsed theme
@@ -1018,7 +1018,7 @@ class IsolatedGroupRenderer:
                                                 elem.attrib.clear()
                                                 elem.set('val', hexv)
                             except Exception as e:
-                                print(f"[WARNING] ファイル操作エラー: {e}")
+                                debug_print(f"[WARNING] ファイル操作エラー: {e}")
                             # preserve attributes for important drawing tags (ln/headEnd/tailEnd/spPr)
                             for sub in ch.iter():
                                 try:
@@ -1055,7 +1055,7 @@ class IsolatedGroupRenderer:
                                 pass  # XML解析エラーは無視
             tree2.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
         except Exception as e:
-            print(f"[WARNING] ファイル操作エラー: {e}")
+            debug_print(f"[WARNING] ファイル操作エラー: {e}")
 
         # Ensure shapes/groups/pictures have aspect-locks so Excel won't auto-stretch them
         try:
@@ -1108,7 +1108,7 @@ class IsolatedGroupRenderer:
             
             tree_locks.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
         except Exception as e:
-            print(f"[WARNING] spLocks追加エラー: {e}")
+            debug_print(f"[WARNING] spLocks追加エラー: {e}")
 
         # Extra pass: for any kept anchor that corresponds to an original
         # connector anchor (cxnSp/cxn), replace the connector element in
@@ -1222,7 +1222,7 @@ class IsolatedGroupRenderer:
                                                 elem.attrib.clear()
                                                 elem.set('val', hexv)
                             except Exception as e:
-                                print(f"[WARNING] ファイル操作エラー: {e}")
+                                debug_print(f"[WARNING] ファイル操作エラー: {e}")
                                 import traceback
                                 traceback.print_exc()
 
@@ -1280,11 +1280,11 @@ class IsolatedGroupRenderer:
                     except Exception:
                         pass  # 一時ファイルの削除失敗は無視
                 except Exception as e:
-                    print(f"[WARNING] ファイル操作エラー: {e}")
+                    debug_print(f"[WARNING] ファイル操作エラー: {e}")
             # write back
             tree3.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
         except Exception as e:
-            print(f"[WARNING] ファイル操作エラー: {e}")
+            debug_print(f"[WARNING] ファイル操作エラー: {e}")
     
 
 
@@ -1414,9 +1414,9 @@ class IsolatedGroupRenderer:
                                         os.remove(drawing_rels)
                                         debug_print(f"[DEBUG] Removed unused drawing rels: {fname}.rels")
                     except Exception as drawing_err:
-                        print(f"[WARNING] Drawing file cleanup failed: {drawing_err}")
+                        debug_print(f"[WARNING] Drawing file cleanup failed: {drawing_err}")
             except Exception as e:
-                print(f"[WARNING] シート削除失敗: {e}")
+                debug_print(f"[WARNING] シート削除失敗: {e}")
         
         # cell_rangeが指定されている場合、Print_Areaを設定
         if cell_range:
@@ -1474,7 +1474,7 @@ class IsolatedGroupRenderer:
                     
                     tree.write(wb_path, encoding='utf-8', xml_declaration=True)
                 except Exception as e:
-                    print(f"[WARNING] Print_Area設定失敗: {e}")
+                    debug_print(f"[WARNING] Print_Area設定失敗: {e}")
             
             sheet_path = os.path.join(tmpdir, f'xl/worksheets/sheet{target_sheet_new_index + 1}.xml')
             if os.path.exists(sheet_path):
@@ -1502,7 +1502,7 @@ class IsolatedGroupRenderer:
                     tree.write(sheet_path, encoding='utf-8', xml_declaration=True)
                 
                 except Exception as e:
-                    print(f"[WARNING] pageSetup修正失敗: {e}")
+                    debug_print(f"[WARNING] pageSetup修正失敗: {e}")
             
             try:
                 orig_s_col, orig_e_col, orig_s_row, orig_e_row = original_cell_range
@@ -1732,7 +1732,7 @@ class IsolatedGroupRenderer:
                     
                     stree4.write(sheet_rel, encoding='utf-8', xml_declaration=True)
             except Exception as e:
-                print(f"[WARNING] sheetData再構築失敗: {e}")
+                debug_print(f"[WARNING] sheetData再構築失敗: {e}")
             
             try:
                 if os.path.exists(sheet_rel):
@@ -1757,7 +1757,7 @@ class IsolatedGroupRenderer:
                         stree_drawing.write(sheet_rel, encoding='utf-8', xml_declaration=True)
                         debug_print(f"[DEBUG] <drawing>要素を追加: {sheet_rel}")
             except Exception as e:
-                print(f"[WARNING] <drawing>要素追加失敗: {e}")
+                debug_print(f"[WARNING] <drawing>要素追加失敗: {e}")
             
             try:
                 drawing_path_full = os.path.join(tmpdir, drawing_path)
@@ -2083,7 +2083,7 @@ class IsolatedGroupRenderer:
                     dtree.write(drawing_path_full, encoding='utf-8', xml_declaration=True)
                     
             except Exception as e:
-                print(f"[WARNING] 図形座標調整失敗: {e}")
+                debug_print(f"[WARNING] 図形座標調整失敗: {e}")
         
         try:
             sheet_rels_path = os.path.join(tmpdir, f'xl/worksheets/_rels/sheet{target_sheet_new_index + 1}.xml.rels')
@@ -2124,7 +2124,7 @@ class IsolatedGroupRenderer:
                         stree.write(sheet_path, encoding='utf-8', xml_declaration=True)
                         debug_print(f"[DEBUG] Updated sheet drawing reference to rId1")
         except Exception as e:
-            print(f"[WARNING] リレーションシップのクリーンアップ失敗: {e}")
+            debug_print(f"[WARNING] リレーションシップのクリーンアップ失敗: {e}")
         
         
         # tmpdirをzip化して一時xlsxファイルを作成
@@ -2168,7 +2168,7 @@ class IsolatedGroupRenderer:
                 debug_print(f"[DEBUG] dbg_copy exists: size={st.st_size} bytes")
             except Exception:
                 try:
-                    print(f"[WARN] dbg_copy not found after save: {src_for_conv}")
+                    debug_print(f"[WARN] dbg_copy not found after save: {src_for_conv}")
                 except Exception:
                     pass
             
@@ -2177,11 +2177,11 @@ class IsolatedGroupRenderer:
                 self._set_page_setup_and_margins(src_for_conv)
                 debug_print(f"[DEBUG] Applied fit-to-page settings to: {src_for_conv}")
             except Exception as e:
-                print(f"[WARNING] isolated group pageSetup設定失敗: {e}")
+                debug_print(f"[WARNING] isolated group pageSetup設定失敗: {e}")
             
             return src_for_conv
         except Exception as e:
-            print(f"[ERROR] 一時xlsxファイル作成失敗: {e}")
+            debug_print(f"[ERROR] 一時xlsxファイル作成失敗: {e}")
             return None
 
 
@@ -2212,14 +2212,14 @@ class IsolatedGroupRenderer:
         
         try:
             # LibreOfficeでPDF生成（一時ディレクトリに出力）
-            print(f"[DEBUG][Phase9] Starting Excel to PDF conversion for sheet='{sheet.title}'")
+            debug_print(f"[DEBUG][Phase9] Starting Excel to PDF conversion for sheet='{sheet.title}'")
             debug_print(f"[DEBUG] LibreOffice PDF変換開始: sheet={sheet.title}")
             pdf_path = self._convert_excel_to_pdf(src_for_conv, tmp_pdf_dir, apply_fit_to_page=False)
             
             if pdf_path is None:
-                print(f"[WARN][Phase9] LibreOffice PDF変換失敗")
+                debug_print(f"[WARN][Phase9] LibreOffice PDF変換失敗")
                 return None
-            print(f"[DEBUG][Phase9] PDF generated successfully: {pdf_path}")
+            debug_print(f"[DEBUG][Phase9] PDF generated successfully: {pdf_path}")
             
             # PDFを確認用に保存（isolated group）
             if getattr(self.converter, 'debug_mode', False):
@@ -2235,21 +2235,21 @@ class IsolatedGroupRenderer:
                     saved_pdf_name = f"{self.converter.base_name}_{safe_sheet}_iso_group_{group_hash}.pdf"
                     saved_pdf_path = os.path.join(pdfs_dir, saved_pdf_name)
                     shutil.copyfile(pdf_path, saved_pdf_path)
-                    print(f"[INFO] 分離グループPDFを保存しました: {saved_pdf_path}")
+                    debug_print(f"[INFO] 分離グループPDFを保存しました: {saved_pdf_path}")
                 except Exception as e:
-                    print(f"[WARNING] 分離グループPDF保存失敗: {e}")
+                    debug_print(f"[WARNING] 分離グループPDF保存失敗: {e}")
             
             png_filename = os.path.basename(src_for_conv).replace('.xlsx', '.png')
             final_png_path = os.path.join(self.converter.images_dir, png_filename)
-            print(f"[DEBUG][Phase9] Starting PDF to PNG conversion: pdf={pdf_path}, output={final_png_path}")
+            debug_print(f"[DEBUG][Phase9] Starting PDF to PNG conversion: pdf={pdf_path}, output={final_png_path}")
             
             # PDFをPNGに変換（最終出力ディレクトリに直接出力）
             png_path = self._convert_pdf_to_png_with_output(pdf_path, final_png_path, dpi=dpi)
             
             if png_path is None:
-                print(f"[WARN][Phase9] PDF→PNG変換失敗")
+                debug_print(f"[WARN][Phase9] PDF→PNG変換失敗")
                 return None
-            print(f"[DEBUG][Phase9] PNG generated successfully: {png_path}")
+            debug_print(f"[DEBUG][Phase9] PNG generated successfully: {png_path}")
             
             try:
                 from PIL import Image
@@ -2266,12 +2266,12 @@ class IsolatedGroupRenderer:
                         cropped = im.crop((l, t, r, b))
                         cropped.save(png_path)
             except Exception as e:
-                print(f"[WARNING] クロップ処理失敗: {e}")
+                debug_print(f"[WARNING] クロップ処理失敗: {e}")
             
             return png_path
             
         except Exception as e:
-            print(f"[ERROR] PDF/PNG生成エラー: {e}")
+            debug_print(f"[ERROR] PDF/PNG生成エラー: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -2287,26 +2287,26 @@ class IsolatedGroupRenderer:
         import os
         import subprocess
         
-        print(f"[DEBUG][convert_excel_to_pdf] Starting conversion: excel={excel_path}, outdir={output_dir}")
+        debug_print(f"[DEBUG][convert_excel_to_pdf] Starting conversion: excel={excel_path}, outdir={output_dir}")
         
         if not os.path.exists(excel_path):
-            print(f"[ERROR][convert_excel_to_pdf] Source Excel file does not exist: {excel_path}")
+            debug_print(f"[ERROR][convert_excel_to_pdf] Source Excel file does not exist: {excel_path}")
             return None
         
         try:
             file_size = os.path.getsize(excel_path)
             debug_print(f"[DEBUG][convert_excel_to_pdf] Source file exists, size={file_size} bytes")
         except Exception as e:
-            print(f"[ERROR][convert_excel_to_pdf] Cannot access source file: {e}")
+            debug_print(f"[ERROR][convert_excel_to_pdf] Cannot access source file: {e}")
             return None
         
         LIBREOFFICE_PATH = get_libreoffice_path()
         
         if not LIBREOFFICE_PATH or not os.path.exists(LIBREOFFICE_PATH):
-            print(f"[ERROR] LibreOffice not found: {LIBREOFFICE_PATH}")
+            debug_print(f"[ERROR] LibreOffice not found: {LIBREOFFICE_PATH}")
             return None
         
-        print(f"[DEBUG][convert_excel_to_pdf] LibreOffice path: {LIBREOFFICE_PATH}")
+        debug_print(f"[DEBUG][convert_excel_to_pdf] LibreOffice path: {LIBREOFFICE_PATH}")
         
         try:
             cmd = [
@@ -2317,7 +2317,7 @@ class IsolatedGroupRenderer:
                 excel_path
             ]
             
-            print(f"[DEBUG][convert_excel_to_pdf] Running command: {' '.join(cmd)}")
+            debug_print(f"[DEBUG][convert_excel_to_pdf] Running command: {' '.join(cmd)}")
             
             result = subprocess.run(
                 cmd,
@@ -2326,29 +2326,29 @@ class IsolatedGroupRenderer:
                 timeout=90
             )
             
-            print(f"[DEBUG][convert_excel_to_pdf] Command returncode: {result.returncode}")
+            debug_print(f"[DEBUG][convert_excel_to_pdf] Command returncode: {result.returncode}")
             if result.stdout:
-                print(f"[DEBUG][convert_excel_to_pdf] stdout: {result.stdout[:500]}")
+                debug_print(f"[DEBUG][convert_excel_to_pdf] stdout: {result.stdout[:500]}")
             if result.stderr:
-                print(f"[DEBUG][convert_excel_to_pdf] stderr: {result.stderr[:500]}")
+                debug_print(f"[DEBUG][convert_excel_to_pdf] stderr: {result.stderr[:500]}")
             
             if result.returncode == 0:
                 basename = os.path.splitext(os.path.basename(excel_path))[0]
                 pdf_path = os.path.join(output_dir, basename + '.pdf')
                 
-                print(f"[DEBUG][convert_excel_to_pdf] Expected PDF path: {pdf_path}")
+                debug_print(f"[DEBUG][convert_excel_to_pdf] Expected PDF path: {pdf_path}")
                 
                 if os.path.exists(pdf_path):
                     return pdf_path
             
-            print(f"[ERROR] LibreOffice変換失敗: {result.stderr}")
+            debug_print(f"[ERROR] LibreOffice変換失敗: {result.stderr}")
             return None
             
         except subprocess.TimeoutExpired:
-            print(f"[ERROR] LibreOffice変換タイムアウト")
+            debug_print(f"[ERROR] LibreOffice変換タイムアウト")
             return None
         except Exception as e:
-            print(f"[ERROR] LibreOffice変換エラー: {e}")
+            debug_print(f"[ERROR] LibreOffice変換エラー: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -2383,7 +2383,7 @@ class IsolatedGroupRenderer:
                 
                 doc = fitz.open(pdf_path)
                 if len(doc) == 0:
-                    print("[ERROR] PDFにページが含まれていません")
+                    debug_print("[ERROR] PDFにページが含まれていません")
                     doc.close()
                     return None
                 
@@ -2406,10 +2406,10 @@ class IsolatedGroupRenderer:
                     img = img.convert('RGB')
                 
                 img.save(output_path, 'PNG')
-                print(f"[SUCCESS] PNG変換完了: {output_path}")
+                debug_print(f"[SUCCESS] PNG変換完了: {output_path}")
                 
             except Exception as e:
-                print(f"[ERROR] PyMuPDF変換エラー: {e}")
+                debug_print(f"[ERROR] PyMuPDF変換エラー: {e}")
                 import traceback
                 traceback.print_exc()
                 return None
@@ -2443,10 +2443,10 @@ class IsolatedGroupRenderer:
             return None
             
         except subprocess.TimeoutExpired:
-            print(f"[ERROR] ImageMagick変換タイムアウト")
+            debug_print(f"[ERROR] ImageMagick変換タイムアウト")
             return None
         except Exception as e:
-            print(f"[ERROR] ImageMagick変換エラー: {e}")
+            debug_print(f"[ERROR] ImageMagick変換エラー: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -2488,7 +2488,7 @@ class IsolatedGroupRenderer:
             return png_path
             
         except Exception as e:
-            print(f"[ERROR] クロップエラー: {e}")
+            debug_print(f"[ERROR] クロップエラー: {e}")
             return png_path
 
 
@@ -2521,7 +2521,7 @@ class IsolatedGroupRenderer:
                     
                     debug_print(f"[DEBUG][_phase10] Added {len(keep_cnvpr_ids)} shape IDs to _global_iso_preserved_ids")
                 except Exception as e:
-                    print(f"[WARNING] Failed to update _global_iso_preserved_ids: {e}")
+                    debug_print(f"[WARNING] Failed to update _global_iso_preserved_ids: {e}")
             
             # 実際に使用されたファイル名を取得
             basename = os.path.basename(out_path)
@@ -2548,12 +2548,12 @@ class IsolatedGroupRenderer:
                 rep = 1
             
             # デバッグログ
-            print(f"[INFO] sheet={sheet.title} file={basename} start_row={rep}")
+            debug_print(f"[INFO] sheet={sheet.title} file={basename} start_row={rep}")
             
             return (basename, rep)
             
         except Exception as e:
-            print(f"[ERROR] 後処理エラー: {e}")
+            debug_print(f"[ERROR] 後処理エラー: {e}")
             # フォールバック: タプルで返す
             return (png_name, 1)
 
@@ -2589,7 +2589,7 @@ class IsolatedGroupRenderer:
                     
                     tree.write(workbook_path, encoding='utf-8', xml_declaration=True)
                 except Exception as e:
-                    print(f"[WARNING] workbook.xmlの修正に失敗: {e}")
+                    debug_print(f"[WARNING] workbook.xmlの修正に失敗: {e}")
             
             xl_worksheets = os.path.join(tmpdir, 'xl', 'worksheets')
             if os.path.exists(xl_worksheets):
@@ -2627,7 +2627,7 @@ class IsolatedGroupRenderer:
                             
                             tree.write(sheet_path, encoding='utf-8', xml_declaration=True)
                         except Exception as e:
-                            print(f"[WARNING] {fname} のpageSetup設定に失敗: {e}")
+                            debug_print(f"[WARNING] {fname} のpageSetup設定に失敗: {e}")
             
             with zipfile.ZipFile(xlsx_path, 'w', zipfile.ZIP_DEFLATED) as zout:
                 for root_dir, dirs, files in os.walk(tmpdir):
