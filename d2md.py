@@ -1431,24 +1431,63 @@ class WordToMarkdownConverter:
         }
         
         try:
+            processed_ids = set()
+            
             for elem in drawing_element.iter():
                 tag_name = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
                 
-                if tag_name == 'anchor' or tag_name == 'inline':
+                if tag_name == 'wgp':
+                    for child in elem:
+                        child_tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                        
+                        if child_tag == 'wsp':
+                            shape_info = self._extract_wsp_metadata(child)
+                            if shape_info and (shape_info.get('name') or shape_info.get('text') or shape_info.get('shape_type')):
+                                shape_id = shape_info.get('id', '')
+                                if not shape_id or shape_id not in processed_ids:
+                                    metadata['shapes'].append(shape_info)
+                                    if shape_id:
+                                        processed_ids.add(shape_id)
+                        
+                        elif child_tag == 'pic':
+                            shape_info = self._extract_pic_metadata(child)
+                            if shape_info and (shape_info.get('name') or shape_info.get('type')):
+                                shape_id = shape_info.get('id', '')
+                                if not shape_id or shape_id not in processed_ids:
+                                    metadata['shapes'].append(shape_info)
+                                    if shape_id:
+                                        processed_ids.add(shape_id)
+                        
+                        elif child_tag == 'grpSp':
+                            for nested in child.iter():
+                                nested_tag = nested.tag.split('}')[-1] if '}' in nested.tag else nested.tag
+                                
+                                if nested_tag == 'wsp':
+                                    shape_info = self._extract_wsp_metadata(nested)
+                                    if shape_info and (shape_info.get('name') or shape_info.get('text') or shape_info.get('shape_type')):
+                                        shape_id = shape_info.get('id', '')
+                                        if not shape_id or shape_id not in processed_ids:
+                                            metadata['shapes'].append(shape_info)
+                                            if shape_id:
+                                                processed_ids.add(shape_id)
+                                
+                                elif nested_tag == 'pic':
+                                    shape_info = self._extract_pic_metadata(nested)
+                                    if shape_info and (shape_info.get('name') or shape_info.get('type')):
+                                        shape_id = shape_info.get('id', '')
+                                        if not shape_id or shape_id not in processed_ids:
+                                            metadata['shapes'].append(shape_info)
+                                            if shape_id:
+                                                processed_ids.add(shape_id)
+                
+                elif tag_name == 'anchor' or tag_name == 'inline':
                     shape_info = self._extract_single_shape_metadata(elem)
                     if shape_info and shape_info.get('name'):
-                        metadata['shapes'].append(shape_info)
-                elif tag_name == 'wsp':
-                    shape_info = self._extract_wsp_metadata(elem)
-                    if shape_info and shape_info.get('name'):
-                        metadata['shapes'].append(shape_info)
-                elif tag_name == 'wgp':
-                    for wsp in elem.iter():
-                        wsp_tag = wsp.tag.split('}')[-1] if '}' in wsp.tag else wsp.tag
-                        if wsp_tag == 'wsp':
-                            shape_info = self._extract_wsp_metadata(wsp)
-                            if shape_info and shape_info.get('name'):
-                                metadata['shapes'].append(shape_info)
+                        shape_id = shape_info.get('id', '')
+                        if not shape_id or shape_id not in processed_ids:
+                            metadata['shapes'].append(shape_info)
+                            if shape_id:
+                                processed_ids.add(shape_id)
             
         except Exception as e:
             print(f"[DEBUG] 図形メタデータ抽出エラー: {e}")
@@ -1554,6 +1593,48 @@ class WordToMarkdownConverter:
         
         return shape_info
     
+    def _extract_pic_metadata(self, pic_element) -> Dict[str, Any]:
+        """pic（Picture）要素からメタデータを抽出"""
+        shape_info = {}
+        
+        try:
+            for elem in pic_element.iter():
+                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                
+                if tag == 'cNvPr':
+                    shape_info['name'] = elem.attrib.get('name', '')
+                    shape_info['id'] = elem.attrib.get('id', '')
+                    shape_info['description'] = elem.attrib.get('descr', '')
+                    shape_info['type'] = 'picture'
+                
+                elif tag == 'ext':
+                    try:
+                        cx = int(elem.attrib.get('cx', 0))
+                        cy = int(elem.attrib.get('cy', 0))
+                        shape_info['width_emu'] = cx
+                        shape_info['height_emu'] = cy
+                    except:
+                        pass
+                
+                elif tag == 'off':
+                    try:
+                        x = int(elem.attrib.get('x', 0))
+                        y = int(elem.attrib.get('y', 0))
+                        shape_info['x_emu'] = x
+                        shape_info['y_emu'] = y
+                    except:
+                        pass
+                
+                elif tag == 'blip':
+                    embed = elem.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed', '')
+                    if embed:
+                        shape_info['image_rel_id'] = embed
+        
+        except Exception as e:
+            print(f"[DEBUG] pic要素メタデータ抽出エラー: {e}")
+        
+        return shape_info
+    
     def _format_shape_metadata_as_text(self, metadata: Dict[str, Any]) -> str:
         """図形メタデータを人間が読みやすいテキスト形式に整形"""
         if not metadata.get('shapes'):
@@ -1561,12 +1642,24 @@ class WordToMarkdownConverter:
         
         lines = ["### 図形情報", ""]
         
-        for shape in metadata['shapes']:
-            name = shape.get('name', '不明な図形')
+        for idx, shape in enumerate(metadata['shapes'], 1):
+            name = shape.get('name', '')
+            if not name:
+                shape_type = shape.get('shape_type', shape.get('type', ''))
+                if shape_type:
+                    name = f"図形 #{idx} ({shape_type})"
+                else:
+                    name = f"図形 #{idx}"
+            
             lines.append(f"**{name}**")
+            
+            if shape.get('id'):
+                lines.append(f"- ID: {shape['id']}")
             
             if shape.get('shape_type'):
                 lines.append(f"- 図形タイプ: {shape['shape_type']}")
+            elif shape.get('type'):
+                lines.append(f"- タイプ: {shape['type']}")
             
             if shape.get('text'):
                 lines.append(f"- テキスト: {shape['text']}")
