@@ -93,7 +93,7 @@ class ExcelToMarkdownConverter:
             self._owner = owner
 
         def append(self, item):
-            print(f"[MD_APPEND] {repr(item)}")
+            debug_print(f"[MD_APPEND] {repr(item)}")
             try:
                 if isinstance(item, str) and item.strip() == '---' and len(self) and isinstance(self[-1], str) and self[-1].strip() == '---':
                     return
@@ -7742,7 +7742,7 @@ class ExcelToMarkdownConverter:
         if non_empty_cells < 1:
             return False
         # Debug: report computed heuristics for this region
-        print(f"PLAIN_ENTRY sheet={getattr(sheet,'title',None)} region={start_row}-{end_row},{start_col}-{end_col} non_empty={non_empty_cells} total={total_cells}")
+        debug_print(f"PLAIN_ENTRY sheet={getattr(sheet,'title',None)} region={start_row}-{end_row},{start_col}-{end_col} non_empty={non_empty_cells} total={total_cells}")
         text_content = ' '.join(texts)
         
         avg_len = sum(len(t) for t in texts) / non_empty_cells if non_empty_cells > 0 else 0
