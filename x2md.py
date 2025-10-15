@@ -232,7 +232,7 @@ class ExcelToMarkdownConverter:
     def _detect_bordered_tables(self, sheet, min_row, max_row, min_col, max_col):
         """外枠罫線のみで囲まれた最大矩形をテーブルと判定（内部罫線は無視）"""
         tables = []
-        print("[DEBUG] セル罫線情報一覧:")
+        debug_print("[DEBUG] セル罫線情報一覧:")
         # 最小限の安全な実装: 詳細な罫線テーブル検出ロジック
         # は以前の編集で削除されファイル構造が破損しました。
         # ここで空の'tables'を返すのは安全: 呼び出しコードは
@@ -289,28 +289,28 @@ class ExcelToMarkdownConverter:
         if self._is_canonical_emit():
             self._emitted_images.add(str(img_name))
         else:
-            print(f"[TRACE] Skipping _emitted_images.add({img_name}) in non-canonical pass")
+            debug_print(f"[TRACE] Skipping _emitted_images.add({img_name}) in non-canonical pass")
 
     def _mark_sheet_map(self, sheet_title: str, src_row: int, md_index: int):
         """Record a source-row -> markdown index mapping only during canonical emission."""
         if self._is_canonical_emit():
             self._cell_to_md_index.setdefault(sheet_title, {})[src_row] = int(md_index)
         else:
-            print(f"[TRACE] Skipping authoritative sheet_map[{sheet_title}][{src_row}] assignment in non-canonical pass")
+            debug_print(f"[TRACE] Skipping authoritative sheet_map[{sheet_title}][{src_row}] assignment in non-canonical pass")
 
     def _mark_emitted_row(self, sheet_title: str, row: int):
         """Mark a row as emitted only during canonical emission."""
         if self._is_canonical_emit():
             self._sheet_emitted_rows.setdefault(sheet_title, set()).add(int(row))
         else:
-            print(f"[TRACE] Skipping emitted_rows.add({sheet_title},{row}) in non-canonical pass")
+            debug_print(f"[TRACE] Skipping emitted_rows.add({sheet_title},{row}) in non-canonical pass")
 
     def _mark_emitted_text(self, sheet_title: str, norm_text: str):
         """Record a normalized emitted text only during canonical emission."""
         if self._is_canonical_emit():
             self._sheet_emitted_texts.setdefault(sheet_title, set()).add(str(norm_text))
         else:
-            print(f"[TRACE] Skipping emitted_texts.add({sheet_title},...) in non-canonical pass")
+            debug_print(f"[TRACE] Skipping emitted_texts.add({sheet_title},...) in non-canonical pass")
         
 
     def _escape_angle_brackets(self, text: str) -> str:
@@ -1637,9 +1637,9 @@ class ExcelToMarkdownConverter:
             # 両方の構造に存在する行のみを正式なものとして扱う
             authoritative_emitted = set(r for r in emitted if r in sheet_map)
             sample_emitted = sorted(list(authoritative_emitted))[:20]
-            print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} emitted_count_total={len(emitted)} emitted_count_auth={len(authoritative_emitted)} emitted_sample={sample_emitted} source_rows_count={len(source_rows) if source_rows else 0}")
+            debug_print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} emitted_count_total={len(emitted)} emitted_count_auth={len(authoritative_emitted)} emitted_sample={sample_emitted} source_rows_count={len(source_rows) if source_rows else 0}")
         except (ValueError, TypeError):
-            print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} unable to snapshot emitted set")
+            debug_print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} unable to snapshot emitted set")
 
         if not authoritative_emitted or not source_rows:
             return table_data, source_rows
@@ -1657,12 +1657,12 @@ class ExcelToMarkdownConverter:
                     pruned_src.append(src)
                 else:
                     # debug: note that this source row was removed due to prior authoritative emission
-                    print(f"[TRACE][_prune_emitted_rows_removed] sheet={sheet_title} removed_src_row={src}")
+                    debug_print(f"[TRACE][_prune_emitted_rows_removed] sheet={sheet_title} removed_src_row={src}")
             except (ValueError, TypeError):
                 pruned_table.append(row)
                 pruned_src.append(src)
 
-        print(f"[TRACE][_prune_emitted_rows_exit] sheet={sheet_title} in={len(source_rows)} out={len(pruned_src)}")
+        debug_print(f"[TRACE][_prune_emitted_rows_exit] sheet={sheet_title} in={len(source_rows)} out={len(pruned_src)}")
 
         return pruned_table, pruned_src
     
@@ -2440,7 +2440,7 @@ class ExcelToMarkdownConverter:
                                                 except Exception as e:
                                                     pass  # XML解析エラーは無視
                                         else:
-                                            print(f"[TRACE] Skipping sheet_map offset updates in non-canonical pass for sheet={sheet.title}")
+                                            debug_print(f"[TRACE] Skipping sheet_map offset updates in non-canonical pass for sheet={sheet.title}")
 
                                 # mark all images used
                                 self._sheet_shape_next_idx[sheet.title] = len(imgs)
@@ -5371,14 +5371,14 @@ class ExcelToMarkdownConverter:
         # that uses heuristics (merged cells, annotations, column separations).
         if not table_regions:
             try:
-                print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
+                debug_print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
                 heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
                 try:
-                    print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
+                    debug_debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
                     if heur_tables:
-                        print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
+                        debug_debug_print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
                     if heur_annotations:
-                        print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
+                        debug_debug_print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 if heur_tables:
@@ -5769,7 +5769,7 @@ class ExcelToMarkdownConverter:
                 except Exception as e:
                     pass  # XML解析エラーは無視
             else:
-                print(f"[TRACE] Skipping authoritative mapping for excluded_region rows {start_row}-{end_row} (non-canonical)")
+                debug_print(f"[TRACE] Skipping authoritative mapping for excluded_region rows {start_row}-{end_row} (non-canonical)")
     
     def _output_plain_text_region(self, sheet, start_row: int, end_row: int, min_col: int, max_col: int):
         """プレーンテキスト領域をMarkdownに出力"""
@@ -5817,7 +5817,7 @@ class ExcelToMarkdownConverter:
         """処理済み行を除外してテーブル領域を検出"""
         try:
             print("[INFO] 罫線による表領域の検出を開始...")
-            print(f"[TRACE][_detect_table_regions_excl_entry] sheet={getattr(sheet,'title',None)} range=({min_row}-{max_row},{min_col}-{max_col}) processed_rows_count={len(processed_rows) if processed_rows else 0} processed_rows_sample={sorted(list(processed_rows))[:20] if processed_rows else []}")
+            debug_print(f"[TRACE][_detect_table_regions_excl_entry] sheet={getattr(sheet,'title',None)} range=({min_row}-{max_row},{min_col}-{max_col}) processed_rows_count={len(processed_rows) if processed_rows else 0} processed_rows_sample={sorted(list(processed_rows))[:20] if processed_rows else []}")
         except (ValueError, TypeError) as e:
             debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
@@ -7997,7 +7997,7 @@ class ExcelToMarkdownConverter:
                                 pass  # XML解析エラーは無視
                         else:
                             # non-canonical context: canonical pass will assign indices
-                            print(f"[TRACE] Skipping authoritative mapping for plain-text fallback row={row_num} (non-canonical)")
+                            debug_print(f"[TRACE] Skipping authoritative mapping for plain-text fallback row={row_num} (non-canonical)")
                     except (ValueError, TypeError) as e:
                         debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
