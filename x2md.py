@@ -231,7 +231,7 @@ class ExcelToMarkdownConverter:
         content = "\n".join(str(x) for x in self.markdown_lines)
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(content)
-        debug_print(f"[SUCCESS] 変換完了: {output_file}")
+        print(f"[SUCCESS] 変換完了: {output_file}")
         return output_file
 
     def _detect_bordered_tables(self, sheet, min_row, max_row, min_col, max_col):
@@ -294,28 +294,28 @@ class ExcelToMarkdownConverter:
         if self._is_canonical_emit():
             self._emitted_images.add(str(img_name))
         else:
-            debug_print(f"[TRACE] Skipping _emitted_images.add({img_name}) in non-canonical pass")
+            print(f"[TRACE] Skipping _emitted_images.add({img_name}) in non-canonical pass")
 
     def _mark_sheet_map(self, sheet_title: str, src_row: int, md_index: int):
         """Record a source-row -> markdown index mapping only during canonical emission."""
         if self._is_canonical_emit():
             self._cell_to_md_index.setdefault(sheet_title, {})[src_row] = int(md_index)
         else:
-            debug_print(f"[TRACE] Skipping authoritative sheet_map[{sheet_title}][{src_row}] assignment in non-canonical pass")
+            print(f"[TRACE] Skipping authoritative sheet_map[{sheet_title}][{src_row}] assignment in non-canonical pass")
 
     def _mark_emitted_row(self, sheet_title: str, row: int):
         """Mark a row as emitted only during canonical emission."""
         if self._is_canonical_emit():
             self._sheet_emitted_rows.setdefault(sheet_title, set()).add(int(row))
         else:
-            debug_print(f"[TRACE] Skipping emitted_rows.add({sheet_title},{row}) in non-canonical pass")
+            print(f"[TRACE] Skipping emitted_rows.add({sheet_title},{row}) in non-canonical pass")
 
     def _mark_emitted_text(self, sheet_title: str, norm_text: str):
         """Record a normalized emitted text only during canonical emission."""
         if self._is_canonical_emit():
             self._sheet_emitted_texts.setdefault(sheet_title, set()).add(str(norm_text))
         else:
-            debug_print(f"[TRACE] Skipping emitted_texts.add({sheet_title},...) in non-canonical pass")
+            print(f"[TRACE] Skipping emitted_texts.add({sheet_title},...) in non-canonical pass")
         
 
     def _escape_angle_brackets(self, text: str) -> str:
@@ -1372,7 +1372,7 @@ class ExcelToMarkdownConverter:
                     for row, _, kind, payload in events_emit:
                         try:
                             if kind == 'text':
-                                debug_print(f"  [LOG] text @{row}: {payload}")
+                                print(f"  [LOG] text @{row}: {payload}")
                             elif kind == 'table':
                                 # payload may be (table_data, src_rows, meta)
                                 tdata = None
@@ -1389,14 +1389,14 @@ class ExcelToMarkdownConverter:
                                 except Exception:
                                     title = None
                                 if title:
-                                    debug_print(f"  [LOG] table @{row} title: {title} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
+                                    print(f"  [LOG] table @{row} title: {title} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
                                 else:
-                                    debug_print(f"  [LOG] table @{row} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
+                                    print(f"  [LOG] table @{row} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
                             else:  # image
-                                debug_print(f"  [LOG] image @{row}: {payload}")
+                                print(f"  [LOG] image @{row}: {payload}")
                         except (ValueError, TypeError):
                             # be robust in diagnostic pass; do not raise
-                            debug_print(f"  [LOG] event @{row} kind={kind} (payload unstable)")
+                            print(f"  [LOG] event @{row} kind={kind} (payload unstable)")
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
@@ -1643,9 +1643,9 @@ class ExcelToMarkdownConverter:
             # 両方の構造に存在する行のみを正式なものとして扱う
             authoritative_emitted = set(r for r in emitted if r in sheet_map)
             sample_emitted = sorted(list(authoritative_emitted))[:20]
-            debug_print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} emitted_count_total={len(emitted)} emitted_count_auth={len(authoritative_emitted)} emitted_sample={sample_emitted} source_rows_count={len(source_rows) if source_rows else 0}")
+            print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} emitted_count_total={len(emitted)} emitted_count_auth={len(authoritative_emitted)} emitted_sample={sample_emitted} source_rows_count={len(source_rows) if source_rows else 0}")
         except (ValueError, TypeError):
-            debug_print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} unable to snapshot emitted set")
+            print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} unable to snapshot emitted set")
 
         if not authoritative_emitted or not source_rows:
             return table_data, source_rows
@@ -1663,12 +1663,12 @@ class ExcelToMarkdownConverter:
                     pruned_src.append(src)
                 else:
                     # debug: note that this source row was removed due to prior authoritative emission
-                    debug_print(f"[TRACE][_prune_emitted_rows_removed] sheet={sheet_title} removed_src_row={src}")
+                    print(f"[TRACE][_prune_emitted_rows_removed] sheet={sheet_title} removed_src_row={src}")
             except (ValueError, TypeError):
                 pruned_table.append(row)
                 pruned_src.append(src)
 
-        debug_print(f"[TRACE][_prune_emitted_rows_exit] sheet={sheet_title} in={len(source_rows)} out={len(pruned_src)}")
+        print(f"[TRACE][_prune_emitted_rows_exit] sheet={sheet_title} in={len(source_rows)} out={len(pruned_src)}")
 
         return pruned_table, pruned_src
     
@@ -2446,7 +2446,7 @@ class ExcelToMarkdownConverter:
                                                 except Exception as e:
                                                     pass  # XML解析エラーは無視
                                         else:
-                                            debug_print(f"[TRACE] Skipping sheet_map offset updates in non-canonical pass for sheet={sheet.title}")
+                                            print(f"[TRACE] Skipping sheet_map offset updates in non-canonical pass for sheet={sheet.title}")
 
                                 # mark all images used
                                 self._sheet_shape_next_idx[sheet.title] = len(imgs)
@@ -2618,7 +2618,7 @@ class ExcelToMarkdownConverter:
             # return the saved image filename (basename). Caller will generate
             # the markdown using this concrete filename so that links always
             # point to an existing file on disk.
-            debug_print(f"[SUCCESS] 画像を処理: {image_filename}")
+            print(f"[SUCCESS] 画像を処理: {image_filename}")
             return os.path.basename(image_filename)
         except Exception as e:
             try:
@@ -3281,7 +3281,7 @@ class ExcelToMarkdownConverter:
                 md_line = f"![{sheet.title}](images/{result_filename})"
                 try:
                     self._insert_markdown_image(insert_index, md_line, result_filename, sheet=sheet)
-                    debug_print(f"[SUCCESS] シート全体の画像を挿入: {result_filename}")
+                    print(f"[SUCCESS] シート全体の画像を挿入: {result_filename}")
                 except Exception as e:
                     print(f"[WARNING] 画像挿入失敗: {e}")
                     # フォールバック: markdown_linesに直接追加
@@ -4914,7 +4914,7 @@ class ExcelToMarkdownConverter:
                 
                 except Exception as e:
                     if getattr(self, 'verbose', False):
-                        debug_print(f"[WARN][_iso_v2] Failed to remove non-target sheets: {e}")
+                        print(f"[WARN][_iso_v2] Failed to remove non-target sheets: {e}")
                         import traceback
                         traceback.print_exc()
                 
@@ -4986,7 +4986,7 @@ class ExcelToMarkdownConverter:
                         debug_print(f"[DEBUG][_iso_v2] Set pageSetup to scale=100 (normal size) to preserve shapes")
                     except Exception as e:
                         if getattr(self, 'verbose', False):
-                            debug_print(f"[WARN][_iso_v2] Failed to fix pageSetup: {e}")
+                            print(f"[WARN][_iso_v2] Failed to fix pageSetup: {e}")
                 
                 # Worksheet reconstruction code (DISABLED - keep original sheet data)
                 if False and os.path.exists(sheet_rel) and cell_range:
@@ -5185,7 +5185,7 @@ class ExcelToMarkdownConverter:
                         debug_print(f"[DEBUG][_iso_v2] Reconstructed sheet data: kept original rows {s_row}-{e_row}, cols {s_col}-{e_col}")
                     except Exception as e:
                         if getattr(self, 'verbose', False):
-                            debug_print(f"[WARN][_iso_v2] Failed to reconstruct worksheet: {e}")
+                            print(f"[WARN][_iso_v2] Failed to reconstruct worksheet: {e}")
 
                 # CRITICAL: Remove Print_Area completely to ensure all shapes are visible
                 # Print_Area restricts the visible area and can hide shapes outside the defined range
@@ -5209,7 +5209,7 @@ class ExcelToMarkdownConverter:
                         wtree.write(wb_rel, encoding='utf-8', xml_declaration=True)
                 except Exception as e:
                     if getattr(self, 'verbose', False):
-                        debug_print(f"[WARN][_iso_v2] Failed to remove Print_Area: {e}")
+                        print(f"[WARN][_iso_v2] Failed to remove Print_Area: {e}")
 
                 # Create trimmed workbook ZIP for debugging (saved in output dir)
                 debug_xlsx_filename = f"{self.base_name}_{sheet.title}_group_{shape_indices[0] if shape_indices else 0}_debug.xlsx"
@@ -5228,7 +5228,7 @@ class ExcelToMarkdownConverter:
                     debug_print(f"[DEBUG][_iso_v2] Saved debug workbook: {debug_xlsx_path}")
                 except Exception as e:
                     if getattr(self, 'verbose', False):
-                        debug_print(f"[WARN][_iso_v2] Failed to create trimmed workbook: {e}")
+                        print(f"[WARN][_iso_v2] Failed to create trimmed workbook: {e}")
                     return None
 
                 # Convert to PDF and PNG (save PDF for debugging)
@@ -5244,7 +5244,7 @@ class ExcelToMarkdownConverter:
                     
                     if proc.returncode != 0:
                         if getattr(self, 'verbose', False):
-                            debug_print(f"[WARN][_iso_v2] LibreOffice PDF conversion failed: {proc.stderr}")
+                            print(f"[WARN][_iso_v2] LibreOffice PDF conversion failed: {proc.stderr}")
                         return None
                     
                     # Find generated PDF
@@ -5281,7 +5281,7 @@ class ExcelToMarkdownConverter:
                     
                     if proc.returncode != 0 or not os.path.exists(png_path):
                         if getattr(self, 'verbose', False):
-                            debug_print(f"[WARN][_iso_v2] ImageMagick PNG conversion failed: {proc.stderr}")
+                            print(f"[WARN][_iso_v2] ImageMagick PNG conversion failed: {proc.stderr}")
                         return None
                     
                     debug_print(f"[DEBUG][_iso_v2] Successfully rendered group: {png_filename}")
@@ -5310,7 +5310,7 @@ class ExcelToMarkdownConverter:
                             im.close()
                     except Exception as crop_err:
                         if getattr(self, 'verbose', False):
-                            debug_print(f"[WARN][_iso_v2] Failed to crop image: {crop_err}")
+                            print(f"[WARN][_iso_v2] Failed to crop image: {crop_err}")
                     
                     # Return tuple: (filename, minimum_row_for_cluster)
                     debug_print(f"[DEBUG][_iso_v2] Returning: filename={png_filename}, cluster_min_row={cluster_min_row}")
@@ -5380,11 +5380,11 @@ class ExcelToMarkdownConverter:
                 print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
                 heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
                 try:
-                    debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
+                    print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
                     if heur_tables:
-                        debug_print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
+                        print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
                     if heur_annotations:
-                        debug_print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
+                        print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 if heur_tables:
@@ -5775,7 +5775,7 @@ class ExcelToMarkdownConverter:
                 except Exception as e:
                     pass  # XML解析エラーは無視
             else:
-                debug_print(f"[TRACE] Skipping authoritative mapping for excluded_region rows {start_row}-{end_row} (non-canonical)")
+                print(f"[TRACE] Skipping authoritative mapping for excluded_region rows {start_row}-{end_row} (non-canonical)")
     
     def _output_plain_text_region(self, sheet, start_row: int, end_row: int, min_col: int, max_col: int):
         """プレーンテキスト領域をMarkdownに出力"""
@@ -5823,7 +5823,7 @@ class ExcelToMarkdownConverter:
         """処理済み行を除外してテーブル領域を検出"""
         try:
             print("[INFO] 罫線による表領域の検出を開始...")
-            debug_print(f"[TRACE][_detect_table_regions_excl_entry] sheet={getattr(sheet,'title',None)} range=({min_row}-{max_row},{min_col}-{max_col}) processed_rows_count={len(processed_rows) if processed_rows else 0} processed_rows_sample={sorted(list(processed_rows))[:20] if processed_rows else []}")
+            print(f"[TRACE][_detect_table_regions_excl_entry] sheet={getattr(sheet,'title',None)} range=({min_row}-{max_row},{min_col}-{max_col}) processed_rows_count={len(processed_rows) if processed_rows else 0} processed_rows_sample={sorted(list(processed_rows))[:20] if processed_rows else []}")
         except (ValueError, TypeError) as e:
             debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
@@ -7566,7 +7566,7 @@ class ExcelToMarkdownConverter:
                     except Exception:
                         title_in_region = None
                     if sheet_name == 'XMLファイル自動生成' or title_in_region == 'XMLファイル自動生成':
-                        debug_print('[DEBUG-TRACE] Detected target sheet/region for deep dump: XMLファイル自動生成')
+                        print('[DEBUG-TRACE] Detected target sheet/region for deep dump: XMLファイル自動生成')
                         debug_print(f"[DEBUG-TRACE] region={region}")
                         debug_print(f"[DEBUG-TRACE] unique_cols={unique_cols}")
                         # dump first_row_vals if present
@@ -8003,7 +8003,7 @@ class ExcelToMarkdownConverter:
                                 pass  # XML解析エラーは無視
                         else:
                             # non-canonical context: canonical pass will assign indices
-                            debug_print(f"[TRACE] Skipping authoritative mapping for plain-text fallback row={row_num} (non-canonical)")
+                            print(f"[TRACE] Skipping authoritative mapping for plain-text fallback row={row_num} (non-canonical)")
                     except (ValueError, TypeError) as e:
                         debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
@@ -10093,7 +10093,7 @@ def convert_xls_to_xlsx(xls_file_path: str) -> Optional[str]:
             shutil.rmtree(temp_dir)
             return None
         
-        debug_print(f"[SUCCESS] XLS→XLSX変換完了: {xlsx_output_path}")
+        print(f"[SUCCESS] XLS→XLSX変換完了: {xlsx_output_path}")
         return xlsx_output_path
         
     except subprocess.TimeoutExpired:
