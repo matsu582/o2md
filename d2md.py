@@ -1431,17 +1431,24 @@ class WordToMarkdownConverter:
         }
         
         try:
-            for anchor in drawing_element.iter():
-                tag_name = anchor.tag.split('}')[-1] if '}' in anchor.tag else anchor.tag
+            for elem in drawing_element.iter():
+                tag_name = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
                 
                 if tag_name == 'anchor' or tag_name == 'inline':
-                    shape_info = self._extract_single_shape_metadata(anchor)
+                    shape_info = self._extract_single_shape_metadata(elem)
                     if shape_info and shape_info.get('name'):
                         metadata['shapes'].append(shape_info)
                 elif tag_name == 'wsp':
-                    shape_info = self._extract_wsp_metadata(anchor)
+                    shape_info = self._extract_wsp_metadata(elem)
                     if shape_info and shape_info.get('name'):
                         metadata['shapes'].append(shape_info)
+                elif tag_name == 'wgp':
+                    for wsp in elem.iter():
+                        wsp_tag = wsp.tag.split('}')[-1] if '}' in wsp.tag else wsp.tag
+                        if wsp_tag == 'wsp':
+                            shape_info = self._extract_wsp_metadata(wsp)
+                            if shape_info and shape_info.get('name'):
+                                metadata['shapes'].append(shape_info)
             
         except Exception as e:
             print(f"[DEBUG] 図形メタデータ抽出エラー: {e}")
@@ -1502,6 +1509,7 @@ class WordToMarkdownConverter:
     def _extract_wsp_metadata(self, wsp_element) -> Dict[str, Any]:
         """wsp（Word Shape）要素からメタデータを抽出"""
         shape_info = {}
+        text_parts = []
         
         try:
             for elem in wsp_element.iter():
@@ -1517,14 +1525,8 @@ class WordToMarkdownConverter:
                     if prst:
                         shape_info['shape_type'] = prst
                 
-                elif tag == 'txBody':
-                    text_parts = []
-                    for t_elem in elem.iter():
-                        t_tag = t_elem.tag.split('}')[-1] if '}' in t_elem.tag else t_elem.tag
-                        if t_tag == 't' and t_elem.text:
-                            text_parts.append(t_elem.text.strip())
-                    if text_parts:
-                        shape_info['text'] = ' / '.join(text_parts)
+                elif tag == 't' and elem.text:
+                    text_parts.append(elem.text.strip())
                 
                 elif tag == 'ext':
                     try:
@@ -1543,6 +1545,9 @@ class WordToMarkdownConverter:
                         shape_info['y_emu'] = y
                     except:
                         pass
+            
+            if text_parts:
+                shape_info['text'] = ' / '.join(text_parts)
         
         except Exception as e:
             print(f"[DEBUG] wsp要素メタデータ抽出エラー: {e}")
