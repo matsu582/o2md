@@ -5612,6 +5612,10 @@ class ExcelToMarkdownConverter:
                         smin = min(cols_used)
                         smax = max(cols_used)
                         debug_print(f"[DEBUG] implicit table detected rows={srow}-{erow} cols={smin}-{smax}")
+                        
+                        if self._is_colon_separated_list(sheet, srow, erow, smin, smax):
+                            debug_print(f"[DEBUG] implicit table is colon-separated list; skipping rows={srow}-{erow}")
+                            continue
                         # Strong guard: if the run is a two-column numbered/list style
                         # (left column is enumeration markers like ①, 1., a) and right
                         # column is descriptive text, skip converting to an implicit table
@@ -5847,14 +5851,16 @@ class ExcelToMarkdownConverter:
                 sheet, min_col, max_col
             )
         
-        # プレーンテキスト的なテーブル領域を除外（メイン処理で行うため一時的に無効化）
-        # table_boundaries = self._filter_real_tables(sheet, table_boundaries, processed_rows)
+        # プレーンテキスト的なテーブル領域を除外
+        table_boundaries = self._filter_real_tables(sheet, table_boundaries, processed_rows)
         
         # 結合セルによる境界調整
         table_boundaries = self._adjust_table_regions_for_merged_cells(sheet, table_boundaries)
         
         # 水平分離処理（注釈付き）
         final_regions, annotations = self._split_horizontal_tables_with_annotations(sheet, table_boundaries)
+        
+        final_regions = self._filter_real_tables(sheet, final_regions, processed_rows)
         
         # Trace summary of detected regions
         summary = f"DET_EXCL sheet={getattr(sheet,'title',None)} regions={len(final_regions)} " + ",".join([f"{r[0]}-{r[1]}" for r in final_regions[:10]])
@@ -5871,6 +5877,10 @@ class ExcelToMarkdownConverter:
             # 短すぎるテーブルは除外（2行以下）
             if end_row - start_row < 2:
                 debug_print(f"[DEBUG] 短すぎるテーブル除外: 行{start_row}〜{end_row}")
+                continue
+            
+            if self._is_colon_separated_list(sheet, start_row, end_row, start_col, end_col):
+                debug_print(f"[DEBUG] コロン区切り項目リストのため除外: 行{start_row}〜{end_row}")
                 continue
             
             # プレーンテキスト行が多い場合は除外
@@ -5923,6 +5933,36 @@ class ExcelToMarkdownConverter:
             real_tables.append(boundary)
         
         return real_tables
+    
+    def _is_colon_separated_list(self, sheet, start_row: int, end_row: int, start_col: int, end_col: int) -> bool:
+        """コロン区切りの項目リストパターンを検出（例：項目名：値）"""
+        rows_with_colon = 0
+        total_data_rows = 0
+        
+        for row_num in range(start_row, end_row + 1):
+            row_cells = []
+            has_data = False
+            has_colon = False
+            
+            for col_num in range(start_col, end_col + 1):
+                if row_num <= sheet.max_row and col_num <= sheet.max_column:
+                    cell_value = str(sheet.cell(row=row_num, column=col_num).value or "").strip()
+                    if cell_value:
+                        row_cells.append(cell_value)
+                        has_data = True
+                        if cell_value in (':', '：'):
+                            has_colon = True
+            
+            if has_data:
+                total_data_rows += 1
+                if has_colon:
+                    rows_with_colon += 1
+        
+        if total_data_rows > 0 and (rows_with_colon / total_data_rows) >= 0.5:
+            debug_print(f"[DEBUG] コロン区切りリスト検出: {rows_with_colon}/{total_data_rows}行がコロンを含む")
+            return True
+        
+        return False
     
     def _calculate_border_density(self, sheet, start_row: int, end_row: int, start_col: int, end_col: int) -> float:
         """境界線密度を計算"""
