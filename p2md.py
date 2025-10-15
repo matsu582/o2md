@@ -57,6 +57,24 @@ DEFAULT_DPI = 300
 IMAGE_QUALITY = 95
 
 
+
+# グローバルverboseフラグ
+_VERBOSE = False
+
+def set_verbose(verbose: bool):
+    """verboseモードを設定"""
+    global _VERBOSE
+    _VERBOSE = verbose
+
+def is_verbose() -> bool:
+    """verboseモードかどうかを返す"""
+    return _VERBOSE
+
+def debug_print(*args, **kwargs):
+    """verboseモード時のみ出力するデバッグ用print"""
+    if _VERBOSE:
+        print(*args, **kwargs)
+
 class PowerPointToMarkdownConverter:
     def __init__(self, pptx_file_path: str, output_dir=None):
         """コンバーター初期化
@@ -707,7 +725,7 @@ class PowerPointToMarkdownConverter:
             bool: 変換成功時True
         """
         try:
-            print(f"[DEBUG] PyMuPDFでPDF→PNG変換実行 (ページ {page_index})...")
+            debug_print(f"[DEBUG] PyMuPDFでPDF→PNG変換実行 (ページ {page_index})...")
             
             doc = fitz.open(pdf_path)
             if page_index >= len(doc):
@@ -825,8 +843,12 @@ def main():
     parser.add_argument('pptx_file', help='変換するPowerPointファイル（.pptまたは.pptx）')
     parser.add_argument('-o', '--output-dir', type=str,
                        help='出力ディレクトリを指定（デフォルト: ./output）')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                       help='デバッグ情報を出力')
     
     args = parser.parse_args()
+    
+    set_verbose(args.verbose)
     
     if not os.path.exists(args.pptx_file):
         print(f"エラー: ファイル '{args.pptx_file}' が見つかりません。")
