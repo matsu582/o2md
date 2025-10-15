@@ -57,7 +57,7 @@ except ImportError as e:
 LIBREOFFICE_PATH = get_libreoffice_path()
 
 class WordToMarkdownConverter:
-    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None):
+    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None, shape_metadata=False):
         self.word_file = word_file_path
         self.doc = Document(word_file_path)
         self.base_name = Path(word_file_path).stem
@@ -83,6 +83,7 @@ class WordToMarkdownConverter:
         self.referenced_images = set()  # 実際に文書内で参照されている画像のrId
         self.vector_image_counter = 0  # ベクター画像専用カウンター
         self.regular_image_counter = 0  # 通常画像専用カウンター
+        self.shape_metadata = shape_metadata  # 図形メタデータ出力フラグ
         
     def convert(self) -> str:
         """メイン変換処理"""
@@ -1114,6 +1115,34 @@ class WordToMarkdownConverter:
                 encoded_filename = urllib.parse.quote(image_filename)
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
                 self.markdown_lines.append("")
+                
+                if self.shape_metadata:
+                    try:
+                        metadata = self._extract_shape_metadata_from_drawing(drawing_element)
+                        if metadata.get('shapes'):
+                            text_metadata = self._format_shape_metadata_as_text(metadata)
+                            json_metadata = self._format_shape_metadata_as_json(metadata)
+                            
+                            if text_metadata:
+                                self.markdown_lines.append("")
+                                self.markdown_lines.append(text_metadata)
+                                self.markdown_lines.append("")
+                            
+                            if json_metadata and json_metadata != "{}":
+                                self.markdown_lines.append("<details>")
+                                self.markdown_lines.append("<summary>JSON形式の図形情報</summary>")
+                                self.markdown_lines.append("")
+                                self.markdown_lines.append("```json")
+                                self.markdown_lines.append(json_metadata)
+                                self.markdown_lines.append("```")
+                                self.markdown_lines.append("")
+                                self.markdown_lines.append("</details>")
+                                self.markdown_lines.append("")
+                            
+                            print(f"[DEBUG] 図形メタデータ追加: {len(metadata['shapes'])} shapes")
+                    except Exception as e:
+                        print(f"[WARNING] 図形メタデータ追加失敗: {e}")
+                
                 print(f"[SUCCESS] ベクター複合図形を処理: {image_filename}")
                 
                 # デバッグ用にPDFも保存
@@ -1392,6 +1421,263 @@ class WordToMarkdownConverter:
         except Exception as e:
             print(f"[DEBUG] 画像情報取得エラー: {e}")
 
+    def _extract_shape_metadata_from_drawing(self, drawing_element) -> Dict[str, Any]:
+        """DrawingML要素から図形メタデータを抽出"""
+        metadata = {
+            'type': 'unknown',
+            'name': '',
+            'description': '',
+            'shapes': []
+        }
+        
+        try:
+            processed_ids = set()
+            
+            for elem in drawing_element.iter():
+                tag_name = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                
+                if tag_name == 'wgp':
+                    for child in elem:
+                        child_tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                        
+                        if child_tag == 'wsp':
+                            shape_info = self._extract_wsp_metadata(child)
+                            if shape_info and (shape_info.get('name') or shape_info.get('text') or shape_info.get('shape_type')):
+                                shape_id = shape_info.get('id', '')
+                                if not shape_id or shape_id not in processed_ids:
+                                    metadata['shapes'].append(shape_info)
+                                    if shape_id:
+                                        processed_ids.add(shape_id)
+                        
+                        elif child_tag == 'pic':
+                            shape_info = self._extract_pic_metadata(child)
+                            if shape_info and (shape_info.get('name') or shape_info.get('type')):
+                                shape_id = shape_info.get('id', '')
+                                if not shape_id or shape_id not in processed_ids:
+                                    metadata['shapes'].append(shape_info)
+                                    if shape_id:
+                                        processed_ids.add(shape_id)
+                        
+                        elif child_tag == 'grpSp':
+                            for nested in child.iter():
+                                nested_tag = nested.tag.split('}')[-1] if '}' in nested.tag else nested.tag
+                                
+                                if nested_tag == 'wsp':
+                                    shape_info = self._extract_wsp_metadata(nested)
+                                    if shape_info and (shape_info.get('name') or shape_info.get('text') or shape_info.get('shape_type')):
+                                        shape_id = shape_info.get('id', '')
+                                        if not shape_id or shape_id not in processed_ids:
+                                            metadata['shapes'].append(shape_info)
+                                            if shape_id:
+                                                processed_ids.add(shape_id)
+                                
+                                elif nested_tag == 'pic':
+                                    shape_info = self._extract_pic_metadata(nested)
+                                    if shape_info and (shape_info.get('name') or shape_info.get('type')):
+                                        shape_id = shape_info.get('id', '')
+                                        if not shape_id or shape_id not in processed_ids:
+                                            metadata['shapes'].append(shape_info)
+                                            if shape_id:
+                                                processed_ids.add(shape_id)
+                
+                elif tag_name == 'anchor' or tag_name == 'inline':
+                    shape_info = self._extract_single_shape_metadata(elem)
+                    if shape_info and shape_info.get('name'):
+                        shape_id = shape_info.get('id', '')
+                        if not shape_id or shape_id not in processed_ids:
+                            metadata['shapes'].append(shape_info)
+                            if shape_id:
+                                processed_ids.add(shape_id)
+            
+        except Exception as e:
+            print(f"[DEBUG] 図形メタデータ抽出エラー: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return metadata
+    
+    def _extract_single_shape_metadata(self, anchor_element) -> Dict[str, Any]:
+        """単一図形のメタデータを抽出"""
+        shape_info = {}
+        
+        try:
+            for elem in anchor_element.iter():
+                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                
+                if tag == 'cNvPr':
+                    shape_info['name'] = elem.attrib.get('name', '')
+                    shape_info['id'] = elem.attrib.get('id', '')
+                    shape_info['description'] = elem.attrib.get('descr', '')
+                
+                elif tag in ('rect', 'roundRect', 'ellipse', 'triangle', 'line', 'bentConnector2', 
+                            'bentConnector3', 'bentConnector4', 'bentConnector5', 'straightConnector1'):
+                    shape_info['shape_type'] = tag
+                
+                elif tag == 'txBody' or tag == 'sp':
+                    text_parts = []
+                    for t_elem in elem.iter():
+                        t_tag = t_elem.tag.split('}')[-1] if '}' in t_elem.tag else t_elem.tag
+                        if t_tag == 't' and t_elem.text:
+                            text_parts.append(t_elem.text.strip())
+                    if text_parts:
+                        shape_info['text'] = ' / '.join(text_parts)
+                
+                elif tag == 'extent':
+                    try:
+                        cx = int(elem.attrib.get('cx', 0))
+                        cy = int(elem.attrib.get('cy', 0))
+                        shape_info['width_emu'] = cx
+                        shape_info['height_emu'] = cy
+                    except:
+                        pass
+                
+                elif tag == 'off' or tag == 'pos':
+                    try:
+                        x = int(elem.attrib.get('x', 0))
+                        y = int(elem.attrib.get('y', 0))
+                        shape_info['x_emu'] = x
+                        shape_info['y_emu'] = y
+                    except:
+                        pass
+        
+        except Exception as e:
+            print(f"[DEBUG] 単一図形メタデータ抽出エラー: {e}")
+        
+        return shape_info
+    
+    def _extract_wsp_metadata(self, wsp_element) -> Dict[str, Any]:
+        """wsp（Word Shape）要素からメタデータを抽出"""
+        shape_info = {}
+        text_parts = []
+        
+        try:
+            for elem in wsp_element.iter():
+                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                
+                if tag == 'cNvPr':
+                    shape_info['name'] = elem.attrib.get('name', '')
+                    shape_info['id'] = elem.attrib.get('id', '')
+                    shape_info['description'] = elem.attrib.get('descr', '')
+                
+                elif tag == 'prstGeom':
+                    prst = elem.attrib.get('prst', '')
+                    if prst:
+                        shape_info['shape_type'] = prst
+                
+                elif tag == 't' and elem.text:
+                    text_parts.append(elem.text.strip())
+                
+                elif tag == 'ext':
+                    try:
+                        cx = int(elem.attrib.get('cx', 0))
+                        cy = int(elem.attrib.get('cy', 0))
+                        shape_info['width_emu'] = cx
+                        shape_info['height_emu'] = cy
+                    except:
+                        pass
+                
+                elif tag == 'off':
+                    try:
+                        x = int(elem.attrib.get('x', 0))
+                        y = int(elem.attrib.get('y', 0))
+                        shape_info['x_emu'] = x
+                        shape_info['y_emu'] = y
+                    except:
+                        pass
+            
+            if text_parts:
+                shape_info['text'] = ' / '.join(text_parts)
+        
+        except Exception as e:
+            print(f"[DEBUG] wsp要素メタデータ抽出エラー: {e}")
+        
+        return shape_info
+    
+    def _extract_pic_metadata(self, pic_element) -> Dict[str, Any]:
+        """pic（Picture）要素からメタデータを抽出"""
+        shape_info = {}
+        
+        try:
+            for elem in pic_element.iter():
+                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                
+                if tag == 'cNvPr':
+                    shape_info['name'] = elem.attrib.get('name', '')
+                    shape_info['id'] = elem.attrib.get('id', '')
+                    shape_info['description'] = elem.attrib.get('descr', '')
+                    shape_info['type'] = 'picture'
+                
+                elif tag == 'ext':
+                    try:
+                        cx = int(elem.attrib.get('cx', 0))
+                        cy = int(elem.attrib.get('cy', 0))
+                        shape_info['width_emu'] = cx
+                        shape_info['height_emu'] = cy
+                    except:
+                        pass
+                
+                elif tag == 'off':
+                    try:
+                        x = int(elem.attrib.get('x', 0))
+                        y = int(elem.attrib.get('y', 0))
+                        shape_info['x_emu'] = x
+                        shape_info['y_emu'] = y
+                    except:
+                        pass
+                
+                elif tag == 'blip':
+                    embed = elem.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed', '')
+                    if embed:
+                        shape_info['image_rel_id'] = embed
+        
+        except Exception as e:
+            print(f"[DEBUG] pic要素メタデータ抽出エラー: {e}")
+        
+        return shape_info
+    
+    def _format_shape_metadata_as_text(self, metadata: Dict[str, Any]) -> str:
+        """図形メタデータを人間が読みやすいテキスト形式に整形"""
+        if not metadata.get('shapes'):
+            return ""
+        
+        lines = ["### 図形情報", ""]
+        
+        for idx, shape in enumerate(metadata['shapes'], 1):
+            name = shape.get('name', '')
+            if not name:
+                shape_type = shape.get('shape_type', shape.get('type', ''))
+                if shape_type:
+                    name = f"図形 #{idx} ({shape_type})"
+                else:
+                    name = f"図形 #{idx}"
+            
+            lines.append(f"**{name}**")
+            
+            if shape.get('id'):
+                lines.append(f"- ID: {shape['id']}")
+            
+            if shape.get('shape_type'):
+                lines.append(f"- 図形タイプ: {shape['shape_type']}")
+            elif shape.get('type'):
+                lines.append(f"- タイプ: {shape['type']}")
+            
+            if shape.get('text'):
+                lines.append(f"- テキスト: {shape['text']}")
+            
+            if shape.get('description'):
+                lines.append(f"- 説明: {shape['description']}")
+            
+            lines.append("")
+        
+        return '\n'.join(lines)
+    
+    def _format_shape_metadata_as_json(self, metadata: Dict[str, Any]) -> str:
+        """図形メタデータをJSON形式に整形"""
+        import json
+        if not metadata.get('shapes'):
+            return "{}"
+        return json.dumps(metadata, ensure_ascii=False, indent=2)
+    
     def _detect_image_format(self, image_data: bytes, target_ref: str) -> str:
         """画像形式を検出"""
         if image_data.startswith(b'\x89PNG'):
@@ -1589,6 +1875,8 @@ def main():
                        help='章番号の代わりに見出しテキストをリンクに使用')
     parser.add_argument('-o', '--output-dir', type=str, 
                        help='出力ディレクトリを指定（デフォルト: 実行ディレクトリ）')
+    parser.add_argument('--shape-metadata', action='store_true',
+                       help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
     
     args = parser.parse_args()
     
@@ -1614,7 +1902,7 @@ def main():
         print(f"✅ DOC→DOCX変換完了: {converted_file}")
     
     try:
-        converter = WordToMarkdownConverter(processing_file, use_heading_text=args.use_heading_text, output_dir=args.output_dir)
+        converter = WordToMarkdownConverter(processing_file, use_heading_text=args.use_heading_text, output_dir=args.output_dir, shape_metadata=args.shape_metadata)
         output_file = converter.convert()
         print("\n✅ 変換完了!")
         print(f"📄 出力ファイル: {output_file}")
