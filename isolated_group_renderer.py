@@ -543,7 +543,7 @@ class IsolatedGroupRenderer:
                 while q:
                     bfs_iter += 1
                     if bfs_iter > bfs_max:
-                        debug_print(f"[WARN][_iso_bfs] reached bfs_max={bfs_max}; aborting BFS expansion (preserve_count={len(preserve)})")
+                        print(f"[WARN][_iso_bfs] reached bfs_max={bfs_max}; aborting BFS expansion (preserve_count={len(preserve)})")
                         break
                     cur = q.popleft()
                     # curを参照するアンカー -> それらを含めることを検討
@@ -2168,7 +2168,7 @@ class IsolatedGroupRenderer:
                 debug_print(f"[DEBUG] dbg_copy exists: size={st.st_size} bytes")
             except Exception:
                 try:
-                    debug_print(f"[WARN] dbg_copy not found after save: {src_for_conv}")
+                    print(f"[WARN] dbg_copy not found after save: {src_for_conv}")
                 except Exception:
                     pass
             
@@ -2217,7 +2217,7 @@ class IsolatedGroupRenderer:
             pdf_path = self._convert_excel_to_pdf(src_for_conv, tmp_pdf_dir, apply_fit_to_page=False)
             
             if pdf_path is None:
-                debug_print(f"[WARN][Phase9] LibreOffice PDF変換失敗")
+                print(f"[WARN][Phase9] LibreOffice PDF変換失敗")
                 return None
             debug_print(f"[DEBUG][Phase9] PDF generated successfully: {pdf_path}")
             
@@ -2247,7 +2247,7 @@ class IsolatedGroupRenderer:
             png_path = self._convert_pdf_to_png_with_output(pdf_path, final_png_path, dpi=dpi)
             
             if png_path is None:
-                debug_print(f"[WARN][Phase9] PDF→PNG変換失敗")
+                print(f"[WARN][Phase9] PDF→PNG変換失敗")
                 return None
             debug_print(f"[DEBUG][Phase9] PNG generated successfully: {png_path}")
             
@@ -2406,7 +2406,7 @@ class IsolatedGroupRenderer:
                     img = img.convert('RGB')
                 
                 img.save(output_path, 'PNG')
-                debug_print(f"[SUCCESS] PNG変換完了: {output_path}")
+                print(f"[SUCCESS] PNG変換完了: {output_path}")
                 
             except Exception as e:
                 print(f"[ERROR] PyMuPDF変換エラー: {e}")
