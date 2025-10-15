@@ -57,7 +57,7 @@ except ImportError as e:
 LIBREOFFICE_PATH = get_libreoffice_path()
 
 class WordToMarkdownConverter:
-    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None):
+    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None, shape_metadata=False):
         self.word_file = word_file_path
         self.doc = Document(word_file_path)
         self.base_name = Path(word_file_path).stem
@@ -83,6 +83,7 @@ class WordToMarkdownConverter:
         self.referenced_images = set()  # 実際に文書内で参照されている画像のrId
         self.vector_image_counter = 0  # ベクター画像専用カウンター
         self.regular_image_counter = 0  # 通常画像専用カウンター
+        self.shape_metadata = shape_metadata  # 図形メタデータ出力フラグ
         
     def convert(self) -> str:
         """メイン変換処理"""
@@ -1589,6 +1590,8 @@ def main():
                        help='章番号の代わりに見出しテキストをリンクに使用')
     parser.add_argument('-o', '--output-dir', type=str, 
                        help='出力ディレクトリを指定（デフォルト: 実行ディレクトリ）')
+    parser.add_argument('--shape-metadata', action='store_true',
+                       help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
     
     args = parser.parse_args()
     
@@ -1614,7 +1617,7 @@ def main():
         print(f"✅ DOC→DOCX変換完了: {converted_file}")
     
     try:
-        converter = WordToMarkdownConverter(processing_file, use_heading_text=args.use_heading_text, output_dir=args.output_dir)
+        converter = WordToMarkdownConverter(processing_file, use_heading_text=args.use_heading_text, output_dir=args.output_dir, shape_metadata=args.shape_metadata)
         output_file = converter.convert()
         print("\n✅ 変換完了!")
         print(f"📄 出力ファイル: {output_file}")
