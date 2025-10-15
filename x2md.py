@@ -401,7 +401,7 @@ class ExcelToMarkdownConverter:
             print(f"[ERROR] _emit_free_text failed: {e}")
             return False
     
-    def _insert_markdown_image(self, insert_at: Optional[int], md_line: str, img_name: str):
+    def _insert_markdown_image(self, insert_at: Optional[int], md_line: str, img_name: str, sheet=None):
         """Insert or append an image markdown line and immediately mark it as emitted.
 
         Returns the new insert index (one past the inserted block) when inserted,
@@ -447,6 +447,33 @@ class ExcelToMarkdownConverter:
             if insert_at is None:
                 self.markdown_lines.append(md_line)
                 self.markdown_lines.append("")
+                
+                if sheet is not None:
+                    try:
+                        shapes_metadata = self._extract_all_shapes_metadata(sheet)
+                        if shapes_metadata:
+                            text_metadata = self._format_shape_metadata_as_text(shapes_metadata)
+                            if text_metadata:
+                                self.markdown_lines.append("")
+                                for line in text_metadata.split('\n'):
+                                    self.markdown_lines.append(line)
+                                self.markdown_lines.append("")
+                            
+                            json_metadata = self._format_shape_metadata_as_json(shapes_metadata)
+                            if json_metadata and json_metadata != "{}":
+                                self.markdown_lines.append("<details>")
+                                self.markdown_lines.append("<summary>JSON形式の図形情報</summary>")
+                                self.markdown_lines.append("")
+                                self.markdown_lines.append("```json")
+                                for line in json_metadata.split('\n'):
+                                    self.markdown_lines.append(line)
+                                self.markdown_lines.append("```")
+                                self.markdown_lines.append("")
+                                self.markdown_lines.append("</details>")
+                                self.markdown_lines.append("")
+                    except Exception as e:
+                        print(f"[WARNING] Failed to add shape metadata: {e}")
+                
                 self._mark_image_emitted(img_name)
                 return len(self.markdown_lines)
 
@@ -462,8 +489,49 @@ class ExcelToMarkdownConverter:
             # 複数挿入の相対順序を保持するため空行とmd行を挿入
             self.markdown_lines.insert(insert_at, "")
             self.markdown_lines.insert(insert_at, md_line)
+            
+            lines_added = 2
+            
+            if sheet is not None:
+                try:
+                    shapes_metadata = self._extract_all_shapes_metadata(sheet)
+                    if shapes_metadata:
+                        text_metadata = self._format_shape_metadata_as_text(shapes_metadata)
+                        if text_metadata:
+                            self.markdown_lines.insert(insert_at + lines_added, "")
+                            lines_added += 1
+                            for line in text_metadata.split('\n'):
+                                self.markdown_lines.insert(insert_at + lines_added, line)
+                                lines_added += 1
+                            self.markdown_lines.insert(insert_at + lines_added, "")
+                            lines_added += 1
+                        
+                        json_metadata = self._format_shape_metadata_as_json(shapes_metadata)
+                        if json_metadata and json_metadata != "{}":
+                            self.markdown_lines.insert(insert_at + lines_added, "<details>")
+                            lines_added += 1
+                            self.markdown_lines.insert(insert_at + lines_added, "<summary>JSON形式の図形情報</summary>")
+                            lines_added += 1
+                            self.markdown_lines.insert(insert_at + lines_added, "")
+                            lines_added += 1
+                            self.markdown_lines.insert(insert_at + lines_added, "```json")
+                            lines_added += 1
+                            for line in json_metadata.split('\n'):
+                                self.markdown_lines.insert(insert_at + lines_added, line)
+                                lines_added += 1
+                            self.markdown_lines.insert(insert_at + lines_added, "```")
+                            lines_added += 1
+                            self.markdown_lines.insert(insert_at + lines_added, "")
+                            lines_added += 1
+                            self.markdown_lines.insert(insert_at + lines_added, "</details>")
+                            lines_added += 1
+                            self.markdown_lines.insert(insert_at + lines_added, "")
+                            lines_added += 1
+                except Exception as e:
+                    print(f"[WARNING] Failed to add shape metadata: {e}")
+            
             self._mark_image_emitted(img_name)
-            return insert_at + 2
+            return insert_at + lines_added
         except Exception:
             # フォールバック: 追加
             self.markdown_lines.append(md_line)
@@ -2013,7 +2081,7 @@ class ExcelToMarkdownConverter:
                                 if ref in self._emitted_images or img_name in self._emitted_images:
                                     continue
                                 try:
-                                    new_idx = self._insert_markdown_image(insert_index, md_line, img_name)
+                                    new_idx = self._insert_markdown_image(insert_index, md_line, img_name, sheet=sheet)
                                     try:
                                         if insert_index is not None:
                                             insert_index = new_idx
@@ -2075,7 +2143,7 @@ class ExcelToMarkdownConverter:
                                         continue
                                     
                                     md_line = f"![{sheet.title}の図](images/{img_name})"
-                                    new_idx = self._insert_markdown_image(insert_index, md_line, img_name)
+                                    new_idx = self._insert_markdown_image(insert_index, md_line, img_name, sheet=sheet)
                                     try:
                                         if insert_index is not None:
                                             insert_index = new_idx
@@ -2278,7 +2346,7 @@ class ExcelToMarkdownConverter:
                                         md = f"![{sheet.title}](images/{img})"
                                         # Use helper to insert and mark emitted
                                         try:
-                                            new_at = self._insert_markdown_image(insert_at, md, img)
+                                            new_at = self._insert_markdown_image(insert_at, md, img, sheet=sheet)
                                             md_index_map.setdefault(insert_at, []).append(img)
                                             insert_at = new_at
                                         except Exception:
@@ -2335,7 +2403,7 @@ class ExcelToMarkdownConverter:
                                             continue
                                         md = f"![{sheet.title}](images/{img_fn})"
                                         try:
-                                            new_at = self._insert_markdown_image(insert_at, md, img_fn)
+                                            new_at = self._insert_markdown_image(insert_at, md, img_fn, sheet=sheet)
                                             try:
                                                 insert_at = new_at
                                             except (ValueError, TypeError) as e:
@@ -3142,7 +3210,7 @@ class ExcelToMarkdownConverter:
                 # 即座にMarkdownに挿入
                 md_line = f"![{sheet.title}](images/{result_filename})"
                 try:
-                    self._insert_markdown_image(insert_index, md_line, result_filename)
+                    self._insert_markdown_image(insert_index, md_line, result_filename, sheet=sheet)
                     print(f"[SUCCESS] シート全体の画像を挿入: {result_filename}")
                 except Exception as e:
                     print(f"[WARNING] 画像挿入失敗: {e}")
@@ -3760,6 +3828,263 @@ class ExcelToMarkdownConverter:
             return False
         except (ET.ParseError, KeyError, AttributeError):
             return False
+
+    def _extract_shape_metadata_from_anchor(self, anchor, sheet) -> Dict[str, Any]:
+        """drawing anchorから図形のメタデータを抽出
+        
+        Args:
+            anchor: XML anchor element
+            sheet: 対象シート
+            
+        Returns:
+            図形のメタデータを含む辞書
+        """
+        metadata = {
+            'type': 'unknown',
+            'name': '',
+            'position': {},
+            'size': {},
+            'text_content': [],
+            'connector_type': None,
+            'shape_properties': {}
+        }
+        
+        try:
+            ns_xdr = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
+            ns_a = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+            
+            anchor_type = anchor.tag.split('}')[-1].lower()
+            metadata['anchor_type'] = anchor_type
+            
+            for sub in anchor.iter():
+                if sub.tag.split('}')[-1].lower() == 'cnvpr':
+                    metadata['name'] = sub.attrib.get('name', '')
+                    metadata['id'] = sub.attrib.get('id', '')
+                    metadata['description'] = sub.attrib.get('descr', '')
+                    break
+            
+            if anchor_type == 'twocellanchor':
+                fr = anchor.find('{%s}from' % ns_xdr)
+                to = anchor.find('{%s}to' % ns_xdr)
+                if fr is not None:
+                    col_elem = fr.find('{%s}col' % ns_xdr)
+                    row_elem = fr.find('{%s}row' % ns_xdr)
+                    if col_elem is not None and row_elem is not None:
+                        metadata['position']['from_col'] = int(col_elem.text) + 1
+                        metadata['position']['from_row'] = int(row_elem.text) + 1
+                if to is not None:
+                    col_elem = to.find('{%s}col' % ns_xdr)
+                    row_elem = to.find('{%s}row' % ns_xdr)
+                    if col_elem is not None and row_elem is not None:
+                        metadata['position']['to_col'] = int(col_elem.text) + 1
+                        metadata['position']['to_row'] = int(row_elem.text) + 1
+            
+            elif anchor_type == 'onecellanchor':
+                fr = anchor.find('{%s}from' % ns_xdr)
+                ext = anchor.find('{%s}ext' % ns_xdr)
+                if fr is not None:
+                    col_elem = fr.find('{%s}col' % ns_xdr)
+                    row_elem = fr.find('{%s}row' % ns_xdr)
+                    if col_elem is not None and row_elem is not None:
+                        metadata['position']['from_col'] = int(col_elem.text) + 1
+                        metadata['position']['from_row'] = int(row_elem.text) + 1
+                if ext is not None:
+                    cx = ext.attrib.get('cx', '0')
+                    cy = ext.attrib.get('cy', '0')
+                    metadata['size']['width_emu'] = int(cx)
+                    metadata['size']['height_emu'] = int(cy)
+            
+            for desc in anchor.iter():
+                tag_name = desc.tag.split('}')[-1].lower()
+                
+                if tag_name == 'pic':
+                    metadata['type'] = 'picture'
+                elif tag_name == 'sp':
+                    metadata['type'] = 'shape'
+                    for prstgeom in desc.iter():
+                        if prstgeom.tag.split('}')[-1].lower() == 'prstgeom':
+                            prst = prstgeom.attrib.get('prst', '')
+                            metadata['shape_properties']['preset'] = prst
+                            break
+                elif tag_name == 'cxnsp':
+                    metadata['type'] = 'connector'
+                    for prstgeom in desc.iter():
+                        if prstgeom.tag.split('}')[-1].lower() == 'prstgeom':
+                            prst = prstgeom.attrib.get('prst', '')
+                            metadata['connector_type'] = prst
+                            break
+                elif tag_name == 'grpsp':
+                    metadata['type'] = 'group'
+                elif tag_name == 'graphicframe':
+                    metadata['type'] = 'graphic_frame'
+                
+                if tag_name == 't' and desc.text and desc.text.strip():
+                    metadata['text_content'].append(desc.text.strip())
+            
+            return metadata
+            
+        except Exception as e:
+            print(f"[WARNING] Shape metadata extraction failed: {e}")
+            return metadata
+
+    def _extract_all_shapes_metadata(self, sheet) -> List[Dict[str, Any]]:
+        """シート内の全図形のメタデータを抽出
+        
+        Args:
+            sheet: 対象シート
+            
+        Returns:
+            図形メタデータのリスト
+        """
+        shapes_metadata = []
+        
+        try:
+            metadata = self._get_drawing_xml_and_metadata(sheet)
+            if metadata is None:
+                return shapes_metadata
+            
+            drawing_xml = metadata['drawing_xml']
+            
+            for anchor in drawing_xml:
+                anchor_type = anchor.tag.split('}')[-1].lower()
+                if anchor_type in ('twocellanchor', 'onecellanchor'):
+                    if self._anchor_has_drawable(anchor):
+                        shape_meta = self._extract_shape_metadata_from_anchor(anchor, sheet)
+                        shapes_metadata.append(shape_meta)
+            
+            try:
+                metadata['zip'].close()
+            except:
+                pass
+                
+        except Exception as e:
+            print(f"[WARNING] Failed to extract shapes metadata: {e}")
+        
+        return shapes_metadata
+
+    def _format_shape_metadata_as_text(self, shapes_metadata: List[Dict[str, Any]]) -> str:
+        """図形メタデータを人間が読みやすいテキスト形式に整形
+        
+        Args:
+            shapes_metadata: 図形メタデータのリスト
+            
+        Returns:
+            整形されたテキスト
+        """
+        if not shapes_metadata:
+            return ""
+        
+        lines = []
+        lines.append("### 図形情報")
+        lines.append("")
+        
+        for idx, meta in enumerate(shapes_metadata, 1):
+            shape_type = meta.get('type', 'unknown')
+            shape_name = meta.get('name', f'図形{idx}')
+            
+            type_map = {
+                'picture': '画像',
+                'shape': '図形',
+                'connector': 'コネクタ',
+                'group': 'グループ',
+                'graphic_frame': 'グラフィックフレーム',
+                'unknown': '不明'
+            }
+            type_ja = type_map.get(shape_type, shape_type)
+            
+            lines.append(f"**{shape_name}** ({type_ja})")
+            
+            pos = meta.get('position', {})
+            if 'from_col' in pos and 'from_row' in pos:
+                from_cell = f"{self._col_letter(pos['from_col'])}{pos['from_row']}"
+                if 'to_col' in pos and 'to_row' in pos:
+                    to_cell = f"{self._col_letter(pos['to_col'])}{pos['to_row']}"
+                    lines.append(f"- 位置: {from_cell} ～ {to_cell}")
+                else:
+                    lines.append(f"- 位置: {from_cell} から")
+            
+            if shape_type == 'shape':
+                preset = meta.get('shape_properties', {}).get('preset', '')
+                if preset:
+                    lines.append(f"- 図形タイプ: {preset}")
+            
+            if shape_type == 'connector':
+                conn_type = meta.get('connector_type', '')
+                if conn_type:
+                    lines.append(f"- コネクタタイプ: {conn_type}")
+            
+            text_content = meta.get('text_content', [])
+            if text_content:
+                lines.append(f"- テキスト: {' / '.join(text_content)}")
+            
+            description = meta.get('description', '')
+            if description:
+                lines.append(f"- 説明: {description}")
+            
+            lines.append("")
+        
+        return '\n'.join(lines)
+
+    def _format_shape_metadata_as_json(self, shapes_metadata: List[Dict[str, Any]]) -> str:
+        """図形メタデータをJSON形式に整形
+        
+        Args:
+            shapes_metadata: 図形メタデータのリスト
+            
+        Returns:
+            JSON文字列
+        """
+        if not shapes_metadata:
+            return "{}"
+        
+        import json
+        
+        output_data = {
+            'shapes': [],
+            'total_count': len(shapes_metadata)
+        }
+        
+        for meta in shapes_metadata:
+            shape_data = {
+                'name': meta.get('name', ''),
+                'type': meta.get('type', 'unknown'),
+                'anchor_type': meta.get('anchor_type', ''),
+                'position': meta.get('position', {}),
+                'size': meta.get('size', {}),
+                'text_content': meta.get('text_content', []),
+                'properties': {}
+            }
+            
+            if meta.get('type') == 'shape':
+                shape_data['properties'] = meta.get('shape_properties', {})
+            elif meta.get('type') == 'connector':
+                shape_data['properties']['connector_type'] = meta.get('connector_type', '')
+            
+            if meta.get('description'):
+                shape_data['description'] = meta.get('description')
+            
+            if meta.get('id'):
+                shape_data['id'] = meta.get('id')
+            
+            output_data['shapes'].append(shape_data)
+        
+        return json.dumps(output_data, ensure_ascii=False, indent=2)
+
+    def _col_letter(self, col_num: int) -> str:
+        """列番号をExcelの列文字に変換（例: 1→A, 27→AA）
+        
+        Args:
+            col_num: 列番号（1から開始）
+            
+        Returns:
+            列文字
+        """
+        result = ""
+        while col_num > 0:
+            col_num -= 1
+            result = chr(65 + (col_num % 26)) + result
+            col_num //= 26
+        return result or "A"
 
     def _anchor_has_drawable(self, a) -> bool:
         """Shared helper: determine whether a drawing anchor contains drawable
