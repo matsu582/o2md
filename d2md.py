@@ -885,18 +885,21 @@ class WordToMarkdownConverter:
         
         # 段落内のRunを調べて画像があるかチェック
         for run in paragraph.runs:
-            for inline_shape in run._element.xpath('.//a:blip'):
-                # 画像の参照IDを取得
-                embed_id = inline_shape.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
-                if embed_id:
-                    # 対応するリレーションを探す
-                    for rel in paragraph.part.rels.values():
-                        if rel.rId == embed_id and "image" in rel.reltype:
-                            # その場で画像を処理
-                            self._extract_and_convert_image_inline(rel)
-                            return  # 1つの段落につき1つの画像のみ処理
+            # drawing要素を取得
+            drawings = run._element.xpath('.//w:drawing')
+            for drawing in drawings:
+                for inline_shape in drawing.xpath('.//a:blip'):
+                    # 画像の参照IDを取得
+                    embed_id = inline_shape.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+                    if embed_id:
+                        # 対応するリレーションを探す
+                        for rel in paragraph.part.rels.values():
+                            if rel.rId == embed_id and "image" in rel.reltype:
+                                # その場で画像を処理（drawing要素も渡す）
+                                self._extract_and_convert_image_inline(rel, drawing)
+                                return  # 1つの段落につき1つの画像のみ処理
     
-    def _extract_and_convert_image_inline(self, rel):
+    def _extract_and_convert_image_inline(self, rel, drawing_element=None):
         """インライン画像を抽出・変換"""
         try:
             # 参照されている画像として記録
@@ -944,6 +947,33 @@ class WordToMarkdownConverter:
             encoded_filename = urllib.parse.quote(image_filename)
             self.markdown_lines.append(f"![](images/{encoded_filename})")
             self.markdown_lines.append("")
+            
+            if self.shape_metadata and drawing_element is not None:
+                try:
+                    metadata = self._extract_shape_metadata_from_drawing(drawing_element)
+                    if metadata.get('shapes'):
+                        text_metadata = self._format_shape_metadata_as_text(metadata)
+                        json_metadata = self._format_shape_metadata_as_json(metadata)
+                        
+                        if text_metadata:
+                            self.markdown_lines.append("")
+                            self.markdown_lines.append(text_metadata)
+                            self.markdown_lines.append("")
+                        
+                        if json_metadata and json_metadata != "{}":
+                            self.markdown_lines.append("<details>")
+                            self.markdown_lines.append("<summary>JSON形式の図形情報</summary>")
+                            self.markdown_lines.append("")
+                            self.markdown_lines.append("```json")
+                            self.markdown_lines.append(json_metadata)
+                            self.markdown_lines.append("```")
+                            self.markdown_lines.append("")
+                            self.markdown_lines.append("</details>")
+                            self.markdown_lines.append("")
+                        
+                        print(f"[DEBUG] 図形メタデータ追加: {len(metadata['shapes'])} shapes")
+                except Exception as e:
+                    print(f"[WARNING] 図形メタデータ追加失敗: {e}")
             
             print(f"[SUCCESS] 画像をインライン処理: {image_filename}")
             
