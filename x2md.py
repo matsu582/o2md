@@ -128,11 +128,6 @@ class ExcelToMarkdownConverter:
 
         self._init_per_sheet_state()
 
-        class _SimpleLogger:
-            def debug(self, *args, **kwargs):
-                print("[LOGGER_DEBUG]", *args)
-        self.logger = _SimpleLogger()
-
         self.workbook = load_workbook(excel_file_path, data_only=True)
         print(f"[INFO] Excelワークブック読み込み完了: {excel_file_path}")
 
@@ -396,7 +391,6 @@ class ExcelToMarkdownConverter:
                 if src_row is not None:
                     md_index = len(self.markdown_lines) - 1
                     self._mark_sheet_map(sheet.title, src_row, md_index)
-                    self.logger.debug(f"[_text_emit] sheet={sheet.title} src_row={src_row} md_index={md_index} text_norm='{norm}'")
                     debug_print(f"[DEBUG][_text_emit] sheet={sheet.title} src_row={src_row} md_index={md_index} text_norm='{norm}'")
                 
                 # 出力済みとしてマーク
