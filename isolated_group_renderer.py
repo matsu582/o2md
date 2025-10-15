@@ -6,7 +6,7 @@ except ImportError:
     _VERBOSE = False
     def debug_print(*args, **kwargs):
         if _VERBOSE:
-            debug_print(*args, **kwargs)
+            print(*args, **kwargs)
     def is_verbose():
         return _VERBOSE
 
