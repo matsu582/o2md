@@ -55,6 +55,22 @@ MAX_SCAN_COLUMNS = 60
 # Note: specific-word header lists were removed to avoid sheet-specific rules.
 # Generic structural heuristics are used instead (column non-empty ratios, path-like detection, etc.).
 
+_VERBOSE = False
+
+def set_verbose(verbose: bool):
+    """verboseモードを設定"""
+    global _VERBOSE
+    _VERBOSE = verbose
+
+def is_verbose() -> bool:
+    """verboseモードかどうかを返す"""
+    return _VERBOSE
+
+def debug_print(*args, **kwargs):
+    """verboseモード時のみ出力するデバッグ用print"""
+    if _VERBOSE:
+        print(*args, **kwargs)
+
 
 class ExcelToMarkdownConverter:
     class _LoggingList(list):
@@ -109,7 +125,7 @@ class ExcelToMarkdownConverter:
         # Lightweight logger used by many debug calls in the codebase
         class _SimpleLogger:
             def debug(self, *args, **kwargs):
-                print("[LOGGER_DEBUG]", *args)
+                debug_print("[LOGGER_DEBUG]", *args)
         self.logger = _SimpleLogger()
 
         # Load workbook
@@ -202,7 +218,7 @@ class ExcelToMarkdownConverter:
     def _detect_bordered_tables(self, sheet, min_row, max_row, min_col, max_col):
         """外枠罫線のみで囲まれた最大矩形をテーブルと判定（内部罫線は無視）"""
         tables = []
-        print("[DEBUG] セル罫線情報一覧:")
+        debug_print("[DEBUG] セル罫線情報一覧:")
         # Minimal safe implementation: detailed bordered-table detection logic
         # was removed during previous edits and corrupted the file structure.
         # Returning empty 'tables' here is safe: calling code can handle no
@@ -259,28 +275,28 @@ class ExcelToMarkdownConverter:
         if self._is_canonical_emit():
             self._emitted_images.add(str(img_name))
         else:
-            print(f"[TRACE] Skipping _emitted_images.add({img_name}) in non-canonical pass")
+            debug_print(f"[TRACE] Skipping _emitted_images.add({img_name}) in non-canonical pass")
 
     def _mark_sheet_map(self, sheet_title: str, src_row: int, md_index: int):
         """Record a source-row -> markdown index mapping only during canonical emission."""
         if self._is_canonical_emit():
             self._cell_to_md_index.setdefault(sheet_title, {})[src_row] = int(md_index)
         else:
-            print(f"[TRACE] Skipping authoritative sheet_map[{sheet_title}][{src_row}] assignment in non-canonical pass")
+            debug_print(f"[TRACE] Skipping authoritative sheet_map[{sheet_title}][{src_row}] assignment in non-canonical pass")
 
     def _mark_emitted_row(self, sheet_title: str, row: int):
         """Mark a row as emitted only during canonical emission."""
         if self._is_canonical_emit():
             self._sheet_emitted_rows.setdefault(sheet_title, set()).add(int(row))
         else:
-            print(f"[TRACE] Skipping emitted_rows.add({sheet_title},{row}) in non-canonical pass")
+            debug_print(f"[TRACE] Skipping emitted_rows.add({sheet_title},{row}) in non-canonical pass")
 
     def _mark_emitted_text(self, sheet_title: str, norm_text: str):
         """Record a normalized emitted text only during canonical emission."""
         if self._is_canonical_emit():
             self._sheet_emitted_texts.setdefault(sheet_title, set()).add(str(norm_text))
         else:
-            print(f"[TRACE] Skipping emitted_texts.add({sheet_title},...) in non-canonical pass")
+            debug_print(f"[TRACE] Skipping emitted_texts.add({sheet_title},...) in non-canonical pass")
         
 
     def _escape_angle_brackets(self, text: str) -> str:
@@ -325,7 +341,7 @@ class ExcelToMarkdownConverter:
             if t.strip() == '':
                 continue
             if t.strip() == '---':
-                print("[DEBUG][_add_separator] skipping duplicate separator '---'")
+                debug_print("[DEBUG][_add_separator] skipping duplicate separator '---'")
                 return False
             break
 
@@ -362,7 +378,7 @@ class ExcelToMarkdownConverter:
                     md_index = len(self.markdown_lines) - 1
                     self._mark_sheet_map(sheet.title, src_row, md_index)
                     self.logger.debug(f"[_text_emit] sheet={sheet.title} src_row={src_row} md_index={md_index} text_norm='{norm}'")
-                    print(f"[DEBUG][_text_emit] sheet={sheet.title} src_row={src_row} md_index={md_index} text_norm='{norm}'")
+                    debug_print(f"[DEBUG][_text_emit] sheet={sheet.title} src_row={src_row} md_index={md_index} text_norm='{norm}'")
                 
                 # Mark as emitted
                 if src_row is not None:
@@ -397,7 +413,7 @@ class ExcelToMarkdownConverter:
             stk = traceback.extract_stack()
             caller = stk[-3] if len(stk) >= 3 else None
             caller_info = f"{caller.filename}:{caller.lineno}:{caller.name}" if caller else 'unknown'
-            print(f"[DEBUG][_insert_markdown_image_called] insert_at={insert_at} img_name={img_name} caller={caller_info}")
+            debug_print(f"[DEBUG][_insert_markdown_image_called] insert_at={insert_at} img_name={img_name} caller={caller_info}")
             # If we're not in the canonical emission pass and immediate image
             # inserts are not explicitly allowed, convert this request into a
             # deferred registration so the canonical emitter controls placement.
@@ -423,7 +439,7 @@ class ExcelToMarkdownConverter:
                 already = any((isinstance(it, (list, tuple)) and len(it) >= 2 and it[1] == img_name) or (str(it) == img_name) for it in lst)
                 if not already:
                     lst.append((1, img_name))
-                    print(f"[DEBUG][_insert_markdown_image_deferred] img_name={img_name} sheet={key}")
+                    debug_print(f"[DEBUG][_insert_markdown_image_deferred] img_name={img_name} sheet={key}")
 
                 # No mutation performed; caller expecting insertion will receive
                 # current markdown length as if appended.
@@ -517,7 +533,7 @@ class ExcelToMarkdownConverter:
                                 
                                 # ファイルに書き戻し
                                 tree.write(sheet_path, encoding='utf-8', xml_declaration=True)
-                                print(f"[DEBUG] {fname} のpageSetupを縦横1ページに設定")
+                                debug_print(f"[DEBUG] {fname} のpageSetupを縦横1ページに設定")
                             except Exception as e:
                                 print(f"[WARNING] {fname} のpageSetup設定に失敗: {e}")
                 
@@ -784,9 +800,9 @@ class ExcelToMarkdownConverter:
         """
         try:
             # Instrumentation: mark entry into reorder routine
-            print(f"[DEBUG][_reorder_entry] sheet={sheet.title}")
+            debug_print(f"[DEBUG][_reorder_entry] sheet={sheet.title}")
             # Per-run on-disk marker removed; keep only debug traces.
-            print(f"[DEBUG][_reorder_entry_marker] sheet={sheet.title}")
+            debug_print(f"[DEBUG][_reorder_entry_marker] sheet={sheet.title}")
             max_row = sheet.max_row
             # avoid creating the per-sheet emitted rows set here; only the
             # canonical emitter should mutate _sheet_emitted_rows via helpers.
@@ -814,7 +830,7 @@ class ExcelToMarkdownConverter:
 
             # Also print the current sheet_map (row->md index) so we can compare
             sheet_map = self._cell_to_md_index.get(sheet.title, {})
-            print(f"[DEBUG][_img_insertion_debug] sheet={sheet.title} sheet_map={sheet_map}")
+            debug_print(f"[DEBUG][_img_insertion_debug] sheet={sheet.title} sheet_map={sheet_map}")
 
             # NOTE: markdown dump moved later so events log can be persisted
             # before any debug printing of the current markdown state.
@@ -828,9 +844,9 @@ class ExcelToMarkdownConverter:
             emitted_rows = self._sheet_emitted_rows.get(sheet.title, set()) if hasattr(self, '_sheet_emitted_rows') else set()
             deferred_texts = self._sheet_deferred_texts.get(sheet.title, []) if hasattr(self, '_sheet_deferred_texts') else []
             try:
-                print(f"[DEBUG][_canonical_enter] sheet={sheet.title} emitted_rows={sorted(list(emitted_rows))[:50]} deferred_texts_count={len(deferred_texts)}")
+                debug_print(f"[DEBUG][_canonical_enter] sheet={sheet.title} emitted_rows={sorted(list(emitted_rows))[:50]} deferred_texts_count={len(deferred_texts)}")
             except Exception:
-                print(f"[DEBUG][_canonical_enter] sheet={getattr(sheet, 'title', None)} emitted_rows=<error> deferred_texts_count=<error>")
+                debug_print(f"[DEBUG][_canonical_enter] sheet={getattr(sheet, 'title', None)} emitted_rows=<error> deferred_texts_count=<error>")
 
             # If all items collapsed to start_row==1 (common when saved list contains filenames only),
             # try to recompute representative start_rows from drawing cell ranges and redistribute
@@ -911,7 +927,7 @@ class ExcelToMarkdownConverter:
                         kept = [fn for fn in fns if (('iso_group' in (fn or '')) or ('.fixed' in (fn or '')))]
                         suppressed = [fn for fn in fns if fn not in kept]
                         if suppressed:
-                            print(f"[DEBUG][_img_suppress] sheet={sheet.title} row={rr} suppressed={suppressed} kept={kept}")
+                            debug_print(f"[DEBUG][_img_suppress] sheet={sheet.title} row={rr} suppressed={suppressed} kept={kept}")
                         img_map[rr] = kept
                     
             except Exception:
@@ -1185,7 +1201,7 @@ class ExcelToMarkdownConverter:
                         except Exception:
                             p_summary = str(payload)
                         log_line = f"row={row} order={order} kind={kind} payload={p_summary}"
-                        print(f"[DEBUG][_events_emit_sorted] sheet={sheet.title} {log_line}")
+                        debug_print(f"[DEBUG][_events_emit_sorted] sheet={sheet.title} {log_line}")
                 except Exception:
                     pass
 
@@ -1250,14 +1266,14 @@ class ExcelToMarkdownConverter:
                     pass
 
                 # Strong debug: always emit events count so we can detect empty/filled
-                print(f"[DEBUG][_events_sorted] sheet={sheet.title} events_count_emit={len(events_emit)}")
+                debug_print(f"[DEBUG][_events_sorted] sheet={sheet.title} events_count_emit={len(events_emit)}")
 
                 # Before mutating markdown, emit a canonical, deterministic
                 # logging snapshot derived directly from events_emit. This avoids
                 # maintaining a separate events_log list and ensures the log
                 # matches the actual emission sequence.
                 try:
-                    print(f"[DEBUG][_sorted_events_block] sheet={sheet.title} events_count={len(events_emit)}")
+                    debug_print(f"[DEBUG][_sorted_events_block] sheet={sheet.title} events_count={len(events_emit)}")
 
                     # Diagnostic/log-only pass: emit a deterministic, human-readable
                     # snapshot of the events_emit sequence for debugging. THIS PASS
@@ -1267,7 +1283,7 @@ class ExcelToMarkdownConverter:
                     for row, _, kind, payload in events_emit:
                         try:
                             if kind == 'text':
-                                print(f"  [LOG] text @{row}: {payload}")
+                                debug_print(f"  [LOG] text @{row}: {payload}")
                             elif kind == 'table':
                                 # payload may be (table_data, src_rows, meta)
                                 tdata = None
@@ -1284,14 +1300,14 @@ class ExcelToMarkdownConverter:
                                 except Exception:
                                     title = None
                                 if title:
-                                    print(f"  [LOG] table @{row} title: {title} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
+                                    debug_print(f"  [LOG] table @{row} title: {title} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
                                 else:
-                                    print(f"  [LOG] table @{row} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
+                                    debug_print(f"  [LOG] table @{row} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
                             else:  # image
-                                print(f"  [LOG] image @{row}: {payload}")
+                                debug_print(f"  [LOG] image @{row}: {payload}")
                         except Exception:
                             # be robust in diagnostic pass; do not raise
-                            print(f"  [LOG] event @{row} kind={kind} (payload unstable)")
+                            debug_print(f"  [LOG] event @{row} kind={kind} (payload unstable)")
                 except Exception:
                     pass
 
@@ -1307,7 +1323,7 @@ class ExcelToMarkdownConverter:
                             # Best-effort fallback: append escaped/normalized text
                             try:
                                 txt = self._escape_angle_brackets(payload) + "  "
-                                print(f"[DEBUG][_emit_fallback] row={row} text={txt} >>")
+                                debug_print(f"[DEBUG][_emit_fallback] row={row} text={txt} >>")
                                 self.markdown_lines.append(txt)
                                 # Only assign authoritative mappings during canonical pass
                                 # Only record authoritative mappings during canonical pass
@@ -1341,7 +1357,7 @@ class ExcelToMarkdownConverter:
                             except Exception:
                                 table_data = payload
 
-                            print(f"[DEBUG][_emit_table] row={row} table_rows={len(table_data) if isinstance(table_data, list) else 0} src_rows={src_rows} meta={meta} >>")
+                            debug_print(f"[DEBUG][_emit_table] row={row} table_rows={len(table_data) if isinstance(table_data, list) else 0} src_rows={src_rows} meta={meta} >>")
 
                             # If a title/meta is present, emit it first (canonical pass)
                             try:
@@ -1385,7 +1401,7 @@ class ExcelToMarkdownConverter:
                             pass
                     else:  # image
                         img_fn = payload
-                        print(f"[DEBUG][_emit_image] row={row} image={img_fn} >> ")
+                        debug_print(f"[DEBUG][_emit_image] row={row} image={img_fn} >> ")
                         ref = f"images/{img_fn}"
                         # Gate duplicate images deterministically
                         if ref in self._emitted_images or img_fn in self._emitted_images:
@@ -1459,7 +1475,7 @@ class ExcelToMarkdownConverter:
             # final sorted-events fallback removed: no additional logging here.
         except Exception as _exc:
             # Debug: print exception info so we can see why the simplified flow failed
-            print(f"[DEBUG][_reorder_exception] sheet={sheet.title} exc={_exc!r}")
+            debug_print(f"[DEBUG][_reorder_exception] sheet={sheet.title} exc={_exc!r}")
             import traceback
             traceback.print_exc()
             # On error, fall back to immediate insertion of all deferred images
@@ -1509,9 +1525,9 @@ class ExcelToMarkdownConverter:
             # Only consider rows present in both structures as authoritative
             authoritative_emitted = set(r for r in emitted if r in sheet_map)
             sample_emitted = sorted(list(authoritative_emitted))[:20]
-            print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} emitted_count_total={len(emitted)} emitted_count_auth={len(authoritative_emitted)} emitted_sample={sample_emitted} source_rows_count={len(source_rows) if source_rows else 0}")
+            debug_print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} emitted_count_total={len(emitted)} emitted_count_auth={len(authoritative_emitted)} emitted_sample={sample_emitted} source_rows_count={len(source_rows) if source_rows else 0}")
         except Exception:
-            print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} unable to snapshot emitted set")
+            debug_print(f"[TRACE][_prune_emitted_rows_entry] sheet={sheet_title} unable to snapshot emitted set")
 
         if not authoritative_emitted or not source_rows:
             return table_data, source_rows
@@ -1529,12 +1545,12 @@ class ExcelToMarkdownConverter:
                     pruned_src.append(src)
                 else:
                     # debug: note that this source row was removed due to prior authoritative emission
-                    print(f"[TRACE][_prune_emitted_rows_removed] sheet={sheet_title} removed_src_row={src}")
+                    debug_print(f"[TRACE][_prune_emitted_rows_removed] sheet={sheet_title} removed_src_row={src}")
             except Exception:
                 pruned_table.append(row)
                 pruned_src.append(src)
 
-        print(f"[TRACE][_prune_emitted_rows_exit] sheet={sheet_title} in={len(source_rows)} out={len(pruned_src)}")
+        debug_print(f"[TRACE][_prune_emitted_rows_exit] sheet={sheet_title} in={len(source_rows)} out={len(pruned_src)}")
 
         return pruned_table, pruned_src
     
@@ -1595,12 +1611,12 @@ class ExcelToMarkdownConverter:
         """シート内の画像を処理"""
         try:
             # Diagnostic: record entry parameters so we can trace callers
-            print(f"[DEBUG][_process_sheet_images_entry] sheet={sheet.title} insert_index={insert_index} insert_images={insert_images}")
+            debug_print(f"[DEBUG][_process_sheet_images_entry] sheet={sheet.title} insert_index={insert_index} insert_images={insert_images}")
             # Prevent repeated heavy rendering: if shapes were already generated
             # for this sheet earlier in the run, skip processing to avoid
             # repeatedly creating tmp_xlsx and invoking external converters.
             if sheet.title in self._sheet_shapes_generated:
-                print(f"[DEBUG][_process_sheet_images] sheet={sheet.title} shapes already generated; skipping repeated processing")
+                debug_print(f"[DEBUG][_process_sheet_images] sheet={sheet.title} shapes already generated; skipping repeated processing")
                 return False
             images_found = False
             if hasattr(sheet, '_images') and sheet._images:
@@ -1768,7 +1784,7 @@ class ExcelToMarkdownConverter:
                                             pass
                                     global_iso_preserved_ids = getattr(self, '_global_iso_preserved_ids', set()) or set()
                                     if mapped_cid and str(mapped_cid) in global_iso_preserved_ids:
-                                        print(f"[DEBUG][_emit_image_skip] sheet={sheet.title} embedded image {img_name} suppressed (cid={mapped_cid} already preserved)")
+                                        debug_print(f"[DEBUG][_emit_image_skip] sheet={sheet.title} embedded image {img_name} suppressed (cid={mapped_cid} already preserved)")
                                         continue
                                 except Exception:
                                     pass
@@ -1799,7 +1815,7 @@ class ExcelToMarkdownConverter:
                                     mapped_cid = cid_map.get(img_name)
                                     global_iso_preserved_ids = getattr(self, '_global_iso_preserved_ids', set()) or set()
                                     if mapped_cid and str(mapped_cid) in global_iso_preserved_ids:
-                                        print(f"[DEBUG][_defer_image_skip] sheet={sheet.title} embedded image {img_name} suppressed on defer (cid={mapped_cid} already preserved)")
+                                        debug_print(f"[DEBUG][_defer_image_skip] sheet={sheet.title} embedded image {img_name} suppressed on defer (cid={mapped_cid} already preserved)")
                                     else:
                                         self._sheet_shape_images.setdefault(sheet.title, [])
                                         self._sheet_shape_images[sheet.title].append((start_row, img_name))
@@ -1829,7 +1845,7 @@ class ExcelToMarkdownConverter:
             # only vector shapes (no embedded images) are still processed correctly.
             # Phase 2-D fix: Always check for drawing shapes, not just when images_found=True
             if True:  # Always execute isolated-group processing for drawing shapes
-                    print(f"[DEBUG] {len(sheet._images)} 個の埋め込み画像が検出されました。描画要素を調査中...")
+                    debug_print(f"[DEBUG] {len(sheet._images)} 個の埋め込み画像が検出されました。描画要素を調査中...")
                     # If there is only one (or zero) embedded image, prefer to
                     # use that image directly rather than performing costly
                     # isolated-group clustering and trimmed workbook rendering.
@@ -1843,7 +1859,7 @@ class ExcelToMarkdownConverter:
                         # This respects the user's request to avoid clustering when
                         # a single embedded graphic is present.
                         if emb_count == 1:
-                            print(f"[DEBUG][_process_sheet_images_shortcircuit] sheet={sheet.title} single embedded image detected; using embedded image without clustering")
+                            debug_print(f"[DEBUG][_process_sheet_images_shortcircuit] sheet={sheet.title} single embedded image detected; using embedded image without clustering")
                             try:
                                 self._sheet_shapes_generated.add(sheet.title)
                             except Exception:
@@ -1946,7 +1962,7 @@ class ExcelToMarkdownConverter:
                                     # If there are more anchors than embedded images and at least one shape,
                                     # attempt isolated-group rendering to capture vector shapes
                                     if total_anchors > len(sheet._images) and sp_anchors > 0:
-                                        print(f"[DEBUG] Detected additional drawing shapes (anchors={total_anchors}, pics={pic_anchors}, sps={sp_anchors}) - attempting isolated-group rendering")
+                                        debug_print(f"[DEBUG] Detected additional drawing shapes (anchors={total_anchors}, pics={pic_anchors}, sps={sp_anchors}) - attempting isolated-group rendering")
                                         try:
                                             # Extract shape bounding boxes
                                             shapes = None
@@ -1957,7 +1973,7 @@ class ExcelToMarkdownConverter:
                                                 import traceback
                                                 traceback.print_exc()
                                             
-                                            print(f"[DEBUG] _extract_drawing_shapes returned: {len(shapes) if shapes else 'None'} shapes")
+                                            debug_print(f"[DEBUG] _extract_drawing_shapes returned: {len(shapes) if shapes else 'None'} shapes")
                                             if shapes and len(shapes) > 0:
                                                 # Cluster shapes using the proper clustering logic
                                                 # Extract cell ranges for row-based gap-splitting
@@ -1972,7 +1988,7 @@ class ExcelToMarkdownConverter:
                                                 clusters, debug_info = self._cluster_shapes_common(
                                                     sheet, shapes, cell_ranges=cell_ranges_all, max_groups=1
                                                 )
-                                                print(f"[DEBUG] clustered into {len(clusters)} groups: sizes={[len(c) for c in clusters]}")
+                                                debug_print(f"[DEBUG] clustered into {len(clusters)} groups: sizes={[len(c) for c in clusters]}")
                                                 
                                                 # Render each cluster as an isolated group
                                                 # Using stable _render_sheet_isolated_group method (not v2)
@@ -1997,15 +2013,15 @@ class ExcelToMarkdownConverter:
                                                 
                                                 if isolated_produced:
                                                     print(f"[INFO] シート '{sheet.title}' の図形をisolated groupとして出力しました")
-                                                    print(f"[DEBUG] isolated_images count: {len(isolated_images)}")
+                                                    debug_print(f"[DEBUG] isolated_images count: {len(isolated_images)}")
                                                     # isolated group画像をMarkdownに追加するため、images_foundをTrueに設定
                                                     images_found = True
                                                     # 各画像を登録（row情報を使用）
                                                     for img_name, cluster_row in isolated_images:
-                                                        print(f"[DEBUG] Processing isolated group image: {img_name} at row={cluster_row}")
+                                                        debug_print(f"[DEBUG] Processing isolated group image: {img_name} at row={cluster_row}")
                                                         try:
                                                             self._mark_image_emitted(img_name)
-                                                            print(f"[DEBUG] _mark_image_emitted succeeded for: {img_name}")
+                                                            debug_print(f"[DEBUG] _mark_image_emitted succeeded for: {img_name}")
                                                         except Exception as e:
                                                             print(f"[WARNING] _mark_image_emitted failed: {e}")
                                                         
@@ -2016,7 +2032,7 @@ class ExcelToMarkdownConverter:
                                                             self._sheet_shape_images.setdefault(sheet.title, [])
                                                             # クラスタの最小行に配置
                                                             self._sheet_shape_images[sheet.title].append((cluster_row, img_name))
-                                                            print(f"[DEBUG] isolated group画像を_sheet_shape_imagesに追加: {img_name} at row={cluster_row}")
+                                                            debug_print(f"[DEBUG] isolated group画像を_sheet_shape_imagesに追加: {img_name} at row={cluster_row}")
                                                         except Exception as e:
                                                             print(f"[WARNING] Failed to add to _sheet_shape_images: {e}")
                                                             import traceback
@@ -2037,7 +2053,7 @@ class ExcelToMarkdownConverter:
             # corresponding PDF page to PNG using ImageMagick. This captures vector
             # shapes and drawings that openpyxl doesn't expose as images.
             if not images_found:
-                print(f"[DEBUG] イメージが見つかりませんでした。")
+                debug_print(f"[DEBUG] イメージが見つかりませんでした。")
                 # Avoid rendering sheets that contain only cell text; only fallback
                 # when the sheet has drawing elements.
                 if not self._sheet_has_drawings(sheet):
@@ -2134,7 +2150,7 @@ class ExcelToMarkdownConverter:
                                     # the computed start_row pairs we just generated.
                                     try:
                                         # log for diagnostics but do not use it
-                                        print(f"[DEBUG] Ignoring persisted start_map for sheet={sheet.title}")
+                                        debug_print(f"[DEBUG] Ignoring persisted start_map for sheet={sheet.title}")
                                     except Exception:
                                         pass
 
@@ -2143,9 +2159,9 @@ class ExcelToMarkdownConverter:
 
                                 # Diagnostic debug: emit the current mapping of source rows -> markdown indices
                                 try:
-                                    print(f"[DEBUG][_img_insertion_debug] sheet={sheet.title} sheet_map={sheet_map}")
-                                    print(f"[DEBUG][_img_insertion_debug] imgs_by_row={imgs_by_row}")
-                                    print(f"[DEBUG][_img_insertion_debug] normalized_pairs={normalized}")
+                                    debug_print(f"[DEBUG][_img_insertion_debug] sheet={sheet.title} sheet_map={sheet_map}")
+                                    debug_print(f"[DEBUG][_img_insertion_debug] imgs_by_row={imgs_by_row}")
+                                    debug_print(f"[DEBUG][_img_insertion_debug] normalized_pairs={normalized}")
                                 except Exception:
                                     pass
 
@@ -2255,7 +2271,7 @@ class ExcelToMarkdownConverter:
                                                 except Exception:
                                                     pass
                                         else:
-                                            print(f"[TRACE] Skipping sheet_map offset updates in non-canonical pass for sheet={sheet.title}")
+                                            debug_print(f"[TRACE] Skipping sheet_map offset updates in non-canonical pass for sheet={sheet.title}")
 
                                 # mark all images used
                                 self._sheet_shape_next_idx[sheet.title] = len(imgs)
@@ -2326,7 +2342,7 @@ class ExcelToMarkdownConverter:
             if hasattr(image, '_data') and callable(getattr(image, '_data')):
                 try:
                     image_data = image._data()
-                    print(f"[DEBUG] image._data() succeeded for image #{self.image_counter} on sheet '{sheet_name}'")
+                    debug_print(f"[DEBUG] image._data() succeeded for image #{self.image_counter} on sheet '{sheet_name}'")
                 except ValueError:
                     # Likely a closed ZipExtFile. Fall through to zip-based fallback.
                     image_data = None
@@ -2366,7 +2382,7 @@ class ExcelToMarkdownConverter:
                         except Exception:
                             image_data = None
                     # refがstrでない場合はimage_dataはNone
-                    print(f"[DEBUG] image.ref-based extraction succeeded for image #{self.image_counter} on sheet '{sheet_name}'")
+                    debug_print(f"[DEBUG] image.ref-based extraction succeeded for image #{self.image_counter} on sheet '{sheet_name}'")
                 except Exception:
                     image_data = None
 
@@ -2401,7 +2417,7 @@ class ExcelToMarkdownConverter:
                             existing = ef.read()
                         if existing == image_data:
                             # reuse
-                            print(f"[DEBUG] 既存の画像ファイルを再利用: {image_filename}")
+                            debug_print(f"[DEBUG] 既存の画像ファイルを再利用: {image_filename}")
                         else:
                             # collision unlikely, fallback to unique suffix
                             import time
@@ -2459,7 +2475,7 @@ class ExcelToMarkdownConverter:
             # Debug: log image filenames and their SHA256 before building groups
             try:
                 import hashlib as _hashlib
-                print('[DEBUG][_dedupe] listing images and computing sha256 before dedupe:')
+                debug_print('[DEBUG][_dedupe] listing images and computing sha256 before dedupe:')
                 for _fn in sorted(os.listdir(img_dir)):
                     _fp = os.path.join(img_dir, _fn)
                     if not os.path.isfile(_fp):
@@ -2469,9 +2485,9 @@ class ExcelToMarkdownConverter:
                         with open(_fp, 'rb') as _f:
                             for _chunk in iter(lambda: _f.read(8192), b''):
                                 _h.update(_chunk)
-                        print(f"[DEBUG][_dedupe] pre-sha {_fn} = {_h.hexdigest()}")
+                        debug_print(f"[DEBUG][_dedupe] pre-sha {_fn} = {_h.hexdigest()}")
                     except Exception as _e:
-                        print(f"[DEBUG][_dedupe] pre-sha {_fn} FAILED: {_e}")
+                        debug_print(f"[DEBUG][_dedupe] pre-sha {_fn} FAILED: {_e}")
             except Exception:
                 # non-fatal; continue with normal dedupe
                 pass
@@ -2509,7 +2525,7 @@ class ExcelToMarkdownConverter:
                     bases = set([fn.split('_', 1)[0] if '_' in fn else fn for fn, _ in items_sorted])
                     if len(bases) != 1 or (self.base_name not in bases):
                         try:
-                            print(f"[DEBUG][_dedupe] skipping cross-workbook dedupe for hash {h}: bases={bases}")
+                            debug_print(f"[DEBUG][_dedupe] skipping cross-workbook dedupe for hash {h}: bases={bases}")
                         except Exception:
                             pass
                         # Do not remove any files in this group; leave as-is
@@ -2517,7 +2533,7 @@ class ExcelToMarkdownConverter:
                 except Exception:
                     # If any failure determining origin, be conservative and skip
                     try:
-                        print(f"[DEBUG][_dedupe] skipping dedupe for hash {h} due to error determining origins")
+                        debug_print(f"[DEBUG][_dedupe] skipping dedupe for hash {h} due to error determining origins")
                     except Exception:
                         pass
                     continue
@@ -2545,7 +2561,7 @@ class ExcelToMarkdownConverter:
                         p = os.path.join(img_dir, dup)
                         if os.path.exists(p):
                             os.remove(p)
-                            print(f"[DEBUG][_dedupe] removed duplicate image: {dup} -> canonical: {canonical}")
+                            debug_print(f"[DEBUG][_dedupe] removed duplicate image: {dup} -> canonical: {canonical}")
                     except Exception:
                         pass
 
@@ -2834,7 +2850,7 @@ class ExcelToMarkdownConverter:
                 if rowc in group_rows or any(abs(int(rowc) - int(gr)) <= 1 for gr in group_rows):
                     preserve.add(scid)
         
-        print(f"[DEBUG][_resolve_connector] keep={len(keep_cnvpr_ids)} → preserve={len(preserve)} (rows={sorted(list(group_rows))})")
+        debug_print(f"[DEBUG][_resolve_connector] keep={len(keep_cnvpr_ids)} → preserve={len(preserve)} (rows={sorted(list(group_rows))})")
         return preserve
 
     def _prune_drawing_anchors(
@@ -2889,7 +2905,7 @@ class ExcelToMarkdownConverter:
                     
                     if this_cid is not None and str(this_cid) in keep_cnvpr_ids:
                         kept_count += 1
-                        print(f"[DEBUG][_prune] KEEP anchor id={this_cid}")
+                        debug_print(f"[DEBUG][_prune] KEEP anchor id={this_cid}")
                         continue
                     
                     try:
@@ -2917,19 +2933,19 @@ class ExcelToMarkdownConverter:
                     try:
                         root.remove(node)
                         removed_count += 1
-                        print(f"[DEBUG][_prune] REMOVE anchor id={this_cid}")
+                        debug_print(f"[DEBUG][_prune] REMOVE anchor id={this_cid}")
                     except Exception:
                         try:
                             root.remove(node)
                             removed_count += 1
-                            print(f"[DEBUG][_prune] REMOVE anchor id={this_cid} (retry)")
+                            debug_print(f"[DEBUG][_prune] REMOVE anchor id={this_cid} (retry)")
                         except Exception:
                             pass
             
-            print(f"[DEBUG][_prune] Summary: kept={kept_count}, removed={removed_count}, total={kept_count+removed_count}")
+            debug_print(f"[DEBUG][_prune] Summary: kept={kept_count}, removed={removed_count}, total={kept_count+removed_count}")
             tree.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
         except Exception as e:
-            print(f"[DEBUG][_prune_drawing_anchors] Error: {e}")
+            debug_print(f"[DEBUG][_prune_drawing_anchors] Error: {e}")
 
     def _convert_excel_to_pdf(self, xlsx_path: str, tmpdir: str, apply_fit_to_page: bool = True) -> Optional[str]:
         """ExcelファイルをPDFに変換
@@ -2956,7 +2972,7 @@ class ExcelToMarkdownConverter:
             
             # LibreOfficeでPDF変換
             cmd = [LIBREOFFICE_PATH, '--headless', '--convert-to', 'pdf', '--outdir', tmpdir, tmp_xlsx]
-            print(f"[DEBUG] LibreOffice export command: {' '.join(cmd)}")
+            debug_print(f"[DEBUG] LibreOffice export command: {' '.join(cmd)}")
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
             
             if proc.returncode != 0:
@@ -3011,7 +3027,7 @@ class ExcelToMarkdownConverter:
                 png_path
             ]
             
-            print(f"[DEBUG] ImageMagick command: {' '.join(cmd)}")
+            debug_print(f"[DEBUG] ImageMagick command: {' '.join(cmd)}")
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
             
             if proc.returncode != 0:
@@ -3056,7 +3072,7 @@ class ExcelToMarkdownConverter:
             tmpdir = tempfile.mkdtemp(prefix='xls2md_render_')
             
             # 1. Excel→PDF変換 (Phase 1メソッド)
-            print(f"[DEBUG] Fallback rendering for sheet: {sheet.title}")
+            debug_print(f"[DEBUG] Fallback rendering for sheet: {sheet.title}")
             pdf_path = self._convert_excel_to_pdf(self.excel_file, tmpdir, apply_fit_to_page=True)
             if pdf_path is None:
                 print("[WARNING] LibreOffice がPDFを出力しませんでした")
@@ -3782,16 +3798,16 @@ class ExcelToMarkdownConverter:
 
             result = False
             if drawable_types:
-                print(f"[DEBUG] Anchor has drawable elements: {drawable_types}")
+                debug_print(f"[DEBUG] Anchor has drawable elements: {drawable_types}")
                 result = True
             elif has_connector_ref:
-                print(f"[DEBUG] Anchor has connector references; treating as drawable")
+                debug_print(f"[DEBUG] Anchor has connector references; treating as drawable")
                 result = True
             elif has_text:
-                print(f"[DEBUG] Anchor contains only text; treating as non-drawable")
+                debug_print(f"[DEBUG] Anchor contains only text; treating as non-drawable")
                 result = False
             else:
-                print(f"[DEBUG] Anchor has no drawable elements")
+                debug_print(f"[DEBUG] Anchor has no drawable elements")
                 result = False
 
             # cache and return
@@ -4157,7 +4173,7 @@ class ExcelToMarkdownConverter:
                 bboxes.append((left, top, right, bottom))
 
             # return bboxes (list of (left, top, right, bottom) in pixel-ish units)
-            print(f"[DEBUG] _extract_drawing_shapes found {len(bboxes)} bboxes")
+            debug_print(f"[DEBUG] _extract_drawing_shapes found {len(bboxes)} bboxes")
             return bboxes
         except Exception as e:
             print(f"[WARNING] _extract_drawing_shapes exception: {e}")
@@ -4221,7 +4237,7 @@ class ExcelToMarkdownConverter:
                 rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
                 
                 if rels_path not in z.namelist():
-                    print(f"[DEBUG][_iso_v2] sheet={sheet.title} missing rels")
+                    debug_print(f"[DEBUG][_iso_v2] sheet={sheet.title} missing rels")
                     return None
                 
                 # Find drawing relationship
@@ -4233,7 +4249,7 @@ class ExcelToMarkdownConverter:
                         break
                 
                 if not drawing_target:
-                    print(f"[DEBUG][_iso_v2] sheet={sheet.title} no drawing relationship")
+                    debug_print(f"[DEBUG][_iso_v2] sheet={sheet.title} no drawing relationship")
                     return None
                 
                 # Normalize drawing path
@@ -4245,7 +4261,7 @@ class ExcelToMarkdownConverter:
                 if drawing_path not in z.namelist():
                     drawing_path = drawing_path.replace('worksheets', 'drawings')
                     if drawing_path not in z.namelist():
-                        print(f"[DEBUG][_iso_v2] drawing_path not found: {drawing_path}")
+                        debug_print(f"[DEBUG][_iso_v2] drawing_path not found: {drawing_path}")
                         return None
                 
                 # Parse drawing XML
@@ -4260,7 +4276,7 @@ class ExcelToMarkdownConverter:
                     anchors.append(node)
             
             if not anchors:
-                print(f"[DEBUG][_iso_v2] no drawable anchors found")
+                debug_print(f"[DEBUG][_iso_v2] no drawable anchors found")
                 return None
             
                 # Compute cell_range if not provided
@@ -4289,10 +4305,10 @@ class ExcelToMarkdownConverter:
                         e_row = e_row + row_padding
                         
                         cell_range = (s_col, e_col, s_row, e_row)
-                        print(f"[DEBUG][_iso_v2] Computed cell_range from shapes: cols {s_col}-{e_col}, rows {s_row}-{e_row} (with padding)")
-                        print(f"[DEBUG][_iso_v2] Original shape ranges: {picked}")
+                        debug_print(f"[DEBUG][_iso_v2] Computed cell_range from shapes: cols {s_col}-{e_col}, rows {s_row}-{e_row} (with padding)")
+                        debug_print(f"[DEBUG][_iso_v2] Original shape ranges: {picked}")
                 except Exception as e:
-                    print(f"[DEBUG][_iso_v2] Failed to compute cell_range: {e}")            # Build keep_cnvpr_ids from shape_indices
+                    debug_print(f"[DEBUG][_iso_v2] Failed to compute cell_range: {e}")            # Build keep_cnvpr_ids from shape_indices
             keep_cnvpr_ids = set()
             for si in shape_indices:
                 if 0 <= si < len(anchors):
@@ -4303,7 +4319,7 @@ class ExcelToMarkdownConverter:
                                 keep_cnvpr_ids.add(str(cid))
                             break
             
-            print(f"[DEBUG][_iso_v2] anchors={len(anchors)} keep_ids={sorted(list(keep_cnvpr_ids))}")
+            debug_print(f"[DEBUG][_iso_v2] anchors={len(anchors)} keep_ids={sorted(list(keep_cnvpr_ids))}")
             
             # Use helper method to resolve connector references
             referenced_ids = self._resolve_connector_references(
@@ -4459,7 +4475,7 @@ class ExcelToMarkdownConverter:
                                             except Exception:
                                                 pass
                             
-                            print(f"[DEBUG][_iso_v2] Removed {len(sheets_to_remove)} non-target sheets from workbook (kept drawing: {target_sheet_drawing or 'none'})")
+                            debug_print(f"[DEBUG][_iso_v2] Removed {len(sheets_to_remove)} non-target sheets from workbook (kept drawing: {target_sheet_drawing or 'none'})")
                 
                 except Exception as e:
                     if getattr(self, 'verbose', False):
@@ -4490,10 +4506,10 @@ class ExcelToMarkdownConverter:
                 # Keep original drawing.xml coordinates intact
                 # LibreOffice needs the original coordinates to properly render shapes
                 # We only trim the cell data, not the drawing positions
-                print(f"[DEBUG][_iso_v2] Preserving original drawing coordinates (no adjustment)")
+                debug_print(f"[DEBUG][_iso_v2] Preserving original drawing coordinates (no adjustment)")
                 if cell_range:
                     s_col, e_col, s_row, e_row = cell_range
-                    print(f"[DEBUG][_iso_v2] Cell range for data trimming: cols {s_col}-{e_col}, rows {s_row}-{e_row}")
+                    debug_print(f"[DEBUG][_iso_v2] Cell range for data trimming: cols {s_col}-{e_col}, rows {s_row}-{e_row}")
                 
                 # DO NOT reconstruct worksheet - keep all original data
                 # This preserves the original cell positions so shapes can reference them correctly
@@ -4532,7 +4548,7 @@ class ExcelToMarkdownConverter:
                         
                         # Write back the modified sheet
                         stree.write(sheet_rel, encoding='utf-8', xml_declaration=True)
-                        print(f"[DEBUG][_iso_v2] Set pageSetup to scale=100 (normal size) to preserve shapes")
+                        debug_print(f"[DEBUG][_iso_v2] Set pageSetup to scale=100 (normal size) to preserve shapes")
                     except Exception as e:
                         if getattr(self, 'verbose', False):
                             print(f"[WARN][_iso_v2] Failed to fix pageSetup: {e}")
@@ -4561,7 +4577,7 @@ class ExcelToMarkdownConverter:
                         if sheet_data is not None and src_sheet_data is not None:
                             new_sheet_data = ET.Element(sheet_data_tag)
                             src_rows = src_sheet_data.findall(f'{{{ns}}}row')
-                            print(f"[DEBUG][_iso_v2] Found {len(src_rows)} rows in source sheet.xml")
+                            debug_print(f"[DEBUG][_iso_v2] Found {len(src_rows)} rows in source sheet.xml")
                             cells_copied = 0
                             
                             # Helper to convert index to letters
@@ -4615,7 +4631,7 @@ class ExcelToMarkdownConverter:
                                 if len(new_row) > 0:  # Only add row if it has cells
                                     new_sheet_data.append(new_row)
                             
-                            print(f"[DEBUG][_iso_v2] Copied {cells_copied} cells with original row/col numbers")
+                            debug_print(f"[DEBUG][_iso_v2] Copied {cells_copied} cells with original row/col numbers")
                             
                             # Replace old sheetData with new one
                             for child in list(sroot):
@@ -4725,7 +4741,7 @@ class ExcelToMarkdownConverter:
                         ps.set('copies', '1')
                         # Append at the end of sheet
                         sroot.append(ps)
-                        print(f"[DEBUG][_iso_v2] Set pageSetup to scale=100 (normal size) to preserve shapes")
+                        debug_print(f"[DEBUG][_iso_v2] Set pageSetup to scale=100 (normal size) to preserve shapes")
                         
                         # Set page margins (as attributes, standard Excel format)
                         pm_tag = f'{{{ns}}}pageMargins'
@@ -4746,7 +4762,7 @@ class ExcelToMarkdownConverter:
                             sroot.remove(hf)
                         
                         stree.write(sheet_rel, encoding='utf-8', xml_declaration=True)
-                        print(f"[DEBUG][_iso_v2] Reconstructed sheet data: kept original rows {s_row}-{e_row}, cols {s_col}-{e_col}")
+                        debug_print(f"[DEBUG][_iso_v2] Reconstructed sheet data: kept original rows {s_row}-{e_row}, cols {s_col}-{e_col}")
                     except Exception as e:
                         if getattr(self, 'verbose', False):
                             print(f"[WARN][_iso_v2] Failed to reconstruct worksheet: {e}")
@@ -4768,7 +4784,7 @@ class ExcelToMarkdownConverter:
                         # Remove ALL defined names (including Print_Area) to prevent display issues
                         if dn is not None:
                             wroot.remove(dn)
-                            print(f"[DEBUG][_iso_v2] Removed Print_Area and all defined names to ensure shapes are visible")
+                            debug_print(f"[DEBUG][_iso_v2] Removed Print_Area and all defined names to ensure shapes are visible")
                         
                         wtree.write(wb_rel, encoding='utf-8', xml_declaration=True)
                 except Exception as e:
@@ -4789,7 +4805,7 @@ class ExcelToMarkdownConverter:
                     
                     shutil.make_archive(debug_zip_base, 'zip', tmpdir)
                     shutil.move(debug_zip_base + '.zip', debug_xlsx_path)
-                    print(f"[DEBUG][_iso_v2] Saved debug workbook: {debug_xlsx_path}")
+                    debug_print(f"[DEBUG][_iso_v2] Saved debug workbook: {debug_xlsx_path}")
                 except Exception as e:
                     if getattr(self, 'verbose', False):
                         print(f"[WARN][_iso_v2] Failed to create trimmed workbook: {e}")
@@ -4803,7 +4819,7 @@ class ExcelToMarkdownConverter:
                     
                     # Convert to PDF (output to same directory as xlsx)
                     cmd = [LIBREOFFICE_PATH, '--headless', '--convert-to', 'pdf', '--outdir', self.output_dir, debug_xlsx_path]
-                    print(f"[DEBUG][_iso_v2] LibreOffice command: {' '.join(cmd)}")
+                    debug_print(f"[DEBUG][_iso_v2] LibreOffice command: {' '.join(cmd)}")
                     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
                     
                     if proc.returncode != 0:
@@ -4825,7 +4841,7 @@ class ExcelToMarkdownConverter:
                             return None
                         pdf_path = os.path.join(self.output_dir, pdf_candidates[0])
                     
-                    print(f"[DEBUG][_iso_v2] Saved debug PDF: {pdf_path}")
+                    debug_print(f"[DEBUG][_iso_v2] Saved debug PDF: {pdf_path}")
                     
                     # Convert PDF to PNG (final output in images directory)
                     png_filename = f"{self.base_name}_{sheet.title}_group_{shape_indices[0] if shape_indices else 0}.png"
@@ -4840,7 +4856,7 @@ class ExcelToMarkdownConverter:
                     cmd = ['convert', '-density', str(dpi), f'{pdf_path}[0]', 
                            '-background', 'white', '-flatten',
                            '-colorspace', 'sRGB', '-quality', str(IMAGE_QUALITY), png_path]
-                    print(f"[DEBUG][_iso_v2] ImageMagick command: {' '.join(cmd)}")
+                    debug_print(f"[DEBUG][_iso_v2] ImageMagick command: {' '.join(cmd)}")
                     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
                     
                     if proc.returncode != 0 or not os.path.exists(png_path):
@@ -4848,8 +4864,8 @@ class ExcelToMarkdownConverter:
                             print(f"[WARN][_iso_v2] ImageMagick PNG conversion failed: {proc.stderr}")
                         return None
                     
-                    print(f"[DEBUG][_iso_v2] Successfully rendered group: {png_filename}")
-                    print(f"[DEBUG][_iso_v2] Debug files: {debug_xlsx_filename}, {debug_pdf_filename}")
+                    debug_print(f"[DEBUG][_iso_v2] Successfully rendered group: {png_filename}")
+                    debug_print(f"[DEBUG][_iso_v2] Debug files: {debug_xlsx_filename}, {debug_pdf_filename}")
                     
                     # Crop image to remove excess whitespace while preserving connectors
                     # Use tighter cropping for isolated groups (white_thresh=250 for more aggressive)
@@ -4870,14 +4886,14 @@ class ExcelToMarkdownConverter:
                                 cropped = im.crop((l, t, r, b))
                                 cropped.save(png_path)
                                 cropped.close()
-                                print(f"[DEBUG][_iso_v2] Cropped image: {im.size} → {cropped.size}")
+                                debug_print(f"[DEBUG][_iso_v2] Cropped image: {im.size} → {cropped.size}")
                             im.close()
                     except Exception as crop_err:
                         if getattr(self, 'verbose', False):
                             print(f"[WARN][_iso_v2] Failed to crop image: {crop_err}")
                     
                     # Return tuple: (filename, minimum_row_for_cluster)
-                    print(f"[DEBUG][_iso_v2] Returning: filename={png_filename}, cluster_min_row={cluster_min_row}")
+                    debug_print(f"[DEBUG][_iso_v2] Returning: filename={png_filename}, cluster_min_row={cluster_min_row}")
                     return (png_filename, cluster_min_row)
                     
                 except Exception as e:
@@ -4937,7 +4953,7 @@ class ExcelToMarkdownConverter:
             sheet_index = self.workbook.sheetnames.index(sheet.title)
             rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
             if rels_path not in z.namelist():
-                print(f"[DEBUG][_iso_entry] sheet={sheet.title} missing rels: {rels_path}")
+                debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} missing rels: {rels_path}")
                 return None
             rels_xml = ET.fromstring(z.read(rels_path))
             drawing_target = None
@@ -4946,7 +4962,7 @@ class ExcelToMarkdownConverter:
                     drawing_target = rel.attrib.get('Target')
                     break
             if not drawing_target:
-                print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawing relationship found in rels")
+                debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawing relationship found in rels")
                 return None
 
             drawing_path = drawing_target
@@ -4955,11 +4971,11 @@ class ExcelToMarkdownConverter:
             if drawing_path.startswith('/'):
                 drawing_path = drawing_path.lstrip('/')
             # Diagnostic: report resolved drawing path and requested shape indices
-            print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path={drawing_path} shape_indices={shape_indices}")
+            debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path={drawing_path} shape_indices={shape_indices}")
             if drawing_path not in z.namelist():
                 drawing_path = drawing_path.replace('worksheets', 'drawings')
                 if drawing_path not in z.namelist():
-                    print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path not found in archive after normalization: {drawing_path}")
+                    debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path not found in archive after normalization: {drawing_path}")
                     return None
 
             drawing_xml_bytes = z.read(drawing_path)
@@ -4973,7 +4989,7 @@ class ExcelToMarkdownConverter:
                 if lname in ('twocellanchor', 'onecellanchor') and self._anchor_has_drawable(node):
                     anchors.append(node)
             if not anchors:
-                print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawable anchors found in drawing xml")
+                debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawable anchors found in drawing xml")
                 return None
             # If no explicit cell_range supplied, compute the minimal bounding
             # cell_range that covers the requested shape_indices using the
@@ -5012,10 +5028,10 @@ class ExcelToMarkdownConverter:
                             if max_data_col > 0:
                                 max_allowed_col = max_data_col + 5
                                 if e_col > max_allowed_col:
-                                    print(f"[DEBUG][_iso_entry] Limiting e_col from {e_col} to {max_allowed_col} (max_data_col={max_data_col})")
+                                    debug_print(f"[DEBUG][_iso_entry] Limiting e_col from {e_col} to {max_allowed_col} (max_data_col={max_data_col})")
                                     e_col = max_allowed_col
                         except Exception as limit_err:
-                            print(f"[DEBUG][_iso_entry] Failed to limit cell_range: {limit_err}")
+                            debug_print(f"[DEBUG][_iso_entry] Failed to limit cell_range: {limit_err}")
                         
                         cell_range = (s_col, e_col, s_row, e_row)
             except Exception:
@@ -5044,7 +5060,7 @@ class ExcelToMarkdownConverter:
                 keep_cnvpr_ids = set()
             try:
                 # Diagnostic: show how many anchors exist and which cNvPr ids will be kept
-                print(f"[DEBUG][_iso_entry] sheet={sheet.title} anchors_count={len(anchors)} keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))}")
+                debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} anchors_count={len(anchors)} keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))}")
             except Exception:
                 keep_cnvpr_ids = set()
             # create tempdir and copy original xlsx contents there to modify
@@ -5360,7 +5376,7 @@ class ExcelToMarkdownConverter:
                         except Exception:
                             dbg_all_id_to_row_keys = []
                         try:
-                            print(f"[DEBUG][_iso_group_extra] group_rows={dbg_rows} id_to_row_keys={dbg_id_to_row_keys} all_id_to_row_keys={dbg_all_id_to_row_keys}")
+                            debug_print(f"[DEBUG][_iso_group_extra] group_rows={dbg_rows} id_to_row_keys={dbg_id_to_row_keys} all_id_to_row_keys={dbg_all_id_to_row_keys}")
                         except Exception:
                             pass
                         # For each connector cosmetic entry, list endpoints (may be empty) and mapped rows
@@ -5391,7 +5407,7 @@ class ExcelToMarkdownConverter:
                                     except Exception:
                                         rows_mapped.append(None)
                                 try:
-                                    print(f"[DEBUG][_iso_group_conn] cid={ccid} endpoints={sorted(list(eps))} mapped_rows={rows_mapped}")
+                                    debug_print(f"[DEBUG][_iso_group_conn] cid={ccid} endpoints={sorted(list(eps))} mapped_rows={rows_mapped}")
                                 except Exception:
                                     pass
                         except Exception:
@@ -5401,13 +5417,13 @@ class ExcelToMarkdownConverter:
                             for special in ('56','61'):
                                 if 'all_id_to_row' in locals() and special in all_id_to_row:
                                     try:
-                                        print(f"[DEBUG][_iso_group_idrow] id={special} all_row={all_id_to_row.get(special)} id_to_row_val={id_to_row.get(special) if 'id_to_row' in locals() else None}")
+                                        debug_print(f"[DEBUG][_iso_group_idrow] id={special} all_row={all_id_to_row.get(special)} id_to_row_val={id_to_row.get(special) if 'id_to_row' in locals() else None}")
                                     except Exception:
                                         pass
                         except Exception:
                             pass
                         msg = f"[DEBUG][_iso_group] keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))} preserved_ids={sorted(list(referenced_ids))} connector_children_keys={sorted(list(connector_children_by_id.keys()))}"
-                        print(msg)
+                        debug_print(msg)
                         # expose preserved ids for callers so they can avoid duplicate renders
                         try:
                             self._last_iso_preserved_ids = set(referenced_ids)
@@ -5436,7 +5452,7 @@ class ExcelToMarkdownConverter:
                                 w = csv.writer(df)
                                 w.writerow(['keep_cnvpr_ids', 'preserved_ids', 'connector_children_keys'])
                                 w.writerow([";".join(sorted(list(map(str, keep_cnvpr_ids)))), ";".join(sorted(list(map(str, referenced_ids)))), ";".join(sorted(list(map(str, connector_children_by_id.keys()))) )])
-                            print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
+                            debug_print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
                         except Exception:
                             pass
                     except Exception:
@@ -5612,7 +5628,7 @@ class ExcelToMarkdownConverter:
                                             pass
                                     if removed:
                                         try:
-                                            print(f"[DEBUG][_iso_hdrfoot] removed {removed} headerFooter elements from {sheet_rel}")
+                                            debug_print(f"[DEBUG][_iso_hdrfoot] removed {removed} headerFooter elements from {sheet_rel}")
                                         except Exception:
                                             pass
                                 except Exception:
@@ -5635,7 +5651,7 @@ class ExcelToMarkdownConverter:
                         kept_anchors = [n for n in list(droot_check) if n.tag.split('}')[-1].lower() in ('twocellanchor', 'onecellanchor')]
                         if not kept_anchors:
                             try:
-                                print(f"[DEBUG][_iso_entry] sheet={sheet.title} trimmed drawing has no anchors after pruning; skipping isolated group")
+                                debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} trimmed drawing has no anchors after pruning; skipping isolated group")
                             except Exception:
                                 pass
                             return None
@@ -6927,7 +6943,7 @@ class ExcelToMarkdownConverter:
                     suffix = "_grp"
                 tmp_xlsx = os.path.join(tmpdir, f"{self.base_name}_iso_group{suffix}.xlsx")
                 try:
-                    print(f"[DEBUG][_iso_entry] sheet={sheet.title} tmp_xlsx will be created at: {tmp_xlsx}")
+                    debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} tmp_xlsx will be created at: {tmp_xlsx}")
                 except Exception:
                     pass
                 # If cell_range was provided, further minimize the tmpdir contents
@@ -7588,7 +7604,7 @@ class ExcelToMarkdownConverter:
                                     except Exception:
                                         pass
                                     try:
-                                        print(f"[DEBUG][_iso_hdrfoot_sweep] removed {removed_count} headerFooter from {relp} and forced fit-to-page/margins")
+                                        debug_print(f"[DEBUG][_iso_hdrfoot_sweep] removed {removed_count} headerFooter from {relp} and forced fit-to-page/margins")
                                     except Exception:
                                         pass
                             except Exception:
@@ -7619,10 +7635,10 @@ class ExcelToMarkdownConverter:
                     except Exception:
                         # fallback to non-atomic move
                         shutil.move(tmp_dbg, dbg_copy)
-                    print(f"[DEBUG] saved group workbook: {dbg_copy}")
+                    debug_print(f"[DEBUG] saved group workbook: {dbg_copy}")
                     try:
                         st = os.stat(dbg_copy)
-                        print(f"[DEBUG] dbg_copy exists: size={st.st_size} bytes")
+                        debug_print(f"[DEBUG] dbg_copy exists: size={st.st_size} bytes")
                     except Exception:
                         try:
                             print(f"[WARN] dbg_copy not found after save: {dbg_copy}")
@@ -7644,7 +7660,7 @@ class ExcelToMarkdownConverter:
                             # rewrite often fixes subtle OOXML packaging order
                             # and relationship issues that trip LibreOffice.
                             shutil.copyfile(dbg_copy, fixed_candidate)
-                            print(f"[DEBUG] created fixed workbook (inline): {fixed_candidate}")
+                            debug_print(f"[DEBUG] created fixed workbook (inline): {fixed_candidate}")
                             try:
                                 # Attempt an in-place normalization using openpyxl.
                                 # Use a read/load+save cycle; if it fails, leave
@@ -7653,7 +7669,7 @@ class ExcelToMarkdownConverter:
                                 try:
                                     _wb_tmp = _op_load(fixed_candidate)
                                     _wb_tmp.save(fixed_candidate)
-                                    print(f"[DEBUG] openpyxl resaved fixed workbook: {fixed_candidate}")
+                                    debug_print(f"[DEBUG] openpyxl resaved fixed workbook: {fixed_candidate}")
                                 except Exception as _e_inner:
                                     try:
                                         print(f"[WARN] openpyxl resave failed: {_e_inner}")
@@ -7698,7 +7714,7 @@ class ExcelToMarkdownConverter:
                                 ids_fn = fixed_candidate + '.ids.json'
                                 with open(ids_fn, 'w', encoding='utf-8') as jf:
                                     json.dump({'cNvPr_ids': ids}, jf, ensure_ascii=False, indent=2)
-                                print(f"[DEBUG] wrote fixed workbook ids: {ids_fn} (count={len(ids)})")
+                                debug_print(f"[DEBUG] wrote fixed workbook ids: {ids_fn} (count={len(ids)})")
                             except Exception:
                                 pass
                         except Exception:
@@ -7708,10 +7724,10 @@ class ExcelToMarkdownConverter:
                         src_for_conv = dbg_copy
                         if os.path.exists(repaired_candidate):
                             src_for_conv = repaired_candidate
-                            print(f"[DEBUG] using repaired workbook for conversion: {src_for_conv}")
+                            debug_print(f"[DEBUG] using repaired workbook for conversion: {src_for_conv}")
                         elif os.path.exists(fixed_candidate):
                             src_for_conv = fixed_candidate
-                            print(f"[DEBUG] using fixed workbook for conversion: {src_for_conv}")
+                            debug_print(f"[DEBUG] using fixed workbook for conversion: {src_for_conv}")
                         else:
                             # fallback: use the original dbg_copy
                             src_for_conv = dbg_copy
@@ -7727,7 +7743,7 @@ class ExcelToMarkdownConverter:
                             compat_dir = os.path.join(self.output_dir, 'debug_workbooks_compat')
                             os.makedirs(compat_dir, exist_ok=True)
                             try:
-                                print(f"[DEBUG][_iso_conv_choice] sheet={sheet.title} src_for_conv={src_for_conv}")
+                                debug_print(f"[DEBUG][_iso_conv_choice] sheet={sheet.title} src_for_conv={src_for_conv}")
                             except Exception:
                                 pass
                             cmd_conv = [LIBREOFFICE_PATH, '--headless', '--convert-to', 'xlsx', '--outdir', compat_dir, src_for_conv]
@@ -7735,7 +7751,7 @@ class ExcelToMarkdownConverter:
                             # LibreOffice may create a file with the same basename under compat_dir
                             compat_path = os.path.join(compat_dir, os.path.basename(src_for_conv))
                             if proc_conv.returncode == 0 and os.path.exists(compat_path):
-                                print(f"[DEBUG] saved LibreOffice-resaved compatible workbook: {compat_path}")
+                                debug_print(f"[DEBUG] saved LibreOffice-resaved compatible workbook: {compat_path}")
                             else:
                                 # If conversion failed, log stderr for diagnostics and try to detect any produced xlsx file
                                 stderr = (proc_conv.stderr or '').strip()
@@ -7745,7 +7761,7 @@ class ExcelToMarkdownConverter:
                                 base = os.path.splitext(os.path.basename(src_for_conv))[0]
                                 candidates = [os.path.join(compat_dir, f) for f in os.listdir(compat_dir) if f.startswith(base) and f.lower().endswith('.xlsx')]
                                 if candidates:
-                                    print(f"[DEBUG] detected LibreOffice output candidate: {candidates[0]}")
+                                    debug_print(f"[DEBUG] detected LibreOffice output candidate: {candidates[0]}")
                         except Exception as _e:
                             try:
                                 print(f"[WARN] LibreOffice conversion failed: {_e}")
@@ -7851,7 +7867,7 @@ class ExcelToMarkdownConverter:
                             out_img_name = f"{base_fn}.png"
                         out_img_path = os.path.join(self.images_dir, out_img_name)
                         try:
-                            print(f"[DEBUG][_iso_direct] sheet={sheet.title} direct-extract candidate={img_src_path} will produce {out_img_path}")
+                            debug_print(f"[DEBUG][_iso_direct] sheet={sheet.title} direct-extract candidate={img_src_path} will produce {out_img_path}")
                         except Exception:
                             pass
                         # if source is already png, copy; else convert via PIL
@@ -7864,7 +7880,7 @@ class ExcelToMarkdownConverter:
                                 im = PILImage.open(img_src_path)
                                 im.convert('RGB').save(out_img_path, 'PNG')
                             try:
-                                print(f"[DEBUG] extracted embedded image directly: {out_img_path}")
+                                debug_print(f"[DEBUG] extracted embedded image directly: {out_img_path}")
                             except Exception:
                                 pass
                             # cleanup tmp dirs
@@ -7874,7 +7890,7 @@ class ExcelToMarkdownConverter:
                                 pass
                             # return filename (caller expects png_name)
                             try:
-                                print(f"[DEBUG][_iso_direct_return] sheet={sheet.title} returned_direct_image={os.path.basename(out_img_path)} src={img_src_path}")
+                                debug_print(f"[DEBUG][_iso_direct_return] sheet={sheet.title} returned_direct_image={os.path.basename(out_img_path)} src={img_src_path}")
                             except Exception:
                                 pass
                             return os.path.basename(out_img_path)
@@ -7941,9 +7957,9 @@ class ExcelToMarkdownConverter:
                                             pass
                                     
                                     stree.write(sp, encoding='utf-8', xml_declaration=True)
-                                    print(f"[DEBUG] Applied fitToPage settings to {sp}")
+                                    debug_print(f"[DEBUG] Applied fitToPage settings to {sp}")
                                 except Exception as e:
-                                    print(f"[DEBUG] Failed to apply fitToPage settings: {e}")
+                                    debug_print(f"[DEBUG] Failed to apply fitToPage settings: {e}")
                                 except Exception:
                                     pass
                     except Exception:
@@ -7954,13 +7970,13 @@ class ExcelToMarkdownConverter:
                 # PDF変換直前にtmp_xlsxに縦横1ページ設定を適用(isolated group)
                 try:
                     self._set_excel_fit_to_one_page(tmp_xlsx)
-                    print(f"[DEBUG] isolated group用にtmp_xlsxへpageSetup設定を適用: {tmp_xlsx}")
+                    debug_print(f"[DEBUG] isolated group用にtmp_xlsxへpageSetup設定を適用: {tmp_xlsx}")
                 except Exception as e:
                     print(f"[WARNING] isolated group tmp_xlsx pageSetup設定失敗: {e}")
 
                 # Use Phase 1 foundation method for Excel→PDF conversion
                 try:
-                    print(f"[DEBUG][_iso_conv_invoke] sheet={sheet.title} invoking LibreOffice to convert tmp_xlsx={tmp_xlsx} to PDF in {tmp_pdf_dir}")
+                    debug_print(f"[DEBUG][_iso_conv_invoke] sheet={sheet.title} invoking LibreOffice to convert tmp_xlsx={tmp_xlsx} to PDF in {tmp_pdf_dir}")
                 except Exception:
                     pass
                 
@@ -7968,7 +7984,7 @@ class ExcelToMarkdownConverter:
                 if pdf_path is None:
                     try:
                         print(f"[WARN][_iso_conv_fail] LibreOffice PDF conversion failed")
-                        print(f"[DEBUG][_iso_conv_fallback] sheet={sheet.title} falling back to original excel_file={getattr(self,'excel_file',None)} for conversion")
+                        debug_print(f"[DEBUG][_iso_conv_fallback] sheet={sheet.title} falling back to original excel_file={getattr(self,'excel_file',None)} for conversion")
                     except Exception:
                         pass
                     try:
@@ -8071,7 +8087,7 @@ class ExcelToMarkdownConverter:
                     pass
 
                 try:
-                    print(f"[DEBUG][_iso_imagemagick] running image magick to produce {out_path}")
+                    debug_print(f"[DEBUG][_iso_imagemagick] running image magick to produce {out_path}")
                 except Exception:
                     pass
                 proc2 = subprocess.run(im_cmd_full, capture_output=True, text=True, timeout=120)
@@ -8090,7 +8106,7 @@ class ExcelToMarkdownConverter:
                     except Exception:
                         pass
                     try:
-                        print(f"[DEBUG][_iso_im_convert_fallback] sheet={sheet.title} will fallback to using original excel_file={getattr(self,'excel_file',None)}")
+                        debug_print(f"[DEBUG][_iso_im_convert_fallback] sheet={sheet.title} will fallback to using original excel_file={getattr(self,'excel_file',None)}")
                     except Exception:
                         pass
                     return None
@@ -8267,8 +8283,8 @@ class ExcelToMarkdownConverter:
 
                                     # DEBUG: log scale and expected sizes
                                     try:
-                                        print(f"[DEBUG] expected_w={expected_w} expected_h={expected_h} w_im={w_im} h_im={h_im} scale_x={scale_x} scale_y={scale_y}")
-                                        print(f"[DEBUG] page_box={page_box}")
+                                        debug_print(f"[DEBUG] expected_w={expected_w} expected_h={expected_h} w_im={w_im} h_im={h_im} scale_x={scale_x} scale_y={scale_y}")
+                                        debug_print(f"[DEBUG] page_box={page_box}")
                                     except Exception:
                                         pass
 
@@ -8315,14 +8331,14 @@ class ExcelToMarkdownConverter:
                                         bpx = min(h_im, int(row_y[e_row] * uniform_scale) if e_row < len(row_y) else h_im)
                                     # DEBUG: report computed crop coords
                                     try:
-                                        print(f"[DEBUG] content_bbox={content_bbox} sheet_px_box=({sheet_l_px},{sheet_t_px},{sheet_r_px},{sheet_b_px})" )
+                                        debug_print(f"[DEBUG] content_bbox={content_bbox} sheet_px_box=({sheet_l_px},{sheet_t_px},{sheet_r_px},{sheet_b_px})" )
                                     except Exception:
                                         try:
-                                            print(f"[DEBUG] fallback sheet cell coords: sl={col_x[s_col-1]}, st={row_y[s_row-1]}, er={col_x[e_col] if e_col < len(col_x) else 'NA'}, eb={row_y[e_row] if e_row < len(row_y) else 'NA'}")
+                                            debug_print(f"[DEBUG] fallback sheet cell coords: sl={col_x[s_col-1]}, st={row_y[s_row-1]}, er={col_x[e_col] if e_col < len(col_x) else 'NA'}, eb={row_y[e_row] if e_row < len(row_y) else 'NA'}")
                                         except Exception:
                                             pass
                                     try:
-                                        print(f"[DEBUG] crop_px=({lpx},{tpx},{rpx},{bpx})")
+                                        debug_print(f"[DEBUG] crop_px=({lpx},{tpx},{rpx},{bpx})")
                                     except Exception:
                                         pass
                                 else:
@@ -8418,7 +8434,7 @@ class ExcelToMarkdownConverter:
         print("[INFO] 罫線で囲まれた領域によるテーブル抽出を開始...")
         table_regions = self._detect_bordered_tables(sheet, min_row, max_row, min_col, max_col)
         try:
-            print(f"[DEBUG][_convert_sheet_data] bordered_table_regions_count={len(table_regions)} sample={table_regions[:5]}")
+            debug_print(f"[DEBUG][_convert_sheet_data] bordered_table_regions_count={len(table_regions)} sample={table_regions[:5]}")
         except Exception:
             pass
 
@@ -8426,21 +8442,21 @@ class ExcelToMarkdownConverter:
         # that uses heuristics (merged cells, annotations, column separations).
         if not table_regions:
             try:
-                print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
+                debug_print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
                 heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
                 try:
-                    print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
+                    debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
                     if heur_tables:
-                        print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
+                        debug_print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
                     if heur_annotations:
-                        print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
+                        debug_print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
                 except Exception:
                     pass
                 if heur_tables:
-                    print(f"[DEBUG] heuristic detection found {len(heur_tables)} table regions")
+                    debug_print(f"[DEBUG] heuristic detection found {len(heur_tables)} table regions")
                     table_regions = heur_tables
             except Exception as _e:
-                print(f"[DEBUG] heuristic table detection failed: {_e}")
+                debug_print(f"[DEBUG] heuristic table detection failed: {_e}")
 
         # 変更: 描画（図形/画像）が占有するセル領域を検出し、重複する表領域は
         # テーブルとして出力せずプレーンテキスト扱いで出力する（ユーザ要望）。
@@ -8488,7 +8504,7 @@ class ExcelToMarkdownConverter:
             frac = overlap_cells / table_cells if table_cells > 0 else 0.0
             # debug
             try:
-                print(f"[DEBUG] table_region={region} overlap_cells={overlap_cells} table_cells={table_cells} frac={frac:.3f}")
+                debug_print(f"[DEBUG] table_region={region} overlap_cells={overlap_cells} table_cells={table_cells} frac={frac:.3f}")
             except Exception:
                 pass
 
@@ -8507,7 +8523,7 @@ class ExcelToMarkdownConverter:
 
         table_regions = kept_table_regions
         try:
-            print(f"[DEBUG][_convert_sheet_data] kept_table_regions_count={len(table_regions)} kept_sample={table_regions[:5]}")
+            debug_print(f"[DEBUG][_convert_sheet_data] kept_table_regions_count={len(table_regions)} kept_sample={table_regions[:5]}")
         except Exception:
             pass
 
@@ -8518,7 +8534,7 @@ class ExcelToMarkdownConverter:
         table_index = 0
         for region in table_regions:
             try:
-                print(f"[DEBUG] emitting detected table region: {region}")
+                debug_print(f"[DEBUG] emitting detected table region: {region}")
             except Exception:
                 pass
             try:
@@ -8529,7 +8545,7 @@ class ExcelToMarkdownConverter:
                 table_index += 1
             except Exception as _e:
                 try:
-                    print(f"[DEBUG] _convert_table_region failed for region={region}: {_e}")
+                    debug_print(f"[DEBUG] _convert_table_region failed for region={region}: {_e}")
                 except Exception:
                     pass
             # Mark rows as processed regardless of conversion success so
@@ -8631,7 +8647,7 @@ class ExcelToMarkdownConverter:
                 before_count = len(merged_texts)
                 merged_texts = [t for t in merged_texts if t[0] not in processed_rows]
                 try:
-                    print(f"[DEBUG] filtered merged_texts: removed {before_count - len(merged_texts)} rows that were already processed as tables")
+                    debug_print(f"[DEBUG] filtered merged_texts: removed {before_count - len(merged_texts)} rows that were already processed as tables")
                 except Exception:
                     pass
             except Exception:
@@ -8671,7 +8687,7 @@ class ExcelToMarkdownConverter:
                         smin = min(cols_used)
                         smax = max(cols_used)
                         try:
-                            print(f"[DEBUG] implicit table detected rows={srow}-{erow} cols={smin}-{smax}")
+                            debug_print(f"[DEBUG] implicit table detected rows={srow}-{erow} cols={smin}-{smax}")
                         except Exception:
                             pass
                         # Strong guard: if the run is a two-column numbered/list style
@@ -8715,7 +8731,7 @@ class ExcelToMarkdownConverter:
                                     r_avg = sum(len(x) for x in r_texts) / len(r_texts) if r_texts else 0
                                     if ratio >= 0.8 and r_avg >= 8:
                                         try:
-                                            print(f"[DEBUG] implicit run looks like enumerated list; skipping table conversion rows={srow}-{erow} cols={lcol}-{rcol} left_ratio={ratio:.2f} right_avg={r_avg:.1f}")
+                                            debug_print(f"[DEBUG] implicit run looks like enumerated list; skipping table conversion rows={srow}-{erow} cols={lcol}-{rcol} left_ratio={ratio:.2f} right_avg={r_avg:.1f}")
                                         except Exception:
                                             pass
                                         continue
@@ -8743,7 +8759,7 @@ class ExcelToMarkdownConverter:
                 before_count2 = len(merged_texts)
                 merged_texts = [t for t in merged_texts if t[0] not in processed_rows]
                 try:
-                    print(f"[DEBUG] post-implicit-filter: removed {before_count2 - len(merged_texts)} rows processed by implicit-table conversion")
+                    debug_print(f"[DEBUG] post-implicit-filter: removed {before_count2 - len(merged_texts)} rows processed by implicit-table conversion")
                 except Exception:
                     pass
             except Exception:
@@ -8751,9 +8767,9 @@ class ExcelToMarkdownConverter:
         # Emit merged free-form text entries in ascending row order.
         last_emitted_row = None
         if merged_texts:
-            print(f"[DEBUG] merged_texts出力開始: {len(merged_texts)}件")
+            debug_print(f"[DEBUG] merged_texts出力開始: {len(merged_texts)}件")
             for (r, txt, is_excl_end) in merged_texts:
-                print(f"[DEBUG] merged_texts出力: 行{r}, text='{txt[:50]}...' (is_excl_end={is_excl_end})")
+                debug_print(f"[DEBUG] merged_texts出力: 行{r}, text='{txt[:50]}...' (is_excl_end={is_excl_end})")
                 self._emit_free_text(sheet, r, txt)
                 # if this row is the end of an excluded block, append a blank line
                 # and mark emitted rows ONLY during the canonical emission pass.
@@ -8788,7 +8804,7 @@ class ExcelToMarkdownConverter:
             # この行がプレーンテキスト行かチェック
             region = (row_num, row_num, min_col, max_col)
             if self._is_plain_text_region(sheet, region):
-                print(f"[DEBUG] プレーンテキスト行を検出: 行{row_num}")
+                debug_print(f"[DEBUG] プレーンテキスト行を検出: 行{row_num}")
                 # 連続するプレーンテキスト行を検索
                 text_end_row = row_num
                 for next_row in range(row_num + 1, max_row + 1):
@@ -8840,7 +8856,7 @@ class ExcelToMarkdownConverter:
                     pass
             else:
                 try:
-                    print(f"[TRACE] Skipping authoritative mapping for excluded_region rows {start_row}-{end_row} (non-canonical)")
+                    debug_print(f"[TRACE] Skipping authoritative mapping for excluded_region rows {start_row}-{end_row} (non-canonical)")
                 except Exception:
                     pass
     
@@ -8884,13 +8900,13 @@ class ExcelToMarkdownConverter:
                         self._mark_emitted_row(sheet.title, r)
                 except Exception:
                     pass
-            print(f"[DEBUG] プレーンテキスト出力: {len(text_content)}行")
+            debug_print(f"[DEBUG] プレーンテキスト出力: {len(text_content)}行")
 
     def _detect_table_regions_excluding_processed(self, sheet, min_row: int, max_row: int, min_col: int, max_col: int, processed_rows: set) -> Tuple[List[Tuple[int, int, int, int]], List[str]]:
         """処理済み行を除外してテーブル領域を検出"""
         try:
             print("[INFO] 罫線による表領域の検出を開始...")
-            print(f"[TRACE][_detect_table_regions_excl_entry] sheet={getattr(sheet,'title',None)} range=({min_row}-{max_row},{min_col}-{max_col}) processed_rows_count={len(processed_rows) if processed_rows else 0} processed_rows_sample={sorted(list(processed_rows))[:20] if processed_rows else []}")
+            debug_print(f"[TRACE][_detect_table_regions_excl_entry] sheet={getattr(sheet,'title',None)} range=({min_row}-{max_row},{min_col}-{max_col}) processed_rows_count={len(processed_rows) if processed_rows else 0} processed_rows_sample={sorted(list(processed_rows))[:20] if processed_rows else []}")
         except Exception:
             pass
         
@@ -8902,7 +8918,7 @@ class ExcelToMarkdownConverter:
             if row_num in processed_rows:
                 if current_table_start is not None:
                     # テーブル中の処理済み行があった場合、テーブルを分割
-                    print(f"[DEBUG] テーブル内の処理済み行{row_num}でテーブル分割")
+                    debug_print(f"[DEBUG] テーブル内の処理済み行{row_num}でテーブル分割")
                     current_table_start = None
                 continue
                 
@@ -8941,7 +8957,7 @@ class ExcelToMarkdownConverter:
             
             # 短すぎるテーブルは除外（2行以下）
             if end_row - start_row < 2:
-                print(f"[DEBUG] 短すぎるテーブル除外: 行{start_row}〜{end_row}")
+                debug_print(f"[DEBUG] 短すぎるテーブル除外: 行{start_row}〜{end_row}")
                 continue
             
             # プレーンテキスト行が多い場合は除外
@@ -8979,7 +8995,7 @@ class ExcelToMarkdownConverter:
             plain_text_ratio = plain_text_count / total_rows if total_rows > 0 else 0
             descriptive_ratio = descriptive_content_count / total_rows if total_rows > 0 else 0
             
-            print(f"[DEBUG] テーブル判定: 行{start_row}〜{end_row}, プレーンテキスト比率: {plain_text_ratio:.2f}, 記述的テキスト比率: {descriptive_ratio:.2f}")
+            debug_print(f"[DEBUG] テーブル判定: 行{start_row}〜{end_row}, プレーンテキスト比率: {plain_text_ratio:.2f}, 記述的テキスト比率: {descriptive_ratio:.2f}")
             # 罫線で囲まれている領域は必ずテーブルとして出力（除外判定を緩和）
             # 記述的テキスト比率やプレーンテキスト比率による除外は行わない
             
@@ -8987,10 +9003,10 @@ class ExcelToMarkdownConverter:
             if (end_row - start_row) <= 5:  # 5行以下の小さなテーブル
                 border_density = self._calculate_border_density(sheet, start_row, end_row, start_col, end_col)
                 if border_density < 0.3:  # 境界線密度30%未満
-                    print(f"[DEBUG] 小さなテーブルで罫線密度低いため除外: 行{start_row}〜{end_row} (密度: {border_density:.2f})")
+                    debug_print(f"[DEBUG] 小さなテーブルで罫線密度低いため除外: 行{start_row}〜{end_row} (密度: {border_density:.2f})")
                     continue
             
-            print(f"[DEBUG] 実テーブルとして認定: 行{start_row}〜{end_row}")
+            debug_print(f"[DEBUG] 実テーブルとして認定: 行{start_row}〜{end_row}")
             real_tables.append(boundary)
         
         return real_tables
@@ -9023,12 +9039,12 @@ class ExcelToMarkdownConverter:
         """罫線情報を基に表の領域を検出"""
         print("[INFO] 罫線による表領域の検出を開始...")
         try:
-            print(f"[DEBUG][_detect_table_regions_entry] sheet={getattr(sheet,'title',None)} min_row={min_row} max_row={max_row} min_col={min_col} max_col={max_col}")
+            debug_print(f"[DEBUG][_detect_table_regions_entry] sheet={getattr(sheet,'title',None)} min_row={min_row} max_row={max_row} min_col={min_col} max_col={max_col}")
         except Exception:
             pass
         # Debug: basic sheet metrics
         try:
-            print(f"[DEBUG][_detect_table_regions_entry] sheet={sheet.title} rows={min_row}-{max_row} cols={min_col}-{max_col} max_row={sheet.max_row} max_col={sheet.max_column}")
+            debug_print(f"[DEBUG][_detect_table_regions_entry] sheet={sheet.title} rows={min_row}-{max_row} cols={min_col}-{max_col} max_row={sheet.max_row} max_col={sheet.max_column}")
         except Exception:
             pass
         
@@ -9095,7 +9111,7 @@ class ExcelToMarkdownConverter:
         
         for region in table_regions:
             start_row, end_row, start_col, end_col = region
-            print(f"[DEBUG] 分離処理中の領域: 行{start_row}〜{end_row}, 列{start_col}〜{end_col}")
+            debug_print(f"[DEBUG] 分離処理中の領域: 行{start_row}〜{end_row}, 列{start_col}〜{end_col}")
             
             # 注意書きを収集
             annotations = self._collect_annotations_from_region(sheet, region)
@@ -9103,7 +9119,7 @@ class ExcelToMarkdownConverter:
             
             # 大きなテーブルのみ分離処理を行う
             if (end_col - start_col) < 8:  # 8列未満は分離しない
-                print(f"[DEBUG] 列数が少ないため分離せず: {end_col - start_col + 1}列")
+                debug_print(f"[DEBUG] 列数が少ないため分離せず: {end_col - start_col + 1}列")
                 cleaned_region = self._clean_annotation_from_region(sheet, region)
                 if cleaned_region:
                     separated_tables.append(cleaned_region)
@@ -9122,7 +9138,7 @@ class ExcelToMarkdownConverter:
             
             if len(clear_boundaries) > 1 and not is_single_table:
                 # 罫線による明確な境界があるので、パラメータ-値ペアを作成
-                print(f"[DEBUG] 罫線境界を直接使用: {clear_boundaries}")
+                debug_print(f"[DEBUG] 罫線境界を直接使用: {clear_boundaries}")
                 
                 # パラメータ名列と値列を特定
                 param_boundaries = []
@@ -9140,9 +9156,9 @@ class ExcelToMarkdownConverter:
                         # 全体領域と同じ場合は追加しない(重複を避ける)
                         if not (boundary_start == start_col and boundary_end == end_col):
                             separated_tables.append((start_row, end_row, boundary_start, boundary_end))
-                            print(f"[DEBUG] 複数列境界テーブル追加: {(start_row, end_row, boundary_start, boundary_end)}")
+                            debug_print(f"[DEBUG] 複数列境界テーブル追加: {(start_row, end_row, boundary_start, boundary_end)}")
                         else:
-                            print(f"[DEBUG] 複数列境界は全体と同じためスキップ: {(start_row, end_row, boundary_start, boundary_end)}")
+                            debug_print(f"[DEBUG] 複数列境界は全体と同じためスキップ: {(start_row, end_row, boundary_start, boundary_end)}")
                 
                 # パラメータ名と値を組み合わせたテーブルを作成
                 if param_boundaries and value_boundaries:
@@ -9152,7 +9168,7 @@ class ExcelToMarkdownConverter:
                     param_value_table = self._create_parameter_value_table(sheet, start_row, end_row, param_col, value_col)
                     if param_value_table:
                         separated_tables.append(param_value_table)
-                        print(f"[DEBUG] パラメータ-値テーブル追加: {param_value_table}")
+                        debug_print(f"[DEBUG] パラメータ-値テーブル追加: {param_value_table}")
                 
                 # 個別の境界も追加（項目名リストなど）
                 for boundary_start, boundary_end in clear_boundaries:
@@ -9161,33 +9177,33 @@ class ExcelToMarkdownConverter:
                         cleaned_region = self._clean_annotation_from_region(sheet, table_region)
                         if cleaned_region:
                             separated_tables.append(cleaned_region)
-                            print(f"[DEBUG] 項目名テーブル追加: {cleaned_region}")
+                            debug_print(f"[DEBUG] 項目名テーブル追加: {cleaned_region}")
             else:
                 # 罫線による分離ができない場合、または単一テーブルの場合は従来の方法
                 if is_single_table:
-                    print(f"[DEBUG] 単一テーブル検出、分離スキップ")
+                    debug_print(f"[DEBUG] 単一テーブル検出、分離スキップ")
                 else:
                     main_separations = self._find_major_column_separations(sheet, start_row, end_row, start_col, end_col)
-                    print(f"[DEBUG] 従来方式による分離点: {main_separations}")
+                    debug_print(f"[DEBUG] 従来方式による分離点: {main_separations}")
             
-            print(f"[DEBUG] 検出された分離点: {main_separations}")
+            debug_print(f"[DEBUG] 検出された分離点: {main_separations}")
             
             if len(main_separations) == 0:
                 # 分離点がない場合、注意書きを除外してそのまま追加
-                print(f"[DEBUG] 分離点なし、そのまま追加")
+                debug_print(f"[DEBUG] 分離点なし、そのまま追加")
                 cleaned_region = self._clean_annotation_from_region(sheet, region)
                 if cleaned_region:
                     separated_tables.append(cleaned_region)
-                    print(f"[DEBUG] 分離なし、テーブル追加: {cleaned_region}")
+                    debug_print(f"[DEBUG] 分離なし、テーブル追加: {cleaned_region}")
                 else:
-                    print(f"[DEBUG] 分離なし、テーブルは空のためスキップ")
+                    debug_print(f"[DEBUG] 分離なし、テーブルは空のためスキップ")
             else:
                 # 明確な分離点で分ける
-                print(f"[DEBUG] 分離点で分割開始: {main_separations}")
+                debug_print(f"[DEBUG] 分離点で分割開始: {main_separations}")
                 current_start_col = start_col
                 
                 for i, sep_col in enumerate(main_separations):
-                    print(f"[DEBUG] 分離処理{i+1}: 列{current_start_col}〜{sep_col-1}")
+                    debug_print(f"[DEBUG] 分離処理{i+1}: 列{current_start_col}〜{sep_col-1}")
                     # 列数制限を緩和：設定項目リストなどの1列テーブルも許可
                     if sep_col > current_start_col:  # 最低1列は必要（2列→1列に変更）
                         table_region = (start_row, end_row, current_start_col, sep_col - 1)
@@ -9196,15 +9212,15 @@ class ExcelToMarkdownConverter:
                             # 左側のテーブルの場合、項目名列を追加
                             enhanced_region = self._enhance_table_with_header_column(sheet, cleaned_region, start_col, end_col)
                             separated_tables.append(enhanced_region)
-                            print(f"[DEBUG] 分離テーブル{i+1}追加: {enhanced_region}")
+                            debug_print(f"[DEBUG] 分離テーブル{i+1}追加: {enhanced_region}")
                         else:
-                            print(f"[DEBUG] 分離テーブル{i+1}は空のためスキップ")
+                            debug_print(f"[DEBUG] 分離テーブル{i+1}は空のためスキップ")
                     else:
-                        print(f"[DEBUG] 分離テーブル{i+1}は列数不足のためスキップ: {sep_col - current_start_col + 1}")
+                        debug_print(f"[DEBUG] 分離テーブル{i+1}は列数不足のためスキップ: {sep_col - current_start_col + 1}")
                     current_start_col = sep_col + 1
                 
                 # 最後の部分
-                print(f"[DEBUG] 最後の部分処理: 列{current_start_col}〜{end_col}")
+                debug_print(f"[DEBUG] 最後の部分処理: 列{current_start_col}〜{end_col}")
                 # 列数制限を緩和：1列でも有効
                 if end_col >= current_start_col:  # 最低1列は必要（3列→1列に変更）
                     table_region = (start_row, end_row, current_start_col, end_col)
@@ -9215,11 +9231,11 @@ class ExcelToMarkdownConverter:
                         # 罫線ベースで列境界を再調整
                         final_region = self._refine_column_boundaries_by_borders(sheet, enhanced_region)
                         separated_tables.append(final_region)
-                        print(f"[DEBUG] 最後のテーブル追加: {final_region}")
+                        debug_print(f"[DEBUG] 最後のテーブル追加: {final_region}")
                     else:
-                        print(f"[DEBUG] 最後のテーブルは空のためスキップ")
+                        debug_print(f"[DEBUG] 最後のテーブルは空のためスキップ")
                 else:
-                    print(f"[DEBUG] 最後のテーブルは列数不足のためスキップ: 列幅{end_col - current_start_col + 1}")
+                    debug_print(f"[DEBUG] 最後のテーブルは列数不足のためスキップ: 列幅{end_col - current_start_col + 1}")
         
         # デバッグ: 最終的に分離されたテーブル数を表示
         # 重複テーブルを除去(完全一致)
@@ -9244,14 +9260,14 @@ class ExcelToMarkdownConverter:
                     c1_start >= c2_start and c1_end <= c2_end and
                     not (c1_start == c2_start and c1_end == c2_end)):
                     is_subset = True
-                    print(f"[DEBUG] 部分テーブルを除外: {table1} (完全版: {table2})")
+                    debug_print(f"[DEBUG] 部分テーブルを除外: {table1} (完全版: {table2})")
                     break
             if not is_subset:
                 filtered_tables.append(table1)
         
-        print(f"[DEBUG] 分離結果: {len(filtered_tables)}個のテーブル（重複・部分除去後）")
+        debug_print(f"[DEBUG] 分離結果: {len(filtered_tables)}個のテーブル（重複・部分除去後）")
         for i, table in enumerate(filtered_tables):
-            print(f"[DEBUG] テーブル{i+1}: {table}")
+            debug_print(f"[DEBUG] テーブル{i+1}: {table}")
         
         return filtered_tables, all_annotations
     
@@ -9333,24 +9349,24 @@ class ExcelToMarkdownConverter:
                 cleaned_region = self._clean_annotation_from_region(sheet, region)
                 if cleaned_region:
                     separated_tables.append(cleaned_region)
-                    print(f"[DEBUG] 分離なし、テーブル追加: {cleaned_region}")
+                    debug_print(f"[DEBUG] 分離なし、テーブル追加: {cleaned_region}")
             else:
                 # 明確な分離点で分ける
-                print(f"[DEBUG] 分離点で分割開始: {main_separations}")
+                debug_print(f"[DEBUG] 分離点で分割開始: {main_separations}")
                 current_start_col = start_col
                 
                 for i, sep_col in enumerate(main_separations):
                     if sep_col > current_start_col + 2:  # 最低3列は必要
                         table_region = (start_row, end_row, current_start_col, sep_col - 1)
-                        print(f"[DEBUG] 分離前テーブル{i+1}: {table_region}")
+                        debug_print(f"[DEBUG] 分離前テーブル{i+1}: {table_region}")
                         cleaned_region = self._clean_annotation_from_region(sheet, table_region)
                         if cleaned_region:
                             separated_tables.append(cleaned_region)
-                            print(f"[DEBUG] 分離テーブル{i+1}追加: {cleaned_region}")
+                            debug_print(f"[DEBUG] 分離テーブル{i+1}追加: {cleaned_region}")
                         else:
-                            print(f"[DEBUG] 分離テーブル{i+1}は空のためスキップ")
+                            debug_print(f"[DEBUG] 分離テーブル{i+1}は空のためスキップ")
                     else:
-                        print(f"[DEBUG] 分離テーブル{i+1}は列数不足のためスキップ: {sep_col} <= {current_start_col + 2}")
+                        debug_print(f"[DEBUG] 分離テーブル{i+1}は列数不足のためスキップ: {sep_col} <= {current_start_col + 2}")
                     current_start_col = sep_col + 1
                 
                 # 最後の部分
@@ -9359,7 +9375,7 @@ class ExcelToMarkdownConverter:
                     cleaned_region = self._clean_annotation_from_region(sheet, table_region)
                     if cleaned_region:
                         separated_tables.append(cleaned_region)
-                        print(f"[DEBUG] 最後のテーブル追加: {cleaned_region}")
+                        debug_print(f"[DEBUG] 最後のテーブル追加: {cleaned_region}")
         
         return separated_tables
     
@@ -9367,7 +9383,7 @@ class ExcelToMarkdownConverter:
         """
         パラメータ名列と値列を組み合わせた2列テーブルを作成
         """
-        print(f"[DEBUG] パラメータ-値テーブル作成: 行{start_row}〜{end_row}, パラメータ列{param_col}, 値列{value_col}")
+        debug_print(f"[DEBUG] パラメータ-値テーブル作成: 行{start_row}〜{end_row}, パラメータ列{param_col}, 値列{value_col}")
         
         # パラメータと値のペアを収集
         param_value_pairs = []
@@ -9381,7 +9397,7 @@ class ExcelToMarkdownConverter:
             # パラメータ名がある行のみ収集
             if param_value and not self._is_annotation_text(param_value):
                 param_value_pairs.append((param_value, value_value))
-                print(f"[DEBUG] パラメータ-値ペア: {param_value} → {value_value}")
+                debug_print(f"[DEBUG] パラメータ-値ペア: {param_value} → {value_value}")
         
         if len(param_value_pairs) >= 2:  # 最低2つのペアが必要
             # パラメータ-値テーブルの領域を決定
@@ -9393,7 +9409,7 @@ class ExcelToMarkdownConverter:
         """
         明確な罫線による垂直境界を検出してテーブルを分離
         """
-        print(f"[DEBUG] 明確な罫線境界検出: 行{min_row}〜{max_row}, 列{min_col}〜{max_col}")
+        debug_print(f"[DEBUG] 明確な罫線境界検出: 行{min_row}〜{max_row}, 列{min_col}〜{max_col}")
         
         # 境界線強度を計算
         border_strengths = {}
@@ -9431,18 +9447,18 @@ class ExcelToMarkdownConverter:
         for col, strengths in border_strengths.items():
             if strengths['right'] >= 0.95:
                 strong_right_boundaries.append(col)
-                print(f"[DEBUG] 強い右側境界線: 列{col} ({strengths['right_count']}/{total_rows}行)")
+                debug_print(f"[DEBUG] 強い右側境界線: 列{col} ({strengths['right_count']}/{total_rows}行)")
             elif strengths['right'] >= 0.60:
                 moderate_boundaries.append(col)
-                print(f"[DEBUG] 中程度の右側境界線: 列{col} ({strengths['right_count']}/{total_rows}行)")
+                debug_print(f"[DEBUG] 中程度の右側境界線: 列{col} ({strengths['right_count']}/{total_rows}行)")
 
             if strengths['left'] >= 0.95:
                 strong_left_boundaries.append(col)
-                print(f"[DEBUG] 強い左側境界線: 列{col} ({strengths['left_count']}/{total_rows}行)")
+                debug_print(f"[DEBUG] 強い左側境界線: 列{col} ({strengths['left_count']}/{total_rows}行)")
             elif strengths['left'] >= 0.60:
                 if col not in moderate_boundaries:
                     moderate_boundaries.append(col)
-                    print(f"[DEBUG] 中程度の左側境界線: 列{col} ({strengths['left_count']}/{total_rows}行)")
+                    debug_print(f"[DEBUG] 中程度の左側境界線: 列{col} ({strengths['left_count']}/{total_rows}行)")
 
         # 境界決定のロジック
         boundaries = []
@@ -9454,7 +9470,7 @@ class ExcelToMarkdownConverter:
         # 列数の90%以上に強い境界線がある場合は格子状の単一テーブル
         if total_strong_boundaries >= total_columns * 0.9:
             boundaries.append((min_col, max_col))
-            print(f"[DEBUG] 格子状テーブル検出（境界線密度高）: 列{min_col}〜{max_col}")
+            debug_print(f"[DEBUG] 格子状テーブル検出（境界線密度高）: 列{min_col}〜{max_col}")
         elif total_strong_boundaries <= 2:
             # 強い境界線が少ない場合もmoderate罫線を分割候補に含める
             significant_boundaries = strong_right_boundaries + strong_left_boundaries + moderate_boundaries
@@ -9471,7 +9487,7 @@ class ExcelToMarkdownConverter:
                     end_col = table_starts[i + 1] - 1
                 if end_col >= start_col:
                     boundaries.append((start_col, end_col))
-                    print(f"[DEBUG] テーブル境界決定: 列{start_col}〜{end_col}")
+                    debug_print(f"[DEBUG] テーブル境界決定: 列{start_col}〜{end_col}")
         else:
             # 適度な境界線がある場合は複数テーブルの境界を特定
             significant_boundaries = strong_right_boundaries + strong_left_boundaries
@@ -9494,9 +9510,9 @@ class ExcelToMarkdownConverter:
 
                 if end_col >= start_col:
                     boundaries.append((start_col, end_col))
-                    print(f"[DEBUG] テーブル境界決定: 列{start_col}〜{end_col}")
+                    debug_print(f"[DEBUG] テーブル境界決定: 列{start_col}〜{end_col}")
 
-        print(f"[DEBUG] 最終境界: {boundaries}")
+        debug_print(f"[DEBUG] 最終境界: {boundaries}")
         return boundaries
 
     def _find_major_column_separations(self, sheet, start_row: int, end_row: int, start_col: int, end_col: int) -> List[int]:
@@ -9613,22 +9629,22 @@ class ExcelToMarkdownConverter:
         """2列テーブルに最適化"""
         start_row, end_row, start_col, end_col = region
         
-        print(f"[DEBUG] _optimize_table_for_two_columns: headers={headers}, len={len(headers)}, header_positions={len(header_positions)}")
+        debug_print(f"[DEBUG] _optimize_table_for_two_columns: headers={headers}, len={len(headers)}, header_positions={len(header_positions)}")
 
         # Guard: ヘッダー数が3でない場合は最適化をスキップ
         # (正規化後のヘッダー数で判定、元の列数ではない)
         if len(headers) != 3:
-            print(f"[DEBUG] 2列最適化スキップ（ヘッダー数が3ではない: {len(headers)}列）")
+            debug_print(f"[DEBUG] 2列最適化スキップ（ヘッダー数が3ではない: {len(headers)}列）")
             return None
         
         # header_positionsが3つ以上必要
         if len(header_positions) < 3:
-            print(f"[DEBUG] 2列最適化スキップ（ヘッダー位置が3未満: {len(header_positions)}位置）")
+            debug_print(f"[DEBUG] 2列最適化スキップ（ヘッダー位置が3未満: {len(header_positions)}位置）")
             return None
             
         # 3列で、1列目が冗長な場合を検出
         # 第1列と第2列の組み合わせが設定項目のパターンかチェック(名前|初期値のパターン)
-        print(f"[DEBUG] 3列テーブル検出、パターンチェック: '{headers[0]}' と '{headers[1]}' (列{header_positions[0]}, 列{header_positions[1]})")
+        debug_print(f"[DEBUG] 3列テーブル検出、パターンチェック: '{headers[0]}' と '{headers[1]}' (列{header_positions[0]}, 列{header_positions[1]})")
         # Use column-range based check (inspect the data under header columns) instead
         if self._is_setting_item_pattern_columns(sheet, region, header_positions[0], header_positions[1]):
             # 第1列と第3列のデータ密度を比較して、第1列が有用かどうか判定
@@ -9640,7 +9656,7 @@ class ExcelToMarkdownConverter:
                 
                 # 第1列のデータ密度が50%以上なら第1列を保持
                 if col0_density >= 0.5:
-                    print(f"[DEBUG] 2列最適化 (第1列保持, 密度={col0_density:.1%}): {headers[0]} | {headers[2]}")
+                    debug_print(f"[DEBUG] 2列最適化 (第1列保持, 密度={col0_density:.1%}): {headers[0]} | {headers[2]}")
                     optimized_table = [[headers[0], headers[2]]]
                     # データ行を処理: 第1列と第3列を採用
                     for row_num in range(start_row + 1, end_row + 1):
@@ -9655,7 +9671,7 @@ class ExcelToMarkdownConverter:
                 # fallthrough: if not enough rows, try the original fallback below
 
             # original fallback: use headers[1] and headers[2]
-            print(f"[DEBUG] 2列最適化: {headers[1]} | {headers[2]}")
+            debug_print(f"[DEBUG] 2列最適化: {headers[1]} | {headers[2]}")
             optimized_table = [[headers[1], headers[2]]]
             for row_num in range(start_row + 1, end_row + 1):
                 col2_cell = sheet.cell(row_num, header_positions[1])
@@ -9667,7 +9683,7 @@ class ExcelToMarkdownConverter:
             if len(optimized_table) > 1:
                 return optimized_table
         else:
-            print(f"[DEBUG] パターンマッチせず: '{headers[1]}' と '{headers[2]}'")
+            debug_print(f"[DEBUG] パターンマッチせず: '{headers[1]}' と '{headers[2]}'")
         
         return None
     
@@ -9813,7 +9829,7 @@ class ExcelToMarkdownConverter:
             
             total_rows = len(col1_vals)
             
-            print(f"[DEBUG] _is_setting_item_pattern_columns: col1={col1}({col1_nonempty}個,distinct={col1_distinct},avg_len={avg_len1:.1f}), col2={col2}({col2_nonempty}個,distinct={col2_distinct},avg_len={avg_len2:.1f})")
+            debug_print(f"[DEBUG] _is_setting_item_pattern_columns: col1={col1}({col1_nonempty}個,distinct={col1_distinct},avg_len={avg_len1:.1f}), col2={col2}({col2_nonempty}個,distinct={col2_distinct},avg_len={avg_len2:.1f})")
             
             # - param col (col1) should have more distinct values than value col (col2) typically
             # - value col tends to be shorter on average
@@ -9821,19 +9837,19 @@ class ExcelToMarkdownConverter:
             score = 0
             if col1_distinct >= max(2, col2_distinct):
                 score += 1
-                print(f"[DEBUG] スコア+1: col1_distinct({col1_distinct}) >= max(2, col2_distinct({col2_distinct}))")
+                debug_print(f"[DEBUG] スコア+1: col1_distinct({col1_distinct}) >= max(2, col2_distinct({col2_distinct}))")
             if avg_len2 <= max(6, avg_len1 * 0.7):
                 score += 1
-                print(f"[DEBUG] スコア+1: avg_len2({avg_len2:.1f}) <= max(6, avg_len1*0.7({avg_len1*0.7:.1f}))")
+                debug_print(f"[DEBUG] スコア+1: avg_len2({avg_len2:.1f}) <= max(6, avg_len1*0.7({avg_len1*0.7:.1f}))")
             if col2_nonempty >= max(2, int(total_rows * 0.2)):
                 score += 1
-                print(f"[DEBUG] スコア+1: col2_nonempty({col2_nonempty}) >= max(2, total_rows*0.2({int(total_rows*0.2)}))")
+                debug_print(f"[DEBUG] スコア+1: col2_nonempty({col2_nonempty}) >= max(2, total_rows*0.2({int(total_rows*0.2)}))")
             # if value column distinct is low relative to nonempty, it's likely flag-like
             if col2_nonempty > 0 and (col2_distinct / col2_nonempty) <= 0.5:
                 score += 1
-                print(f"[DEBUG] スコア+1: col2_distinct/col2_nonempty({col2_distinct}/{col2_nonempty}={col2_distinct/col2_nonempty:.2f}) <= 0.5")
+                debug_print(f"[DEBUG] スコア+1: col2_distinct/col2_nonempty({col2_distinct}/{col2_nonempty}={col2_distinct/col2_nonempty:.2f}) <= 0.5")
             
-            print(f"[DEBUG] 最終スコア: {score} (必要: 3以上)")
+            debug_print(f"[DEBUG] 最終スコア: {score} (必要: 3以上)")
             return score >= 3
         except Exception:
             return False
@@ -9948,18 +9964,18 @@ class ExcelToMarkdownConverter:
         """テーブル境界の処理（罫線で囲まれた空行もテーブルの一部として扱う）"""
         # 罫線があり、データがある行でテーブル開始
         if has_data and has_border and current_start is None:
-            print(f"[DEBUG] テーブル開始検出: 行{row_num} (罫線あり)")
+            debug_print(f"[DEBUG] テーブル開始検出: 行{row_num} (罫線あり)")
             return row_num
         # テーブル内で罫線がある空行は継続
         elif current_start is not None and is_empty_row:
             # 空行でも罫線(左右の縦罫線)があればテーブルの一部として継続
             has_vertical_borders = self._has_vertical_borders(sheet, row_num, min_col, max_col)
             if has_vertical_borders:
-                print(f"[DEBUG] テーブル継続: 行{row_num} (空行だが罫線あり)")
+                debug_print(f"[DEBUG] テーブル継続: 行{row_num} (空行だが罫線あり)")
                 return current_start
             else:
                 # 罫線もない空行ならテーブル終了
-                print(f"[DEBUG] テーブル終了検出: 行{row_num} (罫線なし空行)")
+                debug_print(f"[DEBUG] テーブル終了検出: 行{row_num} (罫線なし空行)")
                 self._finalize_table_region(table_boundaries, current_start, row_num - 1, 
                                           sheet, min_col, max_col)
                 return None
@@ -9967,17 +9983,17 @@ class ExcelToMarkdownConverter:
         elif has_border and current_start is not None:
             # データがある行は、強い罫線があってもテーブルの一部として継続
             if has_data:
-                print(f"[DEBUG] テーブル継続: 行{row_num} (データあり)")
+                debug_print(f"[DEBUG] テーブル継続: 行{row_num} (データあり)")
                 return current_start
             # データがない行で強い罫線がある場合のみテーブル終了
             is_strong_boundary = self._is_strong_table_boundary(sheet, row_num, min_col, max_col)
             if is_strong_boundary:
-                print(f"[DEBUG] テーブル終了検出: 行{row_num} (強い罫線、データなし)")
+                debug_print(f"[DEBUG] テーブル終了検出: 行{row_num} (強い罫線、データなし)")
                 self._finalize_table_region(table_boundaries, current_start, row_num - 1, 
                                           sheet, min_col, max_col)
                 return None
             else:
-                print(f"[DEBUG] テーブル継続: 行{row_num} (内部罫線)")
+                debug_print(f"[DEBUG] テーブル継続: 行{row_num} (内部罫線)")
                 return current_start
         return current_start
     
@@ -10003,12 +10019,12 @@ class ExcelToMarkdownConverter:
                     adjusted_start_col = min(adjusted_start_col, merged_range.min_col)
                     adjusted_end_col = max(adjusted_end_col, merged_range.max_col)
                     
-                    print(f"[DEBUG] 結合セルによりテーブル領域拡張: 行{merged_range.min_row}〜{merged_range.max_row}, 列{merged_range.min_col}〜{merged_range.max_col}")
+                    debug_print(f"[DEBUG] 結合セルによりテーブル領域拡張: 行{merged_range.min_row}〜{merged_range.max_row}, 列{merged_range.min_col}〜{merged_range.max_col}")
             
             adjusted_boundaries.append((adjusted_start_row, adjusted_end_row, adjusted_start_col, adjusted_end_col))
             
             if (adjusted_start_row, adjusted_end_row, adjusted_start_col, adjusted_end_col) != (start_row, end_row, start_col, end_col):
-                print(f"[DEBUG] テーブル領域調整: 行{start_row}〜{end_row} -> 行{adjusted_start_row}〜{adjusted_end_row}, 列{start_col}〜{end_col} -> 列{adjusted_start_col}〜{adjusted_end_col}")
+                debug_print(f"[DEBUG] テーブル領域調整: 行{start_row}〜{end_row} -> 行{adjusted_start_row}〜{adjusted_end_row}, 列{start_col}〜{end_col} -> 列{adjusted_start_col}〜{adjusted_end_col}")
         
         return adjusted_boundaries
     
@@ -10019,7 +10035,7 @@ class ExcelToMarkdownConverter:
             actual_col_range = self._get_table_column_range(sheet, start_row, end_row, min_col, max_col)
             if actual_col_range:
                 table_boundaries.append((start_row, end_row, actual_col_range[0], actual_col_range[1]))
-                print(f"[DEBUG] テーブル検出: 行{start_row}〜{end_row}, 列{actual_col_range[0]}〜{actual_col_range[1]}")
+                debug_print(f"[DEBUG] テーブル検出: 行{start_row}〜{end_row}, 列{actual_col_range[0]}〜{actual_col_range[1]}")
     
     def _has_strong_horizontal_border(self, sheet, row_num: int, min_col: int, max_col: int) -> bool:
         """指定行に強い水平罫線があるかチェック（行の上罫線または前行の下罫線）"""
@@ -10226,7 +10242,7 @@ class ExcelToMarkdownConverter:
     
     def _detect_table_columns_by_borders(self, sheet, start_row: int, end_row: int, min_col: int, max_col: int) -> Optional[Tuple[int, int]]:
         """罫線情報を使ってテーブルの列範囲を検出（左罫線・右罫線を正確に判定）"""
-        print(f"[DEBUG] 列範囲検出: 行{start_row}〜{end_row}, 列{min_col}〜{max_col}")
+        debug_print(f"[DEBUG] 列範囲検出: 行{start_row}〜{end_row}, 列{min_col}〜{max_col}")
         
         # 左境界の検出：列の左罫線または前列の右罫線をチェック
         table_start_col = None
@@ -10250,7 +10266,7 @@ class ExcelToMarkdownConverter:
             # 50%以上のセルに境界線がある場合はテーブル開始
             if total_cells > 0 and (border_count / total_cells) >= 0.5:
                 table_start_col = col
-                print(f"[DEBUG] テーブル開始列検出: 列{col} (境界線密度: {border_count}/{total_cells})")
+                debug_print(f"[DEBUG] テーブル開始列検出: 列{col} (境界線密度: {border_count}/{total_cells})")
                 break
         
         # 右境界の検出：列の右罫線または次列の左罫線をチェック
@@ -10275,14 +10291,14 @@ class ExcelToMarkdownConverter:
             # 50%以上のセルに境界線がある場合はテーブル終了
             if total_cells > 0 and (border_count / total_cells) >= 0.5:
                 table_end_col = col
-                print(f"[DEBUG] テーブル終了列検出: 列{col} (境界線密度: {border_count}/{total_cells})")
+                debug_print(f"[DEBUG] テーブル終了列検出: 列{col} (境界線密度: {border_count}/{total_cells})")
                 break
         
         if table_start_col is not None and table_end_col is not None and table_start_col <= table_end_col:
-            print(f"[DEBUG] 罫線ベース列範囲: 列{table_start_col}〜{table_end_col}")
+            debug_print(f"[DEBUG] 罫線ベース列範囲: 列{table_start_col}〜{table_end_col}")
             return (table_start_col, table_end_col)
         
-        print("[DEBUG] 罫線ベース列検出失敗")
+        debug_print("[DEBUG] 罫線ベース列検出失敗")
         return None
     
     def _has_table_borders(self, cell) -> bool:
@@ -10349,9 +10365,9 @@ class ExcelToMarkdownConverter:
                 cols = max(len(r) for r in table_data) if table_data else 0
             except Exception:
                 cols = 0
-            print(f"[DEBUG] _output_markdown_table called (single_table path): rows={len(table_data)}, max_cols={cols}")
+            debug_print(f"[DEBUG] _output_markdown_table called (single_table path): rows={len(table_data)}, max_cols={cols}")
             for i, r in enumerate(table_data[:10]):
-                print(f"[DEBUG] table_data row {i} cols={len(r)}: {r}")
+                debug_print(f"[DEBUG] table_data row {i} cols={len(r)}: {r}")
             # build source_rows sequentially from min_row..max_row assumption
                 try:
                     source_rows = list(range(min_row, max_row + 1))[:len(table_data)]
@@ -10360,12 +10376,12 @@ class ExcelToMarkdownConverter:
                 # prune rows already emitted earlier in the sheet (pre-data rows)
                 try:
                     try:
-                        print(f"[DEBUG][_prune_call_single] sheet={sheet.title} before_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
+                        debug_print(f"[DEBUG][_prune_call_single] sheet={sheet.title} before_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
                     except Exception:
                         pass
                     table_data, source_rows = self._prune_emitted_rows(sheet.title, table_data, source_rows)
                     try:
-                        print(f"[DEBUG][_prune_result_single] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
+                        debug_print(f"[DEBUG][_prune_result_single] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
                     except Exception:
                         pass
                 except Exception:
@@ -10374,7 +10390,7 @@ class ExcelToMarkdownConverter:
                 try:
                     src_sample = source_rows[:10] if source_rows else None
                     rows_len = len(table_data) if table_data else 0
-                    print(f"[DEBUG][_pre_output_call] path=single_table sheet={sheet.title} rows={rows_len} source_rows_sample={src_sample}")
+                    debug_print(f"[DEBUG][_pre_output_call] path=single_table sheet={sheet.title} rows={rows_len} source_rows_sample={src_sample}")
                 except Exception:
                     pass
                 # Defer table emission to canonical pass so authoritative mappings
@@ -10398,7 +10414,7 @@ class ExcelToMarkdownConverter:
         start_row, end_row, start_col, end_col = region
         # Diagnostic entry log: print region and a small sample of raw cell values
         try:
-            print(f"[DEBUG][_convert_table_region_entry] sheet={getattr(sheet, 'title', None)} region={start_row}-{end_row},{start_col}-{end_col}")
+            debug_print(f"[DEBUG][_convert_table_region_entry] sheet={getattr(sheet, 'title', None)} region={start_row}-{end_row},{start_col}-{end_col}")
             # Dump up to 5 rows of raw values to help identify whether a table was detected
             max_dump = min(5, end_row - start_row + 1)
             for rr in range(start_row, start_row + max_dump):
@@ -10409,7 +10425,7 @@ class ExcelToMarkdownConverter:
                     except Exception:
                         v = None
                     rowvals.append((cc, v))
-                print(f"[DEBUG][_convert_table_region_entry] raw row {rr}: {rowvals}")
+                debug_print(f"[DEBUG][_convert_table_region_entry] raw row {rr}: {rowvals}")
         except Exception:
             pass
         
@@ -10419,12 +10435,12 @@ class ExcelToMarkdownConverter:
             title_text = self._find_table_title_in_region(sheet, region)
             if title_text:
                 # タイトルのみの小さなテーブルはスキップ
-                print(f"[DEBUG] タイトルのみの小さなテーブルをスキップ: '{title_text}' at 行{start_row}-{end_row}")
+                debug_print(f"[DEBUG] タイトルのみの小さなテーブルをスキップ: '{title_text}' at 行{start_row}-{end_row}")
                 return
         
         # 非表形式のテキスト（対象分析装置など）をチェック
         if self._is_plain_text_region(sheet, region):
-            print(f"[DEBUG] 非表形式テキストとして処理: 行{start_row}-{end_row}")
+            debug_print(f"[DEBUG] 非表形式テキストとして処理: 行{start_row}-{end_row}")
             self._convert_plain_text_region(sheet, region)
             return
         
@@ -10457,7 +10473,7 @@ class ExcelToMarkdownConverter:
                     found_title_in_region = True
                     break
             if found_title_in_region:
-                print(f"[DEBUG] タイトル行が領域先頭に含まれているためスキップ: '{title_text}' at 行{start_row}")
+                debug_print(f"[DEBUG] タイトル行が領域先頭に含まれているためスキップ: '{title_text}' at 行{start_row}")
                 start_row = start_row + 1
                 region = (start_row, end_row, start_col, end_col)
         except Exception:
@@ -10495,7 +10511,7 @@ class ExcelToMarkdownConverter:
                         # and left is present in fewer than 95% of rows (to avoid eliminating true data columns), drop left
                         total_rows = end_row - start_row + 1
                         if left['distinct'] == 1 and right['distinct'] > 1 and left['nonempty'] / max(1, total_rows) < 0.95:
-                            print(f"[DEBUG] unique_cols heuristic: dropping left repeated column {left['col']} in favor of {right['col']}")
+                            debug_print(f"[DEBUG] unique_cols heuristic: dropping left repeated column {left['col']} in favor of {right['col']}")
                             unique_cols = unique_cols[1:]
                 except Exception:
                     pass
@@ -10572,7 +10588,7 @@ class ExcelToMarkdownConverter:
                             table_data.append(row_vals)
                             source_rows.append(r)
             if table_data:
-                print(f"[DEBUG] unique_cols-based table used: cols={unique_cols}, rows={len(table_data)}")
+                debug_print(f"[DEBUG] unique_cols-based table used: cols={unique_cols}, rows={len(table_data)}")
                 # 追加ダンプ: unique_cols フォールバック時の内部状態確認
                 # safe dump: some variables may not exist in this scope (like header_positions etc.)
                 try:
@@ -10586,11 +10602,11 @@ class ExcelToMarkdownConverter:
                         ctx['final_groups'] = final_groups
                     if 'compressed_headers' in locals():
                         ctx['compressed_headers'] = compressed_headers
-                    print(f"[DEBUG-DUMP] unique_cols context: {ctx}")
+                    debug_print(f"[DEBUG-DUMP] unique_cols context: {ctx}")
                     for i, r in enumerate(table_data[:5]):
-                        print(f"[DEBUG-DUMP] unique_cols table_data row {i}: {r}")
+                        debug_print(f"[DEBUG-DUMP] unique_cols table_data row {i}: {r}")
                 except Exception as _e:
-                    print(f"[DEBUG-DUMP] failed unique_cols dump: {_e}")
+                    debug_print(f"[DEBUG-DUMP] failed unique_cols dump: {_e}")
                 # write compact machine-friendly trace to file (if debug log available)
                 try:
                     sheet_name = getattr(sheet, 'title', None)
@@ -10609,20 +10625,20 @@ class ExcelToMarkdownConverter:
                     except Exception:
                         title_in_region = None
                     if sheet_name == 'XMLファイル自動生成' or title_in_region == 'XMLファイル自動生成':
-                        print('[DEBUG-TRACE] Detected target sheet/region for deep dump: XMLファイル自動生成')
-                        print(f"[DEBUG-TRACE] region={region}")
-                        print(f"[DEBUG-TRACE] unique_cols={unique_cols}")
+                        debug_print('[DEBUG-TRACE] Detected target sheet/region for deep dump: XMLファイル自動生成')
+                        debug_print(f"[DEBUG-TRACE] region={region}")
+                        debug_print(f"[DEBUG-TRACE] unique_cols={unique_cols}")
                         # dump first_row_vals if present
                         if 'first_row_vals' in locals():
-                            print(f"[DEBUG-TRACE] first_row_vals={first_row_vals}")
+                            debug_print(f"[DEBUG-TRACE] first_row_vals={first_row_vals}")
                         if 'merge_into_left' in locals():
-                            print(f"[DEBUG-TRACE] merge_into_left={merge_into_left}")
+                            debug_print(f"[DEBUG-TRACE] merge_into_left={merge_into_left}")
                         if 'merge_map' in locals():
-                            print(f"[DEBUG-TRACE] merge_map={merge_map}")
+                            debug_print(f"[DEBUG-TRACE] merge_map={merge_map}")
                         # header-related structures if present
                         for name in ('header_positions', 'final_groups', 'compressed_headers', 'group_positions'):
                             if name in locals():
-                                print(f"[DEBUG-TRACE] {name}={locals()[name]}")
+                                debug_print(f"[DEBUG-TRACE] {name}={locals()[name]}")
                         # dump a few raw cell values for the region to cross-check
                         try:
                             for rr in range(region[0], min(region[0]+6, region[1]+1)):
@@ -10633,30 +10649,30 @@ class ExcelToMarkdownConverter:
                                     except Exception:
                                         v = None
                                     rowvals.append((c, v))
-                                print(f"[DEBUG-TRACE] raw row {rr}: {rowvals}")
+                                debug_print(f"[DEBUG-TRACE] raw row {rr}: {rowvals}")
                         except Exception as _e:
-                            print(f"[DEBUG-TRACE] failed to dump raw rows: {_e}")
+                            debug_print(f"[DEBUG-TRACE] failed to dump raw rows: {_e}")
                 except Exception as _e:
-                    print(f"[DEBUG-TRACE] deep dump failed: {_e}")
+                    debug_print(f"[DEBUG-TRACE] deep dump failed: {_e}")
                 # 列ヘッダーが無ければプレーンな表として出力
-                print(f"[DEBUG] 出力前テーブルプレビュー(unique_cols): rows={len(table_data)}, first_row={table_data[0] if table_data else None}")
+                debug_print(f"[DEBUG] 出力前テーブルプレビュー(unique_cols): rows={len(table_data)}, first_row={table_data[0] if table_data else None}")
                 # dump table_data shape and first rows for debugging
                 try:
                     cols = max(len(r) for r in table_data) if table_data else 0
                 except Exception:
                     cols = 0
-                print(f"[DEBUG] _output_markdown_table called (unique_cols path): rows={len(table_data)}, max_cols={cols}")
+                debug_print(f"[DEBUG] _output_markdown_table called (unique_cols path): rows={len(table_data)}, max_cols={cols}")
                 for i, r in enumerate(table_data[:10]):
-                    print(f"[DEBUG] table_data row {i} cols={len(r)}: {r}")
+                    debug_print(f"[DEBUG] table_data row {i} cols={len(r)}: {r}")
                 try:
                     # prune pre-emitted rows that may duplicate earlier lines
                     try:
-                        print(f"[DEBUG][_prune_call_unique] sheet={sheet.title} before_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
+                        debug_print(f"[DEBUG][_prune_call_unique] sheet={sheet.title} before_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
                     except Exception:
                         pass
                     table_data, source_rows = self._prune_emitted_rows(sheet.title, table_data, source_rows)
                     try:
-                        print(f"[DEBUG][_prune_result_unique] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
+                        debug_print(f"[DEBUG][_prune_result_unique] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
                     except Exception:
                         pass
                 except Exception:
@@ -10665,7 +10681,7 @@ class ExcelToMarkdownConverter:
                 try:
                     src_sample = source_rows[:10] if source_rows else None
                     rows_len = len(table_data) if table_data else 0
-                    print(f"[DEBUG][_pre_output_call] path=unique_cols sheet={getattr(sheet, 'title', None)} rows={rows_len} source_rows_sample={src_sample}")
+                    debug_print(f"[DEBUG][_pre_output_call] path=unique_cols sheet={getattr(sheet, 'title', None)} rows={rows_len} source_rows_sample={src_sample}")
                 except Exception:
                     pass
                 try:
@@ -10705,15 +10721,15 @@ class ExcelToMarkdownConverter:
             actual_start_row = start_row
         
         if table_data:
-            print(f"[DEBUG] 出力前テーブルプレビュー: rows={len(table_data)}, first_row={table_data[0] if table_data else None}")
+            debug_print(f"[DEBUG] 出力前テーブルプレビュー: rows={len(table_data)}, first_row={table_data[0] if table_data else None}")
             # dump table_data shape before output
             try:
                 cols = max(len(r) for r in table_data) if table_data else 0
             except Exception:
                 cols = 0
-            print(f"[DEBUG] _output_markdown_table called (header/data path): rows={len(table_data)}, max_cols={cols}")
+            debug_print(f"[DEBUG] _output_markdown_table called (header/data path): rows={len(table_data)}, max_cols={cols}")
             for i, r in enumerate(table_data[:10]):
-                print(f"[DEBUG] table_data row {i} cols={len(r)}: {r}")
+                debug_print(f"[DEBUG] table_data row {i} cols={len(r)}: {r}")
             try:
                 # actual_start_rowから開始（header_rowまたはstart_row）
                 # regionのend_rowを使用して、実際のテーブル範囲全体をカバー
@@ -10724,12 +10740,12 @@ class ExcelToMarkdownConverter:
                 approx_rows = None
             try:
                 try:
-                    print(f"[DEBUG][_prune_call_headerdata] sheet={sheet.title} before_prune rows={len(table_data) if table_data else 0} approx_rows_sample={approx_rows[:10] if approx_rows else None}")
+                    debug_print(f"[DEBUG][_prune_call_headerdata] sheet={sheet.title} before_prune rows={len(table_data) if table_data else 0} approx_rows_sample={approx_rows[:10] if approx_rows else None}")
                 except Exception:
                     pass
                 table_data, approx_rows = self._prune_emitted_rows(sheet.title, table_data, approx_rows)
                 try:
-                    print(f"[DEBUG][_prune_result_headerdata] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} approx_rows_sample={approx_rows[:10] if approx_rows else None}")
+                    debug_print(f"[DEBUG][_prune_result_headerdata] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} approx_rows_sample={approx_rows[:10] if approx_rows else None}")
                 except Exception:
                     pass
             except Exception:
@@ -10738,7 +10754,7 @@ class ExcelToMarkdownConverter:
             try:
                 src_sample = approx_rows[:10] if approx_rows else None
                 rows_len = len(table_data) if table_data else 0
-                print(f"[DEBUG][_pre_output_call] path=header_data sheet={sheet.title} rows={rows_len} source_rows_sample={src_sample}")
+                debug_print(f"[DEBUG][_pre_output_call] path=header_data sheet={sheet.title} rows={rows_len} source_rows_sample={src_sample}")
             except Exception:
                 pass
             # Defer table emission until canonical pass so authoritative maps are
@@ -10777,13 +10793,13 @@ class ExcelToMarkdownConverter:
             try:
                 if hasattr(self, '_last_group_positions') and self._last_group_positions:
                     actual_end_col = max(self._last_group_positions)
-                    print(f"[DEBUG] _output_right_side_plain_text: actual_end_col={actual_end_col} (from group_positions={self._last_group_positions})")
+                    debug_print(f"[DEBUG] _output_right_side_plain_text: actual_end_col={actual_end_col} (from group_positions={self._last_group_positions})")
                 else:
                     actual_end_col = end_col
-                    print(f"[DEBUG] _output_right_side_plain_text: actual_end_col={actual_end_col} (from region end_col)")
+                    debug_print(f"[DEBUG] _output_right_side_plain_text: actual_end_col={actual_end_col} (from region end_col)")
             except Exception as e:
                 actual_end_col = end_col
-                print(f"[DEBUG] _output_right_side_plain_text: actual_end_col={actual_end_col} (exception: {e})")
+                debug_print(f"[DEBUG] _output_right_side_plain_text: actual_end_col={actual_end_col} (exception: {e})")
             self._output_right_side_plain_text(sheet, region, actual_end_col)
         else:
             self.markdown_lines.append("*空のテーブル*")
@@ -10796,7 +10812,7 @@ class ExcelToMarkdownConverter:
         if actual_end_col is not None:
             end_col = actual_end_col
         max_col = sheet.max_column
-        print(f"[DEBUG] _output_right_side_plain_text: rows={start_row}-{end_row}, cols={end_col+1}-{max_col}")
+        debug_print(f"[DEBUG] _output_right_side_plain_text: rows={start_row}-{end_row}, cols={end_col+1}-{max_col}")
         for row_num in range(start_row, end_row + 1):
             right_texts = []
             for col_num in range(end_col + 1, max_col + 1):
@@ -10805,7 +10821,7 @@ class ExcelToMarkdownConverter:
                     text = str(cell.value).strip()
                     if text:
                         right_texts.append(text)
-                        print(f"[DEBUG] _output_right_side_plain_text: 行{row_num}列{col_num} text='{text}'")
+                        debug_print(f"[DEBUG] _output_right_side_plain_text: 行{row_num}列{col_num} text='{text}'")
             # 右側にテキストがあれば出力
             if right_texts:
                 # emit via centralized emitter so duplicates and emitted-rows are tracked
@@ -10826,7 +10842,7 @@ class ExcelToMarkdownConverter:
         try:
             rows = end_row - start_row + 1
             cols = end_col - start_col + 1
-            print(f"[DEBUG][_is_plain_text_region_entry] sheet={getattr(sheet,'title',None)} region={start_row}-{end_row},{start_col}-{end_col} rows={rows} cols={cols}")
+            debug_print(f"[DEBUG][_is_plain_text_region_entry] sheet={getattr(sheet,'title',None)} region={start_row}-{end_row},{start_col}-{end_col} rows={rows} cols={cols}")
         except Exception:
             pass
         
@@ -10862,7 +10878,7 @@ class ExcelToMarkdownConverter:
         try:
             tokens = [tok for tok in text_content.split() if tok]
             if row_count == 1 and len(tokens) >= 2 and avg_len <= 60:
-                print(f"[DEBUG] 単一行トークン複数 -> 表扱い: 行{start_row}〜{end_row}, tokens={len(tokens)}, avg_len={avg_len:.1f}")
+                debug_print(f"[DEBUG] 単一行トークン複数 -> 表扱い: 行{start_row}〜{end_row}, tokens={len(tokens)}, avg_len={avg_len:.1f}")
                 return False
         except Exception:
             pass
@@ -10963,7 +10979,7 @@ class ExcelToMarkdownConverter:
                     # Heuristic thresholds: >=80% left are numbering-like and right avg length >=10
                     if ratio >= 0.8 and right_avg >= 10:
                         try:
-                            print(f"[DEBUG] 番号付きリスト検出: 行{start_row}〜{end_row} 左番号率={num_matches}/{len(left_texts)} 右平均長={right_avg:.1f}")
+                            debug_print(f"[DEBUG] 番号付きリスト検出: 行{start_row}〜{end_row} 左番号率={num_matches}/{len(left_texts)} 右平均長={right_avg:.1f}")
                         except Exception:
                             pass
                         return True
@@ -10979,36 +10995,36 @@ class ExcelToMarkdownConverter:
                 border_cols = None
 
             if border_cols:
-                print(f"[DEBUG] パス/XML多だが縦罫線で列境界が検出されたため表として扱います: {border_cols}")
+                debug_print(f"[DEBUG] パス/XML多だが縦罫線で列境界が検出されたため表として扱います: {border_cols}")
                 return False
 
-            print(f"[DEBUG] プレーンテキスト判定(パス/XML多): 行{start_row}〜{end_row}, path_like={path_like_count}/{non_empty_cells}")
+            debug_print(f"[DEBUG] プレーンテキスト判定(パス/XML多): 行{start_row}〜{end_row}, path_like={path_like_count}/{non_empty_cells}")
             return True
 
         # ルール2: 平均セル長が大きく、行数が少なめなら説明文ブロック
         if row_count <= 8 and avg_len > 60:
-            print(f"[DEBUG] プレーンテキスト判定(長文多): 行{start_row}〜{end_row}, avg_len={avg_len:.1f}")
+            debug_print(f"[DEBUG] プレーンテキスト判定(長文多): 行{start_row}〜{end_row}, avg_len={avg_len:.1f}")
             return True
 
         # Exception: single-row with multiple short columns likely represents a compact table
         # e.g. a single row of short labels like 'A  B  C' should be treated as a table
         try:
             if row_count == 1 and cols_with_content >= 2 and avg_len < 40:
-                print(f"[DEBUG] 単一行短文複数列は表扱い: 行{start_row}〜{end_row}, cols_with_content={cols_with_content}, avg_len={avg_len:.1f}")
+                debug_print(f"[DEBUG] 単一行短文複数列は表扱い: 行{start_row}〜{end_row}, cols_with_content={cols_with_content}, avg_len={avg_len:.1f}")
                 return False
         except Exception:
             pass
 
         # ルール3: 非常に少ない行・セルで長文が混在している場合はプレーンテキスト
         if row_count <= 2 and non_empty_cells <= 6 and long_count > 0:
-            print(f"[DEBUG] 単純テキスト判定(少行で長文): 行{start_row}〜{end_row}, long_count={long_count}")
+            debug_print(f"[DEBUG] 単純テキスト判定(少行で長文): 行{start_row}〜{end_row}, long_count={long_count}")
             return True
 
         # ルール4: 列ごとの分布が均一で、各行に複数列のデータがある -> 表形式とみなす
         # 平均非空セル数が2以上かつ行ごとの分散が小さい場合は表
         if avg_row_nonempty >= 2 and row_std <= max(1.5, avg_row_nonempty * 0.6) and cols_with_content >= 2:
             # 表の可能性が高いのでプレーンテキストにはしない
-            print(f"[DEBUG] 表構造検出: 行{start_row}〜{end_row}, avg_row_nonempty={avg_row_nonempty:.1f}, row_std={row_std:.2f}, cols_with_content={cols_with_content}")
+            debug_print(f"[DEBUG] 表構造検出: 行{start_row}〜{end_row}, avg_row_nonempty={avg_row_nonempty:.1f}, row_std={row_std:.2f}, cols_with_content={cols_with_content}")
             return False
 
         # それ以外は保守的にプレーンテキストと判定しない（表として扱う）
@@ -11062,7 +11078,7 @@ class ExcelToMarkdownConverter:
                         else:
                             # non-canonical context: canonical pass will assign indices
                             try:
-                                print(f"[TRACE] Skipping authoritative mapping for plain-text fallback row={row_num} (non-canonical)")
+                                debug_print(f"[TRACE] Skipping authoritative mapping for plain-text fallback row={row_num} (non-canonical)")
                             except Exception:
                                 pass
                     except Exception:
@@ -11086,7 +11102,7 @@ class ExcelToMarkdownConverter:
         """
         start_row, end_row, start_col, end_col = region
         
-        print(f"[DEBUG] ヘッダー行{header_row}でテーブルを構築中...")
+        debug_print(f"[DEBUG] ヘッダー行{header_row}でテーブルを構築中...")
         
         # ヘッダー行の実際の行・列範囲を確認し、regionを拡張
         # (header_rowがregion外の場合や、「名前」など範囲外のヘッダーを含めるため)
@@ -11102,7 +11118,7 @@ class ExcelToMarkdownConverter:
                 header_max_col = max(header_max_col, col_num)
         
         if header_min_col < start_col or header_max_col > end_col or actual_start_row < start_row:
-            print(f"[DEBUG] ヘッダー行により範囲を拡張: 行{start_row}-{end_row} → {actual_start_row}-{actual_end_row}, 列{start_col}-{end_col} → {header_min_col}-{header_max_col}")
+            debug_print(f"[DEBUG] ヘッダー行により範囲を拡張: 行{start_row}-{end_row} → {actual_start_row}-{actual_end_row}, 列{start_col}-{end_col} → {header_min_col}-{header_max_col}")
             start_row = actual_start_row
             end_row = actual_end_row
             start_col = header_min_col
@@ -11223,7 +11239,7 @@ class ExcelToMarkdownConverter:
                             drop = False
 
                         if drop:
-                            print(f"[DEBUG] ヘッダからデータトークン除外: '{p}' at 列{col} (occurrence_fraction={frac:.2f}, len={plen})")
+                            debug_print(f"[DEBUG] ヘッダからデータトークン除外: '{p}' at 列{col} (occurrence_fraction={frac:.2f}, len={plen})")
                             continue
                         filtered_parts.append(p)
 
@@ -11317,18 +11333,18 @@ class ExcelToMarkdownConverter:
 
                 if col_ratio < 0.2 and not keep_despite_low_ratio:
                     # 注記っぽい列としてスキップ
-                    print(f"[DEBUG] ヘッダー候補除外(注記っぽい列): '{combined}' at 列{col} (col_nonempty={col_ratio:.2f})")
+                    debug_print(f"[DEBUG] ヘッダー候補除外(注記っぽい列): '{combined}' at 列{col} (col_nonempty={col_ratio:.2f})")
                     continue
 
                 headers.append(combined)
                 header_positions.append(col)
                 if is_master_col:
-                    print(f"[DEBUG] 結合ヘッダー検出・展開(マスター含む): '{combined}' at 列{col}")
+                    debug_print(f"[DEBUG] 結合ヘッダー検出・展開(マスター含む): '{combined}' at 列{col}")
                 else:
-                    print(f"[DEBUG] ヘッダー検出(結合): '{combined}' at 列{col}")
+                    debug_print(f"[DEBUG] ヘッダー検出(結合): '{combined}' at 列{col}")
         
-        print(f"[DEBUG] 最終ヘッダー: {headers}")
-        print(f"[DEBUG] ヘッダー位置: {header_positions}")
+        debug_print(f"[DEBUG] 最終ヘッダー: {headers}")
+        debug_print(f"[DEBUG] ヘッダー位置: {header_positions}")
 
         # Fallback: if the detected headers are mostly empty, the real header
         # content may be shifted by one row (common when a title row was skipped).
@@ -11339,7 +11355,7 @@ class ExcelToMarkdownConverter:
             nonempty_headers = sum(1 for h in headers if h and str(h).strip())
             total_headers = len(headers) if headers else 0
             if total_headers > 0 and (nonempty_headers / total_headers) < 0.20 and header_row + 1 <= end_row:
-                print(f"[DEBUG] ヘッダーがほとんど空のため、header_rowを1行下にシフトして再試行します (from {header_row} -> {header_row+1})")
+                debug_print(f"[DEBUG] ヘッダーがほとんど空のため、header_rowを1行下にシフトして再試行します (from {header_row} -> {header_row+1})")
                 shifted_row = header_row + 1
                 shifted_headers = []
                 shifted_positions = []
@@ -11367,7 +11383,7 @@ class ExcelToMarkdownConverter:
                     headers = shifted_headers
                     header_positions = shifted_positions
                     header_row = shifted_row
-                    print(f"[DEBUG] シフト後ヘッダー採用: headers={headers}, positions={header_positions}, header_row={header_row}")
+                    debug_print(f"[DEBUG] シフト後ヘッダー採用: headers={headers}, positions={header_positions}, header_row={header_row}")
         except Exception:
             pass
 
@@ -11379,7 +11395,7 @@ class ExcelToMarkdownConverter:
                     headers, header_positions = [list(x) for x in zip(*filtered)]
                 else:
                     headers, header_positions = [], []
-                print(f"[DEBUG] 空ヘッダー列を削除: headers={headers}, positions={header_positions}")
+                debug_print(f"[DEBUG] 空ヘッダー列を削除: headers={headers}, positions={header_positions}")
         except Exception:
             pass
 
@@ -11416,13 +11432,13 @@ class ExcelToMarkdownConverter:
 
         # データ寄り判定: 結合ヘッダーが無い場合のみフォールバックを許可する
         if headers and (data_like_count / len(headers)) > 0.4 and not has_merged_header:
-            print(f"[DEBUG] ヘッダーっぽい行がデータ寄りと判断({data_like_count}/{len(headers)})、ヘッダー処理をスキップします")
+            debug_print(f"[DEBUG] ヘッダーっぽい行がデータ寄りと判断({data_like_count}/{len(headers)})、ヘッダー処理をスキップします")
             return self._trim_edge_empty_columns(self._build_table_data_with_merges(sheet, region, merged_info))
         if has_merged_header:
-            print(f"[DEBUG] 結合セルを含むヘッダーが検出されたため、データ寄り判定を無視してヘッダー処理を継続します")
+            debug_print(f"[DEBUG] 結合セルを含むヘッダーが検出されたため、データ寄り判定を無視してヘッダー処理を継続します")
 
         if len(headers) < 2:
-            print(f"[DEBUG] ヘッダーが不十分、従来方式を使用")
+            debug_print(f"[DEBUG] ヘッダーが不十分、従来方式を使用")
             return self._trim_edge_empty_columns(self._build_table_data_with_merges(sheet, region, merged_info))
 
     # --- ヘッダーの連続重複を圧縮する ---
@@ -11626,17 +11642,17 @@ class ExcelToMarkdownConverter:
         # 実際に使用された列位置を保存（_output_right_side_plain_textで使用）
         self._last_group_positions = group_positions
 
-        print(f"[DEBUG] ヘッダーグループ (元): {groups}")
-        print(f"[DEBUG] ヘッダーグループ (最終): {final_groups}")
-        print(f"[DEBUG] 圧縮後ヘッダー: {compressed_headers}")
+        debug_print(f"[DEBUG] ヘッダーグループ (元): {groups}")
+        debug_print(f"[DEBUG] ヘッダーグループ (最終): {final_groups}")
+        debug_print(f"[DEBUG] 圧縮後ヘッダー: {compressed_headers}")
         # 詳細ダンプ: デバッグ用にヘッダー周りの内部状態を出力
         try:
-            print(f"[DEBUG-DUMP] headers={headers}")
-            print(f"[DEBUG-DUMP] header_positions={header_positions}")
-            print(f"[DEBUG-DUMP] group_positions={group_positions}")
-            print(f"[DEBUG-DUMP] final_groups={final_groups}")
-            print(f"[DEBUG-DUMP] compressed_headers={compressed_headers}")
-            print(f"[DEBUG-DUMP] merged_info_keys_sample={list(merged_info.keys())[:20]}")
+            debug_print(f"[DEBUG-DUMP] headers={headers}")
+            debug_print(f"[DEBUG-DUMP] header_positions={header_positions}")
+            debug_print(f"[DEBUG-DUMP] group_positions={group_positions}")
+            debug_print(f"[DEBUG-DUMP] final_groups={final_groups}")
+            debug_print(f"[DEBUG-DUMP] compressed_headers={compressed_headers}")
+            debug_print(f"[DEBUG-DUMP] merged_info_keys_sample={list(merged_info.keys())[:20]}")
             # 生のセル値を最初の数行だけダンプしてヘッダー位置との対応を確認
             for rr in range(header_row + 1, min(header_row + 6, end_row + 1)):
                 rowvals = []
@@ -11646,9 +11662,9 @@ class ExcelToMarkdownConverter:
                     except Exception:
                         v = None
                     rowvals.append((pos, v))
-                print(f"[DEBUG-DUMP] raw row {rr}: {rowvals}")
+                debug_print(f"[DEBUG-DUMP] raw row {rr}: {rowvals}")
         except Exception as _e:
-            print(f"[DEBUG-DUMP] failed to dump internal state: {_e}")
+            debug_print(f"[DEBUG-DUMP] failed to dump internal state: {_e}")
 
         # テーブルデータ構築（圧縮ヘッダーを使用）
         table_data = [compressed_headers]
@@ -11673,7 +11689,7 @@ class ExcelToMarkdownConverter:
             if col_end < col_start:
                 col_end = col_start
             group_column_ranges.append((col_start, col_end))
-        print(f"[DEBUG] group_column_ranges={group_column_ranges}")
+        debug_print(f"[DEBUG] group_column_ranges={group_column_ranges}")
 
         # Build a helper to get cell value considering merged cells
         def _get_cell_value(r, c):
@@ -11711,7 +11727,7 @@ class ExcelToMarkdownConverter:
             col_scores.sort(key=lambda x: (-x[1], x[2], -x[3], x[0]))
             ordered_cols = [c for (c, _, _, _) in col_scores]
             group_column_priority.append(ordered_cols)
-        print(f"[DEBUG] group_column_priority={group_column_priority}")
+        debug_print(f"[DEBUG] group_column_priority={group_column_priority}")
 
         # write compact group/priority info to debug file for offline analysis
         sheet_name = getattr(sheet, 'title', None)
@@ -11727,11 +11743,11 @@ class ExcelToMarkdownConverter:
                 chosen_content = ''
                 chosen_col = None
                 if row_num == 28 and g_idx == 1:  # 行28グループ1(初期値)を特別追跡
-                    print(f"[DEBUG] 行28グループ1候補: {cols_priority[:5]}")
+                    debug_print(f"[DEBUG] 行28グループ1候補: {cols_priority[:5]}")
                 for col_candidate in cols_priority:
                     content = _get_cell_value(row_num, col_candidate)
                     if row_num == 28 and g_idx == 1 and col_candidate <= 15:  # 最初の数列のみ
-                        print(f"[DEBUG] 行28列{col_candidate}: content='{content}', bool={bool(content and content.strip())}")
+                        debug_print(f"[DEBUG] 行28列{col_candidate}: content='{content}', bool={bool(content and content.strip())}")
                     if content and content.strip():
                         chosen_content = content
                         chosen_col = col_candidate
@@ -11739,7 +11755,7 @@ class ExcelToMarkdownConverter:
                 # デバッグ: 選択状況を出力
                 header_name = compressed_headers[g_idx] if g_idx < len(compressed_headers) else 'unknown'
                 if row_num == 28 or row_num <= header_row + 3:  # 行28を特別に追跡
-                    print(f"[DEBUG] 行{row_num}列{chosen_col}({header_name}): -> '{chosen_content}'")
+                    debug_print(f"[DEBUG] 行{row_num}列{chosen_col}({header_name}): -> '{chosen_content}'")
 
                 merged_val = chosen_content.strip() if chosen_content else ''
                 row_data.append(merged_val)
@@ -11755,13 +11771,13 @@ class ExcelToMarkdownConverter:
         self._detected_header_height = 1
         
         # 2列最適化チェック（正規化後のヘッダーとgroup_positionsを使用）
-        print(f"[DEBUG] 2列最適化チェック開始: headers={compressed_headers}, positions={group_positions}")
+        debug_print(f"[DEBUG] 2列最適化チェック開始: headers={compressed_headers}, positions={group_positions}")
         optimized_structure = self._optimize_table_for_two_columns(sheet, region, compressed_headers, group_positions)
         if optimized_structure:
-            print(f"[DEBUG] 2列最適化成功、テーブルサイズ: {len(optimized_structure)}行")
+            debug_print(f"[DEBUG] 2列最適化成功、テーブルサイズ: {len(optimized_structure)}行")
             return self._trim_edge_empty_columns(optimized_structure)
         else:
-            print(f"[DEBUG] 2列最適化スキップ")
+            debug_print(f"[DEBUG] 2列最適化スキップ")
         
         # 先頭/末尾の空列を削除して返す
         # --- ヒューリスティック：任意の列内で結合されている設定行を分割 ---
@@ -11829,10 +11845,10 @@ class ExcelToMarkdownConverter:
                         cols_to_split.add(col_idx)
 
                 # デバッグ出力: 列ごとのマッチ状況
-                print(f"[DEBUG] 列分割判定: headers={headers}")
+                debug_print(f"[DEBUG] 列分割判定: headers={headers}")
                 for d in col_details:
-                    print(f"[DEBUG] 列{d[0]}: non_empty={d[1]}, matches={d[2]}, ratio={d[3]:.2f}")
-                print(f"[DEBUG] 分割候補の列: {sorted(list(cols_to_split))}")
+                    debug_print(f"[DEBUG] 列{d[0]}: non_empty={d[1]}, matches={d[2]}, ratio={d[3]:.2f}")
+                debug_print(f"[DEBUG] 分割候補の列: {sorted(list(cols_to_split))}")
 
                 if cols_to_split:
                     new_headers = []
@@ -11918,13 +11934,13 @@ class ExcelToMarkdownConverter:
                         # ヘッダーと間違えやすい列（例: 備考欄のようにほとんど空の列）はタイトル候補から除外
                         col_ratio = self._column_nonempty_fraction(sheet, start_row, end_row, col)
                         if col_ratio < 0.2:
-                            print(f"[DEBUG] タイトル候補除外(注記っぽい列): '{text}' at 行{row}列{col} (col_nonempty={col_ratio:.2f})")
+                            debug_print(f"[DEBUG] タイトル候補除外(注記っぽい列): '{text}' at 行{row}列{col} (col_nonempty={col_ratio:.2f})")
                             continue
 
                         distance = abs(row - start_row)
                         row_relation = 0 if row < start_row else (1 if row == start_row else 2)
                         title_candidates.append((text, distance, row, col, 'general', row_relation))
-                        print("[DEBUG] タイトル候補: '{}' at 行{}列{}, 距離{}".format(text, row, col, distance))
+                        debug_print("[DEBUG] タイトル候補: '{}' at 行{}列{}, 距離{}".format(text, row, col, distance))
 
         # 最も適切なタイトルを選択
         if title_candidates:
@@ -11940,12 +11956,12 @@ class ExcelToMarkdownConverter:
                 self._last_table_title_row = int(best_title[2])
             except Exception:
                 self._last_table_title_row = None
-            print("[DEBUG] タイトル選択: '{}' (type={}, row={})".format(best_title[0], best_title[4], best_title[2]))
+            debug_print("[DEBUG] タイトル選択: '{}' (type={}, row={})".format(best_title[0], best_title[4], best_title[2]))
             return best_title[0]
 
         # clear any previous title row if no title found
         self._last_table_title_row = None
-        print("[DEBUG] テーブルタイトルが見つかりませんでした")
+        debug_print("[DEBUG] テーブルタイトルが見つかりませんでした")
         return None
     
     def _find_table_header_row(self, sheet, region: Tuple[int, int, int, int]) -> Optional[Tuple[int, int]]:
@@ -11956,8 +11972,8 @@ class ExcelToMarkdownConverter:
         """
         start_row, end_row, start_col, end_col = region
         
-        print(f"[DEBUG] ヘッダー検索: 行{start_row}〜{min(start_row + 5, end_row + 1)}")
-        print(f"[DEBUG][_find_table_header_row_entry] sheet={sheet.title} region={start_row}-{end_row},{start_col}-{end_col}")
+        debug_print(f"[DEBUG] ヘッダー検索: 行{start_row}〜{min(start_row + 5, end_row + 1)}")
+        debug_print(f"[DEBUG][_find_table_header_row_entry] sheet={sheet.title} region={start_row}-{end_row},{start_col}-{end_col}")
         
         # 結合セル情報を取得して行ごとに評価（結合により上位行が単一ラベルで下位が分割されるケースを区別）
         merged_info = self._get_merged_cell_info(sheet, region)
@@ -12044,9 +12060,9 @@ class ExcelToMarkdownConverter:
                 if height > 1 and multirow_frac < 0.25:
                     # nonemptyが多ければ（全体の50%以上）、有効な複数行ヘッダーとして扱う
                     if nonempty >= total_columns * 0.5:
-                        print(f"[DEBUG] 複数行ヘッダ候補を維持（非空セルが多い）: row={row}, height={height}, multirow_frac={multirow_frac:.2f}, nonempty={nonempty}/{total_columns}")
+                        debug_print(f"[DEBUG] 複数行ヘッダ候補を維持（非空セルが多い）: row={row}, height={height}, multirow_frac={multirow_frac:.2f}, nonempty={nonempty}/{total_columns}")
                     else:
-                        print(f"[DEBUG] 複数行ヘッダ候補をスキップ（実際には単一セル内改行が多い）: row={row}, height={height}, multirow_frac={multirow_frac:.2f}, nonempty={nonempty}/{total_columns}")
+                        debug_print(f"[DEBUG] 複数行ヘッダ候補をスキップ（実際には単一セル内改行が多い）: row={row}, height={height}, multirow_frac={multirow_frac:.2f}, nonempty={nonempty}/{total_columns}")
                         continue
 
                 # compute fraction of columns in the top row that are part of multi-column merged masters
@@ -12060,8 +12076,8 @@ class ExcelToMarkdownConverter:
                 top_merged_fraction = (top_merged_count / total_columns) if total_columns > 0 else 0
 
                 # debug
-                print(f"[DEBUG] 行{row}..{row+height-1} combined header_values (first16): {header_values[:16]}")
-                print(f"[DEBUG] 行{row} height={height} group_count={group_count}, nonempty_cols={nonempty}")
+                debug_print(f"[DEBUG] 行{row}..{row+height-1} combined header_values (first16): {header_values[:16]}")
+                debug_print(f"[DEBUG] 行{row} height={height} group_count={group_count}, nonempty_cols={nonempty}")
 
                 # prefer larger group_count; tie-breaker: prefer full-column coverage, then stronger bottom-border alignment,
                 # then fewer top-row multi-column merges (favor lower-level splits), then deeper bottom row, then larger height
@@ -12153,8 +12169,8 @@ class ExcelToMarkdownConverter:
 
                 likeness_score = _row_header_likeness(bottom_row)
                 # debug print for inspection
-                print(f"[DEBUG] header-likeness(bottom_row={bottom_row})={likeness_score:.3f}")
-                print(f"[DEBUG] header_border_fraction(bottom_row={bottom_row})={header_border_fraction:.3f}")
+                debug_print(f"[DEBUG] header-likeness(bottom_row={bottom_row})={likeness_score:.3f}")
+                debug_print(f"[DEBUG] header_border_fraction(bottom_row={bottom_row})={header_border_fraction:.3f}")
 
                 # 拡張列範囲でのグループ数を計算（テーブル範囲外のヘッダーも考慮）
                 # height>1の場合は全行を走査して結合した値でグループをカウント
@@ -12185,7 +12201,7 @@ class ExcelToMarkdownConverter:
                     except Exception:
                         pass
                 
-                print(f"[DEBUG] extended_group_count(row={row})={extended_group_count} (original group_count={group_count})")
+                debug_print(f"[DEBUG] extended_group_count(row={row})={extended_group_count} (original group_count={group_count})")
 
                 # build metric tuple for this candidate
                 # 罫線を最優先、次に拡張グループ数を考慮
@@ -12273,7 +12289,7 @@ class ExcelToMarkdownConverter:
                     # require a meaningful gain to keep multi-row header; small gains often indicate
                     # the lower rows are data-like and should not be absorbed. Threshold set to 1.
                     if (best_group_count - group_count_one) <= 1:
-                        print(f"[DEBUG] ヘッダー高さの見直し: 複数行によるグループ増分が小さいため単一行を優先します (row={best_row}, before_height={best_height}, groups_before={best_group_count}, groups_one={group_count_one})")
+                        debug_print(f"[DEBUG] ヘッダー高さの見直し: 複数行によるグループ増分が小さいため単一行を優先します (row={best_row}, before_height={best_height}, groups_before={best_group_count}, groups_one={group_count_one})")
                         best_height = 1
                         self._detected_header_height = best_height
             except Exception:
@@ -12312,7 +12328,7 @@ class ExcelToMarkdownConverter:
                     total_columns = min(start_col + 20, end_col + 1) - start_col
                     # prefer bottom row when its grouping equals the multi-row grouping and covers many columns
                     if group_count_bottom >= best_group_count and nonempty_bottom >= max(2, int(total_columns * 0.6)):
-                        print(f"[DEBUG] ヘッダー行選択の調整: 下端行が十分に代表的なヘッダーのため下端行を単一行ヘッダーにします (from row={best_row}, height={best_height} -> row={bottom_row}, height=1)")
+                        debug_print(f"[DEBUG] ヘッダー行選択の調整: 下端行が十分に代表的なヘッダーのため下端行を単一行ヘッダーにします (from row={best_row}, height={best_height} -> row={bottom_row}, height=1)")
                         best_row = bottom_row
                         best_height = 1
                         try:
@@ -12323,11 +12339,11 @@ class ExcelToMarkdownConverter:
             except Exception:
                 pass
 
-            print(f"[DEBUG] ヘッダー行選択 (罫線優先): 行{best_row} (groups={best_group_count}, height={best_height})")
+            debug_print(f"[DEBUG] ヘッダー行選択 (罫線優先): 行{best_row} (groups={best_group_count}, height={best_height})")
             return (best_row, best_height)
 
         # ヘッダー行が見つからなかった場合
-        print(f"[DEBUG] ヘッダー行が見つかりませんでした")
+        debug_print(f"[DEBUG] ヘッダー行が見つかりませんでした")
         return None
     
     def _get_merged_cell_info(self, sheet, region: Tuple[int, int, int, int]) -> Dict[str, Any]:
@@ -12336,15 +12352,15 @@ class ExcelToMarkdownConverter:
         merged_info = {}
         
         try:
-            print(f"[DEBUG] 結合セル情報取得開始: region={region}")
+            debug_print(f"[DEBUG] 結合セル情報取得開始: region={region}")
             for merged_range in sheet.merged_cells.ranges:
-                print(f"[DEBUG] 結合セル範囲発見: 行{merged_range.min_row}〜{merged_range.max_row}, 列{merged_range.min_col}〜{merged_range.max_col}")
+                debug_print(f"[DEBUG] 結合セル範囲発見: 行{merged_range.min_row}〜{merged_range.max_row}, 列{merged_range.min_col}〜{merged_range.max_col}")
                 
                 # 結合セルがテーブル領域と重なっているかチェック（部分的な重なりも含む）
                 if (merged_range.max_row >= start_row and merged_range.min_row <= end_row and
                     merged_range.max_col >= start_col and merged_range.min_col <= end_col):
                     
-                    print(f"[DEBUG] 結合セルが領域に重なる: 行{merged_range.min_row}〜{merged_range.max_row}, 列{merged_range.min_col}〜{merged_range.max_col}")
+                    debug_print(f"[DEBUG] 結合セルが領域に重なる: 行{merged_range.min_row}〜{merged_range.max_row}, 列{merged_range.min_col}〜{merged_range.max_col}")
                     
                     # テーブル領域内の範囲のみで結合セル情報を記録
                     actual_start_row = max(merged_range.min_row, start_row)
@@ -12363,11 +12379,11 @@ class ExcelToMarkdownConverter:
                                 'span_rows': merged_range.max_row - merged_range.min_row + 1,
                                 'span_cols': merged_range.max_col - merged_range.min_col + 1
                             }
-                            print(f"[DEBUG] 結合セル登録: {key} -> master({merged_range.min_row}, {merged_range.min_col})")
+                            debug_print(f"[DEBUG] 結合セル登録: {key} -> master({merged_range.min_row}, {merged_range.min_col})")
                 else:
-                    print(f"[DEBUG] 結合セルが領域外: 行{merged_range.min_row}〜{merged_range.max_row}, 列{merged_range.min_col}〜{merged_range.max_col}")
+                    debug_print(f"[DEBUG] 結合セルが領域外: 行{merged_range.min_row}〜{merged_range.max_row}, 列{merged_range.min_col}〜{merged_range.max_col}")
         except Exception as e:
-            print(f"[DEBUG] 結合セル情報取得エラー: {e}")
+            debug_print(f"[DEBUG] 結合セル情報取得エラー: {e}")
         
         return merged_info
 
@@ -12388,13 +12404,13 @@ class ExcelToMarkdownConverter:
                                      merged_info: Dict[str, Any]) -> List[List[str]]:
         """結合セルを考慮してテーブルデータを構築（ヘッダー行の検出とテーブル構造改善）"""
         start_row, end_row, start_col, end_col = region
-        print(f"[DEBUG] _build_table_data_with_merges実行: region={region}")
+        debug_print(f"[DEBUG] _build_table_data_with_merges実行: region={region}")
         
         # ヘッダー行を検出
         header_info = self._find_table_header_row(sheet, region)
         if header_info:
             header_row, header_height = header_info
-            print(f"[DEBUG] ヘッダー行発見: {header_row}, height={header_height}, テーブルをヘッダー行から開始")
+            debug_print(f"[DEBUG] ヘッダー行発見: {header_row}, height={header_height}, テーブルをヘッダー行から開始")
             # ヘッダー行が見つかった場合、そこからテーブルを開始
             actual_start_row = header_row
             
@@ -12409,13 +12425,13 @@ class ExcelToMarkdownConverter:
                     header_max_col = max(header_max_col, col_num)
             
             if header_min_col < start_col or header_max_col > end_col:
-                print(f"[DEBUG] ヘッダー行により列範囲を拡張: {start_col}-{end_col} → {header_min_col}-{header_max_col}")
+                debug_print(f"[DEBUG] ヘッダー行により列範囲を拡張: {start_col}-{end_col} → {header_min_col}-{header_max_col}")
                 start_col = header_min_col
                 end_col = header_max_col
         else:
             header_row = None
             header_height = 1
-            print(f"[DEBUG] ヘッダー行なし、最初の行から開始")
+            debug_print(f"[DEBUG] ヘッダー行なし、最初の行から開始")
             actual_start_row = start_row
         
         # 最初にすべてのデータを取得
@@ -12437,7 +12453,7 @@ class ExcelToMarkdownConverter:
                     if (row_num == merge_info['master_row'] and 
                         col_num == merge_info['master_col']):
                         if merge_info['span_rows'] > 1 or merge_info['span_cols'] > 1:
-                            print(f"[DEBUG] 結合セル検出: '{content}' を範囲 (行:{merge_info['span_rows']}, 列:{merge_info['span_cols']}) に展開")
+                            debug_print(f"[DEBUG] 結合セル検出: '{content}' を範囲 (行:{merge_info['span_rows']}, 列:{merge_info['span_cols']}) に展開")
                 else:
                     content = self._format_cell_content(cell)
                 
@@ -12445,17 +12461,17 @@ class ExcelToMarkdownConverter:
             raw_table_data.append(row_data)
 
         # dump raw_table_data sample for diagnostics
-        print(f"[DEBUG-DUMP] raw_table_data rows={len(raw_table_data)} sample (first 6):")
+        debug_print(f"[DEBUG-DUMP] raw_table_data rows={len(raw_table_data)} sample (first 6):")
         for i, r in enumerate(raw_table_data[:6]):
-            print(f"[DEBUG-DUMP] raw row {i+actual_start_row}: cols={len(r)} -> {r}")
+            debug_print(f"[DEBUG-DUMP] raw row {i+actual_start_row}: cols={len(r)} -> {r}")
         
         # 空行も含めてすべての行を保持(罫線で囲まれた空行もテーブルの一部)
         filtered_table_data = raw_table_data
 
         # dump filtered_table_data sample for diagnostics
-        print(f"[DEBUG-DUMP] filtered_table_data rows={len(filtered_table_data)} sample (first 6):")
+        debug_print(f"[DEBUG-DUMP] filtered_table_data rows={len(filtered_table_data)} sample (first 6):")
         for i, r in enumerate(filtered_table_data[:6]):
-            print(f"[DEBUG-DUMP] filtered row {i+actual_start_row}: cols={len(r)} -> {r}")
+            debug_print(f"[DEBUG-DUMP] filtered row {i+actual_start_row}: cols={len(r)} -> {r}")
 
         # 空列の検出と除去
         useful_columns = self._identify_useful_columns(filtered_table_data)
@@ -12473,7 +12489,7 @@ class ExcelToMarkdownConverter:
                 useful_columns = sorted(set(useful_columns))
         except Exception:
             # ロギングのみ行い、処理を継続
-            print('[TRACE-USE-HEADER]', str(region), f'useful_columns_before={useful_columns}')
+            debug_print('[TRACE-USE-HEADER]', str(region), f'useful_columns_before={useful_columns}')
 
         # 追加ガード: useful_columns 選定後に、各列のデータ非空割合を計算して
         # 一定のしきい値を満たす列は保持する（誤って削除されるのを防ぐ）
@@ -12498,7 +12514,7 @@ class ExcelToMarkdownConverter:
                     kept_by_guard.append((ci, cnt, frac))
 
             useful_columns = sorted(set(useful_columns))
-            print(f"[TRACE-USEFUL-DECISION] region={region} initial_counts={col_counts} kept_by_guard={kept_by_guard} final_useful={useful_columns}")
+            debug_print(f"[TRACE-USEFUL-DECISION] region={region} initial_counts={col_counts} kept_by_guard={kept_by_guard} final_useful={useful_columns}")
         except Exception:
             pass
 
@@ -12558,9 +12574,9 @@ class ExcelToMarkdownConverter:
             table_data.append(compressed_row)
 
         # dump after column compression step
-        print(f"[DEBUG-DUMP] after useful_columns compression: useful_columns={useful_columns}, table_rows={len(table_data)} sample (first 6):")
+        debug_print(f"[DEBUG-DUMP] after useful_columns compression: useful_columns={useful_columns}, table_rows={len(table_data)} sample (first 6):")
         for i, r in enumerate(table_data[:6]):
-            print(f"[DEBUG-DUMP] compressed row {i}: cols={len(r)} -> {r}")
+            debug_print(f"[DEBUG-DUMP] compressed row {i}: cols={len(r)} -> {r}")
         
         # --- 追加: ヘッダーに同一テキストが連続している場合、それらの列をまとめる ---
         if table_data:
@@ -12573,7 +12589,7 @@ class ExcelToMarkdownConverter:
                     if ci < len(r) and r[ci] and str(r[ci]).strip():
                         cnt += 1
                 col_nonempty_counts.append(cnt)
-            print(f"[DEBUG-DUMP] per-column nonempty counts (after useful_columns): {col_nonempty_counts}")
+            debug_print(f"[DEBUG-DUMP] per-column nonempty counts (after useful_columns): {col_nonempty_counts}")
             # groups: list of (start_idx, end_idx) for consecutive identical headers
             groups = []
             i = 0
@@ -12623,13 +12639,13 @@ class ExcelToMarkdownConverter:
         if len(table_data) > 1 and len(table_data[0]) == 3:
             # 簡易ヘッダー検出（最初の行をヘッダーとみなす）
             headers = table_data[0]
-            print(f"[DEBUG] _build_table_data_with_merges内で2列最適化チェック: headers={headers}")
+            debug_print(f"[DEBUG] _build_table_data_with_merges内で2列最適化チェック: headers={headers}")
             
             # 2列最適化を試行（簡易版）
             # In this path we have only table_data available higher up; keep the table-data based check
             if self._is_setting_item_pattern_tabledata(table_data, 1, 2):
                 # 第1列と第3列を保持して2列テーブルを作る
-                print(f"[DEBUG] 2列最適化実行: {headers[0]} | {headers[2]}")
+                debug_print(f"[DEBUG] 2列最適化実行: {headers[0]} | {headers[2]}")
                 optimized_table = [[headers[0], headers[2]]]  # ヘッダー行
 
                 # データ行を処理: 第1列と第3列を採用
@@ -12644,18 +12660,18 @@ class ExcelToMarkdownConverter:
                 total_data_rows = max(1, len(table_data) - 1)
                 required = max(1, int(total_data_rows * 0.5))  # at least 50% of rows
                 # extra diagnostic dump for 2-col optimization decision
-                print(f"[DEBUG-DUMP] 2col optimization: total_data_rows={total_data_rows}, matched={matched}, required={required}")
+                debug_print(f"[DEBUG-DUMP] 2col optimization: total_data_rows={total_data_rows}, matched={matched}, required={required}")
                 # show sample of rows used for decision
                 for j, r in enumerate(table_data[1: min(len(table_data), 1+10) ]):
-                    print(f"[DEBUG-DUMP] data row sample {j+1}: {r}")
+                    debug_print(f"[DEBUG-DUMP] data row sample {j+1}: {r}")
 
                 if matched >= required:
-                    print(f"[DEBUG] 2列最適化成功、{len(optimized_table)}行のテーブルを返す (matched={matched}/{total_data_rows})")
+                    debug_print(f"[DEBUG] 2列最適化成功、{len(optimized_table)}行のテーブルを返す (matched={matched}/{total_data_rows})")
                     return optimized_table
                 else:
-                    print(f"[DEBUG] 2列最適化スキップ（マッチ行不足: {matched}/{total_data_rows}、必要={required}）")
+                    debug_print(f"[DEBUG] 2列最適化スキップ（マッチ行不足: {matched}/{total_data_rows}、必要={required}）")
             else:
-                print(f"[DEBUG] パターンマッチせず（_build_table_data_with_merges内）")
+                debug_print(f"[DEBUG] パターンマッチせず（_build_table_data_with_merges内）")
         
         return table_data
     
@@ -13140,7 +13156,7 @@ def convert_xls_to_xlsx(xls_file_path: str) -> Optional[str]:
             xls_file_path
         ]
         
-        print(f"[DEBUG] LibreOffice変換コマンド: {' '.join(cmd)}")
+        debug_print(f"[DEBUG] LibreOffice変換コマンド: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         
         if result.returncode != 0:
@@ -13175,8 +13191,12 @@ def main():
     parser.add_argument('excel_file', help='変換するExcelファイル（.xlsx/.xls）')
     parser.add_argument('-o', '--output-dir', type=str, 
                        help='出力ディレクトリを指定（デフォルト: ./output）')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                       help='デバッグ情報を出力')
     
     args = parser.parse_args()
+    
+    set_verbose(args.verbose)
     
     if not os.path.exists(args.excel_file):
         print(f"エラー: ファイル '{args.excel_file}' が見つかりません。")

@@ -45,6 +45,22 @@ except ImportError:
 # 設定
 LIBREOFFICE_PATH = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
 
+_VERBOSE = False
+
+def set_verbose(verbose: bool):
+    """verboseモードを設定"""
+    global _VERBOSE
+    _VERBOSE = verbose
+
+def is_verbose() -> bool:
+    """verboseモードかどうかを返す"""
+    return _VERBOSE
+
+def debug_print(*args, **kwargs):
+    """verboseモード時のみ出力するデバッグ用print"""
+    if _VERBOSE:
+        print(*args, **kwargs)
+
 class WordToMarkdownConverter:
     def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None):
         self.word_file = word_file_path
@@ -132,7 +148,7 @@ class WordToMarkdownConverter:
                     'text': text,
                     'anchor': anchor_id
                 })
-                print(f"[DEBUG] 見出し発見: レベル{heading_level} - {text}")
+                debug_print(f"[DEBUG] 見出し発見: レベル{heading_level} - {text}")
                 
                 # 章番号マッピングを構築（見出しテキストと段落の番号付け情報を使用）
                 self._build_chapter_mapping(text, anchor_id, paragraph)
@@ -178,7 +194,7 @@ class WordToMarkdownConverter:
                     # 章番号部分を除去した見出しタイトルを取得
                     title_text = self._extract_heading_title(heading_text)
                     self.heading_titles_map[pattern] = title_text
-                print(f"[DEBUG] 自動章番号マッピング: '{pattern}' -> '#{anchor_id}'")
+                debug_print(f"[DEBUG] 自動章番号マッピング: '{pattern}' -> '#{anchor_id}'")
         
         # 見出しテキストから章番号を抽出
         patterns = [
@@ -204,7 +220,7 @@ class WordToMarkdownConverter:
                         if self.use_heading_text:
                             title_text = self._extract_heading_title(heading_text)
                             self.heading_titles_map[chapter_ref] = title_text
-                        print(f"[DEBUG] テキスト章番号マッピング: '{chapter_ref}' -> '#{anchor_id}'")
+                        debug_print(f"[DEBUG] テキスト章番号マッピング: '{chapter_ref}' -> '#{anchor_id}'")
                 else:
                     # 単一のマッピング
                     self.headings_map[result] = anchor_id
@@ -212,7 +228,7 @@ class WordToMarkdownConverter:
                     if self.use_heading_text:
                         title_text = self._extract_heading_title(heading_text)
                         self.heading_titles_map[result] = title_text
-                    print(f"[DEBUG] テキスト章番号マッピング: '{result}' -> '#{anchor_id}'")
+                    debug_print(f"[DEBUG] テキスト章番号マッピング: '{result}' -> '#{anchor_id}'")
                 break
     
     def _extract_heading_title(self, heading_text: str) -> str:
@@ -326,7 +342,7 @@ class WordToMarkdownConverter:
                     return True
             return False
         except Exception as e:
-            print(f"[DEBUG] 目次チェックエラー: {e}")
+            debug_print(f"[DEBUG] 目次チェックエラー: {e}")
             return False
     
     def _generate_toc(self):
@@ -440,18 +456,18 @@ class WordToMarkdownConverter:
             # スタイル名での判定
             style_name = paragraph.style.name.lower()
             if style_name in ['toc 1', 'toc 2', 'toc 3', 'toc heading', 'table of contents']:
-                print(f"[DEBUG] 目次スタイル検出: {style_name}")
+                debug_print(f"[DEBUG] 目次スタイル検出: {style_name}")
                 return True
             
             # テキスト内容での判定
             text = paragraph.text.strip().lower()
             if text in ['目次', 'contents', 'table of contents', '目 次']:
-                print(f"[DEBUG] 目次テキスト検出: {text}")
+                debug_print(f"[DEBUG] 目次テキスト検出: {text}")
                 return True
             
             # フィールドコードでの判定
             if 'TOC' in paragraph.text or 'HYPERLINK' in paragraph.text:
-                print(f"[DEBUG] 目次フィールド検出: TOC/HYPERLINK")
+                debug_print(f"[DEBUG] 目次フィールド検出: TOC/HYPERLINK")
                 return True
             
             # Word文書のXML構造での判定
@@ -461,7 +477,7 @@ class WordToMarkdownConverter:
                     next_run = run._element.getnext()
                     while next_run is not None:
                         if 'TOC' in next_run.text if hasattr(next_run, 'text') else '':
-                            print(f"[DEBUG] Word目次フィールド検出")
+                            debug_print(f"[DEBUG] Word目次フィールド検出")
                             return True
                         if next_run.xpath('.//w:fldChar[@w:fldCharType="end"]'):
                             break
@@ -469,7 +485,7 @@ class WordToMarkdownConverter:
             
             return False
         except Exception as e:
-            print(f"[DEBUG] 目次判定エラー: {e}")
+            debug_print(f"[DEBUG] 目次判定エラー: {e}")
             return False
     
     def _is_heading(self, paragraph) -> bool:
@@ -633,11 +649,11 @@ class WordToMarkdownConverter:
                 numbering_info = self.numbering_types[numId]
                 is_bullet = numbering_info['type'] == 'bullet'
                 
-                print(f"[DEBUG] numId={numId} -> type={numbering_info['type']}, format='{numbering_info['format']}'")
+                debug_print(f"[DEBUG] numId={numId} -> type={numbering_info['type']}, format='{numbering_info['format']}'")
             else:
                 # フォールバック：従来の判定方法
                 is_bullet = self._is_bullet_numbering(numId)
-                print(f"[DEBUG] numId={numId} -> フォールバック判定: {'bullet' if is_bullet else 'number'}")
+                debug_print(f"[DEBUG] numId={numId} -> フォールバック判定: {'bullet' if is_bullet else 'number'}")
             
             if is_bullet:
                 # 箇条書きリスト
@@ -696,9 +712,9 @@ class WordToMarkdownConverter:
                 ilvl = ilvl_elem[0].get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val') if ilvl_elem else 'None'
                 
                 text = paragraph.text.strip()[:30]
-                print(f"[DEBUG] リスト項目: '{text}' | numId={num_id} | ilvl={ilvl}")
+                debug_print(f"[DEBUG] リスト項目: '{text}' | numId={num_id} | ilvl={ilvl}")
         except Exception as e:
-            print(f"[DEBUG] 番号付けデバッグエラー: {e}")
+            debug_print(f"[DEBUG] 番号付けデバッグエラー: {e}")
     
     def _analyze_numbering_definitions(self):
         """numbering.xmlから番号付け定義を解析"""
@@ -715,7 +731,7 @@ class WordToMarkdownConverter:
             
             if numbering_part:
                 numbering_xml = numbering_part.blob.decode('utf-8')
-                print(f"[DEBUG] numbering.xml の一部: {numbering_xml[:500]}")
+                debug_print(f"[DEBUG] numbering.xml の一部: {numbering_xml[:500]}")
                 
                 # 各numIdのlvlText（表示形式）を解析
                 import xml.etree.ElementTree as ET
@@ -729,7 +745,7 @@ class WordToMarkdownConverter:
                     if abstract_num_id is not None:
                         abstract_id = abstract_num_id.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')
                         num_to_abstract[num_id] = abstract_id
-                        print(f"[DEBUG] numId={num_id} -> abstractNumId={abstract_id}")
+                        debug_print(f"[DEBUG] numId={num_id} -> abstractNumId={abstract_id}")
                 
                 # abstractNum定義から実際の番号形式を解析
                 for abstract_num in root.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNum'):
@@ -769,10 +785,10 @@ class WordToMarkdownConverter:
                                     'format_type': format_type,
                                     'abstract_id': abstract_id
                                 }
-                                print(f"[DEBUG] numId={num_id}: type={'bullet' if is_bullet else 'number'}, format='{format_text}', format_type='{format_type}'")
+                                debug_print(f"[DEBUG] numId={num_id}: type={'bullet' if is_bullet else 'number'}, format='{format_text}', format_type='{format_type}'")
                         
         except Exception as e:
-            print(f"[DEBUG] numbering解析エラー: {e}")
+            debug_print(f"[DEBUG] numbering解析エラー: {e}")
             import traceback
             traceback.print_exc()
     
@@ -944,7 +960,7 @@ class WordToMarkdownConverter:
                 for processed_rel_id, processed_info in self.processed_images.items():
                     if isinstance(processed_info, dict) and processed_info.get('hash') == image_hash:
                         already_processed = True
-                        print(f"[DEBUG] 画像重複スキップ: {rel.rId} (ハッシュ重複)")
+                        debug_print(f"[DEBUG] 画像重複スキップ: {rel.rId} (ハッシュ重複)")
                         break
                 
                 if not already_processed:
@@ -1000,13 +1016,13 @@ class WordToMarkdownConverter:
                 # Word Processing Canvas (wpc) をチェック
                 canvas_elements = drawing.xpath('.//*[local-name()="wpc"]')
                 if canvas_elements:
-                    print("[DEBUG] Word Processing Canvas検出")
+                    debug_print("[DEBUG] Word Processing Canvas検出")
                     return True
                 
                 # Word Processing Group (wpg) をチェック
                 group_elements = drawing.xpath('.//*[local-name()="wgp"]')
                 if group_elements:
-                    print("[DEBUG] Word Processing Group検出")
+                    debug_print("[DEBUG] Word Processing Group検出")
                     return True
                     
             return False
@@ -1063,7 +1079,7 @@ class WordToMarkdownConverter:
             if not temp_doc_path:
                 return False
             
-            print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
+            debug_print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
             
             # LibreOfficeでPDFに変換
             temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
@@ -1071,7 +1087,7 @@ class WordToMarkdownConverter:
                 os.unlink(temp_doc_path)
                 return False
             
-            print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
             
             # PDFの内容を確認
             self._debug_pdf_content(temp_pdf_path)
@@ -1095,7 +1111,7 @@ class WordToMarkdownConverter:
                 debug_pdf_path = os.path.join('output/debug', f"{os.path.splitext(os.path.basename(image_filename))[0]}.pdf")
                 os.makedirs('output/debug', exist_ok=True)
                 shutil.copy2(temp_pdf_path, debug_pdf_path)
-                print(f"[DEBUG] PDFデバッグファイル保存: {debug_pdf_path}")
+                debug_print(f"[DEBUG] PDFデバッグファイル保存: {debug_pdf_path}")
                 
                 # 一時ファイルを削除
                 os.unlink(temp_doc_path)
@@ -1115,7 +1131,7 @@ class WordToMarkdownConverter:
     def _create_canvas_document(self, canvas_element, drawing_element):
         """キャンバス要素のみを含む一時Word文書を作成"""
         try:
-            print("[DEBUG] Word文書作成開始...")
+            debug_print("[DEBUG] Word文書作成開始...")
             
             # 元の文書からリレーション情報を取得
             original_rels = {}
@@ -1123,13 +1139,13 @@ class WordToMarkdownConverter:
                 for rel in self.doc.part.rels.values():
                     if "image" in rel.reltype:
                         original_rels[rel.rId] = rel.target_part.blob
-                print(f"[DEBUG] 取得したリレーション数: {len(original_rels)}")
+                debug_print(f"[DEBUG] 取得したリレーション数: {len(original_rels)}")
             except Exception as rel_error:
-                print(f"[DEBUG] リレーション取得エラー: {rel_error}")
+                debug_print(f"[DEBUG] リレーション取得エラー: {rel_error}")
             
             # XMLを文字列として取得
             drawing_xml = ET.tostring(drawing_element, encoding='unicode')
-            print(f"[DEBUG] Drawing XML長: {len(drawing_xml)}")
+            debug_print(f"[DEBUG] Drawing XML長: {len(drawing_xml)}")
             
             # より適切なWord文書XMLを作成
             doc_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -1254,7 +1270,7 @@ class WordToMarkdownConverter:
         """PDFをPNGに変換（高速化オプション付き）"""
         try:
             # 手法1: 高速変換（品質は標準、速度重視）
-            print("[DEBUG] 高速PDF→PNG変換実行...")
+            debug_print("[DEBUG] 高速PDF→PNG変換実行...")
             cmd_fast = [
                 'magick',
                 '-density', '300',  # 標準DPIで高速化
@@ -1284,7 +1300,7 @@ class WordToMarkdownConverter:
                         # ファイル名を除いて重要な情報だけ表示
                         parts = info.split()
                         if len(parts) >= 3:
-                            print(f"[DEBUG] 画像情報: {parts[2]} {parts[6] if len(parts) > 6 else ''}")
+                            debug_print(f"[DEBUG] 画像情報: {parts[2]} {parts[6] if len(parts) > 6 else ''}")
                 except Exception:
                     pass
                     
@@ -1294,7 +1310,7 @@ class WordToMarkdownConverter:
                 
                 # 手法2: pdftoppm使用（利用可能な場合）
                 if shutil.which('pdftoppm'):
-                    print("[DEBUG] pdftoppm高速変換試行...")
+                    debug_print("[DEBUG] pdftoppm高速変換試行...")
                     cmd_ppm = ['pdftoppm', '-png', '-r', '200', '-singlefile', pdf_path, output_path.replace('.png', '')]
                     
                     result2 = subprocess.run(cmd_ppm, capture_output=True, text=True, timeout=20)
@@ -1308,7 +1324,7 @@ class WordToMarkdownConverter:
                         return True
                 
                 # 手法3: 最小設定での変換
-                print("[DEBUG] 最小設定変換試行...")
+                debug_print("[DEBUG] 最小設定変換試行...")
                 cmd_minimal = [
                     'magick',
                     '-density', '150',  # 低DPIで最高速
@@ -1342,9 +1358,9 @@ class WordToMarkdownConverter:
                     lines = result.stdout.split('\n')
                     for line in lines:
                         if 'Pages:' in line or 'Page size:' in line:
-                            print(f"[DEBUG] {line.strip()}")
+                            debug_print(f"[DEBUG] {line.strip()}")
                 else:
-                    print(f"[DEBUG] PDF情報取得失敗")
+                    debug_print(f"[DEBUG] PDF情報取得失敗")
             # pdfinfoがない場合は何もしない（エラーメッセージなし）
         except Exception:
             # エラーが発生しても無視（オプション機能のため）
@@ -1363,11 +1379,11 @@ class WordToMarkdownConverter:
                 for line in lines:
                     if any(keyword in line.lower() for keyword in ['geometry', 'resolution', 'colorspace', 'depth']):
                         important_info.append(line.strip())
-                print(f"[DEBUG] 画像情報: {' | '.join(important_info)}")
+                debug_print(f"[DEBUG] 画像情報: {' | '.join(important_info)}")
             else:
-                print(f"[DEBUG] 画像情報取得失敗: {result.stderr}")
+                debug_print(f"[DEBUG] 画像情報取得失敗: {result.stderr}")
         except Exception as e:
-            print(f"[DEBUG] 画像情報取得エラー: {e}")
+            debug_print(f"[DEBUG] 画像情報取得エラー: {e}")
 
     def _detect_image_format(self, image_data: bytes, target_ref: str) -> str:
         """画像形式を検出"""
@@ -1526,7 +1542,7 @@ def convert_doc_to_docx(doc_file_path: str) -> str:
             doc_file_path
         ]
         
-        print(f"[DEBUG] LibreOffice変換コマンド: {' '.join(cmd)}")
+        debug_print(f"[DEBUG] LibreOffice変換コマンド: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         
         if result.returncode != 0:
@@ -1566,8 +1582,12 @@ def main():
                        help='章番号の代わりに見出しテキストをリンクに使用')
     parser.add_argument('-o', '--output-dir', type=str, 
                        help='出力ディレクトリを指定（デフォルト: 実行ディレクトリ）')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                       help='デバッグ情報を出力')
     
     args = parser.parse_args()
+    
+    set_verbose(args.verbose)
     
     if not os.path.exists(args.word_file):
         print(f"エラー: ファイル '{args.word_file}' が見つかりません。")
@@ -1582,7 +1602,7 @@ def main():
     converted_file = None
     
     if args.word_file.endswith('.doc'):
-        print("DOCファイルが指定されました。DOCXに変換します...")
+        debug_print("DOCファイルが指定されました。DOCXに変換します...")
         converted_file = convert_doc_to_docx(args.word_file)
         if converted_file is None:
             print("❌ DOC→DOCX変換に失敗しました。")
