@@ -1728,7 +1728,7 @@ class ExcelToMarkdownConverter:
     def _process_sheet_images(self, sheet, insert_index: Optional[int] = None, insert_images: bool = True):
         """シート内の画像を処理"""
         try:
-            # 診断: 呼び出し元をトレースできるようエントリパラメータを記録
+            print(f"[DEBUG][_process_sheet_images_entry] sheet={sheet.title} insert_index={insert_index} insert_images={insert_images}")
             debug_print(f"[DEBUG][_process_sheet_images_entry] sheet={sheet.title} insert_index={insert_index} insert_images={insert_images}")
             # 重複した重い処理を防止: 図形が既に生成されている場合
             # for this sheet earlier in the run, skip processing to avoid
@@ -1868,22 +1868,32 @@ class ExcelToMarkdownConverter:
                                         total_anchors = total_anchors if 'total_anchors' in locals() else 0
                                         pic_anchors = pic_anchors if 'pic_anchors' in locals() else 0
                                         sp_anchors = sp_anchors if 'sp_anchors' in locals() else 0
+                                    
+                                    print(f"[DEBUG] Sheet '{sheet.title}': total_anchors={total_anchors}, pic_anchors={pic_anchors}, sp_anchors={sp_anchors}, sheet._images={len(sheet._images)}")
+                                    debug_print(f"[DEBUG] Sheet '{sheet.title}': total_anchors={total_anchors}, pic_anchors={pic_anchors}, sp_anchors={sp_anchors}, sheet._images={len(sheet._images)}")
+                                    
                                     # 埋め込み画像よりアンカーが多く、少なくとも1つの図形がある場合、
                                     # attempt isolated-group rendering to capture vector shapes
+                                    print(f"[DEBUG] Checking condition: total_anchors({total_anchors}) > len(sheet._images)({len(sheet._images)}) = {total_anchors > len(sheet._images)} AND sp_anchors({sp_anchors}) > 0 = {sp_anchors > 0}")
                                     if total_anchors > len(sheet._images) and sp_anchors > 0:
+                                        print(f"[DEBUG] Condition TRUE - entering isolated group rendering block for sheet '{sheet.title}'")
                                         debug_print(f"[DEBUG] Detected additional drawing shapes (anchors={total_anchors}, pics={pic_anchors}, sps={sp_anchors}) - attempting isolated-group rendering")
                                         try:
                                             # 図形のバウンディングボックスを抽出
                                             shapes = None
                                             try:
+                                                print(f"[DEBUG] Calling _extract_drawing_shapes for sheet '{sheet.title}'")
                                                 shapes = self._extract_drawing_shapes(sheet)
+                                                print(f"[DEBUG] _extract_drawing_shapes returned {len(shapes) if shapes else 0} shapes")
                                             except Exception as shape_ex:
                                                 print(f"[WARNING] _extract_drawing_shapes failed: {shape_ex}")
                                                 import traceback
                                                 traceback.print_exc()
                                             
                                             debug_print(f"[DEBUG] _extract_drawing_shapes returned: {len(shapes) if shapes else 'None'} shapes")
+                                            print(f"[DEBUG] Checking shapes: shapes={'Not None' if shapes else 'None'}, len={len(shapes) if shapes else 0}")
                                             if shapes and len(shapes) > 0:
+                                                print(f"[DEBUG] Shapes condition TRUE - entering clustering block")
                                                 # 適切なクラスタリングロジックを使用して図形をクラスタリング
                                                 # 行ベースのギャップ分割のためセル範囲を抽出
                                                 try:
@@ -1894,9 +1904,11 @@ class ExcelToMarkdownConverter:
                                                 # 適切なクラスタリングのため_cluster_shapes_commonを使用
                                                 # max_groups=1 means cluster into 1 group if possible (no splitting)
                                                 # ただし、このメソッドは大きなギャップがある場合は分割します
+                                                print(f"[DEBUG] Calling _cluster_shapes_common with {len(shapes)} shapes")
                                                 clusters, debug_info = self._cluster_shapes_common(
                                                     sheet, shapes, cell_ranges=cell_ranges_all, max_groups=1
                                                 )
+                                                print(f"[DEBUG] _cluster_shapes_common returned {len(clusters)} clusters")
                                                 debug_print(f"[DEBUG] clustered into {len(clusters)} groups: sizes={[len(c) for c in clusters]}")
                                                 debug_print(f"[DEBUG] clustering debug_info: {debug_info}")
                                                 
@@ -1905,9 +1917,12 @@ class ExcelToMarkdownConverter:
                                                 # v2 is experimental and incomplete (missing connector cosmetic processing)
                                                 isolated_produced = False
                                                 isolated_images = []  # List of (filename, row) tuples
+                                                print(f"[DEBUG] Starting to render {len(clusters)} clusters for sheet '{sheet.title}'")
                                                 for idx, cluster in enumerate(clusters):
                                                     if len(cluster) > 0:
+                                                        print(f"[DEBUG] Rendering cluster {idx+1}/{len(clusters)} with {len(cluster)} shapes")
                                                         result = self._render_sheet_isolated_group(sheet, cluster)
+                                                        print(f"[DEBUG] Cluster {idx+1} rendering result: {result}")
                                                         if result:
                                                             if isinstance(result, tuple) and len(result) == 2:
                                                                 img_name, cluster_row = result
