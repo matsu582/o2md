@@ -5409,25 +5409,21 @@ class ExcelToMarkdownConverter:
 
             戻り値: Trueなら重複とみなす（テーブルを除外）。
             """
-            # no drawings -> no overlap
             if not drawing_ranges:
                 return False
 
             r1, r2, c1, c2 = region if len(region) == 4 else (region[0], region[1], region[2], region[3])
 
-            # テーブル領域のセル数
             table_cells = max(0, (r2 - r1 + 1)) * max(0, (c2 - c1 + 1))
             if table_cells <= 0:
                 return False
 
-            # accumulate overlapping cells across all drawing ranges
             overlap_cells = 0
             for dr in drawing_ranges:
                 try:
                     d_c1, d_c2, d_r1, d_r2 = dr
                 except Exception:
                     continue
-                # compute intersection rectangle
                 inter_r1 = max(r1, d_r1)
                 inter_r2 = min(r2, d_r2)
                 inter_c1 = max(c1, d_c1)
@@ -5435,12 +5431,21 @@ class ExcelToMarkdownConverter:
                 if inter_r1 <= inter_r2 and inter_c1 <= inter_c2:
                     overlap_cells += (inter_r2 - inter_r1 + 1) * (inter_c2 - inter_c1 + 1)
 
-            # fraction of table covered by drawings
             frac = overlap_cells / table_cells if table_cells > 0 else 0.0
-            # debug
-            debug_print(f"[DEBUG] table_region={region} overlap_cells={overlap_cells} table_cells={table_cells} frac={frac:.3f}")
+            
+            num_rows = r2 - r1 + 1
+            num_cols = c2 - c1 + 1
+            is_very_large_table = num_rows > 50 and num_cols > 30
+            
+            if is_very_large_table and len(drawing_ranges) >= 10:
+                adjusted_threshold = 0.02
+                debug_print(f"[DEBUG] Large table with many drawings detected - using stricter threshold {adjusted_threshold}")
+            else:
+                adjusted_threshold = overlap_threshold
+            
+            debug_print(f"[DEBUG] table_region={region} overlap_cells={overlap_cells} table_cells={table_cells} frac={frac:.3f} threshold={adjusted_threshold:.3f}")
 
-            return frac >= overlap_threshold
+            return frac >= adjusted_threshold
 
         # Split table_regions into those to keep and those to exclude due to overlap
         kept_table_regions = []
