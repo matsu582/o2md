@@ -1,3 +1,15 @@
+
+# デバッグ出力用関数（x2md.pyから使用可能な場合はインポート、そうでない場合はフォールバック）
+try:
+    from x2md import debug_print, is_verbose
+except ImportError:
+    _VERBOSE = False
+    def debug_print(*args, **kwargs):
+        if _VERBOSE:
+            print(*args, **kwargs)
+    def is_verbose():
+        return _VERBOSE
+
 """
 IsolatedGroupRenderer - 分離グループ画像レンダリングクラス
 
@@ -65,7 +77,7 @@ class IsolatedGroupRenderer:
             anchors = self._phase2_collect_anchors(drawing_xml)
             
             if not anchors:
-                print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawable anchors found")
+                debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawable anchors found")
                 return None
             
             # フェーズ3: セル範囲計算
@@ -76,7 +88,7 @@ class IsolatedGroupRenderer:
             # フェーズ4: ID収集
             keep_cnvpr_ids = self._phase4_collect_keep_ids(shape_indices, anchors)
             
-            print(f"[DEBUG][_iso_entry] sheet={sheet.title} anchors_count={len(anchors)} keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))}")
+            debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} anchors_count={len(anchors)} keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))}")
             
             # フェーズ5: 一時ディレクトリ作成とコネクタ参照解決
             tmpdir, referenced_ids, connector_children_by_id = \
@@ -158,7 +170,7 @@ class IsolatedGroupRenderer:
             rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
             
             if rels_path not in z.namelist():
-                print(f"[DEBUG][_iso_entry] sheet={sheet.title} missing rels: {rels_path}")
+                debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} missing rels: {rels_path}")
                 return None, None, None, None, None
             
             rels_xml = ET.fromstring(z.read(rels_path))
@@ -169,7 +181,7 @@ class IsolatedGroupRenderer:
                     break
             
             if not drawing_target:
-                print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawing relationship found in rels")
+                debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawing relationship found in rels")
                 return None, None, None, None, None
             
             drawing_path = drawing_target
@@ -178,12 +190,12 @@ class IsolatedGroupRenderer:
             if drawing_path.startswith('/'):
                 drawing_path = drawing_path.lstrip('/')
             
-            print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path={drawing_path}")
+            debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path={drawing_path}")
             
             if drawing_path not in z.namelist():
                 drawing_path = drawing_path.replace('worksheets', 'drawings')
                 if drawing_path not in z.namelist():
-                    print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path not found in archive")
+                    debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path not found in archive")
                     return None, None, None, None, None
             
             drawing_xml_bytes = z.read(drawing_path)
@@ -247,7 +259,7 @@ class IsolatedGroupRenderer:
                                 
                                 picked.append((start_col, end_col, start_row, end_row))
                             except (ValueError, TypeError, AttributeError) as e:
-                                print(f"[DEBUG][Phase3] Failed to parse anchor {idx}: {e}")
+                                debug_print(f"[DEBUG][Phase3] Failed to parse anchor {idx}: {e}")
                                 continue
                 
                 if picked:
@@ -260,7 +272,7 @@ class IsolatedGroupRenderer:
                     s_row = min(r[2] for r in valid_picked)
                     e_row = max(r[3] for r in valid_picked)
                     
-                    print(f"[DEBUG][Phase3] Original shape range from anchors: col={s_col}-{e_col}, row={s_row}-{e_row}")
+                    debug_print(f"[DEBUG][Phase3] Original shape range from anchors: col={s_col}-{e_col}, row={s_row}-{e_row}")
                     
                     if s_col > e_col:
                         s_col, e_col = e_col, s_col
@@ -273,9 +285,9 @@ class IsolatedGroupRenderer:
                         e_row = s_row
                     
                     cell_range = (s_col, e_col, s_row, e_row)
-                    print(f"[DEBUG][Phase3] Final cell_range: {cell_range}")
+                    debug_print(f"[DEBUG][Phase3] Final cell_range: {cell_range}")
         except (ValueError, TypeError) as e:
-            print(f"[DEBUG] 型変換エラー（無視）: {e}")
+            debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
         return cell_range
     
@@ -322,7 +334,7 @@ class IsolatedGroupRenderer:
                 print(f"[WARNING] ファイル操作エラー: {e}")
             except Exception as e:
                 print(f"[WARNING] ファイル操作エラー: {e}")
-                print(f"[DEBUG] z type: {type(z)}, z value: {z}")
+                debug_print(f"[DEBUG] z type: {type(z)}, z value: {z}")
                 import traceback
                 traceback.print_exc()
 
@@ -411,7 +423,7 @@ class IsolatedGroupRenderer:
                                 try:
                                     id_to_row[str(a_cid)] = int(r.text)
                                 except (ValueError, TypeError) as e:
-                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                                    debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                     # 描画内のすべてのアンカーからフォールバックマッピングを構築
                     # （`anchors`にフィルタされたもののみでなく）これにより
@@ -438,7 +450,7 @@ class IsolatedGroupRenderer:
                                     try:
                                         all_id_to_row[str(a_cid2)] = int(r2.text)
                                     except (ValueError, TypeError) as e:
-                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                                        debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     except (ValueError, TypeError):
                         all_id_to_row = {}
 
@@ -454,7 +466,7 @@ class IsolatedGroupRenderer:
                             preserve.add(cid)
                             q.append(cid)
                 except (ValueError, TypeError) as e:
-                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                    debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 # 推移的閉包を拡張するが、行所属によって拡張を制約
                 # 同じアンカーが複数の行ベースクラスタに引き込まれることを避けます。
                 # 候補アンカー/参照の'from'行がグループの行内にある場合、
@@ -558,16 +570,16 @@ class IsolatedGroupRenderer:
                                         try:
                                             q.append(str(cid))
                                         except (ValueError, TypeError) as e:
-                                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                                            debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                         added = True
                                         break
                                 if added:
                                     continue
                             except (ValueError, TypeError) as e:
-                                print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                                debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                             # フォールバック: 端点が空または一致しない場合はスキップ
                         except (ValueError, TypeError) as e:
-                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                            debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 except Exception:
                     pass  # データ構造操作失敗は無視
 
@@ -605,7 +617,7 @@ class IsolatedGroupRenderer:
                                     try:
                                         q.append(scid)
                                     except (ValueError, TypeError) as e:
-                                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                                        debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                         except Exception:
                             pass  # データ構造操作失敗は無視
                 except Exception:
@@ -627,7 +639,7 @@ class IsolatedGroupRenderer:
                         dbg_all_id_to_row_keys = sorted(list(all_id_to_row.keys())) if 'all_id_to_row' in locals() else []
                     except Exception:
                         dbg_all_id_to_row_keys = []
-                    print(f"[DEBUG][_iso_group_extra] group_rows={dbg_rows} id_to_row_keys={dbg_id_to_row_keys} all_id_to_row_keys={dbg_all_id_to_row_keys}")
+                    debug_print(f"[DEBUG][_iso_group_extra] group_rows={dbg_rows} id_to_row_keys={dbg_id_to_row_keys} all_id_to_row_keys={dbg_all_id_to_row_keys}")
                     # 各コネクタコスメティックエントリについて、端点（空の可能性）とマップされた行をリスト
                     try:
                         for ccid in sorted(list(connector_children_by_id.keys()), key=lambda x: int(x) if str(x).isdigit() else x):
@@ -655,18 +667,18 @@ class IsolatedGroupRenderer:
                                     rows_mapped.append(r)
                                 except Exception:
                                     rows_mapped.append(None)
-                            print(f"[DEBUG][_iso_group_conn] cid={ccid} endpoints={sorted(list(eps))} mapped_rows={rows_mapped}")
+                            debug_print(f"[DEBUG][_iso_group_conn] cid={ccid} endpoints={sorted(list(eps))} mapped_rows={rows_mapped}")
                     except (ValueError, TypeError) as e:
-                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                        debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     # さらに、all_id_to_rowにのみ存在するコネクタ専用IDの明示的なマッピングを表示
                     try:
                         for special in ('56','61'):
                             if 'all_id_to_row' in locals() and special in all_id_to_row:
-                                print(f"[DEBUG][_iso_group_idrow] id={special} all_row={all_id_to_row.get(special)} id_to_row_val={id_to_row.get(special) if 'id_to_row' in locals() else None}")
+                                debug_print(f"[DEBUG][_iso_group_idrow] id={special} all_row={all_id_to_row.get(special)} id_to_row_val={id_to_row.get(special) if 'id_to_row' in locals() else None}")
                     except (ValueError, TypeError) as e:
-                        print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                        debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     msg = f"[DEBUG][_iso_group] keep_cnvpr_ids={sorted(list(keep_cnvpr_ids))} preserved_ids={sorted(list(referenced_ids))} connector_children_keys={sorted(list(connector_children_by_id.keys()))}"
-                    print(msg)
+                    debug_print(msg)
                     # 呼び出し側が重複レンダリングを避けられるよう保持されるIDを公開
                     try:
                         self._last_iso_preserved_ids = set(referenced_ids)
@@ -676,7 +688,7 @@ class IsolatedGroupRenderer:
                             self._last_iso_preserved_ids = set()
                             self.converter._last_iso_preserved_ids = set()
                         except (ValueError, TypeError) as e:
-                            print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                            debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     # 分離毎の診断ファイル（保証されたパス）を書き込み、
                     # 変換実行が常にどのcNvPr IDが
                     # この分離グループに保持されたかの記録を出力するようにします。これは
@@ -698,7 +710,7 @@ class IsolatedGroupRenderer:
                                 w = csv.writer(df)
                                 w.writerow(['keep_cnvpr_ids', 'preserved_ids', 'connector_children_keys'])
                                 w.writerow([";".join(sorted(list(map(str, keep_cnvpr_ids)))), ";".join(sorted(list(map(str, referenced_ids)))), ";".join(sorted(list(map(str, connector_children_by_id.keys()))) )])
-                            print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
+                            debug_print(f"[DEBUG] wrote isolation diagnostics to {diag_path}")
                         except (OSError, IOError, FileNotFoundError):
                             print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
                 except (OSError, IOError, FileNotFoundError):
@@ -784,7 +796,7 @@ class IsolatedGroupRenderer:
                     if node_contains_referenced_id(node):
                         continue
                 except (ValueError, TypeError) as e:
-                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                    debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                 # Fallback: when keep_cnvpr_ids is empty but a cell_range
                 # was computed for the group, preserve any anchor whose
@@ -804,9 +816,9 @@ class IsolatedGroupRenderer:
                                     if from_row in group_rows or any(abs(from_row - gr) <= 1 for gr in group_rows):
                                         continue
                                 except (ValueError, TypeError) as e:
-                                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                                    debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 except (ValueError, TypeError) as e:
-                    print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                    debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
                 # otherwise remove this node from the trimmed drawing
                 try:
@@ -868,7 +880,7 @@ class IsolatedGroupRenderer:
                                 except Exception:
                                     pass  # 一時ファイルの削除失敗は無視
                             if removed:
-                                print(f"[DEBUG][_iso_hdrfoot] removed {removed} headerFooter elements from {sheet_rel}")
+                                debug_print(f"[DEBUG][_iso_hdrfoot] removed {removed} headerFooter elements from {sheet_rel}")
                         except (ValueError, TypeError):
                             pass  # XML書き込み失敗は無視
                         stree.write(sheet_rel, encoding='utf-8', xml_declaration=True)
@@ -888,12 +900,12 @@ class IsolatedGroupRenderer:
                 droot_check = dtree_check.getroot()
                 kept_anchors = [n for n in list(droot_check) if n.tag.split('}')[-1].lower() in ('twocellanchor', 'onecellanchor')]
                 if not kept_anchors:
-                    print(f"[DEBUG][_iso_entry] sheet={sheet.title} trimmed drawing has no anchors after pruning; skipping isolated group")
+                    debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} trimmed drawing has no anchors after pruning; skipping isolated group")
                     return False
             except (ET.ParseError, KeyError, AttributeError) as e:
-                print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
+                debug_print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
         except (ET.ParseError, KeyError, AttributeError) as e:
-            print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
+            debug_print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
 
         return True
     
@@ -1331,7 +1343,7 @@ class IsolatedGroupRenderer:
                                     drawing_name = os.path.basename(target)
                                     keep_drawing_files.add(drawing_name)
                         
-                        print(f"[DEBUG] Keep drawing files: {keep_drawing_files}")
+                        debug_print(f"[DEBUG] Keep drawing files: {keep_drawing_files}")
                         
                         drawings_dir = os.path.join(tmpdir, 'xl/drawings')
                         if os.path.exists(drawings_dir):
@@ -1340,12 +1352,12 @@ class IsolatedGroupRenderer:
                                     drawing_file = os.path.join(drawings_dir, fname)
                                     if os.path.exists(drawing_file):
                                         os.remove(drawing_file)
-                                        print(f"[DEBUG] Removed unused drawing file: {fname}")
+                                        debug_print(f"[DEBUG] Removed unused drawing file: {fname}")
                                     
                                     drawing_rels = os.path.join(drawings_dir, '_rels', fname + '.rels')
                                     if os.path.exists(drawing_rels):
                                         os.remove(drawing_rels)
-                                        print(f"[DEBUG] Removed unused drawing rels: {fname}.rels")
+                                        debug_print(f"[DEBUG] Removed unused drawing rels: {fname}.rels")
                     except Exception as drawing_err:
                         print(f"[WARNING] Drawing file cleanup failed: {drawing_err}")
             except Exception as e:
@@ -1448,9 +1460,9 @@ class IsolatedGroupRenderer:
                 shape_offset_col = orig_s_col - 1
                 shape_offset_row = orig_s_row - 1
                 
-                print(f"[DEBUG][Phase8] Using original_cell_range: col={orig_s_col}-{orig_e_col}, row={orig_s_row}-{orig_e_row}")
-                print(f"[DEBUG][Phase8] Expanded cell range: col={cell_s_col}-{cell_e_col} (left+1, right+1), row={cell_s_row}-{cell_e_row}")
-                print(f"[DEBUG][Phase8] Shape offset: col={shape_offset_col}, row={shape_offset_row}")
+                debug_print(f"[DEBUG][Phase8] Using original_cell_range: col={orig_s_col}-{orig_e_col}, row={orig_s_row}-{orig_e_row}")
+                debug_print(f"[DEBUG][Phase8] Expanded cell range: col={cell_s_col}-{cell_e_col} (left+1, right+1), row={cell_s_row}-{cell_e_row}")
+                debug_print(f"[DEBUG][Phase8] Shape offset: col={shape_offset_col}, row={shape_offset_row}")
                 
                 worksheets_dir = os.path.join(tmpdir, "xl/worksheets")
                 sheet_rel = None
@@ -1688,7 +1700,7 @@ class IsolatedGroupRenderer:
                             sroot_drawing.append(drawing_elem)
                         
                         stree_drawing.write(sheet_rel, encoding='utf-8', xml_declaration=True)
-                        print(f"[DEBUG] <drawing>要素を追加: {sheet_rel}")
+                        debug_print(f"[DEBUG] <drawing>要素を追加: {sheet_rel}")
             except Exception as e:
                 print(f"[WARNING] <drawing>要素追加失敗: {e}")
             
@@ -1698,7 +1710,7 @@ class IsolatedGroupRenderer:
                     shape_offset_col = orig_s_col - 1
                     shape_offset_row = orig_s_row - 1
                     
-                    print(f"[DEBUG][Phase8] Moving shapes: offset=({shape_offset_col}, {shape_offset_row}), original range row={orig_s_row}-{orig_e_row}, col={orig_s_col}-{orig_e_col}")
+                    debug_print(f"[DEBUG][Phase8] Moving shapes: offset=({shape_offset_col}, {shape_offset_row}), original range row={orig_s_row}-{orig_e_row}, col={orig_s_col}-{orig_e_col}")
                     
                     dtree = ET.parse(drawing_path_full)
                     droot = dtree.getroot()
@@ -2042,7 +2054,7 @@ class IsolatedGroupRenderer:
                     root.append(new_rel)
                     
                     tree.write(sheet_rels_path, encoding='utf-8', xml_declaration=True)
-                    print(f"[DEBUG] Cleaned sheet rels and set drawing to rId1")
+                    debug_print(f"[DEBUG] Cleaned sheet rels and set drawing to rId1")
                 
                 sheet_path = os.path.join(tmpdir, f'xl/worksheets/sheet{target_sheet_new_index + 1}.xml')
                 if os.path.exists(sheet_path):
@@ -2055,7 +2067,7 @@ class IsolatedGroupRenderer:
                     if drawing_elem is not None:
                         drawing_elem.set(f'{{{ns_r}}}id', 'rId1')
                         stree.write(sheet_path, encoding='utf-8', xml_declaration=True)
-                        print(f"[DEBUG] Updated sheet drawing reference to rId1")
+                        debug_print(f"[DEBUG] Updated sheet drawing reference to rId1")
         except Exception as e:
             print(f"[WARNING] リレーションシップのクリーンアップ失敗: {e}")
         
@@ -2094,11 +2106,11 @@ class IsolatedGroupRenderer:
                         arcname = os.path.relpath(full, tmpdir)
                         zout.write(full, arcname)
             
-            print(f"[DEBUG] saved group workbook: {src_for_conv}")
+            debug_print(f"[DEBUG] saved group workbook: {src_for_conv}")
             
             try:
                 st = os.stat(src_for_conv)
-                print(f"[DEBUG] dbg_copy exists: size={st.st_size} bytes")
+                debug_print(f"[DEBUG] dbg_copy exists: size={st.st_size} bytes")
             except Exception:
                 try:
                     print(f"[WARN] dbg_copy not found after save: {src_for_conv}")
@@ -2108,7 +2120,7 @@ class IsolatedGroupRenderer:
             
             try:
                 self._set_page_setup_and_margins(src_for_conv)
-                print(f"[DEBUG] Applied fit-to-page settings to: {src_for_conv}")
+                debug_print(f"[DEBUG] Applied fit-to-page settings to: {src_for_conv}")
             except Exception as e:
                 print(f"[WARNING] isolated group pageSetup設定失敗: {e}")
             
@@ -2145,7 +2157,7 @@ class IsolatedGroupRenderer:
         
         try:
             # LibreOfficeでPDF生成（一時ディレクトリに出力）
-            print(f"[DEBUG] LibreOffice PDF変換開始: sheet={sheet.title}")
+            debug_print(f"[DEBUG] LibreOffice PDF変換開始: sheet={sheet.title}")
             pdf_path = self._convert_excel_to_pdf(src_for_conv, tmp_pdf_dir, apply_fit_to_page=False)
             
             if pdf_path is None:
@@ -2283,7 +2295,7 @@ class IsolatedGroupRenderer:
                 import io
                 from PIL import Image as PILImage
                 
-                print(f"[DEBUG] PyMuPDFでPDF→PNG変換実行... (DPI={dpi})")
+                debug_print(f"[DEBUG] PyMuPDFでPDF→PNG変換実行... (DPI={dpi})")
                 
                 doc = fitz.open(pdf_path)
                 if len(doc) == 0:
@@ -2423,7 +2435,7 @@ class IsolatedGroupRenderer:
                     for cid in keep_cnvpr_ids:
                         self.converter._global_iso_preserved_ids.add(str(cid))
                     
-                    print(f"[DEBUG][_phase10] Added {len(keep_cnvpr_ids)} shape IDs to _global_iso_preserved_ids")
+                    debug_print(f"[DEBUG][_phase10] Added {len(keep_cnvpr_ids)} shape IDs to _global_iso_preserved_ids")
                 except Exception as e:
                     print(f"[WARNING] Failed to update _global_iso_preserved_ids: {e}")
             
