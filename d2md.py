@@ -1431,43 +1431,123 @@ class WordToMarkdownConverter:
         }
         
         try:
-            doc_zip = zipfile.ZipFile(self.word_file, 'r')
-            
-            for shape in drawing_element.iter():
-                tag_name = shape.tag.split('}')[-1] if '}' in shape.tag else shape.tag
+            for anchor in drawing_element.iter():
+                tag_name = anchor.tag.split('}')[-1] if '}' in anchor.tag else anchor.tag
                 
-                if tag_name == 'cNvPr':
-                    shape_info = {
-                        'name': shape.attrib.get('name', ''),
-                        'id': shape.attrib.get('id', ''),
-                        'description': shape.attrib.get('descr', '')
-                    }
-                    
-                    parent = shape.getparent() if hasattr(shape, 'getparent') else None
-                    if parent is not None:
-                        for elem in parent.iter():
-                            elem_tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
-                            
-                            if elem_tag in ('rect', 'roundRect', 'ellipse', 'triangle'):
-                                shape_info['shape_type'] = elem_tag
-                            elif elem_tag == 'txBody':
-                                text_content = []
-                                for t in elem.iter():
-                                    t_tag = t.tag.split('}')[-1] if '}' in t.tag else t.tag
-                                    if t_tag == 't' and t.text:
-                                        text_content.append(t.text)
-                                if text_content:
-                                    shape_info['text'] = ' / '.join(text_content)
-                    
-                    if shape_info.get('name'):
+                if tag_name == 'anchor' or tag_name == 'inline':
+                    shape_info = self._extract_single_shape_metadata(anchor)
+                    if shape_info and shape_info.get('name'):
                         metadata['shapes'].append(shape_info)
-            
-            doc_zip.close()
+                elif tag_name == 'wsp':
+                    shape_info = self._extract_wsp_metadata(anchor)
+                    if shape_info and shape_info.get('name'):
+                        metadata['shapes'].append(shape_info)
             
         except Exception as e:
             print(f"[DEBUG] 図形メタデータ抽出エラー: {e}")
+            import traceback
+            traceback.print_exc()
         
         return metadata
+    
+    def _extract_single_shape_metadata(self, anchor_element) -> Dict[str, Any]:
+        """単一図形のメタデータを抽出"""
+        shape_info = {}
+        
+        try:
+            for elem in anchor_element.iter():
+                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                
+                if tag == 'cNvPr':
+                    shape_info['name'] = elem.attrib.get('name', '')
+                    shape_info['id'] = elem.attrib.get('id', '')
+                    shape_info['description'] = elem.attrib.get('descr', '')
+                
+                elif tag in ('rect', 'roundRect', 'ellipse', 'triangle', 'line', 'bentConnector2', 
+                            'bentConnector3', 'bentConnector4', 'bentConnector5', 'straightConnector1'):
+                    shape_info['shape_type'] = tag
+                
+                elif tag == 'txBody' or tag == 'sp':
+                    text_parts = []
+                    for t_elem in elem.iter():
+                        t_tag = t_elem.tag.split('}')[-1] if '}' in t_elem.tag else t_elem.tag
+                        if t_tag == 't' and t_elem.text:
+                            text_parts.append(t_elem.text.strip())
+                    if text_parts:
+                        shape_info['text'] = ' / '.join(text_parts)
+                
+                elif tag == 'extent':
+                    try:
+                        cx = int(elem.attrib.get('cx', 0))
+                        cy = int(elem.attrib.get('cy', 0))
+                        shape_info['width_emu'] = cx
+                        shape_info['height_emu'] = cy
+                    except:
+                        pass
+                
+                elif tag == 'off' or tag == 'pos':
+                    try:
+                        x = int(elem.attrib.get('x', 0))
+                        y = int(elem.attrib.get('y', 0))
+                        shape_info['x_emu'] = x
+                        shape_info['y_emu'] = y
+                    except:
+                        pass
+        
+        except Exception as e:
+            print(f"[DEBUG] 単一図形メタデータ抽出エラー: {e}")
+        
+        return shape_info
+    
+    def _extract_wsp_metadata(self, wsp_element) -> Dict[str, Any]:
+        """wsp（Word Shape）要素からメタデータを抽出"""
+        shape_info = {}
+        
+        try:
+            for elem in wsp_element.iter():
+                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                
+                if tag == 'cNvPr':
+                    shape_info['name'] = elem.attrib.get('name', '')
+                    shape_info['id'] = elem.attrib.get('id', '')
+                    shape_info['description'] = elem.attrib.get('descr', '')
+                
+                elif tag == 'prstGeom':
+                    prst = elem.attrib.get('prst', '')
+                    if prst:
+                        shape_info['shape_type'] = prst
+                
+                elif tag == 'txBody':
+                    text_parts = []
+                    for t_elem in elem.iter():
+                        t_tag = t_elem.tag.split('}')[-1] if '}' in t_elem.tag else t_elem.tag
+                        if t_tag == 't' and t_elem.text:
+                            text_parts.append(t_elem.text.strip())
+                    if text_parts:
+                        shape_info['text'] = ' / '.join(text_parts)
+                
+                elif tag == 'ext':
+                    try:
+                        cx = int(elem.attrib.get('cx', 0))
+                        cy = int(elem.attrib.get('cy', 0))
+                        shape_info['width_emu'] = cx
+                        shape_info['height_emu'] = cy
+                    except:
+                        pass
+                
+                elif tag == 'off':
+                    try:
+                        x = int(elem.attrib.get('x', 0))
+                        y = int(elem.attrib.get('y', 0))
+                        shape_info['x_emu'] = x
+                        shape_info['y_emu'] = y
+                    except:
+                        pass
+        
+        except Exception as e:
+            print(f"[DEBUG] wsp要素メタデータ抽出エラー: {e}")
+        
+        return shape_info
     
     def _format_shape_metadata_as_text(self, metadata: Dict[str, Any]) -> str:
         """図形メタデータを人間が読みやすいテキスト形式に整形"""
