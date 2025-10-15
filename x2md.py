@@ -132,6 +132,7 @@ class ExcelToMarkdownConverter:
         self._embedded_image_cid_by_name = {}
         self._in_canonical_emit = False
         self._global_iso_preserved_ids = set()
+        self._image_shape_ids = {}
         self._last_iso_preserved_ids = set()
 
     def _clear_sheet_state(self, sheet_name: str):
@@ -450,7 +451,8 @@ class ExcelToMarkdownConverter:
                 
                 if sheet is not None:
                     try:
-                        shapes_metadata = self._extract_all_shapes_metadata(sheet)
+                        filter_ids = self._image_shape_ids.get(img_name)
+                        shapes_metadata = self._extract_all_shapes_metadata(sheet, filter_ids=filter_ids)
                         if shapes_metadata:
                             text_metadata = self._format_shape_metadata_as_text(shapes_metadata)
                             if text_metadata:
@@ -494,7 +496,8 @@ class ExcelToMarkdownConverter:
             
             if sheet is not None:
                 try:
-                    shapes_metadata = self._extract_all_shapes_metadata(sheet)
+                    filter_ids = self._image_shape_ids.get(img_name)
+                    shapes_metadata = self._extract_all_shapes_metadata(sheet, filter_ids=filter_ids)
                     if shapes_metadata:
                         text_metadata = self._format_shape_metadata_as_text(shapes_metadata)
                         if text_metadata:
@@ -1890,6 +1893,10 @@ class ExcelToMarkdownConverter:
                                                             # クラスタの最小行に配置
                                                             self._sheet_shape_images[sheet.title].append((cluster_row, img_name))
                                                             print(f"[DEBUG] isolated group画像を_sheet_shape_imagesに追加: {img_name} at row={cluster_row}")
+                                                            
+                                                            if hasattr(self, '_last_iso_preserved_ids') and self._last_iso_preserved_ids:
+                                                                self._image_shape_ids[img_name] = set(self._last_iso_preserved_ids)
+                                                                print(f"[DEBUG] 図形IDマッピングを保存: {img_name} -> {len(self._last_iso_preserved_ids)} shapes")
                                                         except Exception as e:
                                                             print(f"[WARNING] Failed to add to _sheet_shape_images: {e}")
                                                             import traceback
@@ -3927,11 +3934,12 @@ class ExcelToMarkdownConverter:
             print(f"[WARNING] Shape metadata extraction failed: {e}")
             return metadata
 
-    def _extract_all_shapes_metadata(self, sheet) -> List[Dict[str, Any]]:
+    def _extract_all_shapes_metadata(self, sheet, filter_ids: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
         """シート内の全図形のメタデータを抽出
         
         Args:
             sheet: 対象シート
+            filter_ids: 抽出対象の図形IDセット（Noneの場合は全て抽出）
             
         Returns:
             図形メタデータのリスト
@@ -3949,6 +3957,15 @@ class ExcelToMarkdownConverter:
                 anchor_type = anchor.tag.split('}')[-1].lower()
                 if anchor_type in ('twocellanchor', 'onecellanchor'):
                     if self._anchor_has_drawable(anchor):
+                        if filter_ids is not None:
+                            shape_id = None
+                            for sub in anchor.iter():
+                                if sub.tag.split('}')[-1].lower() == 'cnvpr':
+                                    shape_id = sub.attrib.get('id', '')
+                                    break
+                            if shape_id and shape_id not in filter_ids:
+                                continue
+                        
                         shape_meta = self._extract_shape_metadata_from_anchor(anchor, sheet)
                         shapes_metadata.append(shape_meta)
             
