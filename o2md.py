@@ -101,6 +101,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
         output_dir: 出力ディレクトリ（省略時はデフォルト）
         **kwargs: 各変換クラス固有のオプション
             - use_heading_text: Word変換時に見出しテキストをリンクに使用（デフォルト: False）
+            - shape_metadata: 図形メタデータを出力（デフォルト: False）
             
     Returns:
         出力ファイルのパス
@@ -143,7 +144,8 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
                 converted_temp_dir = Path(converted_file).parent
                 print(f"[INFO] ✅ XLS→XLSX変換完了: {converted_file}")
             
-            converter = ExcelToMarkdownConverter(processing_file, output_dir=output_dir)
+            shape_metadata = kwargs.get('shape_metadata', False)
+            converter = ExcelToMarkdownConverter(processing_file, output_dir=output_dir, shape_metadata=shape_metadata)
             output_file = converter.convert()
             
         elif file_type == 'word':
@@ -160,10 +162,12 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
                 print(f"[INFO] ✅ DOC→DOCX変換完了: {converted_file}")
             
             use_heading_text = kwargs.get('use_heading_text', False)
+            shape_metadata = kwargs.get('shape_metadata', False)
             converter = WordToMarkdownConverter(
                 processing_file, 
                 use_heading_text=use_heading_text,
-                output_dir=output_dir
+                output_dir=output_dir,
+                shape_metadata=shape_metadata
             )
             output_file = converter.convert()
             
@@ -229,6 +233,8 @@ def main():
                        help='出力ディレクトリを指定（デフォルト: ./output）')
     parser.add_argument('--use-heading-text', action='store_true',
                        help='[Word専用] 章番号の代わりに見出しテキストをリンクに使用')
+    parser.add_argument('--shape-metadata', action='store_true',
+                       help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
     
     args = parser.parse_args()
     
@@ -236,7 +242,8 @@ def main():
         output_file = convert_office_to_markdown(
             args.file,
             output_dir=args.output_dir,
-            use_heading_text=args.use_heading_text
+            use_heading_text=args.use_heading_text,
+            shape_metadata=args.shape_metadata
         )
         
         print("\n" + "=" * 50)
