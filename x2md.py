@@ -130,11 +130,11 @@ class ExcelToMarkdownConverter:
 
         class _SimpleLogger:
             def debug(self, *args, **kwargs):
-                debug_print("[LOGGER_DEBUG]", *args)
+                print("[LOGGER_DEBUG]", *args)
         self.logger = _SimpleLogger()
 
         self.workbook = load_workbook(excel_file_path, data_only=True)
-        debug_print(f"[INFO] Excelワークブック読み込み完了: {excel_file_path}")
+        print(f"[INFO] Excelワークブック読み込み完了: {excel_file_path}")
 
     def _init_per_sheet_state(self):
         """シート毎の状態変数を初期化"""
@@ -195,7 +195,7 @@ class ExcelToMarkdownConverter:
         - 各シートを順に変換
         - Markdown ファイルを書き出してパスを返す
         """
-        debug_print(f"[INFO] Excel文書変換開始: {self.excel_file}")
+        print(f"[INFO] Excel文書変換開始: {self.excel_file}")
 
         # ドキュメントタイトルを先頭に追加
         self.markdown_lines.append(f"# {self.base_name}")
@@ -206,7 +206,7 @@ class ExcelToMarkdownConverter:
             try:
                 self._generate_toc()
             except Exception as e:
-                debug_print(f"[WARNING] 目次生成失敗: {e}")
+                print(f"[WARNING] 目次生成失敗: {e}")
 
         # シートを変換
         for sheet_name in self.workbook.sheetnames:
@@ -215,13 +215,13 @@ class ExcelToMarkdownConverter:
                 
                 # 非表示シートをスキップ
                 if sheet.sheet_state == 'hidden':
-                    debug_print(f"[INFO] シートをスキップ（非表示）: {sheet_name}")
+                    print(f"[INFO] シートをスキップ（非表示）: {sheet_name}")
                     continue
                 
-                debug_print(f"[INFO] シート変換中: {sheet_name}")
+                print(f"[INFO] シート変換中: {sheet_name}")
                 self._convert_sheet(sheet)
             except Exception as e:
-                debug_print(f"[WARNING] シート処理中にエラーが発生しました: {sheet_name} -> {e}")
+                print(f"[WARNING] シート処理中にエラーが発生しました: {sheet_name} -> {e}")
                 import traceback
                 traceback.print_exc()
                 continue
@@ -237,7 +237,7 @@ class ExcelToMarkdownConverter:
     def _detect_bordered_tables(self, sheet, min_row, max_row, min_col, max_col):
         """外枠罫線のみで囲まれた最大矩形をテーブルと判定（内部罫線は無視）"""
         tables = []
-        debug_print("[DEBUG] セル罫線情報一覧:")
+        print("[DEBUG] セル罫線情報一覧:")
         # 最小限の安全な実装: 詳細な罫線テーブル検出ロジック
         # は以前の編集で削除されファイル構造が破損しました。
         # ここで空の'tables'を返すのは安全: 呼び出しコードは
@@ -284,9 +284,9 @@ class ExcelToMarkdownConverter:
         # Excelファイルを読み込み
         try:
             self.workbook = load_workbook(excel_file_path, data_only=True)
-            debug_print(f"[INFO] Excelワークブック読み込み完了: {excel_file_path}")
+            print(f"[INFO] Excelワークブック読み込み完了: {excel_file_path}")
         except Exception as e:
-            debug_print(f"[ERROR] Excelファイル読み込み失敗: {e}")
+            print(f"[ERROR] Excelファイル読み込み失敗: {e}")
             sys.exit(1)
 
     def _mark_image_emitted(self, img_name: str):
@@ -360,7 +360,7 @@ class ExcelToMarkdownConverter:
             if t.strip() == '':
                 continue
             if t.strip() == '---':
-                debug_print("[DEBUG][_add_separator] skipping duplicate separator '---'")
+                print("[DEBUG][_add_separator] skipping duplicate separator '---'")
                 return False
             break
 
@@ -418,7 +418,7 @@ class ExcelToMarkdownConverter:
                     lst.append((src_row, text))
                 return True
         except Exception as e:
-            debug_print(f"[ERROR] _emit_free_text failed: {e}")
+            print(f"[ERROR] _emit_free_text failed: {e}")
             return False
     
     def _insert_markdown_image(self, insert_at: Optional[int], md_line: str, img_name: str, sheet=None):
@@ -493,7 +493,7 @@ class ExcelToMarkdownConverter:
                                 self.markdown_lines.append("</details>")
                                 self.markdown_lines.append("")
                     except Exception as e:
-                        debug_print(f"[WARNING] Failed to add shape metadata: {e}")
+                        print(f"[WARNING] Failed to add shape metadata: {e}")
                 
                 self._mark_image_emitted(img_name)
                 return len(self.markdown_lines)
@@ -550,7 +550,7 @@ class ExcelToMarkdownConverter:
                             self.markdown_lines.insert(insert_at + lines_added, "")
                             lines_added += 1
                 except Exception as e:
-                    debug_print(f"[WARNING] Failed to add shape metadata: {e}")
+                    print(f"[WARNING] Failed to add shape metadata: {e}")
             
             self._mark_image_emitted(img_name)
             return insert_at + lines_added
@@ -624,7 +624,7 @@ class ExcelToMarkdownConverter:
                                 tree.write(sheet_path, encoding='utf-8', xml_declaration=True)
                                 debug_print(f"[DEBUG] {fname} のpageSetupを縦横1ページに設定")
                             except Exception as e:
-                                debug_print(f"[WARNING] {fname} のpageSetup設定に失敗: {e}")
+                                print(f"[WARNING] {fname} のpageSetup設定に失敗: {e}")
                 
                 # 変更を元のファイルに上書き保存
                 with zipfile.ZipFile(xlsx_path, 'w', zipfile.ZIP_DEFLATED) as zout:
@@ -641,7 +641,7 @@ class ExcelToMarkdownConverter:
                 except Exception:
                     pass  # 一時ファイルの削除失敗は無視
         except Exception as e:
-            debug_print(f"[ERROR] pageSetup設定に失敗: {e}")
+            print(f"[ERROR] pageSetup設定に失敗: {e}")
             return False
     
     def _convert_sheet(self, sheet):
@@ -790,7 +790,7 @@ class ExcelToMarkdownConverter:
                     emitted_any = True
 
         except Exception as e:
-            debug_print(f"[WARNING] シートヘッダー処理でエラー: {e}")
+            print(f"[WARNING] シートヘッダー処理でエラー: {e}")
             # エラー時はdata_rangeを再取得
             data_range = self._get_data_range(sheet)
 
@@ -1352,7 +1352,7 @@ class ExcelToMarkdownConverter:
                         except Exception:
                             continue
                 except Exception as e:
-                    debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                    print(f"[WARNING] ファイル操作エラー: {e}")
 
                 # Strong debug: always emit events count so we can detect empty/filled
                 debug_print(f"[DEBUG][_events_sorted] sheet={sheet.title} events_count_emit={len(events_emit)}")
@@ -1531,7 +1531,7 @@ class ExcelToMarkdownConverter:
                                 self.markdown_lines.append(md)
                                 self.markdown_lines.append("")
                         except Exception as e:
-                            debug_print(f"[WARNING] 図形メタデータ追加失敗: {e}")
+                            print(f"[WARNING] 図形メタデータ追加失敗: {e}")
                             self.markdown_lines.append(md)
                             self.markdown_lines.append("")
                         # record authoritative mapping only via helper
@@ -1614,7 +1614,7 @@ class ExcelToMarkdownConverter:
             return self._calculate_data_bounds(sheet)
             
         except Exception as e:
-            debug_print(f"[WARNING] データ範囲取得エラー: {e}")
+            print(f"[WARNING] データ範囲取得エラー: {e}")
             return None
 
     def _prune_emitted_rows(self, sheet_title: str, table_data: List[List[str]], source_rows: Optional[List[int]]):
@@ -1886,7 +1886,7 @@ class ExcelToMarkdownConverter:
                                                 shapes = self._extract_drawing_shapes(sheet)
                                                 debug_print(f"[DEBUG] _extract_drawing_shapes returned {len(shapes) if shapes else 0} shapes")
                                             except Exception as shape_ex:
-                                                debug_print(f"[WARNING] _extract_drawing_shapes failed: {shape_ex}")
+                                                print(f"[WARNING] _extract_drawing_shapes failed: {shape_ex}")
                                                 import traceback
                                                 traceback.print_exc()
                                             
@@ -1932,10 +1932,10 @@ class ExcelToMarkdownConverter:
                                                             
                                                             isolated_produced = True
                                                             isolated_images.append((cluster_row, img_name))
-                                                            debug_print(f"[INFO] シート '{sheet.title}' のクラスタ {idx+1} をisolated groupとして出力: {img_name} (row={cluster_row})")
+                                                            print(f"[INFO] シート '{sheet.title}' のクラスタ {idx+1} をisolated groupとして出力: {img_name} (row={cluster_row})")
                                                 
                                                 if isolated_produced:
-                                                    debug_print(f"[INFO] シート '{sheet.title}' の図形をisolated groupとして出力しました")
+                                                    print(f"[INFO] シート '{sheet.title}' の図形をisolated groupとして出力しました")
                                                     debug_print(f"[DEBUG] isolated_images count: {len(isolated_images)}")
                                                     # isolated group画像をMarkdownに追加するため、images_foundをTrueに設定
                                                     images_found = True
@@ -1946,7 +1946,7 @@ class ExcelToMarkdownConverter:
                                                             self._mark_image_emitted(img_name)
                                                             debug_print(f"[DEBUG] _mark_image_emitted succeeded for: {img_name}")
                                                         except Exception as e:
-                                                            debug_print(f"[WARNING] _mark_image_emitted failed: {e}")
+                                                            print(f"[WARNING] _mark_image_emitted failed: {e}")
                                                         
                                                         try:
                                                             # _sheet_shape_images に追加（クラスタの最小行を使用）
@@ -1961,13 +1961,13 @@ class ExcelToMarkdownConverter:
                                                                 self._image_shape_ids[img_name] = set(self._last_iso_preserved_ids)
                                                                 debug_print(f"[DEBUG] 図形IDマッピングを保存: {img_name} -> {len(self._last_iso_preserved_ids)} shapes")
                                                         except Exception as e:
-                                                            debug_print(f"[WARNING] Failed to add to _sheet_shape_images: {e}")
+                                                            print(f"[WARNING] Failed to add to _sheet_shape_images: {e}")
                                                             import traceback
                                                             traceback.print_exc()
                                             else:
                                                 isolated_produced = False
                                         except Exception as e:
-                                            debug_print(f"[WARNING] isolated-group rendering failed: {e}")
+                                            print(f"[WARNING] isolated-group rendering failed: {e}")
                                             import traceback
                                             traceback.print_exc()
                                             isolated_produced = False
@@ -1980,7 +1980,7 @@ class ExcelToMarkdownConverter:
             # corresponding PDF page to PNG using ImageMagick. This captures vector
             # shapes and drawings that openpyxl doesn't expose as images.
             if hasattr(sheet, '_images') and sheet._images:
-                debug_print(f"[INFO] シート '{sheet.title}' 内の画像を処理中...")
+                print(f"[INFO] シート '{sheet.title}' 内の画像を処理中...")
                 images_found = True
                 # 埋め込みメディアからのマッピングを事前に設定（描画relsから）
                 # to cNvPr ids so that when we process embedded images below we
@@ -2081,11 +2081,11 @@ class ExcelToMarkdownConverter:
                                                                 if sha8:
                                                                     self._embedded_image_cid_by_name[sheet.title][sha8] = None
                                                             except Exception as e:
-                                                                debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                                                print(f"[WARNING] ファイル操作エラー: {e}")
                                     except Exception as e:
-                                        debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
                 except Exception as e:
-                    debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                    print(f"[WARNING] ファイル操作エラー: {e}")
                 md_lines = []
                 for image in sheet._images:
                     # _process_excel_image now returns the saved image filename (basename)
@@ -2129,7 +2129,7 @@ class ExcelToMarkdownConverter:
                                                 maybe = m.group(1)
                                                 mapped_cid = cid_map.get(maybe)
                                         except Exception as e:
-                                            debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                            print(f"[WARNING] ファイル操作エラー: {e}")
                                     # まだ不明な場合、ディスク上の既存ファイルから短いshaを計算して試行
                                     if mapped_cid is None:
                                         try:
@@ -2141,13 +2141,13 @@ class ExcelToMarkdownConverter:
                                                 sha8 = _hashlib.sha1(d).hexdigest()[:8]
                                                 mapped_cid = cid_map.get(sha8)
                                         except (OSError, IOError, FileNotFoundError):
-                                            debug_print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+                                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
                                     global_iso_preserved_ids = getattr(self, '_global_iso_preserved_ids', set()) or set()
                                     if mapped_cid and str(mapped_cid) in global_iso_preserved_ids:
                                         debug_print(f"[DEBUG][_emit_image_skip] sheet={sheet.title} embedded image {img_name} suppressed (cid={mapped_cid} already preserved)")
                                         continue
                                 except (OSError, IOError, FileNotFoundError):
-                                    debug_print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+                                    print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
                                 if ref in self._emitted_images or img_name in self._emitted_images:
                                     continue
                                 try:
@@ -2156,7 +2156,7 @@ class ExcelToMarkdownConverter:
                                         if insert_index is not None:
                                             insert_index = new_idx
                                     except Exception as e:
-                                        debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
                                 except Exception:
                                     try:
                                         self.markdown_lines.append(md_line)
@@ -2164,9 +2164,9 @@ class ExcelToMarkdownConverter:
                                         try:
                                             self._mark_image_emitted(img_name)
                                         except Exception as e:
-                                            debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                            print(f"[WARNING] ファイル操作エラー: {e}")
                                     except Exception as e:
-                                        debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
                                 # 挿入を延期: 正規の行ソート済み出力のため登録
                                 try:
                                     # check mapped cNvPr for this embedded image and
@@ -2195,7 +2195,7 @@ class ExcelToMarkdownConverter:
                                                 maybe = m.group(1)
                                                 mapped_cid = cid_map.get(maybe)
                                         except Exception as e:
-                                            debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                            print(f"[WARNING] ファイル操作エラー: {e}")
                                     if mapped_cid is None:
                                         try:
                                             fp = os.path.join(self.images_dir, img_name)
@@ -2206,7 +2206,7 @@ class ExcelToMarkdownConverter:
                                                 sha8 = _hashlib.sha1(d).hexdigest()[:8]
                                                 mapped_cid = cid_map.get(sha8)
                                         except (OSError, IOError, FileNotFoundError):
-                                            debug_print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
+                                            print(f"[WARNING] ファイル操作エラー: {e if 'e' in locals() else '不明'}")
                                     global_iso_preserved_ids = getattr(self, '_global_iso_preserved_ids', set()) or set()
                                     if mapped_cid and str(mapped_cid) in global_iso_preserved_ids:
                                         debug_print(f"[DEBUG][_noncanonical_image_skip] sheet={sheet.title} embedded image {img_name} suppressed (cid={mapped_cid} already preserved)")
@@ -2218,14 +2218,14 @@ class ExcelToMarkdownConverter:
                                         if insert_index is not None:
                                             insert_index = new_idx
                                     except Exception as e:
-                                        debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
                                 except Exception:
                                     # フォールバック: sheet_shape_imagesに直接登録
                                     try:
                                         self._sheet_shape_images.setdefault(sheet.title, [])
                                         self._sheet_shape_images[sheet.title].append((start_row, img_name))
                                     except Exception as e:
-                                        debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
 
             if not images_found:
                 debug_print(f"[DEBUG] イメージが見つかりませんでした。")
@@ -2248,10 +2248,10 @@ class ExcelToMarkdownConverter:
                 # are present. If extraction errored (shapes is None) or returned
                 # non-empty, proceed with rendering as before.
                 if shapes == []:
-                    debug_print(f"[INFO] シート '{sheet.title}' に描画要素が見つかりませんでした（XML解析結果）。フォールバックレンダリングをスキップします。")
+                    print(f"[INFO] シート '{sheet.title}' に描画要素が見つかりませんでした（XML解析結果）。フォールバックレンダリングをスキップします。")
                     return False
 
-                debug_print(f"[INFO] シート '{sheet.title}' に検出されたラスタ画像がありません。フォールバックレンダリングを試行します...")
+                print(f"[INFO] シート '{sheet.title}' に検出されたラスタ画像がありません。フォールバックレンダリングを試行します...")
                 try:
                     # Generate sheet-level shape images (will be saved into images_dir)
                     rendered = self._render_sheet_fallback(sheet, insert_index=insert_index, insert_images=insert_images)
@@ -2426,7 +2426,7 @@ class ExcelToMarkdownConverter:
                                                 self.markdown_lines.append("")
                                                 self._mark_image_emitted(img)
                                             except Exception as e:
-                                                debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                                print(f"[WARNING] ファイル操作エラー: {e}")
 
                                     # if we inserted at the global insert_base position, advance it
                                     if (row_num not in sheet_map) and insert_at > insert_base:
@@ -2453,7 +2453,7 @@ class ExcelToMarkdownConverter:
                                 # Log final insertion mapping for this sheet (if any)
                                 try:
                                         if md_index_map:
-                                            debug_print(f"[INFO][_final_img_map] sheet={sheet.title} insert_mappings={md_index_map}")
+                                            print(f"[INFO][_final_img_map] sheet={sheet.title} insert_mappings={md_index_map}")
                                 except (ValueError, TypeError) as e:
                                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                         except (ValueError, TypeError):
@@ -2484,21 +2484,21 @@ class ExcelToMarkdownConverter:
                                                 self.markdown_lines.append("")
                                                 self._mark_image_emitted(img_fn)
                                             except Exception as e:
-                                                debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                                print(f"[WARNING] ファイル操作エラー: {e}")
                                     # record next idx as number of saved images (filenames)
                                     try:
                                         self._sheet_shape_next_idx[sheet.title] = len(imgs)
                                     except Exception as e:
-                                        debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                        print(f"[WARNING] ファイル操作エラー: {e}")
                             except Exception:
                                 self._sheet_shape_next_idx[sheet.title] = len(imgs)
                     else:
-                        debug_print(f"[WARNING] フォールバックレンダリングが実行されませんでした（外部ツール未検出など）。")
+                        print(f"[WARNING] フォールバックレンダリングが実行されませんでした（外部ツール未検出など）。")
                 except Exception as e:
-                    debug_print(f"[WARNING] フォールバックレンダリング中にエラーが発生しました: {e}")
+                    print(f"[WARNING] フォールバックレンダリング中にエラーが発生しました: {e}")
                     
         except Exception as e:
-            debug_print(f"[WARNING] 画像処理エラー: {e}")
+            print(f"[WARNING] 画像処理エラー: {e}")
             return False
         return True
     
@@ -2553,7 +2553,7 @@ class ExcelToMarkdownConverter:
                                 try:
                                     z.close()
                                 except Exception as e:
-                                    debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                                    print(f"[WARNING] ファイル操作エラー: {e}")
                         except Exception:
                             image_data = None
                     # refがstrでない場合はimage_dataはNone
@@ -2562,7 +2562,7 @@ class ExcelToMarkdownConverter:
                     image_data = None
 
             if not image_data:
-                debug_print("[WARNING] 画像データを取得できませんでした")
+                print("[WARNING] 画像データを取得できませんでした")
                 return
             
             # 画像形式を判定
@@ -2624,9 +2624,9 @@ class ExcelToMarkdownConverter:
             try:
                 import traceback
                 tb = traceback.format_exc()
-                debug_print(f"[ERROR] Excel画像処理エラー: {e}\n{tb}")
+                print(f"[ERROR] Excel画像処理エラー: {e}\n{tb}")
             except (ValueError, TypeError):
-                debug_print(f"[ERROR] Excel画像処理エラー: {e}")
+                print(f"[ERROR] Excel画像処理エラー: {e}")
             return None
 
     def _deduplicate_image_files(self):
@@ -2647,7 +2647,7 @@ class ExcelToMarkdownConverter:
             # Debug: log image filenames and their SHA256 before building groups
             try:
                 import hashlib as _hashlib
-                debug_print('[DEBUG][_dedupe] listing images and computing sha256 before dedupe:')
+                print('[DEBUG][_dedupe] listing images and computing sha256 before dedupe:')
                 for _fn in sorted(os.listdir(img_dir)):
                     _fp = os.path.join(img_dir, _fn)
                     if not os.path.isfile(_fp):
@@ -2719,7 +2719,7 @@ class ExcelToMarkdownConverter:
                     self.markdown_lines = ExcelToMarkdownConverter._LoggingList(self)
                     self.markdown_lines += new_lines
                 except Exception as e:
-                    debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                    print(f"[WARNING] ファイル操作エラー: {e}")
 
                 # Remove duplicate files (keep canonical)
                 for dup in duplicate_names:
@@ -2743,9 +2743,9 @@ class ExcelToMarkdownConverter:
                     except Exception:
                         continue
             except Exception as e:
-                debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                print(f"[WARNING] ファイル操作エラー: {e}")
         except Exception as e:
-            debug_print(f"[WARNING] ファイル操作エラー: {e}")
+            print(f"[WARNING] ファイル操作エラー: {e}")
 
     # ========================================================================
     # Phase 1: 画像・図形処理の共通基盤メソッド群
@@ -2816,7 +2816,7 @@ class ExcelToMarkdownConverter:
             }
         
         except Exception as e:
-            debug_print(f"[WARNING] Drawing XML取得失敗: {e}")
+            print(f"[WARNING] Drawing XML取得失敗: {e}")
             try:
                 z.close()
             except:
@@ -2889,7 +2889,7 @@ class ExcelToMarkdownConverter:
                 pass  # データ構造操作失敗は無視
         
         except Exception as e:
-            debug_print(f"[WARNING] テーマカラー解析失敗: {e}")
+            print(f"[WARNING] テーマカラー解析失敗: {e}")
         
         return theme_color_map, ln_ref_map
 
@@ -3142,7 +3142,7 @@ class ExcelToMarkdownConverter:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
             
             if proc.returncode != 0:
-                debug_print(f"[WARNING] LibreOffice PDF 変換失敗: {proc.stderr}")
+                print(f"[WARNING] LibreOffice PDF 変換失敗: {proc.stderr}")
                 return None
             
             # 生成されたPDFを探す
@@ -3153,14 +3153,14 @@ class ExcelToMarkdownConverter:
                 # LibreOfficeが異なる名前で出力した可能性
                 candidates = [os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if f.lower().endswith('.pdf')]
                 if not candidates:
-                    debug_print("[WARNING] LibreOffice がPDFを出力しませんでした")
+                    print("[WARNING] LibreOffice がPDFを出力しませんでした")
                     return None
                 pdf_path = candidates[0]
             
             return pdf_path
         
         except Exception as e:
-            debug_print(f"[WARNING] Excel→PDF変換失敗: {e}")
+            print(f"[WARNING] Excel→PDF変換失敗: {e}")
             return None
 
     def _convert_pdf_page_to_png(self, pdf_path: str, page_index: int, dpi: int,
@@ -3188,7 +3188,7 @@ class ExcelToMarkdownConverter:
             
             doc = fitz.open(pdf_path)
             if page_index >= len(doc):
-                debug_print(f"[WARNING] ページ{page_index}が存在しません（全{len(doc)}ページ）")
+                print(f"[WARNING] ページ{page_index}が存在しません（全{len(doc)}ページ）")
                 doc.close()
                 return None
             
@@ -3212,12 +3212,12 @@ class ExcelToMarkdownConverter:
             
             img.save(png_path, 'PNG', quality=100)
             
-            debug_print(f"[INFO] PNG変換完了: {png_path} (サイズ: {img.size[0]}x{img.size[1]})")
+            print(f"[INFO] PNG変換完了: {png_path} (サイズ: {img.size[0]}x{img.size[1]})")
             
             return png_filename
         
         except Exception as e:
-            debug_print(f"[WARNING] PDF→PNG変換失敗: {e}")
+            print(f"[WARNING] PDF→PNG変換失敗: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -3252,7 +3252,7 @@ class ExcelToMarkdownConverter:
             debug_print(f"[DEBUG] Fallback rendering for sheet: {sheet.title}")
             pdf_path = self._convert_excel_to_pdf(self.excel_file, tmpdir, apply_fit_to_page=True)
             if pdf_path is None:
-                debug_print("[WARNING] LibreOffice がPDFを出力しませんでした")
+                print("[WARNING] LibreOffice がPDFを出力しませんでした")
                 return False
             
             # 2. シートのページインデックスを取得
@@ -3272,7 +3272,7 @@ class ExcelToMarkdownConverter:
             )
             
             if result_filename is None:
-                debug_print("[WARNING] ImageMagick による PNG 変換が失敗しました")
+                print("[WARNING] ImageMagick による PNG 変換が失敗しました")
                 return False
             
             # 4. 画像をMarkdownに登録または挿入
@@ -3283,7 +3283,7 @@ class ExcelToMarkdownConverter:
                     self._insert_markdown_image(insert_index, md_line, result_filename, sheet=sheet)
                     debug_print(f"[SUCCESS] シート全体の画像を挿入: {result_filename}")
                 except Exception as e:
-                    debug_print(f"[WARNING] 画像挿入失敗: {e}")
+                    print(f"[WARNING] 画像挿入失敗: {e}")
                     # フォールバック: markdown_linesに直接追加
                     self.markdown_lines.append(md_line)
                     self.markdown_lines.append("")
@@ -3296,7 +3296,7 @@ class ExcelToMarkdownConverter:
             return True
             
         except Exception as e:
-            debug_print(f"[WARNING] フォールバックレンダリングエラー: {e}")
+            print(f"[WARNING] フォールバックレンダリングエラー: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -3646,7 +3646,7 @@ class ExcelToMarkdownConverter:
 
         Uses drawing XML when available. Returns list aligned with anchors order used in other extractors.
         """
-        debug_print(f"[INFO] シート図形セル範囲抽出: {sheet.title}")
+        print(f"[INFO] シート図形セル範囲抽出: {sheet.title}")
         ranges = []
         try:
             # Use Phase 1 foundation method to get drawing XML
@@ -3803,7 +3803,7 @@ class ExcelToMarkdownConverter:
                     ranges.append((start_col, end_col, start_row, end_row))
         except Exception:
             pass  # データ構造操作失敗は無視
-        debug_print(f"[INFO] 抽出されたセル範囲: {ranges}")
+        print(f"[INFO] 抽出されたセル範囲: {ranges}")
         return ranges
 
     def _anchor_is_connector_only(self, sheet, anchor_idx) -> bool:
@@ -3994,7 +3994,7 @@ class ExcelToMarkdownConverter:
             return metadata
             
         except Exception as e:
-            debug_print(f"[WARNING] Shape metadata extraction failed: {e}")
+            print(f"[WARNING] Shape metadata extraction failed: {e}")
             return metadata
 
     def _extract_all_shapes_metadata(self, sheet, filter_ids: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
@@ -4038,7 +4038,7 @@ class ExcelToMarkdownConverter:
                 pass
                 
         except Exception as e:
-            debug_print(f"[WARNING] Failed to extract shapes metadata: {e}")
+            print(f"[WARNING] Failed to extract shapes metadata: {e}")
         
         return shapes_metadata
 
@@ -4601,14 +4601,14 @@ class ExcelToMarkdownConverter:
                     if box_area / page_area > 0.85:
                         continue
                 except Exception as e:
-                    debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                    print(f"[WARNING] ファイル操作エラー: {e}")
                 bboxes.append((left, top, right, bottom))
 
             # return bboxes (list of (left, top, right, bottom) in pixel-ish units)
             debug_print(f"[DEBUG] _extract_drawing_shapes found {len(bboxes)} bboxes")
             return bboxes
         except Exception as e:
-            debug_print(f"[WARNING] _extract_drawing_shapes exception: {e}")
+            print(f"[WARNING] _extract_drawing_shapes exception: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -4764,7 +4764,7 @@ class ExcelToMarkdownConverter:
             try:
                 self._last_iso_preserved_ids = set(referenced_ids)
             except Exception as e:
-                debug_print(f"[WARNING] ファイル操作エラー: {e}")
+                print(f"[WARNING] ファイル操作エラー: {e}")
             
             # Create temp directory and extract workbook
             tmp_base = tempfile.mkdtemp(prefix='xls2md_iso_v2_base_')
@@ -5257,7 +5257,7 @@ class ExcelToMarkdownConverter:
                                         if f.lower().endswith('.pdf') and 'group' in f and sheet.title in f]
                         if not pdf_candidates:
                             if getattr(self, 'verbose', False):
-                                debug_print("[WARN][_iso_v2] PDF conversion failed - no output")
+                                print("[WARN][_iso_v2] PDF conversion failed - no output")
                             return None
                         pdf_path = os.path.join(self.output_dir, pdf_candidates[0])
                     
@@ -5318,7 +5318,7 @@ class ExcelToMarkdownConverter:
                     
                 except Exception as e:
                     if getattr(self, 'verbose', False):
-                        debug_print(f"[ERROR][_iso_v2] Conversion failed: {e}")
+                        print(f"[ERROR][_iso_v2] Conversion failed: {e}")
                     return None
                 
             finally:
@@ -5331,7 +5331,7 @@ class ExcelToMarkdownConverter:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
         except Exception as e:
-            debug_print(f"[ERROR][_iso_v2] Exception: {e}")
+            print(f"[ERROR][_iso_v2] Exception: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -5366,10 +5366,10 @@ class ExcelToMarkdownConverter:
         """シートデータをテーブルとして変換（複数テーブル対応）"""
         min_row, max_row, min_col, max_col = data_range
         
-        debug_print(f"[INFO] データ範囲: 行{min_row}〜{max_row}, 列{min_col}〜{max_col}")
+        print(f"[INFO] データ範囲: 行{min_row}〜{max_row}, 列{min_col}〜{max_col}")
         
         # 罫線で囲まれた矩形領域のみを表として抽出
-        debug_print("[INFO] 罫線で囲まれた領域によるテーブル抽出を開始...")
+        print("[INFO] 罫線で囲まれた領域によるテーブル抽出を開始...")
         table_regions = self._detect_bordered_tables(sheet, min_row, max_row, min_col, max_col)
         debug_print(f"[DEBUG][_convert_sheet_data] bordered_table_regions_count={len(table_regions)} sample={table_regions[:5]}")
 
@@ -5377,7 +5377,7 @@ class ExcelToMarkdownConverter:
         # that uses heuristics (merged cells, annotations, column separations).
         if not table_regions:
             try:
-                debug_print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
+                print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
                 heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
                 try:
                     debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
@@ -5453,7 +5453,7 @@ class ExcelToMarkdownConverter:
         for tr in table_regions:
             # _detect_bordered_tables returns (r1, r2, c1, c2)
             if region_overlaps_drawings(tr, drawing_cell_ranges):
-                debug_print(f"[INFO] テーブル領域が描画と重複しているため除外: {tr}")
+                print(f"[INFO] テーブル領域が描画と重複しているため除外: {tr}")
                 excluded_table_regions.append(tr)
             else:
                 kept_table_regions.append(tr)
@@ -5489,7 +5489,7 @@ class ExcelToMarkdownConverter:
         if 'excluded_table_regions' in locals() and excluded_table_regions:
             for excl in excluded_table_regions:
                 try:
-                    debug_print(f"[INFO] 描画重複のためプレーンテキストとして収集: {excl}")
+                    print(f"[INFO] 描画重複のためプレーンテキストとして収集: {excl}")
                     srow, erow, sc, ec = excl
                     lines = []
                     for rr in range(srow, erow + 1):
@@ -5822,7 +5822,7 @@ class ExcelToMarkdownConverter:
     def _detect_table_regions_excluding_processed(self, sheet, min_row: int, max_row: int, min_col: int, max_col: int, processed_rows: set) -> Tuple[List[Tuple[int, int, int, int]], List[str]]:
         """処理済み行を除外してテーブル領域を検出"""
         try:
-            debug_print("[INFO] 罫線による表領域の検出を開始...")
+            print("[INFO] 罫線による表領域の検出を開始...")
             debug_print(f"[TRACE][_detect_table_regions_excl_entry] sheet={getattr(sheet,'title',None)} range=({min_row}-{max_row},{min_col}-{max_col}) processed_rows_count={len(processed_rows) if processed_rows else 0} processed_rows_sample={sorted(list(processed_rows))[:20] if processed_rows else []}")
         except (ValueError, TypeError) as e:
             debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
@@ -5990,7 +5990,7 @@ class ExcelToMarkdownConverter:
 
     def _detect_table_regions(self, sheet, min_row: int, max_row: int, min_col: int, max_col: int) -> Tuple[List[Tuple[int, int, int, int]], List[str]]:
         """罫線情報を基に表の領域を検出"""
-        debug_print("[INFO] 罫線による表領域の検出を開始...")
+        print("[INFO] 罫線による表領域の検出を開始...")
         debug_print(f"[DEBUG][_detect_table_regions_entry] sheet={getattr(sheet,'title',None)} min_row={min_row} max_row={max_row} min_col={min_col} max_col={max_col}")
         # Debug: basic sheet metrics
         debug_print(f"[DEBUG][_detect_table_regions_entry] sheet={sheet.title} rows={min_row}-{max_row} cols={min_col}-{max_col} max_row={sheet.max_row} max_col={sheet.max_column}")
@@ -7245,7 +7245,7 @@ class ExcelToMarkdownConverter:
             debug_print(f"[DEBUG] 罫線ベース列範囲: 列{table_start_col}〜{table_end_col}")
             return (table_start_col, table_end_col)
         
-        debug_print("[DEBUG] 罫線ベース列検出失敗")
+        print("[DEBUG] 罫線ベース列検出失敗")
         return None
     
     def _has_table_borders(self, cell) -> bool:
@@ -9727,7 +9727,7 @@ class ExcelToMarkdownConverter:
             return text
             
         except Exception as e:
-            debug_print(f"[WARNING] セル書式適用エラー: {e}")
+            print(f"[WARNING] セル書式適用エラー: {e}")
             return text
 
     def _escape_cell_for_table(self, text: str) -> str:
@@ -10059,7 +10059,7 @@ class ExcelToMarkdownConverter:
 
 def convert_xls_to_xlsx(xls_file_path: str) -> Optional[str]:
     """XLSファイルをXLSXに変換"""
-    debug_print(f"[INFO] XLSファイルをXLSXに変換中: {xls_file_path}")
+    print(f"[INFO] XLSファイルをXLSXに変換中: {xls_file_path}")
     
     # 一時ディレクトリを作成
     temp_dir = tempfile.mkdtemp(prefix='xls2md_conversion_')
@@ -10083,13 +10083,13 @@ def convert_xls_to_xlsx(xls_file_path: str) -> Optional[str]:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         
         if result.returncode != 0:
-            debug_print(f"[ERROR] LibreOffice変換失敗: {result.stderr}")
+            print(f"[ERROR] LibreOffice変換失敗: {result.stderr}")
             shutil.rmtree(temp_dir)
             return None
         
         # 変換されたファイルが存在するか確認
         if not os.path.exists(xlsx_output_path):
-            debug_print(f"[ERROR] 変換後のXLSXファイルが見つかりません: {xlsx_output_path}")
+            print(f"[ERROR] 変換後のXLSXファイルが見つかりません: {xlsx_output_path}")
             shutil.rmtree(temp_dir)
             return None
         
@@ -10097,11 +10097,11 @@ def convert_xls_to_xlsx(xls_file_path: str) -> Optional[str]:
         return xlsx_output_path
         
     except subprocess.TimeoutExpired:
-        debug_print("[ERROR] LibreOffice変換がタイムアウトしました")
+        print("[ERROR] LibreOffice変換がタイムアウトしました")
         shutil.rmtree(temp_dir)
         return None
     except Exception as e:
-        debug_print(f"[ERROR] XLS変換エラー: {e}")
+        print(f"[ERROR] XLS変換エラー: {e}")
         shutil.rmtree(temp_dir)
         return None
 
