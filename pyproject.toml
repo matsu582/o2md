@@ -24,4 +24,5 @@ dev = [
 [tool.pytest.ini_options]
 filterwarnings = [
     "ignore::DeprecationWarning",
+    "ignore:DrawingML support is incomplete:UserWarning:openpyxl.reader.drawings",
 ]
