@@ -3164,15 +3164,88 @@ class ExcelToMarkdownConverter:
             return 'image'
         return txt
 
+    def _get_drawing_max_col_row(self, sheet):
+        """図形が参照する最大の列・行番号を取得する。
+        
+        Returns:
+            (max_col, max_row): 図形が参照する最大の列・行番号のタプル。
+                               図形が存在しない場合は (None, None) を返す。
+        """
+        try:
+            metadata = self._get_drawing_xml_and_metadata(sheet)
+            if metadata is None:
+                return None, None
+            
+            drawing_xml = metadata['drawing_xml']
+            ns = {'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'}
+            
+            max_col = None
+            max_row = None
+            
+            for node in drawing_xml:
+                lname = node.tag.split('}')[-1].lower()
+                if lname not in ('twocellanchor', 'onecellanchor'):
+                    continue
+                
+                if lname == 'twocellanchor':
+                    fr = node.find('xdr:from', ns)
+                    to = node.find('xdr:to', ns)
+                    if fr is not None:
+                        try:
+                            col = int(fr.find('xdr:col', ns).text)
+                            row = int(fr.find('xdr:row', ns).text)
+                            if max_col is None or col > max_col:
+                                max_col = col
+                            if max_row is None or row > max_row:
+                                max_row = row
+                        except Exception:
+                            pass
+                    if to is not None:
+                        try:
+                            col = int(to.find('xdr:col', ns).text)
+                            row = int(to.find('xdr:row', ns).text)
+                            if max_col is None or col > max_col:
+                                max_col = col
+                            if max_row is None or row > max_row:
+                                max_row = row
+                        except Exception:
+                            pass
+                elif lname == 'onecellanchor':
+                    fr = node.find('xdr:from', ns)
+                    if fr is not None:
+                        try:
+                            col = int(fr.find('xdr:col', ns).text)
+                            row = int(fr.find('xdr:row', ns).text)
+                            if max_col is None or col > max_col:
+                                max_col = col
+                            if max_row is None or row > max_row:
+                                max_row = row
+                        except Exception:
+                            pass
+            
+            return max_col, max_row
+        except Exception:
+            return None, None
+
     def _compute_sheet_cell_pixel_map(self, sheet, DPI=300):
         """Compute approximate pixel positions for column right-edges and row bottom-edges.
 
         Returns (col_x, row_y) where col_x[0] == 0 and col_x[i] is the right edge
         of column i (1-based). row_y similar for rows.
+        
+        図形が参照する列・行がシートの max_column/max_row より大きい場合は、
+        図形の範囲まで計算を拡張します。
         """
         try:
             max_col = sheet.max_column
             max_row = sheet.max_row
+            
+            drawing_max_col, drawing_max_row = self._get_drawing_max_col_row(sheet)
+            if drawing_max_col is not None and drawing_max_col > max_col:
+                max_col = drawing_max_col
+            if drawing_max_row is not None and drawing_max_row > max_row:
+                max_row = drawing_max_row
+            
             col_pixels = []
             from openpyxl.utils import get_column_letter
             for c in range(1, max_col+1):
