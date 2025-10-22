@@ -3428,10 +3428,14 @@ class ExcelToMarkdownConverter:
             max_row = sheet.max_row
             
             drawing_max_col, drawing_max_row = self._get_drawing_max_col_row(sheet)
-            if drawing_max_col is not None and drawing_max_col > max_col:
-                max_col = drawing_max_col
-            if drawing_max_row is not None and drawing_max_row > max_row:
-                max_row = drawing_max_row
+            if drawing_max_col is not None:
+                drawing_max_col_1based = drawing_max_col + 1
+                if drawing_max_col_1based > max_col:
+                    max_col = drawing_max_col_1based
+            if drawing_max_row is not None:
+                drawing_max_row_1based = drawing_max_row + 1
+                if drawing_max_row_1based > max_row:
+                    max_row = drawing_max_row_1based
             
             if min_cols is not None:
                 max_col = max(max_col, min_cols)
@@ -3817,15 +3821,22 @@ class ExcelToMarkdownConverter:
                             end_row = ri
                             break
 
-                    # clamp to sheet bounds
+                    # clamp to computed bounds (not sheet.max_column/max_row which may be 1 for drawing-only sheets)
+                    max_computed_col = len(col_x) - 1
+                    max_computed_row = len(row_y) - 1
                     if start_col < 1:
                         start_col = 1
                     if start_row < 1:
                         start_row = 1
-                    if end_col > sheet.max_column:
-                        end_col = sheet.max_column
-                    if end_row > sheet.max_row:
-                        end_row = sheet.max_row
+                    if end_col > max_computed_col:
+                        end_col = max_computed_col
+                    if end_row > max_computed_row:
+                        end_row = max_computed_row
+                    
+                    if start_col > end_col:
+                        start_col, end_col = end_col, start_col
+                    if start_row > end_row:
+                        start_row, end_row = end_row, start_row
 
                     ranges.append((start_col, end_col, start_row, end_row))
                 else:
@@ -4386,7 +4397,9 @@ class ExcelToMarkdownConverter:
             chosen_row = None
             total_rows = None
             try:
-                total_rows = int(sheet.max_row) if getattr(sheet, 'max_row', None) else None
+                # Calculate total_rows from cell_ranges instead of sheet.max_row
+                e_list = [int(cr[3]) for cr in cell_ranges if cr[3] is not None]
+                total_rows = max(e_list) if e_list else None
             except (ValueError, TypeError):
                 total_rows = None
 
@@ -4398,15 +4411,15 @@ class ExcelToMarkdownConverter:
                     left_max = None; right_min = None
                 if left_max is None or right_min is None:
                     continue
-                if right_min - left_max >= 2:
+                if right_min - left_max >= 10:
                     candidate = left_max + 1
                     # immediate empty-row split if candidate not covered
-                    if candidate not in all_covered:
-                        split_at = gi + 1
-                        chosen_row = candidate
-                        break
+                    # if candidate not in all_covered:
+                    #     split_at = gi + 1
+                    #     chosen_row = candidate
+                    #     break
 
-                    # otherwise compute cover_count excluding tiny spans, very long spans, and connector-only anchors
+                    # compute cover_count excluding tiny spans, very long spans, and connector-only anchors
                     considered_anchor_idxs = []
                     excluded_long_span_idxs = []
                     excluded_connector_only_idxs = []
@@ -4426,10 +4439,8 @@ class ExcelToMarkdownConverter:
                             if total_rows and span_rows > max(1, int(total_rows * 0.6)):
                                 excluded_long_span_idxs.append((ai, s_r, e_r)); continue
                             if s_r <= candidate <= e_r:
-                                try:
-                                    is_conn_only = self._anchor_is_connector_only(sheet, ai)
-                                except (ValueError, TypeError):
-                                    is_conn_only = False
+                                # Note: _anchor_is_connector_only requires sheet argument which is not available
+                                is_conn_only = False
                                 if is_conn_only:
                                     excluded_connector_only_idxs.append((ai, s_r, e_r)); continue
                                 considered_anchor_idxs.append((ai, s_r, e_r)); cover_count += 1
@@ -4467,7 +4478,7 @@ class ExcelToMarkdownConverter:
                                 if gap_start == 1 or gap_end == total_rows:
                                     continue
                                 gap_len = (gap_end - gap_start + 1)
-                                if gap_len >= 2:
+                                if gap_len >= 10:
                                     left = []; right = []
                                     for idx in indices_sorted:
                                         try:
@@ -4504,17 +4515,14 @@ class ExcelToMarkdownConverter:
                 debug['clusters'] = clusters
                 return clusters, debug
 
-            # no valid integer row split found; fall back to centroid clustering
-            clusters = self._cluster_shape_indices(shapes, max_groups=max_groups)
+            # no valid integer row split found; return all shapes as single cluster
+            clusters = [list(range(len(shapes)))]
             debug['reason'] = 'no_row_split'
             debug['clusters'] = clusters
             return clusters, debug
-        except Exception:
-            try:
-                clusters = self._cluster_shape_indices(shapes, max_groups=max_groups)
-                return clusters, {'reason': 'error_fallback'}
-            except Exception:
-                return [[i for i in range(len(shapes))]], {'reason': 'fatal'}
+        except Exception as e:
+            debug_print(f"[DEBUG] クラスタリングエラー: {e}")
+            return [[i for i in range(len(shapes))]], {'reason': 'fatal'}
     
     def _get_image_position(self, image):
         """画像の位置情報を取得
