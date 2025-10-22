@@ -4407,7 +4407,7 @@ class ExcelToMarkdownConverter:
                                 if gap_start == 1 or gap_end == total_rows:
                                     continue
                                 gap_len = (gap_end - gap_start + 1)
-                                if gap_len >= 5:
+                                if gap_len >= 2:
                                     left = []; right = []
                                     for idx in indices_sorted:
                                         try:
