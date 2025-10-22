@@ -3351,19 +3351,97 @@ class ExcelToMarkdownConverter:
             return 'image'
         return txt
 
+    def _get_drawing_max_col_row(self, sheet):
+        """図形が参照する最大の列・行番号を取得する。
+        
+        Returns:
+            (max_col, max_row): 図形が参照する最大の列・行番号のタプル。
+                               図形が存在しない場合は (None, None) を返す。
+        """
+        try:
+            metadata = self._get_drawing_xml_and_metadata(sheet)
+            if metadata is None:
+                return None, None
+            
+            drawing_xml = metadata['drawing_xml']
+            ns = {'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'}
+            
+            max_col = None
+            max_row = None
+            
+            for node in drawing_xml:
+                lname = node.tag.split('}')[-1].lower()
+                if lname not in ('twocellanchor', 'onecellanchor'):
+                    continue
+                
+                if lname == 'twocellanchor':
+                    fr = node.find('xdr:from', ns)
+                    to = node.find('xdr:to', ns)
+                    if fr is not None:
+                        try:
+                            col = int(fr.find('xdr:col', ns).text)
+                            row = int(fr.find('xdr:row', ns).text)
+                            if max_col is None or col > max_col:
+                                max_col = col
+                            if max_row is None or row > max_row:
+                                max_row = row
+                        except Exception:
+                            pass
+                    if to is not None:
+                        try:
+                            col = int(to.find('xdr:col', ns).text)
+                            row = int(to.find('xdr:row', ns).text)
+                            if max_col is None or col > max_col:
+                                max_col = col
+                            if max_row is None or row > max_row:
+                                max_row = row
+                        except Exception:
+                            pass
+                elif lname == 'onecellanchor':
+                    fr = node.find('xdr:from', ns)
+                    if fr is not None:
+                        try:
+                            col = int(fr.find('xdr:col', ns).text)
+                            row = int(fr.find('xdr:row', ns).text)
+                            if max_col is None or col > max_col:
+                                max_col = col
+                            if max_row is None or row > max_row:
+                                max_row = row
+                        except Exception:
+                            pass
+            
+            return max_col, max_row
+        except Exception:
+            return None, None
+
     def _compute_sheet_cell_pixel_map(self, sheet, DPI=300, min_cols=None, min_rows=None):
         """Compute approximate pixel positions for column right-edges and row bottom-edges.
 
         Returns (col_x, row_y) where col_x[0] == 0 and col_x[i] is the right edge
         of column i (1-based). row_y similar for rows.
+        
+        図形が参照する列・行がシートの max_column/max_row より大きい場合は、
+        図形の範囲まで計算を拡張します。
         """
         try:
             max_col = sheet.max_column
             max_row = sheet.max_row
+            
+            drawing_max_col, drawing_max_row = self._get_drawing_max_col_row(sheet)
+            if drawing_max_col is not None:
+                drawing_max_col_1based = drawing_max_col + 1
+                if drawing_max_col_1based > max_col:
+                    max_col = drawing_max_col_1based
+            if drawing_max_row is not None:
+                drawing_max_row_1based = drawing_max_row + 1
+                if drawing_max_row_1based > max_row:
+                    max_row = drawing_max_row_1based
+            
             if min_cols is not None:
                 max_col = max(max_col, min_cols)
             if min_rows is not None:
                 max_row = max(max_row, min_rows)
+            
             col_pixels = []
             from openpyxl.utils import get_column_letter
             for c in range(1, max_col+1):
@@ -3687,71 +3765,47 @@ class ExcelToMarkdownConverter:
                         to_row = int(to.find('xdr:row', ns).text)
                     except (ValueError, TypeError):
                         continue
-                    # Use the colOff/rowOff EMU offsets to compute precise pixel
-                    # positions for the anchor extents, then map those pixels to
-                    # enclosing cell indices using col_x and row_y arrays. This
-                    # handles cases where the anchor extends partially into the
-                    # ending cell.
-                    try:
-                        colOff = int(fr.find('xdr:colOff', ns).text)
-                    except (ValueError, TypeError):
-                        colOff = 0
-                    try:
-                        rowOff = int(fr.find('xdr:rowOff', ns).text)
-                    except (ValueError, TypeError):
-                        rowOff = 0
-                    try:
-                        to_colOff = int(to.find('xdr:colOff', ns).text)
-                    except (ValueError, TypeError):
-                        to_colOff = 0
-                    try:
-                        to_rowOff = int(to.find('xdr:rowOff', ns).text)
-                    except (ValueError, TypeError):
-                        to_rowOff = 0
+                    start_col = col + 1
+                    end_col = to_col + 1
+                    start_row = row + 1
+                    end_row = to_row + 1
 
-                    # convert EMU offsets to pixels using same DPI as col/row map
-                    EMU_PER_INCH = 914400
                     try:
-                        EMU_PER_PIXEL = EMU_PER_INCH / float(DPI)
-                    except (ValueError, TypeError):
-                        EMU_PER_PIXEL = EMU_PER_INCH / float(DPI)
-                    left_px = col_x[col] + (colOff / EMU_PER_PIXEL) if col < len(col_x) else col_x[-1]
-                    right_px = col_x[to_col] + (to_colOff / EMU_PER_PIXEL) if to_col < len(col_x) else col_x[-1]
-                    top_px = row_y[row] + (rowOff / EMU_PER_PIXEL) if row < len(row_y) else row_y[-1]
-                    bottom_px = row_y[to_row] + (to_rowOff / EMU_PER_PIXEL) if to_row < len(row_y) else row_y[-1]
-
-                    # map pixels to cell indices (1-based inclusive)
-                    start_col = 1
-                    for ci in range(1, len(col_x)):
-                        if col_x[ci] >= left_px:
-                            start_col = ci
-                            break
-                    end_col = len(col_x)-1
-                    for ci in range(1, len(col_x)):
-                        if col_x[ci] >= right_px:
-                            end_col = ci
-                            break
-
-                    start_row = 1
-                    for ri in range(1, len(row_y)):
-                        if row_y[ri] >= top_px:
-                            start_row = ri
-                            break
-                    end_row = len(row_y)-1
-                    for ri in range(1, len(row_y)):
-                        if row_y[ri] >= bottom_px:
-                            end_row = ri
-                            break
-
-                    # clamp to sheet bounds
-                    if start_col < 1:
-                        start_col = 1
-                    if start_row < 1:
-                        start_row = 1
-                    if end_col > sheet.max_column:
-                        end_col = sheet.max_column
-                    if end_row > sheet.max_row:
-                        end_row = sheet.max_row
+                        ns_a = {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'}
+                        sp = node.find('.//xdr:sp', ns)
+                        if sp is not None:
+                            prst_geom = sp.find('.//a:prstGeom', ns_a)
+                            if prst_geom is not None:
+                                prst = prst_geom.get('prst', '')
+                                if 'callout' in prst.lower():
+                                    # This is a callout shape, check adjustment values
+                                    av_lst = prst_geom.find('a:avLst', ns_a)
+                                    if av_lst is not None:
+                                        adj1_elem = av_lst.find('a:gd[@name="adj1"]', ns_a)
+                                        adj2_elem = av_lst.find('a:gd[@name="adj2"]', ns_a)
+                                        
+                                        adj1 = 0
+                                        adj2 = 0
+                                        if adj1_elem is not None:
+                                            fmla = adj1_elem.get('fmla', '')
+                                            if fmla.startswith('val '):
+                                                try:
+                                                    adj1 = int(fmla.split()[1])
+                                                except (ValueError, IndexError):
+                                                    pass
+                                        if adj2_elem is not None:
+                                            fmla = adj2_elem.get('fmla', '')
+                                            if fmla.startswith('val '):
+                                                try:
+                                                    adj2 = int(fmla.split()[1])
+                                                except (ValueError, IndexError):
+                                                    pass
+                                        
+                                        if adj1 < 0 or adj2 < 0:
+                                            if start_row > 1:
+                                                start_row -= 1
+                    except Exception:
+                        pass
 
                     ranges.append((start_col, end_col, start_row, end_row))
                 else:
@@ -4312,7 +4366,9 @@ class ExcelToMarkdownConverter:
             chosen_row = None
             total_rows = None
             try:
-                total_rows = int(sheet.max_row) if getattr(sheet, 'max_row', None) else None
+                # Calculate total_rows from cell_ranges instead of sheet.max_row
+                e_list = [int(cr[3]) for cr in cell_ranges if cr[3] is not None]
+                total_rows = max(e_list) if e_list else None
             except (ValueError, TypeError):
                 total_rows = None
 
@@ -4326,52 +4382,10 @@ class ExcelToMarkdownConverter:
                     continue
                 if right_min - left_max >= 2:
                     candidate = left_max + 1
-                    # immediate empty-row split if candidate not covered
                     if candidate not in all_covered:
                         split_at = gi + 1
                         chosen_row = candidate
                         break
-
-                    # otherwise compute cover_count excluding tiny spans, very long spans, and connector-only anchors
-                    considered_anchor_idxs = []
-                    excluded_long_span_idxs = []
-                    excluded_connector_only_idxs = []
-                    excluded_small_span_idxs = []
-                    cover_count = 0
-                    try:
-                        for ai, cr in enumerate(cell_ranges):
-                            try:
-                                if not (isinstance(cr, (list, tuple)) and cr[2] is not None and cr[3] is not None):
-                                    continue
-                                s_r = int(cr[2]); e_r = int(cr[3])
-                            except (ValueError, TypeError):
-                                continue
-                            span_rows = (e_r - s_r + 1)
-                            if span_rows <= 1:
-                                excluded_small_span_idxs.append((ai, s_r, e_r)); continue
-                            if total_rows and span_rows > max(1, int(total_rows * 0.6)):
-                                excluded_long_span_idxs.append((ai, s_r, e_r)); continue
-                            if s_r <= candidate <= e_r:
-                                try:
-                                    is_conn_only = self._anchor_is_connector_only(sheet, ai)
-                                except (ValueError, TypeError):
-                                    is_conn_only = False
-                                if is_conn_only:
-                                    excluded_connector_only_idxs.append((ai, s_r, e_r)); continue
-                                considered_anchor_idxs.append((ai, s_r, e_r)); cover_count += 1
-                    except (ValueError, TypeError):
-                        cover_count = 0
-                    try:
-                        threshold = max(1, int(len(cell_ranges) * 0.20))
-                    except (ValueError, TypeError):
-                        threshold = 1
-                    if cover_count <= threshold:
-                        split_at = gi + 1
-                        chosen_row = candidate
-                        break
-                    else:
-                        # record why rejected
-                        debug.setdefault('candidates', []).append({'candidate': candidate, 'cover_count': cover_count, 'threshold': threshold, 'considered': considered_anchor_idxs, 'excluded_long': excluded_long_span_idxs, 'excluded_small': excluded_small_span_idxs, 'excluded_conn': excluded_connector_only_idxs})
 
             # fallback: find largest uncovered interior gap
             if split_at is None:
@@ -4409,18 +4423,6 @@ class ExcelToMarkdownConverter:
                                         debug['chosen_split'] = ('gap', gap_start, gap_end)
                                         debug['clusters'] = clusters
                                         return clusters, debug
-                                # otherwise find split index by first anchor whose start_row > gap_start
-                                candidate = gap_start
-                                split_index = None
-                                for pos, idx in enumerate(indices_sorted):
-                                    try:
-                                        s_r = int(cell_ranges[idx][2])
-                                    except (ValueError, TypeError):
-                                        s_r = None
-                                    if s_r is not None and s_r > candidate:
-                                        split_index = pos; break
-                                if split_index is not None and 0 < split_index < len(indices_sorted):
-                                    split_at = split_index; debug['chosen_split'] = ('gap_fallback', gap_start, gap_end); break
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
@@ -4430,17 +4432,14 @@ class ExcelToMarkdownConverter:
                 debug['clusters'] = clusters
                 return clusters, debug
 
-            # no valid integer row split found; fall back to centroid clustering
-            clusters = self._cluster_shape_indices(shapes, max_groups=max_groups)
+            # no valid integer row split found; return all shapes as single cluster
+            clusters = [list(range(len(shapes)))]
             debug['reason'] = 'no_row_split'
             debug['clusters'] = clusters
             return clusters, debug
-        except Exception:
-            try:
-                clusters = self._cluster_shape_indices(shapes, max_groups=max_groups)
-                return clusters, {'reason': 'error_fallback'}
-            except Exception:
-                return [[i for i in range(len(shapes))]], {'reason': 'fatal'}
+        except Exception as e:
+            debug_print(f"[DEBUG] クラスタリングエラー: {e}")
+            return [[i for i in range(len(shapes))]], {'reason': 'fatal'}
     
     def _get_image_position(self, image):
         """画像の位置情報を取得
