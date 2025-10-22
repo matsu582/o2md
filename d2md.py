@@ -24,29 +24,58 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 import io
+
+from utils import get_libreoffice_path
 
 try:
     from docx import Document
     from docx.shared import Inches
     from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
     from docx.enum.style import WD_STYLE_TYPE
-except ImportError:
-    print("python-docxライブラリが必要です: pip install python-docx")
-    sys.exit(1)
+except ImportError as e:
+    raise ImportError(
+        "python-docxライブラリが必要です: pip install python-docx または uv sync を実行してください"
+    ) from e
 
 try:
     from PIL import Image
-except ImportError:
-    print("Pillowライブラリが必要です: pip install pillow")
-    sys.exit(1)
+except ImportError as e:
+    raise ImportError(
+        "Pillowライブラリが必要です: pip install pillow または uv sync を実行してください"
+    ) from e
+
+try:
+    import fitz
+except ImportError as e:
+    raise ImportError(
+        "PyMuPDFライブラリが必要です: pip install PyMuPDF または uv sync を実行してください"
+    ) from e
 
 # 設定
-LIBREOFFICE_PATH = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+LIBREOFFICE_PATH = get_libreoffice_path()
+
+
+# グローバルverboseフラグ
+_VERBOSE = False
+
+def set_verbose(verbose: bool):
+    """verboseモードを設定"""
+    global _VERBOSE
+    _VERBOSE = verbose
+
+def is_verbose() -> bool:
+    """verboseモードかどうかを返す"""
+    return _VERBOSE
+
+def debug_print(*args, **kwargs):
+    """verboseモード時のみ出力するデバッグ用print"""
+    if _VERBOSE:
+        print(*args, **kwargs)
 
 class WordToMarkdownConverter:
-    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None):
+    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None, shape_metadata=False):
         self.word_file = word_file_path
         self.doc = Document(word_file_path)
         self.base_name = Path(word_file_path).stem
@@ -55,8 +84,7 @@ class WordToMarkdownConverter:
         if output_dir:
             self.output_dir = output_dir
         else:
-            # 実行ディレクトリに基づく出力ディレクトリ
-            self.output_dir = os.getcwd()
+            self.output_dir = os.path.join(os.getcwd(), "output")
         
         self.images_dir = os.path.join(self.output_dir, "images")
         
@@ -73,6 +101,7 @@ class WordToMarkdownConverter:
         self.referenced_images = set()  # 実際に文書内で参照されている画像のrId
         self.vector_image_counter = 0  # ベクター画像専用カウンター
         self.regular_image_counter = 0  # 通常画像専用カウンター
+        self.shape_metadata = shape_metadata  # 図形メタデータ出力フラグ
         
     def convert(self) -> str:
         """メイン変換処理"""
@@ -132,7 +161,7 @@ class WordToMarkdownConverter:
                     'text': text,
                     'anchor': anchor_id
                 })
-                print(f"[DEBUG] 見出し発見: レベル{heading_level} - {text}")
+                debug_print(f"[DEBUG] 見出し発見: レベル{heading_level} - {text}")
                 
                 # 章番号マッピングを構築（見出しテキストと段落の番号付け情報を使用）
                 self._build_chapter_mapping(text, anchor_id, paragraph)
@@ -178,7 +207,7 @@ class WordToMarkdownConverter:
                     # 章番号部分を除去した見出しタイトルを取得
                     title_text = self._extract_heading_title(heading_text)
                     self.heading_titles_map[pattern] = title_text
-                print(f"[DEBUG] 自動章番号マッピング: '{pattern}' -> '#{anchor_id}'")
+                debug_print(f"[DEBUG] 自動章番号マッピング: '{pattern}' -> '#{anchor_id}'")
         
         # 見出しテキストから章番号を抽出
         patterns = [
@@ -204,7 +233,7 @@ class WordToMarkdownConverter:
                         if self.use_heading_text:
                             title_text = self._extract_heading_title(heading_text)
                             self.heading_titles_map[chapter_ref] = title_text
-                        print(f"[DEBUG] テキスト章番号マッピング: '{chapter_ref}' -> '#{anchor_id}'")
+                        debug_print(f"[DEBUG] テキスト章番号マッピング: '{chapter_ref}' -> '#{anchor_id}'")
                 else:
                     # 単一のマッピング
                     self.headings_map[result] = anchor_id
@@ -212,7 +241,7 @@ class WordToMarkdownConverter:
                     if self.use_heading_text:
                         title_text = self._extract_heading_title(heading_text)
                         self.heading_titles_map[result] = title_text
-                    print(f"[DEBUG] テキスト章番号マッピング: '{result}' -> '#{anchor_id}'")
+                    debug_print(f"[DEBUG] テキスト章番号マッピング: '{result}' -> '#{anchor_id}'")
                 break
     
     def _extract_heading_title(self, heading_text: str) -> str:
@@ -230,7 +259,7 @@ class WordToMarkdownConverter:
         
         result = heading_text
         for pattern in patterns:
-            result = re.sub(pattern, '', result, 1)  # 最初の一致のみ置換
+            result = re.sub(pattern, '', result, count=1)  # 最初の一致のみ置換
         
         # 前後の空白を除去
         return result.strip()
@@ -326,7 +355,7 @@ class WordToMarkdownConverter:
                     return True
             return False
         except Exception as e:
-            print(f"[DEBUG] 目次チェックエラー: {e}")
+            debug_print(f"[DEBUG] 目次チェックエラー: {e}")
             return False
     
     def _generate_toc(self):
@@ -393,9 +422,24 @@ class WordToMarkdownConverter:
                 return table
         return None
     
+    def _get_paragraph_text_without_hidden(self, paragraph) -> str:
+        """段落から隠しテキスト（vanish属性を持つrun）を除外してテキストを取得"""
+        text_parts = []
+        for run in paragraph.runs:
+            try:
+                vanish_elem = run._element.xpath('.//w:vanish')
+                if not vanish_elem:
+                    if run.text:
+                        text_parts.append(run.text)
+            except Exception:
+                if run.text:
+                    text_parts.append(run.text)
+        
+        return ''.join(text_parts)
+    
     def _convert_paragraph(self, paragraph):
         """段落を変換"""
-        text = paragraph.text.strip()
+        text = self._get_paragraph_text_without_hidden(paragraph).strip()
         style_name = paragraph.style.name.lower()
         
         if not text:
@@ -440,18 +484,18 @@ class WordToMarkdownConverter:
             # スタイル名での判定
             style_name = paragraph.style.name.lower()
             if style_name in ['toc 1', 'toc 2', 'toc 3', 'toc heading', 'table of contents']:
-                print(f"[DEBUG] 目次スタイル検出: {style_name}")
+                debug_print(f"[DEBUG] 目次スタイル検出: {style_name}")
                 return True
             
             # テキスト内容での判定
             text = paragraph.text.strip().lower()
             if text in ['目次', 'contents', 'table of contents', '目 次']:
-                print(f"[DEBUG] 目次テキスト検出: {text}")
+                debug_print(f"[DEBUG] 目次テキスト検出: {text}")
                 return True
             
             # フィールドコードでの判定
             if 'TOC' in paragraph.text or 'HYPERLINK' in paragraph.text:
-                print(f"[DEBUG] 目次フィールド検出: TOC/HYPERLINK")
+                debug_print(f"[DEBUG] 目次フィールド検出: TOC/HYPERLINK")
                 return True
             
             # Word文書のXML構造での判定
@@ -461,7 +505,7 @@ class WordToMarkdownConverter:
                     next_run = run._element.getnext()
                     while next_run is not None:
                         if 'TOC' in next_run.text if hasattr(next_run, 'text') else '':
-                            print(f"[DEBUG] Word目次フィールド検出")
+                            debug_print(f"[DEBUG] Word目次フィールド検出")
                             return True
                         if next_run.xpath('.//w:fldChar[@w:fldCharType="end"]'):
                             break
@@ -469,7 +513,7 @@ class WordToMarkdownConverter:
             
             return False
         except Exception as e:
-            print(f"[DEBUG] 目次判定エラー: {e}")
+            debug_print(f"[DEBUG] 目次判定エラー: {e}")
             return False
     
     def _is_heading(self, paragraph) -> bool:
@@ -633,11 +677,11 @@ class WordToMarkdownConverter:
                 numbering_info = self.numbering_types[numId]
                 is_bullet = numbering_info['type'] == 'bullet'
                 
-                print(f"[DEBUG] numId={numId} -> type={numbering_info['type']}, format='{numbering_info['format']}'")
+                debug_print(f"[DEBUG] numId={numId} -> type={numbering_info['type']}, format='{numbering_info['format']}'")
             else:
                 # フォールバック：従来の判定方法
                 is_bullet = self._is_bullet_numbering(numId)
-                print(f"[DEBUG] numId={numId} -> フォールバック判定: {'bullet' if is_bullet else 'number'}")
+                debug_print(f"[DEBUG] numId={numId} -> フォールバック判定: {'bullet' if is_bullet else 'number'}")
             
             if is_bullet:
                 # 箇条書きリスト
@@ -696,9 +740,9 @@ class WordToMarkdownConverter:
                 ilvl = ilvl_elem[0].get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val') if ilvl_elem else 'None'
                 
                 text = paragraph.text.strip()[:30]
-                print(f"[DEBUG] リスト項目: '{text}' | numId={num_id} | ilvl={ilvl}")
+                debug_print(f"[DEBUG] リスト項目: '{text}' | numId={num_id} | ilvl={ilvl}")
         except Exception as e:
-            print(f"[DEBUG] 番号付けデバッグエラー: {e}")
+            debug_print(f"[DEBUG] 番号付けデバッグエラー: {e}")
     
     def _analyze_numbering_definitions(self):
         """numbering.xmlから番号付け定義を解析"""
@@ -715,7 +759,7 @@ class WordToMarkdownConverter:
             
             if numbering_part:
                 numbering_xml = numbering_part.blob.decode('utf-8')
-                print(f"[DEBUG] numbering.xml の一部: {numbering_xml[:500]}")
+                debug_print(f"[DEBUG] numbering.xml の一部: {numbering_xml[:500]}")
                 
                 # 各numIdのlvlText（表示形式）を解析
                 import xml.etree.ElementTree as ET
@@ -729,7 +773,7 @@ class WordToMarkdownConverter:
                     if abstract_num_id is not None:
                         abstract_id = abstract_num_id.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')
                         num_to_abstract[num_id] = abstract_id
-                        print(f"[DEBUG] numId={num_id} -> abstractNumId={abstract_id}")
+                        debug_print(f"[DEBUG] numId={num_id} -> abstractNumId={abstract_id}")
                 
                 # abstractNum定義から実際の番号形式を解析
                 for abstract_num in root.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNum'):
@@ -769,10 +813,10 @@ class WordToMarkdownConverter:
                                     'format_type': format_type,
                                     'abstract_id': abstract_id
                                 }
-                                print(f"[DEBUG] numId={num_id}: type={'bullet' if is_bullet else 'number'}, format='{format_text}', format_type='{format_type}'")
+                                debug_print(f"[DEBUG] numId={num_id}: type={'bullet' if is_bullet else 'number'}, format='{format_text}', format_type='{format_type}'")
                         
         except Exception as e:
-            print(f"[DEBUG] numbering解析エラー: {e}")
+            debug_print(f"[DEBUG] numbering解析エラー: {e}")
             import traceback
             traceback.print_exc()
     
@@ -859,18 +903,21 @@ class WordToMarkdownConverter:
         
         # 段落内のRunを調べて画像があるかチェック
         for run in paragraph.runs:
-            for inline_shape in run._element.xpath('.//a:blip'):
-                # 画像の参照IDを取得
-                embed_id = inline_shape.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
-                if embed_id:
-                    # 対応するリレーションを探す
-                    for rel in paragraph.part.rels.values():
-                        if rel.rId == embed_id and "image" in rel.reltype:
-                            # その場で画像を処理
-                            self._extract_and_convert_image_inline(rel)
-                            return  # 1つの段落につき1つの画像のみ処理
+            # drawing要素を取得
+            drawings = run._element.xpath('.//w:drawing')
+            for drawing in drawings:
+                for inline_shape in drawing.xpath('.//a:blip'):
+                    # 画像の参照IDを取得
+                    embed_id = inline_shape.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+                    if embed_id:
+                        # 対応するリレーションを探す
+                        for rel in paragraph.part.rels.values():
+                            if rel.rId == embed_id and "image" in rel.reltype:
+                                # その場で画像を処理（drawing要素も渡す）
+                                self._extract_and_convert_image_inline(rel, drawing)
+                                return  # 1つの段落につき1つの画像のみ処理
     
-    def _extract_and_convert_image_inline(self, rel):
+    def _extract_and_convert_image_inline(self, rel, drawing_element=None):
         """インライン画像を抽出・変換"""
         try:
             # 参照されている画像として記録
@@ -919,6 +966,33 @@ class WordToMarkdownConverter:
             self.markdown_lines.append(f"![](images/{encoded_filename})")
             self.markdown_lines.append("")
             
+            if self.shape_metadata and drawing_element is not None:
+                try:
+                    metadata = self._extract_shape_metadata_from_drawing(drawing_element)
+                    if metadata.get('shapes'):
+                        text_metadata = self._format_shape_metadata_as_text(metadata)
+                        json_metadata = self._format_shape_metadata_as_json(metadata)
+                        
+                        if text_metadata:
+                            self.markdown_lines.append("")
+                            self.markdown_lines.append(text_metadata)
+                            self.markdown_lines.append("")
+                        
+                        if json_metadata and json_metadata != "{}":
+                            self.markdown_lines.append("<details>")
+                            self.markdown_lines.append("<summary>JSON形式の図形情報</summary>")
+                            self.markdown_lines.append("")
+                            self.markdown_lines.append("```json")
+                            self.markdown_lines.append(json_metadata)
+                            self.markdown_lines.append("```")
+                            self.markdown_lines.append("")
+                            self.markdown_lines.append("</details>")
+                            self.markdown_lines.append("")
+                        
+                        debug_print(f"[DEBUG] 図形メタデータ追加: {len(metadata['shapes'])} shapes")
+                except Exception as e:
+                    print(f"[WARNING] 図形メタデータ追加失敗: {e}")
+            
             print(f"[SUCCESS] 画像をインライン処理: {image_filename}")
             
         except Exception as e:
@@ -944,7 +1018,7 @@ class WordToMarkdownConverter:
                 for processed_rel_id, processed_info in self.processed_images.items():
                     if isinstance(processed_info, dict) and processed_info.get('hash') == image_hash:
                         already_processed = True
-                        print(f"[DEBUG] 画像重複スキップ: {rel.rId} (ハッシュ重複)")
+                        debug_print(f"[DEBUG] 画像重複スキップ: {rel.rId} (ハッシュ重複)")
                         break
                 
                 if not already_processed:
@@ -1000,13 +1074,13 @@ class WordToMarkdownConverter:
                 # Word Processing Canvas (wpc) をチェック
                 canvas_elements = drawing.xpath('.//*[local-name()="wpc"]')
                 if canvas_elements:
-                    print("[DEBUG] Word Processing Canvas検出")
+                    debug_print("[DEBUG] Word Processing Canvas検出")
                     return True
                 
                 # Word Processing Group (wpg) をチェック
                 group_elements = drawing.xpath('.//*[local-name()="wgp"]')
                 if group_elements:
-                    print("[DEBUG] Word Processing Group検出")
+                    debug_print("[DEBUG] Word Processing Group検出")
                     return True
                     
             return False
@@ -1063,7 +1137,7 @@ class WordToMarkdownConverter:
             if not temp_doc_path:
                 return False
             
-            print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
+            debug_print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
             
             # LibreOfficeでPDFに変換
             temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
@@ -1071,7 +1145,7 @@ class WordToMarkdownConverter:
                 os.unlink(temp_doc_path)
                 return False
             
-            print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
             
             # PDFの内容を確認
             self._debug_pdf_content(temp_pdf_path)
@@ -1089,13 +1163,41 @@ class WordToMarkdownConverter:
                 encoded_filename = urllib.parse.quote(image_filename)
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
                 self.markdown_lines.append("")
+                
+                if self.shape_metadata:
+                    try:
+                        metadata = self._extract_shape_metadata_from_drawing(drawing_element)
+                        if metadata.get('shapes'):
+                            text_metadata = self._format_shape_metadata_as_text(metadata)
+                            json_metadata = self._format_shape_metadata_as_json(metadata)
+                            
+                            if text_metadata:
+                                self.markdown_lines.append("")
+                                self.markdown_lines.append(text_metadata)
+                                self.markdown_lines.append("")
+                            
+                            if json_metadata and json_metadata != "{}":
+                                self.markdown_lines.append("<details>")
+                                self.markdown_lines.append("<summary>JSON形式の図形情報</summary>")
+                                self.markdown_lines.append("")
+                                self.markdown_lines.append("```json")
+                                self.markdown_lines.append(json_metadata)
+                                self.markdown_lines.append("```")
+                                self.markdown_lines.append("")
+                                self.markdown_lines.append("</details>")
+                                self.markdown_lines.append("")
+                            
+                            debug_print(f"[DEBUG] 図形メタデータ追加: {len(metadata['shapes'])} shapes")
+                    except Exception as e:
+                        print(f"[WARNING] 図形メタデータ追加失敗: {e}")
+                
                 print(f"[SUCCESS] ベクター複合図形を処理: {image_filename}")
                 
                 # デバッグ用にPDFも保存
                 debug_pdf_path = os.path.join('output/debug', f"{os.path.splitext(os.path.basename(image_filename))[0]}.pdf")
                 os.makedirs('output/debug', exist_ok=True)
                 shutil.copy2(temp_pdf_path, debug_pdf_path)
-                print(f"[DEBUG] PDFデバッグファイル保存: {debug_pdf_path}")
+                debug_print(f"[DEBUG] PDFデバッグファイル保存: {debug_pdf_path}")
                 
                 # 一時ファイルを削除
                 os.unlink(temp_doc_path)
@@ -1115,7 +1217,7 @@ class WordToMarkdownConverter:
     def _create_canvas_document(self, canvas_element, drawing_element):
         """キャンバス要素のみを含む一時Word文書を作成"""
         try:
-            print("[DEBUG] Word文書作成開始...")
+            debug_print("[DEBUG] Word文書作成開始...")
             
             # 元の文書からリレーション情報を取得
             original_rels = {}
@@ -1123,13 +1225,13 @@ class WordToMarkdownConverter:
                 for rel in self.doc.part.rels.values():
                     if "image" in rel.reltype:
                         original_rels[rel.rId] = rel.target_part.blob
-                print(f"[DEBUG] 取得したリレーション数: {len(original_rels)}")
+                debug_print(f"[DEBUG] 取得したリレーション数: {len(original_rels)}")
             except Exception as rel_error:
-                print(f"[DEBUG] リレーション取得エラー: {rel_error}")
+                debug_print(f"[DEBUG] リレーション取得エラー: {rel_error}")
             
             # XMLを文字列として取得
             drawing_xml = ET.tostring(drawing_element, encoding='unicode')
-            print(f"[DEBUG] Drawing XML長: {len(drawing_xml)}")
+            debug_print(f"[DEBUG] Drawing XML長: {len(drawing_xml)}")
             
             # より適切なWord文書XMLを作成
             doc_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -1251,84 +1353,81 @@ class WordToMarkdownConverter:
             return None
     
     def _convert_pdf_to_png(self, pdf_path, output_path):
-        """PDFをPNGに変換（高速化オプション付き）"""
+        """PDFをPNGに変換（PyMuPDF使用）"""
         try:
-            # 手法1: 高速変換（品質は標準、速度重視）
-            print("[DEBUG] 高速PDF→PNG変換実行...")
-            cmd_fast = [
-                'magick',
-                '-density', '300',  # 標準DPIで高速化
-                f'{pdf_path}[0]',  # 最初のページ
-                '-colorspace', 'RGB',
-                '-background', 'white',
-                '-alpha', 'remove',
-                '-resize', '200%',  # 2倍拡大（高速）
-                '-trim',  # 余白除去
-                '+repage',
-                '-quality', '90',  # 品質を少し下げて高速化
-                '-depth', '8',
-                output_path
-            ]
+            debug_print("[DEBUG] PyMuPDFでPDF→PNG変換実行...")
             
-            result = subprocess.run(cmd_fast, capture_output=True, text=True, timeout=30)
+            doc = fitz.open(pdf_path)
+            if len(doc) == 0:
+                print("[ERROR] PDFにページが含まれていません")
+                doc.close()
+                return False
             
-            if result.returncode == 0 and os.path.exists(output_path):
-                print(f"[INFO] 高速PNG変換完了: {output_path}")
-                
-                # 画像情報を簡単に出力
-                try:
-                    identify_result = subprocess.run(['magick', 'identify', output_path], 
-                                                   capture_output=True, text=True, timeout=5)
-                    if identify_result.returncode == 0:
-                        info = identify_result.stdout.strip()
-                        # ファイル名を除いて重要な情報だけ表示
-                        parts = info.split()
-                        if len(parts) >= 3:
-                            print(f"[DEBUG] 画像情報: {parts[2]} {parts[6] if len(parts) > 6 else ''}")
-                except Exception:
-                    pass
-                    
-                return True
-            else:
-                print(f"[WARNING] 高速変換失敗、代替手法を試行: {result.stderr}")
-                
-                # 手法2: pdftoppm使用（利用可能な場合）
-                if shutil.which('pdftoppm'):
-                    print("[DEBUG] pdftoppm高速変換試行...")
-                    cmd_ppm = ['pdftoppm', '-png', '-r', '200', '-singlefile', pdf_path, output_path.replace('.png', '')]
-                    
-                    result2 = subprocess.run(cmd_ppm, capture_output=True, text=True, timeout=20)
-                    if result2.returncode == 0 and os.path.exists(output_path):
-                        print(f"[INFO] pdftoppm変換完了: {output_path}")
-                        
-                        # 余白除去を後処理で実行
-                        cmd_trim = ['magick', output_path, '-trim', '+repage', output_path]
-                        subprocess.run(cmd_trim, capture_output=True, text=True, timeout=10)
-                        
-                        return True
-                
-                # 手法3: 最小設定での変換
-                print("[DEBUG] 最小設定変換試行...")
-                cmd_minimal = [
-                    'magick',
-                    '-density', '150',  # 低DPIで最高速
-                    f'{pdf_path}[0]',
-                    '-resize', '150%',  # 小さめの拡大
-                    '-trim',
-                    '+repage',
-                    output_path
-                ]
-                
-                result3 = subprocess.run(cmd_minimal, capture_output=True, text=True, timeout=15)
-                if result3.returncode == 0 and os.path.exists(output_path):
-                    print(f"[INFO] 最小設定変換完了: {output_path}")
-                    return True
-                    
-            return False
+            page = doc[0]
+            
+            mat = fitz.Matrix(300/72, 300/72)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            
+            img_data = pix.tobytes("png")
+            pix = None
+            doc.close()
+            
+            img = Image.open(io.BytesIO(img_data))
+            
+            if img.mode == 'RGBA':
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[3] if len(img.split()) > 3 else None)
+                img = background
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            img = self._trim_white_margins(img)
+            
+            width, height = img.size
+            new_width = int(width * 2)
+            new_height = int(height * 2)
+            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            img.save(output_path, 'PNG', quality=95)
+            
+            print(f"[INFO] PNG変換完了: {output_path} (サイズ: {img.size[0]}x{img.size[1]})")
+            return True
                 
         except Exception as e:
             print(f"[ERROR] PNG変換エラー: {e}")
+            import traceback
+            traceback.print_exc()
             return False
+    
+    def _trim_white_margins(self, img):
+        """画像の白い余白をトリミング"""
+        import numpy as np
+        
+        img_array = np.array(img)
+        
+        if len(img_array.shape) == 3:
+            gray = np.mean(img_array, axis=2)
+        else:
+            gray = img_array
+        
+        threshold = 250
+        non_white_pixels = gray < threshold
+        
+        rows = np.any(non_white_pixels, axis=1)
+        cols = np.any(non_white_pixels, axis=0)
+        
+        if not rows.any() or not cols.any():
+            return img
+        
+        row_indices = np.where(rows)[0]
+        col_indices = np.where(cols)[0]
+        
+        top = row_indices[0]
+        bottom = row_indices[-1] + 1
+        left = col_indices[0]
+        right = col_indices[-1] + 1
+        
+        return img.crop((left, top, right, bottom))
     
     def _debug_pdf_content(self, pdf_path):
         """PDFの内容をデバッグ（オプション）"""
@@ -1342,9 +1441,9 @@ class WordToMarkdownConverter:
                     lines = result.stdout.split('\n')
                     for line in lines:
                         if 'Pages:' in line or 'Page size:' in line:
-                            print(f"[DEBUG] {line.strip()}")
+                            debug_print(f"[DEBUG] {line.strip()}")
                 else:
-                    print(f"[DEBUG] PDF情報取得失敗")
+                    debug_print(f"[DEBUG] PDF情報取得失敗")
             # pdfinfoがない場合は何もしない（エラーメッセージなし）
         except Exception:
             # エラーが発生しても無視（オプション機能のため）
@@ -1353,22 +1452,275 @@ class WordToMarkdownConverter:
     def _debug_image_info(self, image_path):
         """生成された画像の詳細情報をデバッグ"""
         try:
-            # ImageMagickのidentifyコマンドで画像情報を取得
-            cmd = ['magick', 'identify', '-verbose', image_path]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            if result.returncode == 0:
-                # 重要な情報のみ抽出
-                lines = result.stdout.split('\n')
-                important_info = []
-                for line in lines:
-                    if any(keyword in line.lower() for keyword in ['geometry', 'resolution', 'colorspace', 'depth']):
-                        important_info.append(line.strip())
-                print(f"[DEBUG] 画像情報: {' | '.join(important_info)}")
-            else:
-                print(f"[DEBUG] 画像情報取得失敗: {result.stderr}")
+            from PIL import Image
+            with Image.open(image_path) as img:
+                info_parts = [
+                    f"サイズ: {img.size[0]}x{img.size[1]}",
+                    f"モード: {img.mode}",
+                ]
+                if hasattr(img, 'info') and 'dpi' in img.info:
+                    info_parts.append(f"DPI: {img.info['dpi']}")
+                debug_print(f"[DEBUG] 画像情報: {' | '.join(info_parts)}")
         except Exception as e:
-            print(f"[DEBUG] 画像情報取得エラー: {e}")
+            debug_print(f"[DEBUG] 画像情報取得エラー: {e}")
 
+    def _extract_shape_metadata_from_drawing(self, drawing_element) -> Dict[str, Any]:
+        """DrawingML要素から図形メタデータを抽出"""
+        metadata = {
+            'type': 'unknown',
+            'name': '',
+            'description': '',
+            'shapes': []
+        }
+        
+        try:
+            processed_ids = set()
+            
+            for elem in drawing_element.iter():
+                tag_name = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                
+                if tag_name == 'wgp':
+                    for child in elem:
+                        child_tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                        
+                        if child_tag == 'wsp':
+                            shape_info = self._extract_wsp_metadata(child)
+                            if shape_info and (shape_info.get('name') or shape_info.get('text') or shape_info.get('shape_type')):
+                                shape_id = shape_info.get('id', '')
+                                if not shape_id or shape_id not in processed_ids:
+                                    metadata['shapes'].append(shape_info)
+                                    if shape_id:
+                                        processed_ids.add(shape_id)
+                        
+                        elif child_tag == 'pic':
+                            shape_info = self._extract_pic_metadata(child)
+                            if shape_info and (shape_info.get('name') or shape_info.get('type')):
+                                shape_id = shape_info.get('id', '')
+                                if not shape_id or shape_id not in processed_ids:
+                                    metadata['shapes'].append(shape_info)
+                                    if shape_id:
+                                        processed_ids.add(shape_id)
+                        
+                        elif child_tag == 'grpSp':
+                            for nested in child.iter():
+                                nested_tag = nested.tag.split('}')[-1] if '}' in nested.tag else nested.tag
+                                
+                                if nested_tag == 'wsp':
+                                    shape_info = self._extract_wsp_metadata(nested)
+                                    if shape_info and (shape_info.get('name') or shape_info.get('text') or shape_info.get('shape_type')):
+                                        shape_id = shape_info.get('id', '')
+                                        if not shape_id or shape_id not in processed_ids:
+                                            metadata['shapes'].append(shape_info)
+                                            if shape_id:
+                                                processed_ids.add(shape_id)
+                                
+                                elif nested_tag == 'pic':
+                                    shape_info = self._extract_pic_metadata(nested)
+                                    if shape_info and (shape_info.get('name') or shape_info.get('type')):
+                                        shape_id = shape_info.get('id', '')
+                                        if not shape_id or shape_id not in processed_ids:
+                                            metadata['shapes'].append(shape_info)
+                                            if shape_id:
+                                                processed_ids.add(shape_id)
+                
+                elif tag_name == 'anchor' or tag_name == 'inline':
+                    shape_info = self._extract_single_shape_metadata(elem)
+                    if shape_info and shape_info.get('name'):
+                        shape_id = shape_info.get('id', '')
+                        if not shape_id or shape_id not in processed_ids:
+                            metadata['shapes'].append(shape_info)
+                            if shape_id:
+                                processed_ids.add(shape_id)
+            
+        except Exception as e:
+            debug_print(f"[DEBUG] 図形メタデータ抽出エラー: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return metadata
+    
+    def _extract_single_shape_metadata(self, anchor_element) -> Dict[str, Any]:
+        """単一図形のメタデータを抽出"""
+        shape_info = {}
+        
+        try:
+            for elem in anchor_element.iter():
+                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                
+                if tag == 'cNvPr':
+                    shape_info['name'] = elem.attrib.get('name', '')
+                    shape_info['id'] = elem.attrib.get('id', '')
+                    shape_info['description'] = elem.attrib.get('descr', '')
+                
+                elif tag in ('rect', 'roundRect', 'ellipse', 'triangle', 'line', 'bentConnector2', 
+                            'bentConnector3', 'bentConnector4', 'bentConnector5', 'straightConnector1'):
+                    shape_info['shape_type'] = tag
+                
+                elif tag == 'txBody' or tag == 'sp':
+                    text_parts = []
+                    for t_elem in elem.iter():
+                        t_tag = t_elem.tag.split('}')[-1] if '}' in t_elem.tag else t_elem.tag
+                        if t_tag == 't' and t_elem.text:
+                            text_parts.append(t_elem.text.strip())
+                    if text_parts:
+                        shape_info['text'] = ' / '.join(text_parts)
+                
+                elif tag == 'extent':
+                    try:
+                        cx = int(elem.attrib.get('cx', 0))
+                        cy = int(elem.attrib.get('cy', 0))
+                        shape_info['width_emu'] = cx
+                        shape_info['height_emu'] = cy
+                    except:
+                        pass
+                
+                elif tag == 'off' or tag == 'pos':
+                    try:
+                        x = int(elem.attrib.get('x', 0))
+                        y = int(elem.attrib.get('y', 0))
+                        shape_info['x_emu'] = x
+                        shape_info['y_emu'] = y
+                    except:
+                        pass
+        
+        except Exception as e:
+            debug_print(f"[DEBUG] 単一図形メタデータ抽出エラー: {e}")
+        
+        return shape_info
+    
+    def _extract_wsp_metadata(self, wsp_element) -> Dict[str, Any]:
+        """wsp（Word Shape）要素からメタデータを抽出"""
+        shape_info = {}
+        text_parts = []
+        
+        try:
+            for elem in wsp_element.iter():
+                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                
+                if tag == 'cNvPr':
+                    shape_info['name'] = elem.attrib.get('name', '')
+                    shape_info['id'] = elem.attrib.get('id', '')
+                    shape_info['description'] = elem.attrib.get('descr', '')
+                
+                elif tag == 'prstGeom':
+                    prst = elem.attrib.get('prst', '')
+                    if prst:
+                        shape_info['shape_type'] = prst
+                
+                elif tag == 't' and elem.text:
+                    text_parts.append(elem.text.strip())
+                
+                elif tag == 'ext':
+                    try:
+                        cx = int(elem.attrib.get('cx', 0))
+                        cy = int(elem.attrib.get('cy', 0))
+                        shape_info['width_emu'] = cx
+                        shape_info['height_emu'] = cy
+                    except:
+                        pass
+                
+                elif tag == 'off':
+                    try:
+                        x = int(elem.attrib.get('x', 0))
+                        y = int(elem.attrib.get('y', 0))
+                        shape_info['x_emu'] = x
+                        shape_info['y_emu'] = y
+                    except:
+                        pass
+            
+            if text_parts:
+                shape_info['text'] = ' / '.join(text_parts)
+        
+        except Exception as e:
+            debug_print(f"[DEBUG] wsp要素メタデータ抽出エラー: {e}")
+        
+        return shape_info
+    
+    def _extract_pic_metadata(self, pic_element) -> Dict[str, Any]:
+        """pic（Picture）要素からメタデータを抽出"""
+        shape_info = {}
+        
+        try:
+            for elem in pic_element.iter():
+                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                
+                if tag == 'cNvPr':
+                    shape_info['name'] = elem.attrib.get('name', '')
+                    shape_info['id'] = elem.attrib.get('id', '')
+                    shape_info['description'] = elem.attrib.get('descr', '')
+                    shape_info['type'] = 'picture'
+                
+                elif tag == 'ext':
+                    try:
+                        cx = int(elem.attrib.get('cx', 0))
+                        cy = int(elem.attrib.get('cy', 0))
+                        shape_info['width_emu'] = cx
+                        shape_info['height_emu'] = cy
+                    except:
+                        pass
+                
+                elif tag == 'off':
+                    try:
+                        x = int(elem.attrib.get('x', 0))
+                        y = int(elem.attrib.get('y', 0))
+                        shape_info['x_emu'] = x
+                        shape_info['y_emu'] = y
+                    except:
+                        pass
+                
+                elif tag == 'blip':
+                    embed = elem.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed', '')
+                    if embed:
+                        shape_info['image_rel_id'] = embed
+        
+        except Exception as e:
+            debug_print(f"[DEBUG] pic要素メタデータ抽出エラー: {e}")
+        
+        return shape_info
+    
+    def _format_shape_metadata_as_text(self, metadata: Dict[str, Any]) -> str:
+        """図形メタデータを人間が読みやすいテキスト形式に整形"""
+        if not metadata.get('shapes'):
+            return ""
+        
+        lines = ["### 図形情報", ""]
+        
+        for idx, shape in enumerate(metadata['shapes'], 1):
+            name = shape.get('name', '')
+            if not name:
+                shape_type = shape.get('shape_type', shape.get('type', ''))
+                if shape_type:
+                    name = f"図形 #{idx} ({shape_type})"
+                else:
+                    name = f"図形 #{idx}"
+            
+            lines.append(f"**{name}**")
+            
+            if shape.get('id'):
+                lines.append(f"- ID: {shape['id']}")
+            
+            if shape.get('shape_type'):
+                lines.append(f"- 図形タイプ: {shape['shape_type']}")
+            elif shape.get('type'):
+                lines.append(f"- タイプ: {shape['type']}")
+            
+            if shape.get('text'):
+                lines.append(f"- テキスト: {shape['text']}")
+            
+            if shape.get('description'):
+                lines.append(f"- 説明: {shape['description']}")
+            
+            lines.append("")
+        
+        return '\n'.join(lines)
+    
+    def _format_shape_metadata_as_json(self, metadata: Dict[str, Any]) -> str:
+        """図形メタデータをJSON形式に整形"""
+        import json
+        if not metadata.get('shapes'):
+            return "{}"
+        return json.dumps(metadata, ensure_ascii=False, indent=2)
+    
     def _detect_image_format(self, image_data: bytes, target_ref: str) -> str:
         """画像形式を検出"""
         if image_data.startswith(b'\x89PNG'):
@@ -1395,59 +1747,34 @@ class WordToMarkdownConverter:
     def _convert_vector_image(self, image_data: bytes, original_path: str) -> Optional[str]:
         """ベクター画像をPNGに変換"""
         try:
-            # 一時ファイルに保存
             with tempfile.NamedTemporaryFile(delete=False, suffix=Path(original_path).suffix) as temp_file:
                 temp_file.write(image_data)
                 temp_path = temp_file.name
             
-            # 出力パス
             output_path = original_path.replace('.emf', '.png').replace('.wmf', '.png')
             
-            # LibreOfficeで直接変換を試す
             if self._convert_with_libreoffice(temp_path, output_path):
                 os.unlink(temp_path)
                 return output_path
             
-            # LibreOfficeが失敗した場合、ImageMagickを試す
-            cmd = [
-                'magick',
-                temp_path,
-                '-density', '300',
-                '-quality', '100',
-                '-background', 'white',
-                '-alpha', 'remove',
-                output_path
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            
-            # 一時ファイルを削除
             os.unlink(temp_path)
-            
-            if result.returncode == 0 and os.path.exists(output_path):
-                print(f"[SUCCESS] ベクター画像変換完了（ImageMagick）: {output_path}")
-                return output_path
-            else:
-                print(f"[ERROR] ベクター画像変換失敗: {result.stderr}")
-                # 失敗した場合は元のデータをそのまま保存
-                with open(original_path, 'wb') as f:
-                    f.write(image_data)
-                return original_path
+            print(f"[ERROR] ベクター画像変換失敗")
+            with open(original_path, 'wb') as f:
+                f.write(image_data)
+            return original_path
                 
         except Exception as e:
             print(f"[ERROR] ベクター画像変換エラー: {e}")
-            # エラーの場合は元のデータをそのまま保存
             with open(original_path, 'wb') as f:
                 f.write(image_data)
             return original_path
 
     def _convert_with_libreoffice(self, input_path: str, output_path: str) -> bool:
         """LibreOfficeを使用してベクター画像を変換"""
+        temp_dir = None
         try:
-            # 一時的にPDFに変換
             temp_dir = tempfile.mkdtemp()
             
-            # LibreOfficeでPDFに変換
             cmd = [
                 LIBREOFFICE_PATH,
                 '--headless',
@@ -1458,7 +1785,6 @@ class WordToMarkdownConverter:
             
             subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
-            # 変換されたPDFのパスを探す
             pdf_path = None
             for file in os.listdir(temp_dir):
                 if file.endswith('.pdf'):
@@ -1466,37 +1792,37 @@ class WordToMarkdownConverter:
                     break
             
             if pdf_path and os.path.exists(pdf_path):
-                # PDFからPNGに変換（余白除去付き）
-                cmd2 = [
-                    'magick',
-                    pdf_path,
-                    '-density', '300',
-                    '-quality', '100',
-                    '-background', 'white',
-                    '-alpha', 'remove',
-                    '-trim',  # 余白を自動除去
-                    '+repage',  # ページ情報をリセット
-                    output_path
-                ]
+                pdf_doc = fitz.open(pdf_path)
+                page = pdf_doc[0]
                 
-                result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=30)
+                mat = fitz.Matrix(300 / 72, 300 / 72)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
                 
-                # 一時ディレクトリを削除
-                import shutil
-                shutil.rmtree(temp_dir)
+                from PIL import Image
+                if pix.alpha:
+                    img = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
+                    bg = Image.new("RGB", img.size, (255, 255, 255))
+                    bg.paste(img, mask=img.split()[3])
+                else:
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 
-                if result2.returncode == 0 and os.path.exists(output_path):
+                pdf_doc.close()
+                
+                img = self._trim_white_margins(img)
+                img.save(output_path, "PNG")
+                
+                if os.path.exists(output_path):
                     print(f"[SUCCESS] ベクター画像変換完了（LibreOffice→PDF→PNG）: {output_path}")
                     return True
             
-            # 一時ディレクトリを削除
-            import shutil
-            shutil.rmtree(temp_dir)
             return False
             
         except Exception as e:
             print(f"[ERROR] LibreOffice変換エラー: {e}")
             return False
+        finally:
+            if temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
 
 
 def convert_doc_to_docx(doc_file_path: str) -> str:
@@ -1526,7 +1852,7 @@ def convert_doc_to_docx(doc_file_path: str) -> str:
             doc_file_path
         ]
         
-        print(f"[DEBUG] LibreOffice変換コマンド: {' '.join(cmd)}")
+        debug_print(f"[DEBUG] LibreOffice変換コマンド: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         
         if result.returncode != 0:
@@ -1566,8 +1892,14 @@ def main():
                        help='章番号の代わりに見出しテキストをリンクに使用')
     parser.add_argument('-o', '--output-dir', type=str, 
                        help='出力ディレクトリを指定（デフォルト: 実行ディレクトリ）')
+    parser.add_argument('--shape-metadata', action='store_true',
+                       help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                       help='デバッグ情報を出力')
     
     args = parser.parse_args()
+    
+    set_verbose(args.verbose)
     
     if not os.path.exists(args.word_file):
         print(f"エラー: ファイル '{args.word_file}' が見つかりません。")
@@ -1591,7 +1923,7 @@ def main():
         print(f"✅ DOC→DOCX変換完了: {converted_file}")
     
     try:
-        converter = WordToMarkdownConverter(processing_file, use_heading_text=args.use_heading_text, output_dir=args.output_dir)
+        converter = WordToMarkdownConverter(processing_file, use_heading_text=args.use_heading_text, output_dir=args.output_dir, shape_metadata=args.shape_metadata)
         output_file = converter.convert()
         print("\n✅ 変換完了!")
         print(f"📄 出力ファイル: {output_file}")
