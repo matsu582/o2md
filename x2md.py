@@ -8864,6 +8864,58 @@ class ExcelToMarkdownConverter:
             # ここで失敗しても元のtable_dataを返す
             pass
 
+        if len(table_data) > 1:
+            debug_print(f"[DEBUG] 行マージチェック(_build_table_with_header_row): table_data={len(table_data)}行")
+            merged_rows = [table_data[0]]
+            i = 1
+            while i < len(table_data):
+                current_row = list(table_data[i])
+                j = i + 1
+                
+                while j < len(table_data):
+                    next_row = table_data[j]
+                    can_merge = True
+                    
+                    for col_idx in range(len(current_row)):
+                        curr_val = current_row[col_idx].strip() if col_idx < len(current_row) else ""
+                        next_val = next_row[col_idx].strip() if col_idx < len(next_row) else ""
+                        
+                        if curr_val and next_val and curr_val != next_val:
+                            can_merge = False
+                            break
+                    
+                    if can_merge:
+                        for col_idx in range(len(current_row)):
+                            curr_val = current_row[col_idx].strip() if col_idx < len(current_row) else ""
+                            next_val = next_row[col_idx].strip() if col_idx < len(next_row) else ""
+                            
+                            if not curr_val and next_val:
+                                current_row[col_idx] = next_val
+                        j += 1
+                    else:
+                        break
+                
+                merged_rows.append(current_row)
+                i = j
+            
+            if len(merged_rows) != len(table_data):
+                debug_print(f"[DEBUG] 行マージ(_build_table_with_header_row): {len(table_data)}行 → {len(merged_rows)}行")
+                table_data = merged_rows
+        
+        if len(table_data) > 1:
+            filtered_rows = [table_data[0]]
+            for i in range(1, len(table_data)):
+                row = table_data[i]
+                has_content = any(cell and str(cell).strip() for cell in row)
+                if has_content:
+                    filtered_rows.append(row)
+                else:
+                    debug_print(f"[DEBUG] 空行を削除(_build_table_with_header_row): row {i}")
+            
+            if len(filtered_rows) != len(table_data):
+                debug_print(f"[DEBUG] 空行削除(_build_table_with_header_row): {len(table_data)}行 → {len(filtered_rows)}行")
+                table_data = filtered_rows
+
         return self._trim_edge_empty_columns(table_data)
 
     
@@ -9644,6 +9696,58 @@ class ExcelToMarkdownConverter:
                     debug_print(f"[DEBUG] 2列最適化スキップ（マッチ行不足: {matched}/{total_data_rows}、必要={required}）")
             else:
                 debug_print(f"[DEBUG] パターンマッチせず（_build_table_data_with_merges内）")
+        
+        if len(table_data) > 1:
+            debug_print(f"[DEBUG] 行マージチェック: table_data={len(table_data)}行")
+            merged_rows = [table_data[0]]  # ヘッダー行は常に保持
+            i = 1
+            while i < len(table_data):
+                current_row = list(table_data[i])
+                j = i + 1
+                
+                while j < len(table_data):
+                    next_row = table_data[j]
+                    can_merge = True
+                    
+                    for col_idx in range(len(current_row)):
+                        curr_val = current_row[col_idx].strip() if col_idx < len(current_row) else ""
+                        next_val = next_row[col_idx].strip() if col_idx < len(next_row) else ""
+                        
+                        if curr_val and next_val and curr_val != next_val:
+                            can_merge = False
+                            break
+                    
+                    if can_merge:
+                        for col_idx in range(len(current_row)):
+                            curr_val = current_row[col_idx].strip() if col_idx < len(current_row) else ""
+                            next_val = next_row[col_idx].strip() if col_idx < len(next_row) else ""
+                            
+                            if not curr_val and next_val:
+                                current_row[col_idx] = next_val
+                        j += 1
+                    else:
+                        break
+                
+                merged_rows.append(current_row)
+                i = j
+            
+            if len(merged_rows) != len(table_data):
+                debug_print(f"[DEBUG] 行マージ: {len(table_data)}行 → {len(merged_rows)}行")
+                table_data = merged_rows
+        
+        if len(table_data) > 1:
+            filtered_rows = [table_data[0]]
+            for i in range(1, len(table_data)):
+                row = table_data[i]
+                has_content = any(cell and str(cell).strip() for cell in row)
+                if has_content:
+                    filtered_rows.append(row)
+                else:
+                    debug_print(f"[DEBUG] 空行を削除: row {i}")
+            
+            if len(filtered_rows) != len(table_data):
+                debug_print(f"[DEBUG] 空行削除: {len(table_data)}行 → {len(filtered_rows)}行")
+                table_data = filtered_rows
         
         return table_data
     
