@@ -210,3 +210,5 @@ __marimo__/
 test_*/
 output_*/
 debug_*/
+after_*/
+baseline_*/
