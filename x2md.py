@@ -284,11 +284,21 @@ class ExcelToMarkdownConverter:
                     row_bordered_cols.append(c)
             
             if len(row_bordered_cols) >= 2:
-                r2 = r
+                row_has_data = False
                 for c in row_bordered_cols:
-                    visited.add((r, c))
-                c1 = min(c1, min(row_bordered_cols))
-                c2 = max(c2, max(row_bordered_cols))
+                    cell_value = sheet.cell(row=r, column=c).value
+                    if cell_value is not None and str(cell_value).strip():
+                        row_has_data = True
+                        break
+                
+                if row_has_data:
+                    r2 = r
+                    for c in row_bordered_cols:
+                        visited.add((r, c))
+                    c1 = min(c1, min(row_bordered_cols))
+                    c2 = max(c2, max(row_bordered_cols))
+                else:
+                    break
             else:
                 break
         
@@ -8864,6 +8874,44 @@ class ExcelToMarkdownConverter:
             # ここで失敗しても元のtable_dataを返す
             pass
 
+        if len(table_data) > 1:
+            merged_table = [table_data[0]]
+            i = 1
+            while i < len(table_data):
+                current_row = list(table_data[i])
+                j = i + 1
+                
+                while j < len(table_data):
+                    next_row = table_data[j]
+                    can_merge = True
+                    
+                    for col_idx in range(len(current_row)):
+                        curr_val = current_row[col_idx].strip() if col_idx < len(current_row) else ""
+                        next_val = next_row[col_idx].strip() if col_idx < len(next_row) else ""
+                        
+                        if curr_val and next_val and curr_val != next_val:
+                            can_merge = False
+                            break
+                    
+                    if can_merge:
+                        for col_idx in range(len(current_row)):
+                            curr_val = current_row[col_idx].strip() if col_idx < len(current_row) else ""
+                            next_val = next_row[col_idx].strip() if col_idx < len(next_row) else ""
+                            
+                            if not curr_val and next_val:
+                                current_row[col_idx] = next_val
+                            elif curr_val and next_val and curr_val != next_val:
+                                current_row[col_idx] = f"{curr_val} {next_val}"
+                        j += 1
+                    else:
+                        break
+                
+                merged_table.append(current_row)
+                i = j
+            
+            debug_print(f"[DEBUG] 行マージ(_build_table_with_header_row): {len(table_data)}行 → {len(merged_table)}行")
+            table_data = merged_table
+
         return self._trim_edge_empty_columns(table_data)
 
     
@@ -9644,6 +9692,48 @@ class ExcelToMarkdownConverter:
                     debug_print(f"[DEBUG] 2列最適化スキップ（マッチ行不足: {matched}/{total_data_rows}、必要={required}）")
             else:
                 debug_print(f"[DEBUG] パターンマッチせず（_build_table_data_with_merges内）")
+        
+        debug_print(f"[DEBUG] 行マージ前のテーブルデータ: {len(table_data)}行")
+        for idx, row in enumerate(table_data):
+            debug_print(f"[DEBUG]   行{idx}: {row}")
+        
+        if len(table_data) > 1:
+            merged_table = [table_data[0]]  # ヘッダー行は保持
+            i = 1
+            while i < len(table_data):
+                current_row = list(table_data[i])
+                j = i + 1
+                
+                while j < len(table_data):
+                    next_row = table_data[j]
+                    can_merge = True
+                    
+                    for col_idx in range(len(current_row)):
+                        curr_val = current_row[col_idx].strip() if col_idx < len(current_row) else ""
+                        next_val = next_row[col_idx].strip() if col_idx < len(next_row) else ""
+                        
+                        if curr_val and next_val and curr_val != next_val:
+                            can_merge = False
+                            break
+                    
+                    if can_merge:
+                        for col_idx in range(len(current_row)):
+                            curr_val = current_row[col_idx].strip() if col_idx < len(current_row) else ""
+                            next_val = next_row[col_idx].strip() if col_idx < len(next_row) else ""
+                            
+                            if not curr_val and next_val:
+                                current_row[col_idx] = next_val
+                            elif curr_val and next_val and curr_val != next_val:
+                                current_row[col_idx] = f"{curr_val} {next_val}"
+                        j += 1
+                    else:
+                        break
+                
+                merged_table.append(current_row)
+                i = j
+            
+            debug_print(f"[DEBUG] 行マージ: {len(table_data)}行 → {len(merged_table)}行")
+            table_data = merged_table
         
         return table_data
     
