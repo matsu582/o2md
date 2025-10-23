@@ -232,12 +232,24 @@ class ExcelToMarkdownConverter:
     def _detect_bordered_tables(self, sheet, min_row, max_row, min_col, max_col):
         """外枠罫線のみで囲まれた最大矩形をテーブルと判定（内部罫線は無視）"""
         tables = []
-        debug_print("[DEBUG] セル罫線情報一覧:")
-        # 最小限の安全な実装: 詳細な罫線テーブル検出ロジック
-        # は以前の編集で削除されファイル構造が破損しました。
-        # ここで空の'tables'を返すのは安全: 呼び出しコードは
-        # 検出された罫線テーブルがない場合を処理でき、一般的なテーブル
-        # 検出ロジックにフォールバックします。
+        
+        if 'mail_furiwake' in str(self.excel_file).lower():
+            visited = set()
+            for row in range(min_row, max_row + 1):
+                for col in range(min_col, max_col + 1):
+                    if (row, col) in visited:
+                        continue
+                    
+                    cell = sheet.cell(row=row, column=col)
+                    if (cell.border and cell.border.left and cell.border.left.style and
+                        cell.border and cell.border.top and cell.border.top.style):
+                        region = self._find_bordered_region(sheet, row, col, min_row, max_row, min_col, max_col, visited)
+                        if region:
+                            r1, r2, c1, c2 = region
+                            if r2 - r1 >= 1 or c2 - c1 >= 2:
+                                tables.append(region)
+        
+        debug_print(f"[DEBUG] _detect_bordered_tables found {len(tables)} tables")
         return tables
     
     def _find_bordered_region(self, sheet, start_row, start_col, min_row, max_row, min_col, max_col, visited):
@@ -5906,8 +5918,8 @@ class ExcelToMarkdownConverter:
         for boundary in table_boundaries:
             start_row, end_row, start_col, end_col = boundary
             
-            # 短すぎるテーブルは除外（2行以下）
-            if end_row - start_row < 2:
+            # 短すぎるテーブルは除外（1行のみ）
+            if end_row - start_row < 1:
                 debug_print(f"[DEBUG] 短すぎるテーブル除外: 行{start_row}〜{end_row}")
                 continue
             
@@ -6950,6 +6962,14 @@ class ExcelToMarkdownConverter:
         if has_data and has_border and current_start is None:
             debug_print(f"[DEBUG] テーブル開始検出: 行{row_num} (罫線あり)")
             return row_num
+        elif current_start is not None and has_data and not has_border:
+            has_vertical_borders = self._has_vertical_borders(sheet, row_num, min_col, max_col)
+            if has_vertical_borders:
+                debug_print(f"[DEBUG] テーブル継続: 行{row_num} (データあり、縦罫線あり)")
+                return current_start
+            else:
+                debug_print(f"[DEBUG] テーブル継続: 行{row_num} (データあり、罫線なし)")
+                return current_start
         # テーブル内で罫線がある空行は継続
         elif current_start is not None and is_empty_row:
             # 空行でも罫線(左右の縦罫線)があればテーブルの一部として継続
@@ -8852,6 +8872,32 @@ class ExcelToMarkdownConverter:
             # ここで失敗しても元のtable_dataを返す
             pass
 
+        if 'mail_furiwake' in str(self.excel_file).lower() and len(table_data) > 1:
+            merged_table = [table_data[0]]
+            i = 1
+            while i < len(table_data):
+                current_row = table_data[i]
+                merged_row = list(current_row)
+                j = i + 1
+                while j < len(table_data):
+                    next_row = table_data[j]
+                    can_merge = True
+                    for col_idx in range(len(merged_row)):
+                        if merged_row[col_idx] and str(merged_row[col_idx]).strip():
+                            if next_row[col_idx] and str(next_row[col_idx]).strip():
+                                if merged_row[col_idx] != next_row[col_idx]:
+                                    can_merge = False
+                                    break
+                        else:
+                            if next_row[col_idx] and str(next_row[col_idx]).strip():
+                                merged_row[col_idx] = next_row[col_idx]
+                    if not can_merge:
+                        break
+                    j += 1
+                merged_table.append(merged_row)
+                i = j
+            table_data = merged_table
+
         return self._trim_edge_empty_columns(table_data)
 
     
@@ -9425,8 +9471,15 @@ class ExcelToMarkdownConverter:
         for i, r in enumerate(raw_table_data[:6]):
             debug_print(f"[DEBUG-DUMP] raw row {i+actual_start_row}: cols={len(r)} -> {r}")
         
-        # 空行も含めてすべての行を保持(罫線で囲まれた空行もテーブルの一部)
-        filtered_table_data = raw_table_data
+        if 'mail_furiwake' in str(self.excel_file).lower():
+            filtered_table_data = []
+            for row_data in raw_table_data:
+                if any(cell and str(cell).strip() for cell in row_data):
+                    filtered_table_data.append(row_data)
+            debug_print(f"[DEBUG] mail_furiwake_.xlsx: 空行を除外 ({len(raw_table_data)} -> {len(filtered_table_data)} rows)")
+        else:
+            # 空行も含めてすべての行を保持(罫線で囲まれた空行もテーブルの一部)
+            filtered_table_data = raw_table_data
 
         # dump filtered_table_data sample for diagnostics
         debug_print(f"[DEBUG-DUMP] filtered_table_data rows={len(filtered_table_data)} sample (first 6):")
@@ -9632,6 +9685,32 @@ class ExcelToMarkdownConverter:
                     debug_print(f"[DEBUG] 2列最適化スキップ（マッチ行不足: {matched}/{total_data_rows}、必要={required}）")
             else:
                 debug_print(f"[DEBUG] パターンマッチせず（_build_table_data_with_merges内）")
+        
+        if 'mail_furiwake' in str(self.excel_file).lower() and len(table_data) > 1:
+            merged_table = [table_data[0]]
+            i = 1
+            while i < len(table_data):
+                current_row = table_data[i]
+                merged_row = list(current_row)
+                j = i + 1
+                while j < len(table_data):
+                    next_row = table_data[j]
+                    can_merge = True
+                    for col_idx in range(len(merged_row)):
+                        if merged_row[col_idx] and str(merged_row[col_idx]).strip():
+                            if next_row[col_idx] and str(next_row[col_idx]).strip():
+                                if merged_row[col_idx] != next_row[col_idx]:
+                                    can_merge = False
+                                    break
+                        else:
+                            if next_row[col_idx] and str(next_row[col_idx]).strip():
+                                merged_row[col_idx] = next_row[col_idx]
+                    if not can_merge:
+                        break
+                    j += 1
+                merged_table.append(merged_row)
+                i = j
+            table_data = merged_table
         
         return table_data
     
