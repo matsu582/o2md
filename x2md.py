@@ -258,14 +258,22 @@ class ExcelToMarkdownConverter:
         return tables
     
     def _find_bordered_region(self, sheet, start_row, start_col, min_row, max_row, min_col, max_col, visited):
-        """指定されたセルから始まる罫線で囲まれた領域を検出"""
+        """指定されたセルから始まる罫線で囲まれた領域を検出（非連続列が3つ以上ある場合のみ）"""
         bordered_cols_in_row = []
         for c in range(start_col, max_col + 1):
             cell = sheet.cell(row=start_row, column=c)
             if cell.border and cell.border.left and cell.border.left.style:
                 bordered_cols_in_row.append(c)
         
-        if len(bordered_cols_in_row) < 2:
+        if len(bordered_cols_in_row) < 3:
+            return None
+        
+        gaps = 0
+        for i in range(len(bordered_cols_in_row) - 1):
+            if bordered_cols_in_row[i+1] - bordered_cols_in_row[i] > 1:
+                gaps += 1
+        
+        if gaps < 2:
             return None
         
         r1 = start_row
@@ -305,50 +313,6 @@ class ExcelToMarkdownConverter:
         if r2 >= r1 and c2 > c1:
             return (r1, r2, c1, c2)
         return None
-        # デッドコード削除: self.image_counter = 0
-        # マッピング: sheet.title -> 辞書(行番号 -> その行の出力後のmarkdown行インデックス)
-        # 行/領域のmarkdownを出力する際にこれを設定し、描画を
-        # セル(行)に固定された描画を対応する
-        # 段落/テーブル出力の直後に挿入できるようにします。
-        self._cell_to_md_index = {}
-        # マッピング: sheet.title -> 生成された図形画像ファイル名のリスト(images_dir内)
-        self._sheet_shape_images = {}
-        # マッピング: sheet.title -> 次の挿入インデックス
-        self._sheet_shape_next_idx = {}
-        # 図形が生成されたシートタイトルの集合
-        self._sheet_shapes_generated = set()
-        # 過去のコードは永続化されたstart_mapを使用して画像の
-        # 挿入位置を実行間で記憶していました。この動作により別々のグループ
-        # 画像が一部の実行で単一の挿入バケットに集約されていました。
-        # このような永続化されたマップはデフォルトで無効にし、新たに
-        # 計算された代表的なstart_row値が正式なものとなるようにします。
-        self._sheet_shape_image_start_rows = {}
-        # 初期ヘッダースキャン中に収集された延期された自由形式テキスト
-        # sheet.title -> (行, テキスト)のリスト
-        self._sheet_deferred_texts = {}
-        # プレスキャン中に収集された延期テーブル: sheet.title -> (アンカー行, テーブルデータ, ソース行)のリスト
-        self._sheet_deferred_tables = {}
-        # 重複する自由形式テキストを避けるためシート毎の出力済みテキストコンテンツ(正規化済み)を追跡
-        self._sheet_emitted_texts = {}
-        # 行の再出力を避けるためシート毎の出力済み行番号を追跡
-        self._sheet_emitted_rows = {}
-        # 重複画像挿入を避けるため出力済み画像ファイル名(ベース名)を追跡
-        self._emitted_images = set()
-        # マッピング: sheet.title -> { 画像ベース名: cNvPr_id }
-        # 描画XMLを解析する際に設定され、どの埋め込み
-        # 画像がどの描画アンカーID(cNvPr)に対応するかを判別できます。これにより
-        # クラスタ化/グループレンダリングが既に
-        # 同じcNvPr IDを含む画像を生成している場合、埋め込み画像を抑制できます。
-        self._embedded_image_cid_by_name = {}
-        # (削除済み) シート毎の特殊ケースフラグなし（特定のセルテキストによる処理制御を行わない）
-
-        # Excelファイルを読み込み
-        try:
-            self.workbook = load_workbook(excel_file_path, data_only=True)
-            print(f"[INFO] Excelワークブック読み込み完了: {excel_file_path}")
-        except Exception as e:
-            print(f"[ERROR] Excelファイル読み込み失敗: {e}")
-            sys.exit(1)
 
     def _mark_image_emitted(self, img_name: str):
         """Mark an image as emitted only during the canonical emission pass."""
@@ -8907,7 +8871,7 @@ class ExcelToMarkdownConverter:
                         break
                 
                 merged_table.append(current_row)
-                i = j
+                i = j if j > i + 1 else i + 1
             
             debug_print(f"[DEBUG] 行マージ(_build_table_with_header_row): {len(table_data)}行 → {len(merged_table)}行")
             table_data = merged_table
@@ -9698,7 +9662,7 @@ class ExcelToMarkdownConverter:
             debug_print(f"[DEBUG]   行{idx}: {row}")
         
         if len(table_data) > 1:
-            merged_table = [table_data[0]]  # ヘッダー行は保持
+            merged_table = [table_data[0]]
             i = 1
             while i < len(table_data):
                 current_row = list(table_data[i])
@@ -9730,7 +9694,7 @@ class ExcelToMarkdownConverter:
                         break
                 
                 merged_table.append(current_row)
-                i = j
+                i = j if j > i + 1 else i + 1
             
             debug_print(f"[DEBUG] 行マージ: {len(table_data)}行 → {len(merged_table)}行")
             table_data = merged_table
