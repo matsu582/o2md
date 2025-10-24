@@ -1560,17 +1560,15 @@ class ExcelToMarkdownConverter:
                                 if isinstance(meta, dict):
                                     title = meta.get('title')
                                 if title:
-                                    # Emit title as a Markdown heading (canonical)
+                                    # Emit title as plain text (not a heading)
                                     try:
-                                        h = f"### {self._escape_angle_brackets(title)}"
+                                        h = f"{self._escape_angle_brackets(title)}  "
                                         self.markdown_lines.append(h)
                                         # record authoritative mapping and emitted text/row
                                         md_idx = len(self.markdown_lines) - 1
                                         self._mark_sheet_map(sheet.title, row, md_idx)
                                         self._mark_emitted_text(sheet.title, self._normalize_text(title))
                                         self._mark_emitted_row(sheet.title, row)
-                                        # blank line after heading
-                                        self.markdown_lines.append("")
                                     except Exception:
                                         # fallback to previous free-text emission
                                         self._emit_free_text(sheet, row, title)
@@ -5486,11 +5484,11 @@ class ExcelToMarkdownConverter:
                 debug_print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
                 heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
                 try:
-                    debug_debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
+                    debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
                     if heur_tables:
-                        debug_debug_print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
+                        debug_print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
                     if heur_annotations:
-                        debug_debug_print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
+                        debug_print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 if heur_tables:
@@ -8962,11 +8960,13 @@ class ExcelToMarkdownConverter:
 
                     # その他は短めのテキストを候補として追加
                     if len(text) <= 80 and len(text.split()) <= 8:
-                        # ヘッダーと間違えやすい列（例: 備考欄のようにほとんど空の列）はタイトル候補から除外
-                        col_ratio = self._column_nonempty_fraction(sheet, start_row, end_row, col)
-                        if col_ratio < 0.2:
-                            debug_print(f"[DEBUG] タイトル候補除外(注記っぽい列): '{text}' at 行{row}列{col} (col_nonempty={col_ratio:.2f})")
-                            continue
+                        # テーブル領域内の行の場合のみ、列チェックを実施
+                        if start_row <= row <= end_row:
+                            # ヘッダーと間違えやすい列（例: 備考欄のようにほとんど空の列）はタイトル候補から除外
+                            col_ratio = self._column_nonempty_fraction(sheet, start_row, end_row, col)
+                            if col_ratio < 0.2:
+                                debug_print(f"[DEBUG] タイトル候補除外(注記っぽい列): '{text}' at 行{row}列{col} (col_nonempty={col_ratio:.2f})")
+                                continue
 
                         distance = abs(row - start_row)
                         row_relation = 0 if row < start_row else (1 if row == start_row else 2)
@@ -8975,11 +8975,15 @@ class ExcelToMarkdownConverter:
 
         # 最も適切なタイトルを選択
         if title_candidates:
-            # 優先順位: (1) 太字/markdown > general, (2) 表の上方にある候補、(3) 短さ、(4) 距離
+            # 優先順位: (1) テーブル直前(1-2行前)のテキスト, (2) 太字/markdown > general, (3) 表の上方にある候補、(4) 長さ（直前の場合は長い方、それ以外は短い方）、(5) 距離
             def _title_key(x):
-                kind_priority = 0 if x[4] in ('bold', 'markdown') else 1
-                row_relation = x[5]  # 0: above table, 1: same row, 2: below table
-                return (kind_priority, row_relation, len(x[0]), x[1])
+                text, distance, row, col, kind, row_relation = x
+                is_immediately_before = (start_row - row) in (1, 2) and row < start_row
+                immediate_priority = 0 if is_immediately_before else 1
+                kind_priority = 0 if kind in ('bold', 'markdown') else 1
+                length_priority = -len(text) if is_immediately_before else len(text)
+                # row_relation: 0: above table, 1: same row, 2: below table
+                return (immediate_priority, kind_priority, row_relation, length_priority, distance)
 
             best_title = min(title_candidates, key=_title_key)
             # record the detected title row so callers can use it as an anchor
@@ -8987,6 +8991,15 @@ class ExcelToMarkdownConverter:
                 self._last_table_title_row = int(best_title[2])
             except (ValueError, TypeError):
                 self._last_table_title_row = None
+            
+            best_row = best_title[2]
+            same_row_candidates = [c for c in title_candidates if c[2] == best_row]
+            if len(same_row_candidates) > 1:
+                same_row_candidates.sort(key=lambda x: x[3])
+                combined_title = ' '.join([c[0] for c in same_row_candidates])
+                debug_print("[DEBUG] タイトル選択（結合）: '{}' (type={}, row={})".format(combined_title, best_title[4], best_title[2]))
+                return combined_title
+            
             debug_print("[DEBUG] タイトル選択: '{}' (type={}, row={})".format(best_title[0], best_title[4], best_title[2]))
             return best_title[0]
 
