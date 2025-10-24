@@ -232,13 +232,98 @@ class ExcelToMarkdownConverter:
     def _detect_bordered_tables(self, sheet, min_row, max_row, min_col, max_col):
         """外枠罫線のみで囲まれた最大矩形をテーブルと判定（内部罫線は無視）"""
         tables = []
-        debug_print("[DEBUG] セル罫線情報一覧:")
-        # 最小限の安全な実装: 詳細な罫線テーブル検出ロジック
-        # は以前の編集で削除されファイル構造が破損しました。
-        # ここで空の'tables'を返すのは安全: 呼び出しコードは
-        # 検出された罫線テーブルがない場合を処理でき、一般的なテーブル
-        # 検出ロジックにフォールバックします。
+        
+        visited = set()
+        for row in range(min_row, max_row + 1):
+            for col in range(min_col, max_col + 1):
+                if (row, col) in visited:
+                    continue
+                
+                cell = sheet.cell(row=row, column=col)
+                if (cell.border and cell.border.left and cell.border.left.style and
+                    cell.border and cell.border.top and cell.border.top.style):
+                    region = self._find_bordered_region(sheet, row, col, min_row, max_row, min_col, max_col, visited)
+                    if region:
+                        r1, r2, c1, c2 = region
+                        if r2 - r1 >= 1 or c2 - c1 >= 2:
+                            if self._is_valid_bordered_table(sheet, region):
+                                tables.append(region)
+        
+        debug_print(f"[DEBUG] _detect_bordered_tables found {len(tables)} tables")
         return tables
+    
+    def _is_valid_bordered_table(self, sheet, region):
+        """罫線テーブルが有効かどうかをチェック（空行・空列が多すぎる場合は無効）"""
+        r1, r2, c1, c2 = region
+        total_rows = r2 - r1 + 1
+        total_cols = c2 - c1 + 1
+        empty_rows = 0
+        empty_cols = 0
+        
+        for row in range(r1, r2 + 1):
+            is_empty = True
+            for col in range(c1, c2 + 1):
+                cell = sheet.cell(row=row, column=col)
+                if cell.value and str(cell.value).strip():
+                    is_empty = False
+                    break
+            if is_empty:
+                empty_rows += 1
+        
+        for col in range(c1, c2 + 1):
+            is_empty = True
+            for row in range(r1, r2 + 1):
+                cell = sheet.cell(row=row, column=col)
+                if cell.value and str(cell.value).strip():
+                    is_empty = False
+                    break
+            if is_empty:
+                empty_cols += 1
+        
+        empty_row_ratio = empty_rows / total_rows if total_rows > 0 else 0
+        empty_col_ratio = empty_cols / total_cols if total_cols > 0 else 0
+        debug_print(f"[DEBUG] Table region {region}: empty_rows={empty_rows}/{total_rows} (ratio={empty_row_ratio:.2f}), empty_cols={empty_cols}/{total_cols} (ratio={empty_col_ratio:.2f})")
+        
+        return empty_row_ratio < 0.5 and empty_col_ratio < 0.5
+    
+    def _find_bordered_region(self, sheet, start_row, start_col, min_row, max_row, min_col, max_col, visited):
+        """指定されたセルから始まる罫線で囲まれた領域を検出"""
+        bordered_cols_in_row = []
+        for c in range(start_col, max_col + 1):
+            cell = sheet.cell(row=start_row, column=c)
+            if cell.border and cell.border.left and cell.border.left.style:
+                bordered_cols_in_row.append(c)
+        
+        if len(bordered_cols_in_row) < 2:
+            return None
+        
+        r1 = start_row
+        r2 = start_row
+        c1 = min(bordered_cols_in_row)
+        c2 = max(bordered_cols_in_row)
+        
+        for (_, c) in [(start_row, col) for col in bordered_cols_in_row]:
+            visited.add((start_row, c))
+        
+        for r in range(start_row + 1, max_row + 1):
+            row_bordered_cols = []
+            for c in range(c1, c2 + 1):
+                cell = sheet.cell(row=r, column=c)
+                if cell.border and cell.border.left and cell.border.left.style:
+                    row_bordered_cols.append(c)
+            
+            if len(row_bordered_cols) >= 2:
+                r2 = r
+                for c in row_bordered_cols:
+                    visited.add((r, c))
+                c1 = min(c1, min(row_bordered_cols))
+                c2 = max(c2, max(row_bordered_cols))
+            else:
+                break
+        
+        if r2 >= r1 and c2 > c1:
+            return (r1, r2, c1, c2)
+        return None
         # デッドコード削除: self.image_counter = 0
         # マッピング: sheet.title -> 辞書(行番号 -> その行の出力後のmarkdown行インデックス)
         # 行/領域のmarkdownを出力する際にこれを設定し、描画を
