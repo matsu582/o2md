@@ -52,6 +52,7 @@ from pathlib import Path
 # 各変換クラスをインポート
 try:
     from x2md import ExcelToMarkdownConverter, convert_xls_to_xlsx
+    import x2md
 except ImportError as e:
     raise ImportError(
         "x2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
@@ -59,6 +60,7 @@ except ImportError as e:
 
 try:
     from d2md import WordToMarkdownConverter, convert_doc_to_docx
+    import d2md
 except ImportError as e:
     raise ImportError(
         "d2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
@@ -66,6 +68,7 @@ except ImportError as e:
 
 try:
     from p2md import PowerPointToMarkdownConverter
+    import p2md
 except ImportError as e:
     raise ImportError(
         "p2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
@@ -80,6 +83,9 @@ def set_verbose(verbose: bool):
     """verboseモードを設定"""
     global _VERBOSE
     _VERBOSE = verbose
+    x2md.set_verbose(verbose)
+    d2md.set_verbose(verbose)
+    p2md.set_verbose(verbose)
 
 def is_verbose() -> bool:
     """verboseモードかどうかを返す"""

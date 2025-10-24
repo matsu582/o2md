@@ -260,6 +260,28 @@ class ExcelToMarkdownConverter:
         empty_rows = 0
         empty_cols = 0
         
+        cols_with_data = 0
+        for col in range(c1, c2 + 1):
+            value_count = 0
+            for row in range(r1, r2 + 1):
+                cell = sheet.cell(row=row, column=col)
+                if cell.value and str(cell.value).strip():
+                    value_count += 1
+                    if value_count >= 2:
+                        cols_with_data += 1
+                        break
+        
+        # Detect merged cells
+        merged_cols = set()
+        merged_rows = set()
+        for merged_range in sheet.merged_cells.ranges:
+            if (merged_range.min_row <= r2 and merged_range.max_row >= r1 and
+                merged_range.min_col <= c2 and merged_range.max_col >= c1):
+                for col in range(max(merged_range.min_col, c1), min(merged_range.max_col, c2) + 1):
+                    merged_cols.add(col)
+                for row in range(max(merged_range.min_row, r1), min(merged_range.max_row, r2) + 1):
+                    merged_rows.add(row)
+        
         for row in range(r1, r2 + 1):
             is_empty = True
             for col in range(c1, c2 + 1):
@@ -282,7 +304,13 @@ class ExcelToMarkdownConverter:
         
         empty_row_ratio = empty_rows / total_rows if total_rows > 0 else 0
         empty_col_ratio = empty_cols / total_cols if total_cols > 0 else 0
-        debug_print(f"[DEBUG] Table region {region}: empty_rows={empty_rows}/{total_rows} (ratio={empty_row_ratio:.2f}), empty_cols={empty_cols}/{total_cols} (ratio={empty_col_ratio:.2f})")
+        debug_print(f"[DEBUG] Table region {region}: empty_rows={empty_rows}/{total_rows} (ratio={empty_row_ratio:.2f}), empty_cols={empty_cols}/{total_cols} (ratio={empty_col_ratio:.2f}), cols_with_data={cols_with_data}")
+        
+        has_many_merged_cells = len(merged_cols) > total_cols * 0.3 or len(merged_rows) > total_rows * 0.3
+        is_small_table = total_rows <= 10
+        if has_many_merged_cells and cols_with_data >= 3 and is_small_table:
+            debug_print(f"[DEBUG] Small table with many merged cells ({len(merged_cols)} cols, {len(merged_rows)} rows) and {cols_with_data} columns with data, relaxing empty column threshold")
+            return empty_row_ratio < 0.5 and empty_col_ratio < 0.8
         
         return empty_row_ratio < 0.5 and empty_col_ratio < 0.5
     
@@ -1532,17 +1560,15 @@ class ExcelToMarkdownConverter:
                                 if isinstance(meta, dict):
                                     title = meta.get('title')
                                 if title:
-                                    # Emit title as a Markdown heading (canonical)
+                                    # Emit title as plain text (not a heading)
                                     try:
-                                        h = f"### {self._escape_angle_brackets(title)}"
+                                        h = f"{self._escape_angle_brackets(title)}  "
                                         self.markdown_lines.append(h)
                                         # record authoritative mapping and emitted text/row
                                         md_idx = len(self.markdown_lines) - 1
                                         self._mark_sheet_map(sheet.title, row, md_idx)
                                         self._mark_emitted_text(sheet.title, self._normalize_text(title))
                                         self._mark_emitted_row(sheet.title, row)
-                                        # blank line after heading
-                                        self.markdown_lines.append("")
                                     except Exception:
                                         # fallback to previous free-text emission
                                         self._emit_free_text(sheet, row, title)
@@ -5458,11 +5484,11 @@ class ExcelToMarkdownConverter:
                 debug_print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
                 heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
                 try:
-                    debug_debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
+                    debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
                     if heur_tables:
-                        debug_debug_print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
+                        debug_print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
                     if heur_annotations:
-                        debug_debug_print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
+                        debug_print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 if heur_tables:
@@ -8893,6 +8919,8 @@ class ExcelToMarkdownConverter:
             # ここで失敗しても元のtable_dataを返す
             pass
 
+        table_data = self._consolidate_merged_rows(table_data, merged_info, start_row, start_col, end_col)
+        
         return self._trim_edge_empty_columns(table_data)
 
     
@@ -8932,11 +8960,13 @@ class ExcelToMarkdownConverter:
 
                     # その他は短めのテキストを候補として追加
                     if len(text) <= 80 and len(text.split()) <= 8:
-                        # ヘッダーと間違えやすい列（例: 備考欄のようにほとんど空の列）はタイトル候補から除外
-                        col_ratio = self._column_nonempty_fraction(sheet, start_row, end_row, col)
-                        if col_ratio < 0.2:
-                            debug_print(f"[DEBUG] タイトル候補除外(注記っぽい列): '{text}' at 行{row}列{col} (col_nonempty={col_ratio:.2f})")
-                            continue
+                        # テーブル領域内の行の場合のみ、列チェックを実施
+                        if start_row <= row <= end_row:
+                            # ヘッダーと間違えやすい列（例: 備考欄のようにほとんど空の列）はタイトル候補から除外
+                            col_ratio = self._column_nonempty_fraction(sheet, start_row, end_row, col)
+                            if col_ratio < 0.2:
+                                debug_print(f"[DEBUG] タイトル候補除外(注記っぽい列): '{text}' at 行{row}列{col} (col_nonempty={col_ratio:.2f})")
+                                continue
 
                         distance = abs(row - start_row)
                         row_relation = 0 if row < start_row else (1 if row == start_row else 2)
@@ -8945,11 +8975,15 @@ class ExcelToMarkdownConverter:
 
         # 最も適切なタイトルを選択
         if title_candidates:
-            # 優先順位: (1) 太字/markdown > general, (2) 表の上方にある候補、(3) 短さ、(4) 距離
+            # 優先順位: (1) テーブル直前(1-2行前)のテキスト, (2) 太字/markdown > general, (3) 表の上方にある候補、(4) 長さ（直前の場合は長い方、それ以外は短い方）、(5) 距離
             def _title_key(x):
-                kind_priority = 0 if x[4] in ('bold', 'markdown') else 1
-                row_relation = x[5]  # 0: above table, 1: same row, 2: below table
-                return (kind_priority, row_relation, len(x[0]), x[1])
+                text, distance, row, col, kind, row_relation = x
+                is_immediately_before = (start_row - row) in (1, 2) and row < start_row
+                immediate_priority = 0 if is_immediately_before else 1
+                kind_priority = 0 if kind in ('bold', 'markdown') else 1
+                length_priority = -len(text) if is_immediately_before else len(text)
+                # row_relation: 0: above table, 1: same row, 2: below table
+                return (immediate_priority, kind_priority, row_relation, length_priority, distance)
 
             best_title = min(title_candidates, key=_title_key)
             # record the detected title row so callers can use it as an anchor
@@ -8957,6 +8991,15 @@ class ExcelToMarkdownConverter:
                 self._last_table_title_row = int(best_title[2])
             except (ValueError, TypeError):
                 self._last_table_title_row = None
+            
+            best_row = best_title[2]
+            same_row_candidates = [c for c in title_candidates if c[2] == best_row]
+            if len(same_row_candidates) > 1:
+                same_row_candidates.sort(key=lambda x: x[3])
+                combined_title = ' '.join([c[0] for c in same_row_candidates])
+                debug_print("[DEBUG] タイトル選択（結合）: '{}' (type={}, row={})".format(combined_title, best_title[4], best_title[2]))
+                return combined_title
+            
             debug_print("[DEBUG] タイトル選択: '{}' (type={}, row={})".format(best_title[0], best_title[4], best_title[2]))
             return best_title[0]
 
@@ -9401,6 +9444,85 @@ class ExcelToMarkdownConverter:
             return 0.0
         return nonempty / total
     
+    def _consolidate_merged_rows(self, table_data: List[List[str]], merged_info: Dict[str, Any],
+                                 start_row: int, start_col: int, end_col: int) -> List[List[str]]:
+        """マージセルを含む行を統合して重複を削除"""
+        if not table_data or len(table_data) <= 1:
+            return table_data
+        
+        debug_print(f"[DEBUG] _consolidate_merged_rows called: table_data rows={len(table_data)}, start_row={start_row}, start_col={start_col}, end_col={end_col}")
+        debug_print(f"[DEBUG] merged_info keys sample: {list(merged_info.keys())[:10]}")
+        
+        rows_to_keep = []
+        rows_to_skip = set()
+        
+        for row_idx in range(len(table_data)):
+            if row_idx in rows_to_skip:
+                continue
+            
+            actual_row_num = start_row + row_idx
+            current_row = table_data[row_idx]
+            debug_print(f"[DEBUG] Processing row_idx={row_idx}, actual_row_num={actual_row_num}, current_row={current_row}")
+            
+            multi_row_merges = []
+            for col_idx in range(len(current_row)):
+                actual_col_num = start_col + col_idx
+                key = f"{actual_row_num}_{actual_col_num}"
+                
+                if key in merged_info and merged_info[key]['is_merged']:
+                    merge_info = merged_info[key]
+                    if (merge_info['master_row'] == actual_row_num and 
+                        merge_info['master_col'] == actual_col_num and
+                        merge_info['span_rows'] > 1):
+                        multi_row_merges.append(merge_info)
+            
+            if multi_row_merges:
+                max_span = max(m['span_rows'] for m in multi_row_merges)
+                debug_print(f"[DEBUG] Row {actual_row_num} has {len(multi_row_merges)} multi-row merges, max_span={max_span}")
+                
+                for next_row_offset in range(1, max_span):
+                    next_row_idx = row_idx + next_row_offset
+                    if next_row_idx >= len(table_data):
+                        break
+                    
+                    next_row = table_data[next_row_idx]
+                    next_actual_row_num = start_row + next_row_idx
+                    
+                    has_non_merged_data = False
+                    for next_col_idx in range(len(next_row)):
+                        next_cell = next_row[next_col_idx]
+                        if next_cell and str(next_cell).strip():
+                            next_actual_col_num = start_col + next_col_idx
+                            next_key = f"{next_actual_row_num}_{next_actual_col_num}"
+                            
+                            if next_key in merged_info and merged_info[next_key]['is_merged']:
+                                merge_info = merged_info[next_key]
+                                if merge_info['master_row'] < next_actual_row_num:
+                                    continue
+                            
+                            has_non_merged_data = True
+                            debug_print(f"[DEBUG] Row {next_actual_row_num} has non-merged data at col {next_col_idx}: {next_cell}")
+                            break
+                    
+                    if has_non_merged_data:
+                        debug_print(f"[DEBUG] Row {next_actual_row_num} has non-merged data, not consolidating")
+                    else:
+                        debug_print(f"[DEBUG] Row {next_actual_row_num} is empty (merged cell only), consolidating")
+                        for next_col_idx in range(len(next_row)):
+                            if next_col_idx < len(current_row):
+                                next_cell = next_row[next_col_idx]
+                                if next_cell and str(next_cell).strip():
+                                    current_cell = current_row[next_col_idx]
+                                    if not (current_cell and str(current_cell).strip()):
+                                        current_row[next_col_idx] = next_cell
+                        
+                        rows_to_skip.add(next_row_idx)
+            
+            rows_to_keep.append(current_row)
+        
+        debug_print(f"[DEBUG] _consolidate_merged_rows: {len(table_data)} rows -> {len(rows_to_keep)} rows (skipped {len(rows_to_skip)} rows)")
+        return rows_to_keep
+    
     def _build_table_data_with_merges(self, sheet, region: Tuple[int, int, int, int], 
                                      merged_info: Dict[str, Any]) -> List[List[str]]:
         """結合セルを考慮してテーブルデータを構築（ヘッダー行の検出とテーブル構造改善）"""
@@ -9473,6 +9595,10 @@ class ExcelToMarkdownConverter:
         debug_print(f"[DEBUG-DUMP] filtered_table_data rows={len(filtered_table_data)} sample (first 6):")
         for i, r in enumerate(filtered_table_data[:6]):
             debug_print(f"[DEBUG-DUMP] filtered row {i+actual_start_row}: cols={len(r)} -> {r}")
+        
+        filtered_table_data = self._consolidate_merged_rows(
+            filtered_table_data, merged_info, actual_start_row, start_col, end_col
+        )
 
         # 空列の検出と除去
         useful_columns = self._identify_useful_columns(filtered_table_data)
