@@ -8921,6 +8921,8 @@ class ExcelToMarkdownConverter:
             # ここで失敗しても元のtable_dataを返す
             pass
 
+        table_data = self._consolidate_merged_rows(table_data, merged_info, start_row, start_col, end_col)
+        
         return self._trim_edge_empty_columns(table_data)
 
     
@@ -9429,6 +9431,57 @@ class ExcelToMarkdownConverter:
             return 0.0
         return nonempty / total
     
+    def _consolidate_merged_rows(self, table_data: List[List[str]], merged_info: Dict[str, Any],
+                                 start_row: int, start_col: int, end_col: int) -> List[List[str]]:
+        """マージセルを含む行を統合して重複を削除"""
+        if not table_data or len(table_data) <= 1:
+            return table_data
+        
+        debug_print(f"[DEBUG] _consolidate_merged_rows called: table_data rows={len(table_data)}, start_row={start_row}, start_col={start_col}, end_col={end_col}")
+        debug_print(f"[DEBUG] merged_info keys sample: {list(merged_info.keys())[:10]}")
+        
+        rows_to_keep = []
+        rows_to_skip = set()
+        
+        for row_idx in range(len(table_data)):
+            if row_idx in rows_to_skip:
+                continue
+            
+            actual_row_num = start_row + row_idx
+            current_row = table_data[row_idx]
+            debug_print(f"[DEBUG] Processing row_idx={row_idx}, actual_row_num={actual_row_num}, current_row={current_row}")
+            
+            merged_with_next = False
+            for col_idx, cell_value in enumerate(current_row):
+                actual_col_num = start_col + col_idx
+                key = f"{actual_row_num}_{actual_col_num}"
+                
+                if key in merged_info and merged_info[key]['is_merged']:
+                    merge_info = merged_info[key]
+                    if (merge_info['master_row'] == actual_row_num and 
+                        merge_info['master_col'] == actual_col_num and
+                        merge_info['span_rows'] > 1):
+                        merged_with_next = True
+                        
+                        for next_row_offset in range(1, merge_info['span_rows']):
+                            next_row_idx = row_idx + next_row_offset
+                            if next_row_idx < len(table_data):
+                                next_row = table_data[next_row_idx]
+                                for next_col_idx in range(len(next_row)):
+                                    if next_col_idx < len(current_row):
+                                        next_cell = next_row[next_col_idx]
+                                        if next_cell and str(next_cell).strip():
+                                            current_cell = current_row[next_col_idx]
+                                            if not (current_cell and str(current_cell).strip()):
+                                                current_row[next_col_idx] = next_cell
+                                
+                                rows_to_skip.add(next_row_idx)
+            
+            rows_to_keep.append(current_row)
+        
+        debug_print(f"[DEBUG] _consolidate_merged_rows: {len(table_data)} rows -> {len(rows_to_keep)} rows (skipped {len(rows_to_skip)} rows)")
+        return rows_to_keep
+    
     def _build_table_data_with_merges(self, sheet, region: Tuple[int, int, int, int], 
                                      merged_info: Dict[str, Any]) -> List[List[str]]:
         """結合セルを考慮してテーブルデータを構築（ヘッダー行の検出とテーブル構造改善）"""
@@ -9501,6 +9554,10 @@ class ExcelToMarkdownConverter:
         debug_print(f"[DEBUG-DUMP] filtered_table_data rows={len(filtered_table_data)} sample (first 6):")
         for i, r in enumerate(filtered_table_data[:6]):
             debug_print(f"[DEBUG-DUMP] filtered row {i+actual_start_row}: cols={len(r)} -> {r}")
+        
+        filtered_table_data = self._consolidate_merged_rows(
+            filtered_table_data, merged_info, actual_start_row, start_col, end_col
+        )
 
         # 空列の検出と除去
         useful_columns = self._identify_useful_columns(filtered_table_data)
