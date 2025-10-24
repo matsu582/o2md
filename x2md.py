@@ -253,10 +253,12 @@ class ExcelToMarkdownConverter:
         return tables
     
     def _is_valid_bordered_table(self, sheet, region):
-        """罫線テーブルが有効かどうかをチェック（空行が多すぎる場合は無効）"""
+        """罫線テーブルが有効かどうかをチェック（空行・空列が多すぎる場合は無効）"""
         r1, r2, c1, c2 = region
         total_rows = r2 - r1 + 1
+        total_cols = c2 - c1 + 1
         empty_rows = 0
+        empty_cols = 0
         
         for row in range(r1, r2 + 1):
             is_empty = True
@@ -268,10 +270,21 @@ class ExcelToMarkdownConverter:
             if is_empty:
                 empty_rows += 1
         
-        empty_ratio = empty_rows / total_rows if total_rows > 0 else 0
-        debug_print(f"[DEBUG] Table region {region}: empty_rows={empty_rows}/{total_rows} (ratio={empty_ratio:.2f})")
+        for col in range(c1, c2 + 1):
+            is_empty = True
+            for row in range(r1, r2 + 1):
+                cell = sheet.cell(row=row, column=col)
+                if cell.value and str(cell.value).strip():
+                    is_empty = False
+                    break
+            if is_empty:
+                empty_cols += 1
         
-        return empty_ratio < 0.5
+        empty_row_ratio = empty_rows / total_rows if total_rows > 0 else 0
+        empty_col_ratio = empty_cols / total_cols if total_cols > 0 else 0
+        debug_print(f"[DEBUG] Table region {region}: empty_rows={empty_rows}/{total_rows} (ratio={empty_row_ratio:.2f}), empty_cols={empty_cols}/{total_cols} (ratio={empty_col_ratio:.2f})")
+        
+        return empty_row_ratio < 0.5 and empty_col_ratio < 0.5
     
     def _find_bordered_region(self, sheet, start_row, start_col, min_row, max_row, min_col, max_col, visited):
         """指定されたセルから始まる罫線で囲まれた領域を検出"""
