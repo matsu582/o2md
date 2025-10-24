@@ -260,6 +260,28 @@ class ExcelToMarkdownConverter:
         empty_rows = 0
         empty_cols = 0
         
+        cols_with_data = 0
+        for col in range(c1, c2 + 1):
+            value_count = 0
+            for row in range(r1, r2 + 1):
+                cell = sheet.cell(row=row, column=col)
+                if cell.value and str(cell.value).strip():
+                    value_count += 1
+                    if value_count >= 2:
+                        cols_with_data += 1
+                        break
+        
+        # Detect merged cells
+        merged_cols = set()
+        merged_rows = set()
+        for merged_range in sheet.merged_cells.ranges:
+            if (merged_range.min_row <= r2 and merged_range.max_row >= r1 and
+                merged_range.min_col <= c2 and merged_range.max_col >= c1):
+                for col in range(max(merged_range.min_col, c1), min(merged_range.max_col, c2) + 1):
+                    merged_cols.add(col)
+                for row in range(max(merged_range.min_row, r1), min(merged_range.max_row, r2) + 1):
+                    merged_rows.add(row)
+        
         for row in range(r1, r2 + 1):
             is_empty = True
             for col in range(c1, c2 + 1):
@@ -282,7 +304,13 @@ class ExcelToMarkdownConverter:
         
         empty_row_ratio = empty_rows / total_rows if total_rows > 0 else 0
         empty_col_ratio = empty_cols / total_cols if total_cols > 0 else 0
-        debug_print(f"[DEBUG] Table region {region}: empty_rows={empty_rows}/{total_rows} (ratio={empty_row_ratio:.2f}), empty_cols={empty_cols}/{total_cols} (ratio={empty_col_ratio:.2f})")
+        debug_print(f"[DEBUG] Table region {region}: empty_rows={empty_rows}/{total_rows} (ratio={empty_row_ratio:.2f}), empty_cols={empty_cols}/{total_cols} (ratio={empty_col_ratio:.2f}), cols_with_data={cols_with_data}")
+        
+        has_many_merged_cells = len(merged_cols) > total_cols * 0.3 or len(merged_rows) > total_rows * 0.3
+        is_small_table = total_rows <= 10
+        if has_many_merged_cells and cols_with_data >= 3 and is_small_table:
+            debug_print(f"[DEBUG] Small table with many merged cells ({len(merged_cols)} cols, {len(merged_rows)} rows) and {cols_with_data} columns with data, relaxing empty column threshold")
+            return empty_row_ratio < 0.5 and empty_col_ratio < 0.8
         
         return empty_row_ratio < 0.5 and empty_col_ratio < 0.5
     
