@@ -9451,8 +9451,8 @@ class ExcelToMarkdownConverter:
             current_row = table_data[row_idx]
             debug_print(f"[DEBUG] Processing row_idx={row_idx}, actual_row_num={actual_row_num}, current_row={current_row}")
             
-            merged_with_next = False
-            for col_idx, cell_value in enumerate(current_row):
+            multi_row_merges = []
+            for col_idx in range(len(current_row)):
                 actual_col_num = start_col + col_idx
                 key = f"{actual_row_num}_{actual_col_num}"
                 
@@ -9461,21 +9461,49 @@ class ExcelToMarkdownConverter:
                     if (merge_info['master_row'] == actual_row_num and 
                         merge_info['master_col'] == actual_col_num and
                         merge_info['span_rows'] > 1):
-                        merged_with_next = True
+                        multi_row_merges.append(merge_info)
+            
+            if multi_row_merges:
+                max_span = max(m['span_rows'] for m in multi_row_merges)
+                debug_print(f"[DEBUG] Row {actual_row_num} has {len(multi_row_merges)} multi-row merges, max_span={max_span}")
+                
+                for next_row_offset in range(1, max_span):
+                    next_row_idx = row_idx + next_row_offset
+                    if next_row_idx >= len(table_data):
+                        break
+                    
+                    next_row = table_data[next_row_idx]
+                    next_actual_row_num = start_row + next_row_idx
+                    
+                    has_non_merged_data = False
+                    for next_col_idx in range(len(next_row)):
+                        next_cell = next_row[next_col_idx]
+                        if next_cell and str(next_cell).strip():
+                            next_actual_col_num = start_col + next_col_idx
+                            next_key = f"{next_actual_row_num}_{next_actual_col_num}"
+                            
+                            if next_key in merged_info and merged_info[next_key]['is_merged']:
+                                merge_info = merged_info[next_key]
+                                if merge_info['master_row'] < next_actual_row_num:
+                                    continue
+                            
+                            has_non_merged_data = True
+                            debug_print(f"[DEBUG] Row {next_actual_row_num} has non-merged data at col {next_col_idx}: {next_cell}")
+                            break
+                    
+                    if has_non_merged_data:
+                        debug_print(f"[DEBUG] Row {next_actual_row_num} has non-merged data, not consolidating")
+                    else:
+                        debug_print(f"[DEBUG] Row {next_actual_row_num} is empty (merged cell only), consolidating")
+                        for next_col_idx in range(len(next_row)):
+                            if next_col_idx < len(current_row):
+                                next_cell = next_row[next_col_idx]
+                                if next_cell and str(next_cell).strip():
+                                    current_cell = current_row[next_col_idx]
+                                    if not (current_cell and str(current_cell).strip()):
+                                        current_row[next_col_idx] = next_cell
                         
-                        for next_row_offset in range(1, merge_info['span_rows']):
-                            next_row_idx = row_idx + next_row_offset
-                            if next_row_idx < len(table_data):
-                                next_row = table_data[next_row_idx]
-                                for next_col_idx in range(len(next_row)):
-                                    if next_col_idx < len(current_row):
-                                        next_cell = next_row[next_col_idx]
-                                        if next_cell and str(next_cell).strip():
-                                            current_cell = current_row[next_col_idx]
-                                            if not (current_cell and str(current_cell).strip()):
-                                                current_row[next_col_idx] = next_cell
-                                
-                                rows_to_skip.add(next_row_idx)
+                        rows_to_skip.add(next_row_idx)
             
             rows_to_keep.append(current_row)
         
