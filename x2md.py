@@ -142,6 +142,7 @@ class ExcelToMarkdownConverter:
         self._sheet_deferred_tables = {}
         self._sheet_emitted_texts = {}
         self._sheet_emitted_rows = {}
+        self._sheet_emitted_table_titles = {}
         self._emitted_images = set()
         self._embedded_image_cid_by_name = {}
         self._in_canonical_emit = False
@@ -154,7 +155,7 @@ class ExcelToMarkdownConverter:
         for dict_attr in ['_cell_to_md_index', '_sheet_shape_images', '_sheet_shape_next_idx',
                           '_sheet_shape_image_start_rows', '_sheet_deferred_texts',
                           '_sheet_deferred_tables', '_sheet_emitted_texts', '_sheet_emitted_rows',
-                          '_embedded_image_cid_by_name']:
+                          '_sheet_emitted_table_titles', '_embedded_image_cid_by_name']:
             getattr(self, dict_attr, {}).pop(sheet_name, None)
         
         self._sheet_shapes_generated.discard(sheet_name)
@@ -245,8 +246,13 @@ class ExcelToMarkdownConverter:
                     region = self._find_bordered_region(sheet, row, col, min_row, max_row, min_col, max_col, visited)
                     if region:
                         r1, r2, c1, c2 = region
+                        if r1 == 1 and r2 <= 4:
+                            debug_print(f"[DEBUG][{sheet.title}] Top region detected: rows {r1}-{r2}, cols {c1}-{c2}")
                         if r2 - r1 >= 1 or c2 - c1 >= 2:
-                            if self._is_valid_bordered_table(sheet, region):
+                            is_valid = self._is_valid_bordered_table(sheet, region)
+                            if r1 == 1 and r2 <= 4:
+                                debug_print(f"[DEBUG][{sheet.title}] Top region validation: {is_valid}")
+                            if is_valid:
                                 tables.append(region)
         
         debug_print(f"[DEBUG] _detect_bordered_tables found {len(tables)} tables")
@@ -310,9 +316,15 @@ class ExcelToMarkdownConverter:
         is_small_table = total_rows <= 10
         if has_many_merged_cells and cols_with_data >= 3 and is_small_table:
             debug_print(f"[DEBUG] Small table with many merged cells ({len(merged_cols)} cols, {len(merged_rows)} rows) and {cols_with_data} columns with data, relaxing empty column threshold")
-            return empty_row_ratio < 0.5 and empty_col_ratio < 0.8
+            result = empty_row_ratio < 0.5 and empty_col_ratio < 0.8
+            if r1 == 1 and r2 <= 4:
+                debug_print(f"[DEBUG][{sheet.title}] Top region validation details: has_many_merged_cells={has_many_merged_cells}, is_small_table={is_small_table}, result={result}")
+            return result
         
-        return empty_row_ratio < 0.5 and empty_col_ratio < 0.5
+        result = empty_row_ratio < 0.5 and empty_col_ratio < 0.5
+        if r1 == 1 and r2 <= 4:
+            debug_print(f"[DEBUG][{sheet.title}] Top region validation details: has_many_merged_cells={has_many_merged_cells}, is_small_table={is_small_table}, result={result}")
+        return result
     
     def _find_bordered_region(self, sheet, start_row, start_col, min_row, max_row, min_col, max_col, visited):
         """指定されたセルから始まる罫線で囲まれた領域を検出"""
@@ -1560,18 +1572,43 @@ class ExcelToMarkdownConverter:
                                 if isinstance(meta, dict):
                                     title = meta.get('title')
                                 if title:
-                                    # Emit title as plain text (not a heading)
-                                    try:
-                                        h = f"{self._escape_angle_brackets(title)}  "
-                                        self.markdown_lines.append(h)
-                                        # record authoritative mapping and emitted text/row
-                                        md_idx = len(self.markdown_lines) - 1
-                                        self._mark_sheet_map(sheet.title, row, md_idx)
-                                        self._mark_emitted_text(sheet.title, self._normalize_text(title))
-                                        self._mark_emitted_row(sheet.title, row)
-                                    except Exception:
-                                        # fallback to previous free-text emission
-                                        self._emit_free_text(sheet, row, title)
+                                    normalized_title = ' '.join(str(title).strip().split())
+                                    
+                                    if sheet.title not in self._sheet_emitted_table_titles:
+                                        self._sheet_emitted_table_titles[sheet.title] = set()
+                                    
+                                    if normalized_title in self._sheet_emitted_table_titles[sheet.title]:
+                                        debug_print(f"[DEBUG] タイトル '{title}' は既に出力済みのため抑制")
+                                        should_emit_title = False
+                                    else:
+                                        should_emit_title = True
+                                        try:
+                                            if table_data and len(table_data) > 0:
+                                                header_row = table_data[0]
+                                                if isinstance(header_row, (list, tuple)):
+                                                    header_text = ' '.join(str(cell).strip() for cell in header_row if cell)
+                                                    normalized_header = ' '.join(header_text.split())
+                                                    
+                                                    if normalized_title and normalized_header:
+                                                        if normalized_title in normalized_header or normalized_header.startswith(normalized_title):
+                                                            should_emit_title = False
+                                                            debug_print(f"[DEBUG] タイトル '{title}' はヘッダー行と重複しているため出力を抑制")
+                                        except Exception as e:
+                                            debug_print(f"[DEBUG] タイトル冗長性チェックエラー（無視）: {e}")
+                                            should_emit_title = True
+                                    
+                                    self._sheet_emitted_table_titles[sheet.title].add(normalized_title)
+                                    
+                                    if should_emit_title:
+                                        try:
+                                            h = f"{self._escape_angle_brackets(title)}  "
+                                            self.markdown_lines.append(h)
+                                            md_idx = len(self.markdown_lines) - 1
+                                            self._mark_sheet_map(sheet.title, row, md_idx)
+                                            self._mark_emitted_text(sheet.title, self._normalize_text(title))
+                                            self._mark_emitted_row(sheet.title, row)
+                                        except Exception:
+                                            self._emit_free_text(sheet, row, title)
                             except Exception as e:
                                 pass  # XML解析エラーは無視
 
@@ -5477,11 +5514,16 @@ class ExcelToMarkdownConverter:
         table_regions = self._detect_bordered_tables(sheet, min_row, max_row, min_col, max_col)
         debug_print(f"[DEBUG][_convert_sheet_data] bordered_table_regions_count={len(table_regions)} sample={table_regions[:5]}")
 
-        # If no bordered tables found, attempt a broader table-region detection
-        # that uses heuristics (merged cells, annotations, column separations).
-        if not table_regions:
+        # If no bordered tables found, or if bordered tables don't include the top rows (1-4),
+        # attempt a broader table-region detection that uses heuristics (merged cells, annotations, column separations).
+        # This ensures that header rows at the top of sheets are properly detected even when
+        top_region_in_bordered = any(r[0] == 1 and r[1] <= 4 for r in table_regions)
+        if not table_regions or not top_region_in_bordered:
             try:
-                debug_print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
+                if not table_regions:
+                    debug_print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
+                else:
+                    debug_print(f"[DEBUG] bordered tables found but no top region (rows 1-4); trying heuristic _detect_table_regions to find header rows")
                 heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
                 try:
                     debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
@@ -5492,8 +5534,14 @@ class ExcelToMarkdownConverter:
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 if heur_tables:
-                    debug_print(f"[DEBUG] heuristic detection found {len(heur_tables)} table regions")
-                    table_regions = heur_tables
+                    if not table_regions:
+                        debug_print(f"[DEBUG] heuristic detection found {len(heur_tables)} table regions")
+                        table_regions = heur_tables
+                    else:
+                        top_heur_tables = [r for r in heur_tables if r[0] == 1 and r[1] <= 4]
+                        if top_heur_tables:
+                            debug_print(f"[DEBUG] adding {len(top_heur_tables)} top regions from heuristic detection to bordered tables")
+                            table_regions = top_heur_tables + table_regions
             except Exception as _e:
                 debug_print(f"[DEBUG] heuristic table detection failed: {_e}")
 
@@ -5590,6 +5638,54 @@ class ExcelToMarkdownConverter:
 
         table_regions = filtered_table_regions
         debug_print(f"[DEBUG][_convert_sheet_data] kept_table_regions_count={len(table_regions)} kept_sample={table_regions[:5]}")
+
+        # 重複テーブルを除外する処理
+        def regions_overlap(r1, r2, threshold=0.5):
+            """2つのテーブル領域が重複しているかチェック"""
+            row1_start, row1_end, col1_start, col1_end = r1
+            row2_start, row2_end, col2_start, col2_end = r2
+            
+            overlap_row_start = max(row1_start, row2_start)
+            overlap_row_end = min(row1_end, row2_end)
+            overlap_col_start = max(col1_start, col2_start)
+            overlap_col_end = min(col1_end, col2_end)
+            
+            if overlap_row_start > overlap_row_end or overlap_col_start > overlap_col_end:
+                return False
+            
+            overlap_cells = (overlap_row_end - overlap_row_start + 1) * (overlap_col_end - overlap_col_start + 1)
+            
+            r1_cells = (row1_end - row1_start + 1) * (col1_end - col1_start + 1)
+            r2_cells = (row2_end - row2_start + 1) * (col2_end - col2_start + 1)
+            smaller_cells = min(r1_cells, r2_cells)
+            
+            overlap_ratio = overlap_cells / smaller_cells if smaller_cells > 0 else 0
+            
+            return overlap_ratio >= threshold
+        
+        # 重複テーブルを除外（大きいテーブルを優先）
+        deduplicated_regions = []
+        for i, region in enumerate(table_regions):
+            is_duplicate = False
+            for j, other_region in enumerate(table_regions):
+                if i != j and regions_overlap(region, other_region):
+                    r1_cells = (region[1] - region[0] + 1) * (region[3] - region[2] + 1)
+                    r2_cells = (other_region[1] - other_region[0] + 1) * (other_region[3] - other_region[2] + 1)
+                    
+                    if r1_cells < r2_cells:
+                        debug_print(f"[DEBUG] 重複テーブルを除外: {region} (重複先: {other_region})")
+                        is_duplicate = True
+                        break
+                    elif r1_cells == r2_cells and i > j:
+                        debug_print(f"[DEBUG] 重複テーブルを除外: {region} (重複先: {other_region})")
+                        is_duplicate = True
+                        break
+            
+            if not is_duplicate:
+                deduplicated_regions.append(region)
+        
+        table_regions = deduplicated_regions
+        debug_print(f"[DEBUG][_convert_sheet_data] deduplicated_table_regions_count={len(table_regions)} deduplicated_sample={table_regions[:5]}")
 
         processed_rows = set()
         # Emit detected table regions as actual tables (not just reserve rows).
@@ -8848,6 +8944,14 @@ class ExcelToMarkdownConverter:
         # _output_markdown_tableでは複数行ヘッダーとして扱わないように_detected_header_heightを1に設定
         self._detected_header_height = 1
         
+        debug_print(f"[DEBUG] table_data構築完了: {len(table_data)}行")
+        if table_data:
+            debug_print(f"[DEBUG] table_data[0] (ヘッダー): {table_data[0]}")
+            if len(table_data) > 1:
+                debug_print(f"[DEBUG] table_data[1] (最初のデータ行): {table_data[1]}")
+            if len(table_data) > 2:
+                debug_print(f"[DEBUG] table_data[2] (2番目のデータ行): {table_data[2]}")
+        
         # 2列最適化チェック（正規化後のヘッダーとgroup_positionsを使用）
         debug_print(f"[DEBUG] 2列最適化チェック開始: headers={compressed_headers}, positions={group_positions}")
         optimized_structure = self._optimize_table_for_two_columns(sheet, region, compressed_headers, group_positions)
@@ -8970,7 +9074,33 @@ class ExcelToMarkdownConverter:
             # ここで失敗しても元のtable_dataを返す
             pass
 
-        table_data = self._consolidate_merged_rows(table_data, merged_info, start_row, start_col, end_col)
+        if len(table_data) > 1:
+            headers = table_data[0]
+            data_rows = table_data[1:]
+            data_start_row = header_row + (header_height if header_height else 1)
+            consolidated_data_rows = self._consolidate_merged_rows(data_rows, merged_info, data_start_row, start_col, end_col)
+            
+            deduplicated_rows = []
+            for row in consolidated_data_rows:
+                if not deduplicated_rows or row != deduplicated_rows[-1]:
+                    deduplicated_rows.append(row)
+            
+            trimmed_rows = []
+            for row in deduplicated_rows:
+                is_empty = all(not cell or str(cell).strip() == '' for cell in row)
+                if not is_empty:
+                    trimmed_rows.append(row)
+                else:
+                    has_content_after = False
+                    current_idx = deduplicated_rows.index(row)
+                    for future_row in deduplicated_rows[current_idx + 1:]:
+                        if any(cell and str(cell).strip() != '' for cell in future_row):
+                            has_content_after = True
+                            break
+                    if has_content_after:
+                        trimmed_rows.append(row)
+            
+            table_data = [headers] + trimmed_rows
         
         return self._trim_edge_empty_columns(table_data)
 
@@ -9298,12 +9428,18 @@ class ExcelToMarkdownConverter:
                 
                 debug_print(f"[DEBUG] extended_group_count(row={row})={extended_group_count} (original group_count={group_count})")
 
+                first_row_bonus = 0.5 if row == start_row else 0.0
+                adjusted_border_fraction = header_border_fraction + first_row_bonus
+                
+                if first_row_bonus > 0:
+                    debug_print(f"[DEBUG] 最初の行ボーナス適用: row={row}, border_fraction={header_border_fraction:.3f} -> {adjusted_border_fraction:.3f}")
+
                 # build metric tuple for this candidate
                 # 罫線を最優先、次に拡張グループ数を考慮
                 # 同等の場合は上部の行を優先（-rowで小さい行番号が大きい値になる）
                 # heightは小さい方を優先（より保守的なヘッダー検出）
                 metrics = (
-                    header_border_fraction,  # 1st: 罫線が最も重要な判断基準
+                    adjusted_border_fraction,  # 1st: 罫線が最も重要な判断基準（start_rowにボーナス）
                     extended_group_count,    # 2nd: 拡張範囲でのグループ数（範囲外ヘッダー対応）
                     -row,                    # 3rd: より上の行を優先（負の値で小さい行番号が大きくなる）
                     group_count,             # 4th: テーブル範囲内のグループ数
@@ -10036,6 +10172,15 @@ class ExcelToMarkdownConverter:
         """Markdownテーブルとして出力"""
         if not table_data:
             return
+        
+        if source_rows and len(source_rows) >= 2 and source_rows[0] <= 4:
+            import traceback
+            stack = traceback.extract_stack()
+            caller_info = []
+            for frame in stack[-6:-1]:
+                if 'x2md.py' in frame.filename:
+                    caller_info.append(f"{frame.name}:{frame.lineno}")
+            debug_print(f"[DEBUG][{sheet_title}] テーブル生成: rows={source_rows[:5]}, cols={len(table_data[0]) if table_data else 0}, caller={' <- '.join(caller_info)}")
 
         # normalize row lengths
         max_cols = max(len(row) for row in table_data)
