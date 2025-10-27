@@ -245,8 +245,13 @@ class ExcelToMarkdownConverter:
                     region = self._find_bordered_region(sheet, row, col, min_row, max_row, min_col, max_col, visited)
                     if region:
                         r1, r2, c1, c2 = region
+                        if r1 == 1 and r2 <= 4:
+                            debug_print(f"[DEBUG][{sheet.title}] Top region detected: rows {r1}-{r2}, cols {c1}-{c2}")
                         if r2 - r1 >= 1 or c2 - c1 >= 2:
-                            if self._is_valid_bordered_table(sheet, region):
+                            is_valid = self._is_valid_bordered_table(sheet, region)
+                            if r1 == 1 and r2 <= 4:
+                                debug_print(f"[DEBUG][{sheet.title}] Top region validation: {is_valid}")
+                            if is_valid:
                                 tables.append(region)
         
         debug_print(f"[DEBUG] _detect_bordered_tables found {len(tables)} tables")
@@ -310,9 +315,15 @@ class ExcelToMarkdownConverter:
         is_small_table = total_rows <= 10
         if has_many_merged_cells and cols_with_data >= 3 and is_small_table:
             debug_print(f"[DEBUG] Small table with many merged cells ({len(merged_cols)} cols, {len(merged_rows)} rows) and {cols_with_data} columns with data, relaxing empty column threshold")
-            return empty_row_ratio < 0.5 and empty_col_ratio < 0.8
+            result = empty_row_ratio < 0.5 and empty_col_ratio < 0.8
+            if r1 == 1 and r2 <= 4:
+                debug_print(f"[DEBUG][{sheet.title}] Top region validation details: has_many_merged_cells={has_many_merged_cells}, is_small_table={is_small_table}, result={result}")
+            return result
         
-        return empty_row_ratio < 0.5 and empty_col_ratio < 0.5
+        result = empty_row_ratio < 0.5 and empty_col_ratio < 0.5
+        if r1 == 1 and r2 <= 4:
+            debug_print(f"[DEBUG][{sheet.title}] Top region validation details: has_many_merged_cells={has_many_merged_cells}, is_small_table={is_small_table}, result={result}")
+        return result
     
     def _find_bordered_region(self, sheet, start_row, start_col, min_row, max_row, min_col, max_col, visited):
         """指定されたセルから始まる罫線で囲まれた領域を検出"""
@@ -5477,11 +5488,16 @@ class ExcelToMarkdownConverter:
         table_regions = self._detect_bordered_tables(sheet, min_row, max_row, min_col, max_col)
         debug_print(f"[DEBUG][_convert_sheet_data] bordered_table_regions_count={len(table_regions)} sample={table_regions[:5]}")
 
-        # If no bordered tables found, attempt a broader table-region detection
-        # that uses heuristics (merged cells, annotations, column separations).
-        if not table_regions:
+        # If no bordered tables found, or if bordered tables don't include the top rows (1-4),
+        # attempt a broader table-region detection that uses heuristics (merged cells, annotations, column separations).
+        # This ensures that header rows at the top of sheets are properly detected even when
+        top_region_in_bordered = any(r[0] == 1 and r[1] <= 4 for r in table_regions)
+        if not table_regions or not top_region_in_bordered:
             try:
-                debug_print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
+                if not table_regions:
+                    debug_print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
+                else:
+                    debug_print(f"[DEBUG] bordered tables found but no top region (rows 1-4); trying heuristic _detect_table_regions to find header rows")
                 heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
                 try:
                     debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
@@ -5492,8 +5508,14 @@ class ExcelToMarkdownConverter:
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 if heur_tables:
-                    debug_print(f"[DEBUG] heuristic detection found {len(heur_tables)} table regions")
-                    table_regions = heur_tables
+                    if not table_regions:
+                        debug_print(f"[DEBUG] heuristic detection found {len(heur_tables)} table regions")
+                        table_regions = heur_tables
+                    else:
+                        top_heur_tables = [r for r in heur_tables if r[0] == 1 and r[1] <= 4]
+                        if top_heur_tables:
+                            debug_print(f"[DEBUG] adding {len(top_heur_tables)} top regions from heuristic detection to bordered tables")
+                            table_regions = top_heur_tables + table_regions
             except Exception as _e:
                 debug_print(f"[DEBUG] heuristic table detection failed: {_e}")
 
@@ -10098,6 +10120,15 @@ class ExcelToMarkdownConverter:
         """Markdownテーブルとして出力"""
         if not table_data:
             return
+        
+        if source_rows and len(source_rows) >= 2 and source_rows[0] <= 4:
+            import traceback
+            stack = traceback.extract_stack()
+            caller_info = []
+            for frame in stack[-6:-1]:
+                if 'x2md.py' in frame.filename:
+                    caller_info.append(f"{frame.name}:{frame.lineno}")
+            debug_print(f"[DEBUG][{sheet_title}] テーブル生成: rows={source_rows[:5]}, cols={len(table_data[0]) if table_data else 0}, caller={' <- '.join(caller_info)}")
 
         # normalize row lengths
         max_cols = max(len(row) for row in table_data)
