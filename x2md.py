@@ -8666,6 +8666,31 @@ class ExcelToMarkdownConverter:
         compressed_headers = [normalized_headers[a] for (a, b) in final_groups]
         group_positions = [header_positions[a] for (a, b) in final_groups]
         
+        deduplicated_headers = []
+        deduplicated_positions = []
+        deduplicated_groups = []
+        
+        i = 0
+        while i < len(compressed_headers):
+            current_header = compressed_headers[i]
+            current_group_start = final_groups[i][0]
+            current_group_end = final_groups[i][1]
+            
+            j = i + 1
+            while j < len(compressed_headers) and compressed_headers[j] == current_header:
+                current_group_end = final_groups[j][1]
+                j += 1
+            
+            deduplicated_headers.append(current_header)
+            deduplicated_positions.append(group_positions[i])
+            deduplicated_groups.append((current_group_start, current_group_end))
+            
+            i = j
+        
+        compressed_headers = deduplicated_headers
+        group_positions = deduplicated_positions
+        final_groups = deduplicated_groups
+        
         # 実際に使用された列位置を保存（_output_right_side_plain_textで使用）
         self._last_group_positions = group_positions
 
