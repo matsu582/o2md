@@ -8666,6 +8666,31 @@ class ExcelToMarkdownConverter:
         compressed_headers = [normalized_headers[a] for (a, b) in final_groups]
         group_positions = [header_positions[a] for (a, b) in final_groups]
         
+        deduplicated_headers = []
+        deduplicated_positions = []
+        deduplicated_groups = []
+        
+        i = 0
+        while i < len(compressed_headers):
+            current_header = compressed_headers[i]
+            current_group_start = final_groups[i][0]
+            current_group_end = final_groups[i][1]
+            
+            j = i + 1
+            while j < len(compressed_headers) and compressed_headers[j] == current_header:
+                current_group_end = final_groups[j][1]
+                j += 1
+            
+            deduplicated_headers.append(current_header)
+            deduplicated_positions.append(group_positions[i])
+            deduplicated_groups.append((current_group_start, current_group_end))
+            
+            i = j
+        
+        compressed_headers = deduplicated_headers
+        group_positions = deduplicated_positions
+        final_groups = deduplicated_groups
+        
         # 実際に使用された列位置を保存（_output_right_side_plain_textで使用）
         self._last_group_positions = group_positions
 
@@ -8797,6 +8822,14 @@ class ExcelToMarkdownConverter:
         # _output_markdown_tableでは複数行ヘッダーとして扱わないように_detected_header_heightを1に設定
         self._detected_header_height = 1
         
+        debug_print(f"[DEBUG] table_data構築完了: {len(table_data)}行")
+        if table_data:
+            debug_print(f"[DEBUG] table_data[0] (ヘッダー): {table_data[0]}")
+            if len(table_data) > 1:
+                debug_print(f"[DEBUG] table_data[1] (最初のデータ行): {table_data[1]}")
+            if len(table_data) > 2:
+                debug_print(f"[DEBUG] table_data[2] (2番目のデータ行): {table_data[2]}")
+        
         # 2列最適化チェック（正規化後のヘッダーとgroup_positionsを使用）
         debug_print(f"[DEBUG] 2列最適化チェック開始: headers={compressed_headers}, positions={group_positions}")
         optimized_structure = self._optimize_table_for_two_columns(sheet, region, compressed_headers, group_positions)
@@ -8919,7 +8952,18 @@ class ExcelToMarkdownConverter:
             # ここで失敗しても元のtable_dataを返す
             pass
 
-        table_data = self._consolidate_merged_rows(table_data, merged_info, start_row, start_col, end_col)
+        if len(table_data) > 1:
+            headers = table_data[0]
+            data_rows = table_data[1:]
+            data_start_row = header_row + (header_height if header_height else 1)
+            consolidated_data_rows = self._consolidate_merged_rows(data_rows, merged_info, data_start_row, start_col, end_col)
+            
+            deduplicated_rows = []
+            for row in consolidated_data_rows:
+                if not deduplicated_rows or row != deduplicated_rows[-1]:
+                    deduplicated_rows.append(row)
+            
+            table_data = [headers] + deduplicated_rows
         
         return self._trim_edge_empty_columns(table_data)
 
@@ -9247,12 +9291,18 @@ class ExcelToMarkdownConverter:
                 
                 debug_print(f"[DEBUG] extended_group_count(row={row})={extended_group_count} (original group_count={group_count})")
 
+                first_row_bonus = 0.5 if row == start_row else 0.0
+                adjusted_border_fraction = header_border_fraction + first_row_bonus
+                
+                if first_row_bonus > 0:
+                    debug_print(f"[DEBUG] 最初の行ボーナス適用: row={row}, border_fraction={header_border_fraction:.3f} -> {adjusted_border_fraction:.3f}")
+
                 # build metric tuple for this candidate
                 # 罫線を最優先、次に拡張グループ数を考慮
                 # 同等の場合は上部の行を優先（-rowで小さい行番号が大きい値になる）
                 # heightは小さい方を優先（より保守的なヘッダー検出）
                 metrics = (
-                    header_border_fraction,  # 1st: 罫線が最も重要な判断基準
+                    adjusted_border_fraction,  # 1st: 罫線が最も重要な判断基準（start_rowにボーナス）
                     extended_group_count,    # 2nd: 拡張範囲でのグループ数（範囲外ヘッダー対応）
                     -row,                    # 3rd: より上の行を優先（負の値で小さい行番号が大きくなる）
                     group_count,             # 4th: テーブル範囲内のグループ数
