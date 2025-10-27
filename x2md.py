@@ -5565,6 +5565,54 @@ class ExcelToMarkdownConverter:
         table_regions = kept_table_regions
         debug_print(f"[DEBUG][_convert_sheet_data] kept_table_regions_count={len(table_regions)} kept_sample={table_regions[:5]}")
 
+        # 重複テーブルを除外する処理
+        def regions_overlap(r1, r2, threshold=0.5):
+            """2つのテーブル領域が重複しているかチェック"""
+            row1_start, row1_end, col1_start, col1_end = r1
+            row2_start, row2_end, col2_start, col2_end = r2
+            
+            overlap_row_start = max(row1_start, row2_start)
+            overlap_row_end = min(row1_end, row2_end)
+            overlap_col_start = max(col1_start, col2_start)
+            overlap_col_end = min(col1_end, col2_end)
+            
+            if overlap_row_start > overlap_row_end or overlap_col_start > overlap_col_end:
+                return False
+            
+            overlap_cells = (overlap_row_end - overlap_row_start + 1) * (overlap_col_end - overlap_col_start + 1)
+            
+            r1_cells = (row1_end - row1_start + 1) * (col1_end - col1_start + 1)
+            r2_cells = (row2_end - row2_start + 1) * (col2_end - col2_start + 1)
+            smaller_cells = min(r1_cells, r2_cells)
+            
+            overlap_ratio = overlap_cells / smaller_cells if smaller_cells > 0 else 0
+            
+            return overlap_ratio >= threshold
+        
+        # 重複テーブルを除外（大きいテーブルを優先）
+        deduplicated_regions = []
+        for i, region in enumerate(table_regions):
+            is_duplicate = False
+            for j, other_region in enumerate(table_regions):
+                if i != j and regions_overlap(region, other_region):
+                    r1_cells = (region[1] - region[0] + 1) * (region[3] - region[2] + 1)
+                    r2_cells = (other_region[1] - other_region[0] + 1) * (other_region[3] - other_region[2] + 1)
+                    
+                    if r1_cells < r2_cells:
+                        debug_print(f"[DEBUG] 重複テーブルを除外: {region} (重複先: {other_region})")
+                        is_duplicate = True
+                        break
+                    elif r1_cells == r2_cells and i > j:
+                        debug_print(f"[DEBUG] 重複テーブルを除外: {region} (重複先: {other_region})")
+                        is_duplicate = True
+                        break
+            
+            if not is_duplicate:
+                deduplicated_regions.append(region)
+        
+        table_regions = deduplicated_regions
+        debug_print(f"[DEBUG][_convert_sheet_data] deduplicated_table_regions_count={len(table_regions)} deduplicated_sample={table_regions[:5]}")
+
         processed_rows = set()
         # Emit detected table regions as actual tables (not just reserve rows).
         # We convert each detected table region into markdown here, then mark
@@ -8963,7 +9011,22 @@ class ExcelToMarkdownConverter:
                 if not deduplicated_rows or row != deduplicated_rows[-1]:
                     deduplicated_rows.append(row)
             
-            table_data = [headers] + deduplicated_rows
+            trimmed_rows = []
+            for row in deduplicated_rows:
+                is_empty = all(not cell or str(cell).strip() == '' for cell in row)
+                if not is_empty:
+                    trimmed_rows.append(row)
+                else:
+                    has_content_after = False
+                    current_idx = deduplicated_rows.index(row)
+                    for future_row in deduplicated_rows[current_idx + 1:]:
+                        if any(cell and str(cell).strip() != '' for cell in future_row):
+                            has_content_after = True
+                            break
+                    if has_content_after:
+                        trimmed_rows.append(row)
+            
+            table_data = [headers] + trimmed_rows
         
         return self._trim_edge_empty_columns(table_data)
 
