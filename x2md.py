@@ -142,6 +142,7 @@ class ExcelToMarkdownConverter:
         self._sheet_deferred_tables = {}
         self._sheet_emitted_texts = {}
         self._sheet_emitted_rows = {}
+        self._sheet_emitted_table_titles = {}
         self._emitted_images = set()
         self._embedded_image_cid_by_name = {}
         self._in_canonical_emit = False
@@ -154,7 +155,7 @@ class ExcelToMarkdownConverter:
         for dict_attr in ['_cell_to_md_index', '_sheet_shape_images', '_sheet_shape_next_idx',
                           '_sheet_shape_image_start_rows', '_sheet_deferred_texts',
                           '_sheet_deferred_tables', '_sheet_emitted_texts', '_sheet_emitted_rows',
-                          '_embedded_image_cid_by_name']:
+                          '_sheet_emitted_table_titles', '_embedded_image_cid_by_name']:
             getattr(self, dict_attr, {}).pop(sheet_name, None)
         
         self._sheet_shapes_generated.discard(sheet_name)
@@ -1571,18 +1572,43 @@ class ExcelToMarkdownConverter:
                                 if isinstance(meta, dict):
                                     title = meta.get('title')
                                 if title:
-                                    # Emit title as plain text (not a heading)
-                                    try:
-                                        h = f"{self._escape_angle_brackets(title)}  "
-                                        self.markdown_lines.append(h)
-                                        # record authoritative mapping and emitted text/row
-                                        md_idx = len(self.markdown_lines) - 1
-                                        self._mark_sheet_map(sheet.title, row, md_idx)
-                                        self._mark_emitted_text(sheet.title, self._normalize_text(title))
-                                        self._mark_emitted_row(sheet.title, row)
-                                    except Exception:
-                                        # fallback to previous free-text emission
-                                        self._emit_free_text(sheet, row, title)
+                                    normalized_title = ' '.join(str(title).strip().split())
+                                    
+                                    if sheet.title not in self._sheet_emitted_table_titles:
+                                        self._sheet_emitted_table_titles[sheet.title] = set()
+                                    
+                                    if normalized_title in self._sheet_emitted_table_titles[sheet.title]:
+                                        debug_print(f"[DEBUG] タイトル '{title}' は既に出力済みのため抑制")
+                                        should_emit_title = False
+                                    else:
+                                        should_emit_title = True
+                                        try:
+                                            if table_data and len(table_data) > 0:
+                                                header_row = table_data[0]
+                                                if isinstance(header_row, (list, tuple)):
+                                                    header_text = ' '.join(str(cell).strip() for cell in header_row if cell)
+                                                    normalized_header = ' '.join(header_text.split())
+                                                    
+                                                    if normalized_title and normalized_header:
+                                                        if normalized_title in normalized_header or normalized_header.startswith(normalized_title):
+                                                            should_emit_title = False
+                                                            debug_print(f"[DEBUG] タイトル '{title}' はヘッダー行と重複しているため出力を抑制")
+                                        except Exception as e:
+                                            debug_print(f"[DEBUG] タイトル冗長性チェックエラー（無視）: {e}")
+                                            should_emit_title = True
+                                    
+                                    self._sheet_emitted_table_titles[sheet.title].add(normalized_title)
+                                    
+                                    if should_emit_title:
+                                        try:
+                                            h = f"{self._escape_angle_brackets(title)}  "
+                                            self.markdown_lines.append(h)
+                                            md_idx = len(self.markdown_lines) - 1
+                                            self._mark_sheet_map(sheet.title, row, md_idx)
+                                            self._mark_emitted_text(sheet.title, self._normalize_text(title))
+                                            self._mark_emitted_row(sheet.title, row)
+                                        except Exception:
+                                            self._emit_free_text(sheet, row, title)
                             except Exception as e:
                                 pass  # XML解析エラーは無視
 
