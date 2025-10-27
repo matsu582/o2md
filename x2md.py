@@ -5562,7 +5562,33 @@ class ExcelToMarkdownConverter:
             else:
                 kept_table_regions.append(tr)
 
-        table_regions = kept_table_regions
+        filtered_table_regions = []
+        for i, region_a in enumerate(kept_table_regions):
+            r1_a, r2_a, c1_a, c2_a = region_a
+            width_a = c2_a - c1_a + 1
+            height_a = r2_a - r1_a + 1
+            
+            is_nested = False
+            for j, region_b in enumerate(kept_table_regions):
+                if i == j:
+                    continue
+                r1_b, r2_b, c1_b, c2_b = region_b
+                width_b = c2_b - c1_b + 1
+                height_b = r2_b - r1_b + 1
+                
+                if (r1_b <= r1_a and r2_a <= r2_b and 
+                    c1_b <= c1_a and c2_a <= c2_b):
+                    if width_a == 1 and width_b >= 2:
+                        overlap_ratio = height_a / height_b if height_b > 0 else 0
+                        if overlap_ratio > 0.8:
+                            debug_print(f"[DEBUG] ネストされた1列テーブルを除外: {region_a} (含まれる先: {region_b}, 幅: {width_a} vs {width_b}, 重複率: {overlap_ratio:.2f})")
+                            is_nested = True
+                            break
+            
+            if not is_nested:
+                filtered_table_regions.append(region_a)
+
+        table_regions = filtered_table_regions
         debug_print(f"[DEBUG][_convert_sheet_data] kept_table_regions_count={len(table_regions)} kept_sample={table_regions[:5]}")
 
         processed_rows = set()
@@ -8665,6 +8691,31 @@ class ExcelToMarkdownConverter:
         # 正規化されたヘッダーを使用
         compressed_headers = [normalized_headers[a] for (a, b) in final_groups]
         group_positions = [header_positions[a] for (a, b) in final_groups]
+        
+        deduplicated_headers = []
+        deduplicated_positions = []
+        deduplicated_groups = []
+        
+        i = 0
+        while i < len(compressed_headers):
+            current_header = compressed_headers[i]
+            current_group_start = final_groups[i][0]
+            current_group_end = final_groups[i][1]
+            
+            j = i + 1
+            while j < len(compressed_headers) and compressed_headers[j] == current_header:
+                current_group_end = final_groups[j][1]
+                j += 1
+            
+            deduplicated_headers.append(current_header)
+            deduplicated_positions.append(group_positions[i])
+            deduplicated_groups.append((current_group_start, current_group_end))
+            
+            i = j
+        
+        compressed_headers = deduplicated_headers
+        group_positions = deduplicated_positions
+        final_groups = deduplicated_groups
         
         # 実際に使用された列位置を保存（_output_right_side_plain_textで使用）
         self._last_group_positions = group_positions
