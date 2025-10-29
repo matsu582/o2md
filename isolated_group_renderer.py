@@ -29,7 +29,7 @@ from typing import List, Dict, Tuple, Optional, Set
 from collections import deque
 import copy
 import hashlib
-from utils import get_libreoffice_path
+from utils import get_libreoffice_path, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id
 
 
 class IsolatedGroupRenderer:
@@ -1424,11 +1424,11 @@ class IsolatedGroupRenderer:
             
             if original_cell_range:
                 orig_s_col, orig_e_col, orig_s_row, orig_e_row = original_cell_range
-                start_col_letter = self._col_letter(orig_s_col)
-                end_col_letter = self._col_letter(orig_e_col)
+                start_col_letter = col_letter(orig_s_col)
+                end_col_letter = col_letter(orig_e_col)
             else:
-                start_col_letter = self._col_letter(s_col)
-                end_col_letter = self._col_letter(e_col)
+                start_col_letter = col_letter(s_col)
+                end_col_letter = col_letter(e_col)
             
             # Print_Area文字列を作成
             sheet_name_escaped = sheet.title.replace("'", "''")
@@ -1614,7 +1614,7 @@ class IsolatedGroupRenderer:
                                         continue
                                 
                                 new_col_idx = col_idx - shape_offset_col
-                                new_col_letters = self._col_letter(new_col_idx)
+                                new_col_letters = col_letter(new_col_idx)
                                 
                                 new_cell = ET.Element(f'{{{ns}}}c', dict(cell_el.attrib))
                                 new_cell.attrib['r'] = f"{new_col_letters}{new_r_index}"
@@ -1637,8 +1637,8 @@ class IsolatedGroupRenderer:
                         if dim is None:
                             dim = ET.Element(dim_tag)
                             sroot4.insert(0, dim)
-                        start_addr = f"{self._col_letter(1)}1"
-                        end_addr = f"{self._col_letter(orig_e_col - orig_s_col + 1)}{max(1, max_new_r_index)}"
+                        start_addr = f"{col_letter(1)}1"
+                        end_addr = f"{col_letter(orig_e_col - orig_s_col + 1)}{max(1, max_new_r_index)}"
                         dim.set('ref', f"{start_addr}:{end_addr}")
                     
                     cols_tag = f'{{{ns}}}cols'
@@ -2642,12 +2642,3 @@ class IsolatedGroupRenderer:
                 shutil.rmtree(tmpdir)
             except Exception:
                 pass
-    
-    def _col_letter(self, col_num):
-        """列番号をExcelの列文字に変換（1→'A', 27→'AA'）"""
-        result = []
-        while col_num > 0:
-            col_num -= 1
-            result.append(chr(col_num % 26 + ord('A')))
-            col_num //= 26
-        return ''.join(reversed(result))

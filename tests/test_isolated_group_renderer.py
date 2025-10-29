@@ -19,6 +19,7 @@ from unittest.mock import Mock, MagicMock, patch
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from isolated_group_renderer import IsolatedGroupRenderer
+from utils import col_letter
 
 
 class TestIsolatedGroupRendererInit:
@@ -65,31 +66,22 @@ class TestIsolatedGroupRendererInit:
 class TestUtilityMethods:
     """ユーティリティメソッドのテスト"""
     
-    def test_col_letter_method_exists(self):
-        """_col_letterメソッドが存在することを確認"""
-        mock_converter = Mock()
-        renderer = IsolatedGroupRenderer(mock_converter)
-        
-        assert hasattr(renderer, '_col_letter')
-        assert callable(renderer._col_letter)
+    def test_col_letter_function_available(self):
+        """col_letter関数がutils.pyから利用可能であることを確認"""
+        assert col_letter is not None
+        assert callable(col_letter)
     
     def test_col_letter_single_char(self):
-        """_col_letterが1文字の列を正しく変換"""
-        mock_converter = Mock()
-        renderer = IsolatedGroupRenderer(mock_converter)
-        
-        assert renderer._col_letter(1) == 'A'
-        assert renderer._col_letter(2) == 'B'
-        assert renderer._col_letter(26) == 'Z'
+        """col_letterが1文字の列を正しく変換"""
+        assert col_letter(1) == 'A'
+        assert col_letter(2) == 'B'
+        assert col_letter(26) == 'Z'
     
     def test_col_letter_double_char(self):
-        """_col_letterが2文字の列を正しく変換"""
-        mock_converter = Mock()
-        renderer = IsolatedGroupRenderer(mock_converter)
-        
-        assert renderer._col_letter(27) == 'AA'
-        assert renderer._col_letter(28) == 'AB'
-        assert renderer._col_letter(52) == 'AZ'
+        """col_letterが2文字の列を正しく変換"""
+        assert col_letter(27) == 'AA'
+        assert col_letter(28) == 'AB'
+        assert col_letter(52) == 'AZ'
 
 
 class TestRenderMethod:

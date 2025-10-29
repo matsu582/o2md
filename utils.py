@@ -8,6 +8,10 @@ import os
 import platform
 import subprocess
 import shutil
+import zipfile
+import xml.etree.ElementTree as ET
+from typing import Optional, Tuple, List, Set, Dict, Any
+import logging
 
 
 def get_libreoffice_path():
@@ -55,3 +59,254 @@ def col_letter(n: int) -> str:
         n, rem = divmod(n-1, 26)
         letters = chr(65 + rem) + letters
     return letters
+
+
+# ============================================================================
+# ============================================================================
+
+def normalize_excel_path(path: str) -> str:
+    """Excelファイル内のパスを正規化する
+    
+    Args:
+        path: 正規化するパス（例: '../drawings/drawing1.xml'）
+    
+    Returns:
+        正規化されたパス（例: 'xl/drawings/drawing1.xml'）
+    """
+    if path.startswith('..'):
+        path = path.replace('../', 'xl/')
+    if path.startswith('/'):
+        path = path.lstrip('/')
+    return path
+
+
+def get_xml_from_zip(z: zipfile.ZipFile, path: str) -> Optional[ET.Element]:
+    """ZIPファイルからXMLを取得してパースする
+    
+    Args:
+        z: ZipFileオブジェクト
+        path: XMLファイルのパス
+    
+    Returns:
+        パースされたXMLのルート要素、失敗時はNone
+    """
+    try:
+        if path not in z.namelist():
+            return None
+        xml_bytes = z.read(path)
+        return ET.fromstring(xml_bytes)
+    except Exception as e:
+        logging.debug(f"Failed to get XML from zip: {path}, error: {e}")
+        return None
+
+
+def xml_exists_in_zip(z: zipfile.ZipFile, path: str) -> bool:
+    """ZIP内にXMLファイルが存在するか確認
+    
+    Args:
+        z: ZipFileオブジェクト
+        path: 確認するファイルパス
+    
+    Returns:
+        存在する場合True
+    """
+    return path in z.namelist()
+
+
+# ============================================================================
+# ============================================================================
+
+def extract_anchor_id(anchor: ET.Element) -> Optional[str]:
+    """アンカー要素からcNvPr IDを抽出する
+    
+    Args:
+        anchor: アンカー要素（twoCellAnchor, oneCellAnchor等）
+    
+    Returns:
+        cNvPr ID文字列、見つからない場合はNone
+    """
+    try:
+        for sub in anchor.iter():
+            if sub.tag.split('}')[-1].lower() == 'cnvpr':
+                cid = sub.attrib.get('id')
+                if cid is not None:
+                    return str(cid)
+        return None
+    except Exception:
+        return None
+
+
+def anchor_has_drawable(anchor: ET.Element) -> bool:
+    """アンカーが描画可能な要素を持つか判定
+    
+    Args:
+        anchor: アンカー要素
+    
+    Returns:
+        描画可能な要素を持つ場合True
+    """
+    try:
+        for child in anchor:
+            tag_local = child.tag.split('}')[-1].lower()
+            if tag_local in ('pic', 'sp', 'grpsp', 'graphicframe', 'cxnsp'):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def extract_shape_metadata(anchor: ET.Element) -> Dict[str, Any]:
+    """アンカーから図形メタデータを抽出
+    
+    Args:
+        anchor: アンカー要素
+    
+    Returns:
+        メタデータ辞書（id, name, type等）
+    """
+    metadata = {
+        'id': None,
+        'name': None,
+        'type': None,
+        'description': None
+    }
+    
+    try:
+        for sub in anchor.iter():
+            tag_local = sub.tag.split('}')[-1].lower()
+            if tag_local == 'cnvpr':
+                metadata['id'] = sub.attrib.get('id')
+                metadata['name'] = sub.attrib.get('name')
+                metadata['description'] = sub.attrib.get('descr')
+        
+        for child in anchor:
+            tag_local = child.tag.split('}')[-1].lower()
+            if tag_local in ('pic', 'sp', 'grpsp', 'graphicframe', 'cxnsp'):
+                metadata['type'] = tag_local
+                break
+    except Exception:
+        pass
+    
+    return metadata
+
+
+def collect_anchors(drawing_xml: ET.Element, anchor_filter_func=None) -> List[ET.Element]:
+    """drawing XMLから描画可能なアンカーリストを取得
+    
+    Args:
+        drawing_xml: drawing XMLのルート要素
+        anchor_filter_func: アンカーをフィルタする関数（オプション）
+    
+    Returns:
+        アンカー要素のリスト
+    """
+    anchors = []
+    try:
+        for node in drawing_xml:
+            lname = node.tag.split('}')[-1].lower()
+            if lname in ('twocellanchor', 'onecellanchor'):
+                if anchor_filter_func is None or anchor_filter_func(node):
+                    anchors.append(node)
+    except Exception:
+        pass
+    return anchors
+
+
+# ============================================================================
+# ============================================================================
+
+def safe_call(func, *args, **kwargs):
+    """関数を安全に呼び出し、例外時はNoneを返す
+    
+    Args:
+        func: 呼び出す関数
+        *args: 位置引数
+        **kwargs: キーワード引数
+    
+    Returns:
+        関数の戻り値、例外時はNone
+    """
+    try:
+        return func(*args, **kwargs)
+    except Exception as e:
+        logging.debug(f"safe_call failed: {func.__name__}, error: {e}")
+        return None
+
+
+def compute_sheet_cell_pixel_map(sheet, dpi: int = 300) -> Tuple[List[float], List[float]]:
+    """Excelシートのセル→ピクセル座標変換マップを計算
+    
+    Args:
+        sheet: openpyxlのWorksheetオブジェクト
+        dpi: DPI設定
+    
+    Returns:
+        (列座標リスト, 行座標リスト)のタプル
+    """
+    try:
+        col_pixels = [0.0]
+        for col_idx in range(1, sheet.max_column + 1):
+            col_letter_str = col_letter(col_idx)
+            col_dim = sheet.column_dimensions.get(col_letter_str)
+            if col_dim and col_dim.width:
+                width_chars = col_dim.width
+            else:
+                width_chars = 8.43  # デフォルト幅
+            width_px = width_chars * 7.0 * (dpi / 96.0)
+            col_pixels.append(col_pixels[-1] + width_px)
+        
+        row_pixels = [0.0]
+        for row_idx in range(1, sheet.max_row + 1):
+            row_dim = sheet.row_dimensions.get(row_idx)
+            if row_dim and row_dim.height:
+                height_pt = row_dim.height
+            else:
+                height_pt = 15.0  # デフォルト高さ
+            height_px = height_pt * (dpi / 72.0)
+            row_pixels.append(row_pixels[-1] + height_px)
+        
+        return col_pixels, row_pixels
+    except Exception as e:
+        logging.debug(f"compute_sheet_cell_pixel_map failed: {e}")
+        return [0.0], [0.0]
+
+
+# ============================================================================
+# ============================================================================
+
+def filter_processed_rows(merged_texts: List[Tuple], processed_rows: Set[int]) -> List[Tuple]:
+    """処理済み行を除外したテキストリストを返す
+    
+    Args:
+        merged_texts: (行番号, テキスト)のタプルリスト
+        processed_rows: 処理済み行番号のセット
+    
+    Returns:
+        フィルタ後のリスト
+    """
+    return [(row, text) for row, text in merged_texts if row not in processed_rows]
+
+
+def deduplicate_table_regions(table_regions: List[Tuple]) -> List[Tuple]:
+    """重複するテーブル領域を除外
+    
+    Args:
+        table_regions: テーブル領域のリスト
+    
+    Returns:
+        重複除外後のリスト
+    """
+    if not table_regions:
+        return []
+    
+    unique_regions = []
+    for region in table_regions:
+        is_duplicate = False
+        for existing in unique_regions:
+            if region == existing:
+                is_duplicate = True
+                break
+        if not is_duplicate:
+            unique_regions.append(region)
+    
+    return unique_regions

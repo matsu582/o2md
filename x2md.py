@@ -23,7 +23,7 @@ import io
 import zipfile
 import xml.etree.ElementTree as ET
 
-from utils import get_libreoffice_path
+from utils import get_libreoffice_path, col_letter, normalize_excel_path, get_xml_from_zip, xml_exists_in_zip, extract_anchor_id, anchor_has_drawable as utils_anchor_has_drawable
 from isolated_group_renderer import IsolatedGroupRenderer
 
 try:
@@ -165,14 +165,6 @@ class ExcelToMarkdownConverter:
     def _is_canonical_emit(self) -> bool:
         """Check if currently in canonical emission mode."""
         return getattr(self, '_in_canonical_emit', False)
-
-    def _col_letter(self, n: int) -> str:
-        """Convert column number to Excel column letter (1 -> A, 27 -> AA, etc.)."""
-        letters = ''
-        while n > 0:
-            n, rem = divmod(n-1, 26)
-            letters = chr(65 + rem) + letters
-        return letters
 
     def _safe_get_cell_value(self, sheet, row: int, col: int) -> Any:
         """Safely get cell value, return None if error."""
@@ -4272,9 +4264,9 @@ class ExcelToMarkdownConverter:
             
             pos = meta.get('position', {})
             if 'from_col' in pos and 'from_row' in pos:
-                from_cell = f"{self._col_letter(pos['from_col'])}{pos['from_row']}"
+                from_cell = f"{col_letter(pos['from_col'])}{pos['from_row']}"
                 if 'to_col' in pos and 'to_row' in pos:
-                    to_cell = f"{self._col_letter(pos['to_col'])}{pos['to_row']}"
+                    to_cell = f"{col_letter(pos['to_col'])}{pos['to_row']}"
                     lines.append(f"- 位置: {from_cell} ～ {to_cell}")
                 else:
                     lines.append(f"- 位置: {from_cell} から")
@@ -5214,8 +5206,8 @@ class ExcelToMarkdownConverter:
                                 dim = ET.Element(dim_tag)
                                 sroot.insert(0, dim)
                             # Use original row/col numbers
-                            start_addr = f"{self._col_letter(s_col)}{s_row}"
-                            end_addr = f"{self._col_letter(e_col)}{e_row}"
+                            start_addr = f"{col_letter(s_col)}{s_row}"
+                            end_addr = f"{col_letter(e_col)}{e_row}"
                             dim.set('ref', f"{start_addr}:{end_addr}")
                         
                         # Rebuild cols element with ORIGINAL column numbers
