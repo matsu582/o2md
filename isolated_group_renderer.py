@@ -218,11 +218,7 @@ class IsolatedGroupRenderer:
                 debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawing relationship found in rels")
                 return None, None, None, None, None
             
-            drawing_path = drawing_target
-            if drawing_path.startswith('..'):
-                drawing_path = drawing_path.replace('../', 'xl/')
-            if drawing_path.startswith('/'):
-                drawing_path = drawing_path.lstrip('/')
+            drawing_path = normalize_excel_path(drawing_target)
             
             debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path={drawing_path}")
             

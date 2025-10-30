@@ -788,11 +788,7 @@ class ExcelToMarkdownConverter:
                             drawing_target_tmp = rel.attrib.get('Target')
                             break
                     if drawing_target_tmp:
-                        drawing_path_tmp = drawing_target_tmp
-                        if drawing_path_tmp.startswith('..'):
-                            drawing_path_tmp = drawing_path_tmp.replace('../', 'xl/')
-                        if drawing_path_tmp.startswith('/'):
-                            drawing_path_tmp = drawing_path_tmp.lstrip('/')
+                        drawing_path_tmp = normalize_excel_path(drawing_target_tmp)
                         if drawing_path_tmp not in ztmp.namelist():
                             drawing_path_tmp = drawing_path_tmp.replace('worksheets', 'drawings')
                         if drawing_path_tmp in ztmp.namelist():
@@ -1925,11 +1921,7 @@ class ExcelToMarkdownConverter:
                                     drawing_target = rel.attrib.get('Target')
                                     break
                             if drawing_target:
-                                drawing_path = drawing_target
-                                if drawing_path.startswith('..'):
-                                    drawing_path = drawing_path.replace('../', 'xl/')
-                                if drawing_path.startswith('/'):
-                                    drawing_path = drawing_path.lstrip('/')
+                                drawing_path = normalize_excel_path(drawing_target)
                                 if drawing_path not in z.namelist():
                                     drawing_path = drawing_path.replace('worksheets', 'drawings')
                                 if drawing_path in z.namelist():
@@ -1969,11 +1961,7 @@ class ExcelToMarkdownConverter:
                                                 rid = rel.attrib.get('Id') or rel.attrib.get('Id')
                                                 tgt = rel.attrib.get('Target')
                                                 if rid and tgt:
-                                                    tgtp = tgt
-                                                    if tgtp.startswith('..'):
-                                                        tgtp = tgtp.replace('../', 'xl/')
-                                                    if tgtp.startswith('/'):
-                                                        tgtp = tgtp.lstrip('/')
+                                                    tgtp = normalize_excel_path(tgt)
                                                     rid_to_target[rid] = tgtp
 
                                             for node_c in list(drawing_xml):
@@ -2133,11 +2121,7 @@ class ExcelToMarkdownConverter:
                                 drawing_target = rel.attrib.get('Target')
                                 break
                         if drawing_target:
-                            drawing_path = drawing_target
-                            if drawing_path.startswith('..'):
-                                drawing_path = drawing_path.replace('../', 'xl/')
-                            if drawing_path.startswith('/'):
-                                drawing_path = drawing_path.lstrip('/')
+                            drawing_path = normalize_excel_path(drawing_target)
                             if drawing_path not in z.namelist():
                                 drawing_path = drawing_path.replace('worksheets', 'drawings')
                             if drawing_path in z.namelist():
@@ -2154,11 +2138,7 @@ class ExcelToMarkdownConverter:
                                             rid = rel2.attrib.get('Id') or rel2.attrib.get('Id')
                                             tgt = rel2.attrib.get('Target')
                                             if rid and tgt:
-                                                tgtp = tgt
-                                                if tgtp.startswith('..'):
-                                                    tgtp = tgtp.replace('../', 'xl/')
-                                                if tgtp.startswith('/'):
-                                                    tgtp = tgtp.lstrip('/')
+                                                tgtp = normalize_excel_path(tgt)
                                                 rid_to_target[rid] = tgtp
                                         # iterate anchors and map both media basename and media SHA8 -> cNvPr
                                         import hashlib as _hashlib
@@ -2177,11 +2157,7 @@ class ExcelToMarkdownConverter:
                                                     if rid and rid in rid_to_target:
                                                         target = rid_to_target[rid]
                                                         # normalize path
-                                                        tgtp = target
-                                                        if tgtp.startswith('..'):
-                                                            tgtp = tgtp.replace('../', 'xl/')
-                                                        if tgtp.startswith('/'):
-                                                            tgtp = tgtp.lstrip('/')
+                                                        tgtp = normalize_excel_path(target)
                                                         # extract basename
                                                         fname = os.path.basename(tgtp)
                                                         try:
@@ -2928,11 +2904,7 @@ class ExcelToMarkdownConverter:
                 return None
             
             # drawing_pathの正規化
-            drawing_path = drawing_target
-            if drawing_path.startswith('..'):
-                drawing_path = drawing_path.replace('../', 'xl/')
-            if drawing_path.startswith('/'):
-                drawing_path = drawing_path.lstrip('/')
+            drawing_path = normalize_excel_path(drawing_target)
             if drawing_path not in z.namelist():
                 drawing_path = drawing_path.replace('worksheets', 'drawings')
                 if drawing_path not in z.namelist():
@@ -4015,11 +3987,7 @@ class ExcelToMarkdownConverter:
                     break
             if not drawing_target:
                 return False
-            drawing_path = drawing_target
-            if drawing_path.startswith('..'):
-                drawing_path = drawing_path.replace('../', 'xl/')
-            if drawing_path.startswith('/'):
-                drawing_path = drawing_path.lstrip('/')
+            drawing_path = normalize_excel_path(drawing_target)
             if drawing_path not in z.namelist():
                 drawing_path = drawing_path.replace('worksheets', 'drawings')
                 if drawing_path not in z.namelist():
@@ -4068,11 +4036,7 @@ class ExcelToMarkdownConverter:
                     break
             if not drawing_target:
                 return False
-            drawing_path = drawing_target
-            if drawing_path.startswith('..'):
-                drawing_path = drawing_path.replace('../', 'xl/')
-            if drawing_path.startswith('/'):
-                drawing_path = drawing_path.lstrip('/')
+            drawing_path = normalize_excel_path(drawing_target)
             if drawing_path not in z.namelist():
                 drawing_path = drawing_path.replace('worksheets', 'drawings')
                 if drawing_path not in z.namelist():
@@ -4818,10 +4782,7 @@ class ExcelToMarkdownConverter:
                     return None
                 
                 # Normalize drawing path
-                drawing_path = drawing_target
-                if drawing_path.startswith('..'):
-                    drawing_path = drawing_path.replace('../', 'xl/')
-                drawing_path = drawing_path.lstrip('/')
+                drawing_path = normalize_excel_path(drawing_target)
                 
                 if drawing_path not in z.namelist():
                     drawing_path = drawing_path.replace('worksheets', 'drawings')
