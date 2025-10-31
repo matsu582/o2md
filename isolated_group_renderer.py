@@ -203,11 +203,10 @@ class IsolatedGroupRenderer:
             sheet_index = self.converter.workbook.sheetnames.index(sheet.title)
             rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
             
-            if rels_path not in z.namelist():
+            rels_xml = get_xml_from_zip(z, rels_path)
+            if rels_xml is None:
                 debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} missing rels: {rels_path}")
                 return None, None, None, None, None
-            
-            rels_xml = ET.fromstring(z.read(rels_path))
             drawing_target = None
             for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
                 if rel.attrib.get('Type','').endswith('/drawing'):

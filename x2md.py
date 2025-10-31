@@ -1912,8 +1912,8 @@ class ExcelToMarkdownConverter:
                         z = zipfile.ZipFile(self.excel_file)
                         sheet_index = self.workbook.sheetnames.index(sheet.title)
                         rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
-                        if rels_path in z.namelist():
-                            rels_xml = ET.fromstring(z.read(rels_path))
+                        rels_xml = get_xml_from_zip(z, rels_path)
+                        if rels_xml is not None:
                             drawing_target = None
                             for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
                                 t = rel.attrib.get('Type','')
@@ -1924,8 +1924,8 @@ class ExcelToMarkdownConverter:
                                 drawing_path = normalize_excel_path(drawing_target)
                                 if drawing_path not in z.namelist():
                                     drawing_path = drawing_path.replace('worksheets', 'drawings')
-                                if drawing_path in z.namelist():
-                                    drawing_xml = ET.fromstring(z.read(drawing_path))
+                                drawing_xml = get_xml_from_zip(z, drawing_path)
+                                if drawing_xml is not None:
                                     # 簡素化されバランスの取れた解析: アンカーIDを収集
                                     # and count pic/sp anchors. Also attempt to map any
                                     # embedded image filenames to their cNvPr ids. Keep
@@ -1954,8 +1954,8 @@ class ExcelToMarkdownConverter:
                                         # attempt to read drawing relationships and map embedded images
                                         self._embedded_image_cid_by_name.setdefault(sheet.title, {})
                                         drawing_rels_path = os.path.dirname(drawing_path) + '/_rels/' + os.path.basename(drawing_path) + '.rels'
-                                        if drawing_rels_path in z.namelist():
-                                            rels_xml = ET.fromstring(z.read(drawing_rels_path))
+                                        rels_xml = get_xml_from_zip(z, drawing_rels_path)
+                                        if rels_xml is not None:
                                             rid_to_target = {}
                                             for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
                                                 rid = rel.attrib.get('Id') or rel.attrib.get('Id')
@@ -2112,8 +2112,8 @@ class ExcelToMarkdownConverter:
                     z = zipfile.ZipFile(self.excel_file)
                     sheet_index = self.workbook.sheetnames.index(sheet.title)
                     rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
-                    if rels_path in z.namelist():
-                        rels_xml = ET.fromstring(z.read(rels_path))
+                    rels_xml = get_xml_from_zip(z, rels_path)
+                    if rels_xml is not None:
                         drawing_target = None
                         for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
                             t = rel.attrib.get('Type','')
@@ -2124,15 +2124,15 @@ class ExcelToMarkdownConverter:
                             drawing_path = normalize_excel_path(drawing_target)
                             if drawing_path not in z.namelist():
                                 drawing_path = drawing_path.replace('worksheets', 'drawings')
-                            if drawing_path in z.namelist():
-                                drawing_xml = ET.fromstring(z.read(drawing_path))
+                            drawing_xml = get_xml_from_zip(z, drawing_path)
+                            if drawing_xml is not None:
                                 # ensure map exists
                                 self._embedded_image_cid_by_name.setdefault(sheet.title, {})
                                 # attempt to read drawing rels if present and map rId -> target
                                 drawing_rels_path = os.path.dirname(drawing_path) + '/_rels/' + os.path.basename(drawing_path) + '.rels'
-                                if drawing_rels_path in z.namelist():
-                                    try:
-                                        rels_xml2 = ET.fromstring(z.read(drawing_rels_path))
+                                try:
+                                    rels_xml2 = get_xml_from_zip(z, drawing_rels_path)
+                                    if rels_xml2 is not None:
                                         rid_to_target = {}
                                         for rel2 in rels_xml2.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
                                             rid = rel2.attrib.get('Id') or rel2.attrib.get('Id')
@@ -2192,8 +2192,8 @@ class ExcelToMarkdownConverter:
                                                                     self._embedded_image_cid_by_name[sheet.title][sha8] = None
                                                             except Exception as e:
                                                                 print(f"[WARNING] ファイル操作エラー: {e}")
-                                    except Exception as e:
-                                        print(f"[WARNING] ファイル操作エラー: {e}")
+                                except Exception as e:
+                                    print(f"[WARNING] ファイル操作エラー: {e}")
                 except Exception as e:
                     print(f"[WARNING] ファイル操作エラー: {e}")
                 md_lines = []
@@ -2888,11 +2888,10 @@ class ExcelToMarkdownConverter:
             sheet_index = self.workbook.sheetnames.index(sheet.title)
             rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
             
-            if rels_path not in z.namelist():
+            rels_xml = get_xml_from_zip(z, rels_path)
+            if rels_xml is None:
                 z.close()
                 return None
-            
-            rels_xml = ET.fromstring(z.read(rels_path))
             drawing_target = None
             for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
                 if rel.attrib.get('Type', '').endswith('/drawing'):
@@ -3976,9 +3975,9 @@ class ExcelToMarkdownConverter:
             z = zipfile.ZipFile(self.excel_file)
             sheet_index = self.workbook.sheetnames.index(sheet.title)
             rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
-            if rels_path not in z.namelist():
+            rels_xml = get_xml_from_zip(z, rels_path)
+            if rels_xml is None:
                 return False
-            rels_xml = ET.fromstring(z.read(rels_path))
             drawing_target = None
             for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
                 t = rel.attrib.get('Type','')
@@ -3992,7 +3991,9 @@ class ExcelToMarkdownConverter:
                 drawing_path = drawing_path.replace('worksheets', 'drawings')
                 if drawing_path not in z.namelist():
                     return False
-            drawing_xml = ET.fromstring(z.read(drawing_path))
+            drawing_xml = get_xml_from_zip(z, drawing_path)
+            if drawing_xml is None:
+                return False
             # locate the requested anchor node
             idx = 0
             for node in drawing_xml:
@@ -4025,9 +4026,9 @@ class ExcelToMarkdownConverter:
             z = zipfile.ZipFile(self.excel_file)
             sheet_index = self.workbook.sheetnames.index(sheet.title)
             rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
-            if rels_path not in z.namelist():
+            rels_xml = get_xml_from_zip(z, rels_path)
+            if rels_xml is None:
                 return False
-            rels_xml = ET.fromstring(z.read(rels_path))
             drawing_target = None
             for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
                 t = rel.attrib.get('Type','')
@@ -4041,7 +4042,9 @@ class ExcelToMarkdownConverter:
                 drawing_path = drawing_path.replace('worksheets', 'drawings')
                 if drawing_path not in z.namelist():
                     return False
-            drawing_xml = ET.fromstring(z.read(drawing_path))
+            drawing_xml = get_xml_from_zip(z, drawing_path)
+            if drawing_xml is None:
+                return False
             # look for drawable descendants
             for node in drawing_xml.iter():
                 lname = node.tag.split('}')[-1].lower()
@@ -4765,12 +4768,11 @@ class ExcelToMarkdownConverter:
                 sheet_index = self.workbook.sheetnames.index(sheet.title)
                 rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
                 
-                if rels_path not in z.namelist():
+                # Find drawing relationship
+                rels_xml = get_xml_from_zip(z, rels_path)
+                if rels_xml is None:
                     debug_print(f"[DEBUG][_iso_v2] sheet={sheet.title} missing rels")
                     return None
-                
-                # Find drawing relationship
-                rels_xml = ET.fromstring(z.read(rels_path))
                 drawing_target = None
                 for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
                     if rel.attrib.get('Type', '').endswith('/drawing'):
@@ -5093,8 +5095,8 @@ class ExcelToMarkdownConverter:
                         # Read original sheet.xml from source Excel file to get cell values
                         with zipfile.ZipFile(self.excel_file, 'r') as src_z:
                             src_sheet_path = f"xl/worksheets/sheet{sheet_index+1}.xml"
-                            if src_sheet_path in src_z.namelist():
-                                src_sheet_xml = ET.fromstring(src_z.read(src_sheet_path))
+                            src_sheet_xml = get_xml_from_zip(src_z, src_sheet_path)
+                            if src_sheet_xml is not None:
                                 src_sheet_data = src_sheet_xml.find(f'{{{ns}}}sheetData')
                             else:
                                 src_sheet_data = None
