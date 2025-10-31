@@ -116,11 +116,12 @@ def xml_exists_in_zip(z: zipfile.ZipFile, path: str) -> bool:
 # ============================================================================
 # ============================================================================
 
-def extract_anchor_id(anchor: ET.Element) -> Optional[str]:
+def extract_anchor_id(anchor: ET.Element, allow_idx: bool = False) -> Optional[str]:
     """アンカー要素からcNvPr IDを抽出する
     
     Args:
         anchor: アンカー要素（twoCellAnchor, oneCellAnchor等）
+        allow_idx: Trueの場合、idが見つからない時にidx属性も確認する
     
     Returns:
         cNvPr ID文字列、見つからない場合はNone
@@ -131,9 +132,34 @@ def extract_anchor_id(anchor: ET.Element) -> Optional[str]:
                 cid = sub.attrib.get('id')
                 if cid is not None:
                     return str(cid)
+                if allow_idx:
+                    cid = sub.attrib.get('idx')
+                    if cid is not None:
+                        return str(cid)
         return None
     except Exception:
         return None
+
+
+def anchor_is_hidden(anchor: ET.Element) -> bool:
+    """アンカーが非表示かどうかを判定する
+    
+    Args:
+        anchor: アンカー要素
+    
+    Returns:
+        非表示の場合True
+    """
+    try:
+        for sub in anchor.iter():
+            if sub.tag.split('}')[-1].lower() == 'cnvpr':
+                hidden = sub.attrib.get('hidden')
+                if hidden in ('1', 'true'):
+                    return True
+                break
+        return False
+    except Exception:
+        return False
 
 
 def anchor_has_drawable(anchor: ET.Element) -> bool:

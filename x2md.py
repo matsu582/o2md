@@ -23,7 +23,7 @@ import io
 import zipfile
 import xml.etree.ElementTree as ET
 
-from utils import get_libreoffice_path, col_letter, normalize_excel_path, get_xml_from_zip, xml_exists_in_zip, extract_anchor_id, anchor_has_drawable as utils_anchor_has_drawable
+from utils import get_libreoffice_path, col_letter, normalize_excel_path, get_xml_from_zip, xml_exists_in_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
 from isolated_group_renderer import IsolatedGroupRenderer
 
 try:
@@ -796,11 +796,7 @@ class ExcelToMarkdownConverter:
                             for node_tmp in drawing_xml_tmp:
                                 lname_tmp = node_tmp.tag.split('}')[-1].lower()
                                 if lname_tmp in ('twocellanchor', 'onecellanchor'):
-                                    cid_tmp = None
-                                    for sub_tmp in node_tmp.iter():
-                                        if sub_tmp.tag.split('}')[-1].lower() == 'cnvpr':
-                                            cid_tmp = sub_tmp.attrib.get('id') or sub_tmp.attrib.get('idx')
-                                            break
+                                    cid_tmp = extract_anchor_id(node_tmp, allow_idx=True)
                                     anchors_cid_list.append(str(cid_tmp) if cid_tmp is not None else None)
             except (ET.ParseError, KeyError, AttributeError):
                 anchors_cid_list = []
@@ -1968,11 +1964,7 @@ class ExcelToMarkdownConverter:
                                                 lname_c = node_c.tag.split('}')[-1].lower()
                                                 if lname_c not in ('twocellanchor', 'onecellanchor'):
                                                     continue
-                                                cid_val = None
-                                                for sub_c in node_c.iter():
-                                                    if sub_c.tag.split('}')[-1].lower() == 'cnvpr':
-                                                        cid_val = sub_c.attrib.get('id') or sub_c.attrib.get('idx')
-                                                        break
+                                                cid_val = extract_anchor_id(node_c, allow_idx=True)
                                                 for sub in node_c.iter():
                                                     if sub.tag.split('}')[-1].lower() == 'blip':
                                                         rid = sub.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed') or sub.attrib.get('embed')
@@ -2146,11 +2138,7 @@ class ExcelToMarkdownConverter:
                                             lname_c = node_c.tag.split('}')[-1].lower()
                                             if lname_c not in ('twocellanchor', 'onecellanchor'):
                                                 continue
-                                            cid_val = None
-                                            for sub_c in node_c.iter():
-                                                if sub_c.tag.split('}')[-1].lower() == 'cnvpr':
-                                                    cid_val = sub_c.attrib.get('id') or sub_c.attrib.get('idx')
-                                                    break
+                                            cid_val = extract_anchor_id(node_c, allow_idx=True)
                                             for sub in node_c.iter():
                                                 if sub.tag.split('}')[-1].lower() == 'blip':
                                                     rid = sub.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed') or sub.attrib.get('embed')
@@ -3025,11 +3013,7 @@ class ExcelToMarkdownConverter:
             lname = orig.tag.split('}')[-1].lower()
             if lname not in ('twocellanchor', 'onecellanchor'):
                 continue
-            cid = None
-            for sub in orig.iter():
-                if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                    cid = str(sub.attrib.get('id'))
-                    break
+            cid = extract_anchor_id(orig, allow_idx=False)
             if cid is None:
                 continue
             
@@ -3052,11 +3036,7 @@ class ExcelToMarkdownConverter:
         ns_xdr = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
         
         for an in anchors:
-            a_cid = None
-            for sub in an.iter():
-                if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                    a_cid = sub.attrib.get('id') or sub.attrib.get('idx')
-                    break
+            a_cid = extract_anchor_id(an, allow_idx=True)
             if a_cid is None:
                 continue
             fr = an.find('{%s}from' % ns_xdr)
@@ -3073,11 +3053,7 @@ class ExcelToMarkdownConverter:
             lname2 = orig_an.tag.split('}')[-1].lower()
             if lname2 not in ('twocellanchor', 'onecellanchor'):
                 continue
-            a_cid2 = None
-            for sub2 in orig_an.iter():
-                if sub2.tag.split('}')[-1].lower() == 'cnvpr':
-                    a_cid2 = sub2.attrib.get('id') or sub2.attrib.get('idx')
-                    break
+            a_cid2 = extract_anchor_id(orig_an, allow_idx=True)
             if a_cid2 is None:
                 continue
             fr2 = orig_an.find('{%s}from' % ns_xdr)
@@ -3145,12 +3121,11 @@ class ExcelToMarkdownConverter:
         try:
             def node_contains_referenced_id(n):
                 try:
+                    vid = extract_anchor_id(n, allow_idx=True)
+                    if vid is not None and str(vid) in referenced_ids:
+                        return True
                     for sub in n.iter():
                         lname = sub.tag.split('}')[-1].lower()
-                        if lname == 'cnvpr' or lname.endswith('cnvpr'):
-                            vid = sub.attrib.get('id') or sub.attrib.get('idx')
-                            if vid is not None and str(vid) in referenced_ids:
-                                return True
                         if lname in ('stcxn', 'endcxn', 'stcxnpr', 'endcxnpr'):
                             vid = sub.attrib.get('id') or sub.attrib.get('idx')
                             if vid is not None and str(vid) in referenced_ids:
@@ -3168,11 +3143,7 @@ class ExcelToMarkdownConverter:
             for node in list(root):
                 lname = node.tag.split('}')[-1].lower()
                 if lname in ('twocellanchor', 'onecellanchor'):
-                    this_cid = None
-                    for sub in node.iter():
-                        if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                            this_cid = sub.attrib.get('id') or sub.attrib.get('idx')
-                            break
+                    this_cid = extract_anchor_id(node, allow_idx=True)
                     
                     if this_cid is not None and str(this_cid) in keep_cnvpr_ids:
                         kept_count += 1
@@ -4081,10 +4052,10 @@ class ExcelToMarkdownConverter:
             anchor_type = anchor.tag.split('}')[-1].lower()
             metadata['anchor_type'] = anchor_type
             
+            metadata['id'] = extract_anchor_id(anchor, allow_idx=False) or ''
             for sub in anchor.iter():
                 if sub.tag.split('}')[-1].lower() == 'cnvpr':
                     metadata['name'] = sub.attrib.get('name', '')
-                    metadata['id'] = sub.attrib.get('id', '')
                     metadata['description'] = sub.attrib.get('descr', '')
                     break
             
@@ -4176,11 +4147,7 @@ class ExcelToMarkdownConverter:
                 if anchor_type in ('twocellanchor', 'onecellanchor'):
                     if self._anchor_has_drawable(anchor):
                         if filter_ids is not None:
-                            shape_id = None
-                            for sub in anchor.iter():
-                                if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                                    shape_id = sub.attrib.get('id', '')
-                                    break
+                            shape_id = extract_anchor_id(anchor, allow_idx=False) or ''
                             if shape_id and shape_id not in filter_ids:
                                 continue
                         
@@ -4327,12 +4294,9 @@ class ExcelToMarkdownConverter:
 
             key = None
             try:
-                for sub in a.iter():
-                    if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                        cid = sub.attrib.get('id') or sub.attrib.get('idx')
-                        if cid is not None:
-                            key = f"cnvpr:{cid}"
-                            break
+                cid = extract_anchor_id(a, allow_idx=True)
+                if cid is not None:
+                    key = f"cnvpr:{cid}"
             except Exception:
                 key = None
 
@@ -4366,13 +4330,7 @@ class ExcelToMarkdownConverter:
                 # explicit pictorial/shape types (including connector shapes)
                 if lname in ('pic', 'sp', 'graphicframe', 'grpsp', 'cxnsp'):
                     # check for hidden flag on closest cNvPr child
-                    is_hidden = False
-                    for sub in desc.iter():
-                        if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                            if sub.attrib.get('hidden') in ('1', 'true'):
-                                is_hidden = True
-                                break
-                    if is_hidden:
+                    if anchor_is_hidden(desc):
                         continue
                     drawable_types.append(lname)
                 # detect connector endpoint references
@@ -4840,12 +4798,9 @@ class ExcelToMarkdownConverter:
             keep_cnvpr_ids = set()
             for si in shape_indices:
                 if 0 <= si < len(anchors):
-                    for sub in anchors[si].iter():
-                        if sub.tag.split('}')[-1].lower() == 'cnvpr':
-                            cid = sub.attrib.get('id')
-                            if cid:
-                                keep_cnvpr_ids.add(str(cid))
-                            break
+                    cid = extract_anchor_id(anchors[si], allow_idx=False)
+                    if cid:
+                        keep_cnvpr_ids.add(str(cid))
             
             debug_print(f"[DEBUG][_iso_v2] anchors={len(anchors)} keep_ids={sorted(list(keep_cnvpr_ids))}")
             
