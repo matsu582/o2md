@@ -100,19 +100,6 @@ def get_xml_from_zip(z: zipfile.ZipFile, path: str) -> Optional[ET.Element]:
         return None
 
 
-def xml_exists_in_zip(z: zipfile.ZipFile, path: str) -> bool:
-    """ZIP内にXMLファイルが存在するか確認
-    
-    Args:
-        z: ZipFileオブジェクト
-        path: 確認するファイルパス
-    
-    Returns:
-        存在する場合True
-    """
-    return path in z.namelist()
-
-
 # ============================================================================
 # ============================================================================
 
@@ -181,41 +168,6 @@ def anchor_has_drawable(anchor: ET.Element) -> bool:
         return False
 
 
-def extract_shape_metadata(anchor: ET.Element) -> Dict[str, Any]:
-    """アンカーから図形メタデータを抽出
-    
-    Args:
-        anchor: アンカー要素
-    
-    Returns:
-        メタデータ辞書（id, name, type等）
-    """
-    metadata = {
-        'id': None,
-        'name': None,
-        'type': None,
-        'description': None
-    }
-    
-    try:
-        for sub in anchor.iter():
-            tag_local = sub.tag.split('}')[-1].lower()
-            if tag_local == 'cnvpr':
-                metadata['id'] = sub.attrib.get('id')
-                metadata['name'] = sub.attrib.get('name')
-                metadata['description'] = sub.attrib.get('descr')
-        
-        for child in anchor:
-            tag_local = child.tag.split('}')[-1].lower()
-            if tag_local in ('pic', 'sp', 'grpsp', 'graphicframe', 'cxnsp'):
-                metadata['type'] = tag_local
-                break
-    except Exception:
-        pass
-    
-    return metadata
-
-
 def collect_anchors(drawing_xml: ET.Element, anchor_filter_func=None) -> List[ET.Element]:
     """drawing XMLから描画可能なアンカーリストを取得
     
@@ -240,24 +192,6 @@ def collect_anchors(drawing_xml: ET.Element, anchor_filter_func=None) -> List[ET
 
 # ============================================================================
 # ============================================================================
-
-def safe_call(func, *args, **kwargs):
-    """関数を安全に呼び出し、例外時はNoneを返す
-    
-    Args:
-        func: 呼び出す関数
-        *args: 位置引数
-        **kwargs: キーワード引数
-    
-    Returns:
-        関数の戻り値、例外時はNone
-    """
-    try:
-        return func(*args, **kwargs)
-    except Exception as e:
-        logging.debug(f"safe_call failed: {func.__name__}, error: {e}")
-        return None
-
 
 def compute_sheet_cell_pixel_map(sheet, dpi: int = 300) -> Tuple[List[float], List[float]]:
     """Excelシートのセル→ピクセル座標変換マップを計算
@@ -295,44 +229,3 @@ def compute_sheet_cell_pixel_map(sheet, dpi: int = 300) -> Tuple[List[float], Li
     except Exception as e:
         logging.debug(f"compute_sheet_cell_pixel_map failed: {e}")
         return [0.0], [0.0]
-
-
-# ============================================================================
-# ============================================================================
-
-def filter_processed_rows(merged_texts: List[Tuple], processed_rows: Set[int]) -> List[Tuple]:
-    """処理済み行を除外したテキストリストを返す
-    
-    Args:
-        merged_texts: (行番号, テキスト)のタプルリスト
-        processed_rows: 処理済み行番号のセット
-    
-    Returns:
-        フィルタ後のリスト
-    """
-    return [(row, text) for row, text in merged_texts if row not in processed_rows]
-
-
-def deduplicate_table_regions(table_regions: List[Tuple]) -> List[Tuple]:
-    """重複するテーブル領域を除外
-    
-    Args:
-        table_regions: テーブル領域のリスト
-    
-    Returns:
-        重複除外後のリスト
-    """
-    if not table_regions:
-        return []
-    
-    unique_regions = []
-    for region in table_regions:
-        is_duplicate = False
-        for existing in unique_regions:
-            if region == existing:
-                is_duplicate = True
-                break
-        if not is_duplicate:
-            unique_regions.append(region)
-    
-    return unique_regions

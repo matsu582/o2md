@@ -23,7 +23,7 @@ import io
 import zipfile
 import xml.etree.ElementTree as ET
 
-from utils import get_libreoffice_path, col_letter, normalize_excel_path, get_xml_from_zip, xml_exists_in_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
+from utils import get_libreoffice_path, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
 from isolated_group_renderer import IsolatedGroupRenderer
 
 try:
