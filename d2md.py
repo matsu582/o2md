@@ -75,7 +75,16 @@ def debug_print(*args, **kwargs):
         print(*args, **kwargs)
 
 class WordToMarkdownConverter:
-    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None, shape_metadata=False):
+    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None, shape_metadata=False, output_format='png'):
+        """Word文書をMarkdownに変換するコンバータ
+        
+        Args:
+            word_file_path: 変換するWordファイルのパス
+            use_heading_text: 章番号の代わりに見出しテキストを使用するか
+            output_dir: 出力ディレクトリ（省略時はデフォルト）
+            shape_metadata: 図形メタデータ出力フラグ
+            output_format: 出力画像形式 ('png' または 'svg')
+        """
         self.word_file = word_file_path
         self.doc = Document(word_file_path)
         self.base_name = Path(word_file_path).stem
@@ -102,6 +111,14 @@ class WordToMarkdownConverter:
         self.vector_image_counter = 0  # ベクター画像専用カウンター
         self.regular_image_counter = 0  # 通常画像専用カウンター
         self.shape_metadata = shape_metadata  # 図形メタデータ出力フラグ
+        self.output_format = output_format.lower() if output_format else 'png'
+        
+        # 出力形式の検証
+        if self.output_format not in ('png', 'svg'):
+            print(f"[WARNING] 不明な出力形式 '{output_format}'。'png'を使用します。")
+            self.output_format = 'png'
+        
+        print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
         
     def convert(self) -> str:
         """メイン変換処理"""
@@ -1150,12 +1167,19 @@ class WordToMarkdownConverter:
             # PDFの内容を確認
             self._debug_pdf_content(temp_pdf_path)
             
-            # PDFからPNGに変換（専用カウンターを使用）
+            # PDFから画像に変換（専用カウンターを使用、出力形式に応じてPNGまたはSVG）
             self.vector_image_counter += 1
-            image_filename = f"{self.base_name}_vector_composite_{self.vector_image_counter:03d}.png"
+            ext = self.output_format
+            image_filename = f"{self.base_name}_vector_composite_{self.vector_image_counter:03d}.{ext}"
             image_path = os.path.join(self.images_dir, image_filename)
             
-            if self._convert_pdf_to_png(temp_pdf_path, image_path):
+            # 出力形式に応じて変換
+            if self.output_format == 'svg':
+                convert_success = self._convert_pdf_to_svg(temp_pdf_path, image_path)
+            else:
+                convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
+            
+            if convert_success:
                 # 生成された画像の詳細を確認
                 self._debug_image_info(image_path)
                 
@@ -1428,6 +1452,45 @@ class WordToMarkdownConverter:
         right = col_indices[-1] + 1
         
         return img.crop((left, top, right, bottom))
+    
+    def _convert_pdf_to_svg(self, pdf_path, output_path):
+        """PDFをSVGに変換（PyMuPDF使用）"""
+        try:
+            debug_print("[DEBUG] PyMuPDFでPDF→SVG変換実行...")
+            
+            doc = fitz.open(pdf_path)
+            if len(doc) == 0:
+                print("[ERROR] PDFにページが含まれていません")
+                doc.close()
+                return False
+            
+            page = doc[0]
+            
+            # SVGとして出力
+            svg_content = page.get_svg_image()
+            doc.close()
+            
+            # SVGファイルに書き込み
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(svg_content)
+            
+            print(f"[INFO] SVG変換完了: {output_path}")
+            return True
+                
+        except Exception as e:
+            print(f"[ERROR] SVG変換エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _convert_pdf_to_image(self, pdf_path, output_path):
+        """PDFを画像に変換（出力形式に応じてPNGまたはSVG）"""
+        if self.output_format == 'svg':
+            # SVG出力の場合は拡張子を変更
+            svg_path = output_path.replace('.png', '.svg')
+            return self._convert_pdf_to_svg(pdf_path, svg_path), svg_path
+        else:
+            return self._convert_pdf_to_png(pdf_path, output_path), output_path
     
     def _debug_pdf_content(self, pdf_path):
         """PDFの内容をデバッグ（オプション）"""
@@ -1894,6 +1957,8 @@ def main():
                        help='出力ディレクトリを指定（デフォルト: 実行ディレクトリ）')
     parser.add_argument('--shape-metadata', action='store_true',
                        help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
+    parser.add_argument('--format', choices=['png', 'svg'], default='png',
+                       help='出力画像形式を指定（デフォルト: png）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力')
     
@@ -1917,19 +1982,25 @@ def main():
         print("DOCファイルが指定されました。DOCXに変換します...")
         converted_file = convert_doc_to_docx(args.word_file)
         if converted_file is None:
-            print("❌ DOC→DOCX変換に失敗しました。")
+            print("DOC→DOCX変換に失敗しました。")
             sys.exit(1)
         processing_file = converted_file
-        print(f"✅ DOC→DOCX変換完了: {converted_file}")
+        print(f"DOC→DOCX変換完了: {converted_file}")
     
     try:
-        converter = WordToMarkdownConverter(processing_file, use_heading_text=args.use_heading_text, output_dir=args.output_dir, shape_metadata=args.shape_metadata)
+        converter = WordToMarkdownConverter(
+            processing_file, 
+            use_heading_text=args.use_heading_text, 
+            output_dir=args.output_dir, 
+            shape_metadata=args.shape_metadata,
+            output_format=args.format
+        )
         output_file = converter.convert()
-        print("\n✅ 変換完了!")
-        print(f"📄 出力ファイル: {output_file}")
-        print(f"🖼️  画像フォルダ: {converter.images_dir}")
+        print("\n変換完了!")
+        print(f"出力ファイル: {output_file}")
+        print(f"画像フォルダ: {converter.images_dir}")
         if args.use_heading_text:
-            print("📝 見出しテキストリンクモード: 有効")
+            print("見出しテキストリンクモード: 有効")
         
     except Exception as e:
         print(f"❌ 変換エラー: {e}")

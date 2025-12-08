@@ -126,6 +126,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
         **kwargs: 各変換クラス固有のオプション
             - use_heading_text: Word変換時に見出しテキストをリンクに使用（デフォルト: False）
             - shape_metadata: 図形メタデータを出力（デフォルト: False）
+            - output_format: 出力画像形式 ('png' または 'svg'、デフォルト: 'png')
             
     Returns:
         出力ファイルのパス
@@ -169,7 +170,13 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
                 print(f"[INFO] ✅ XLS→XLSX変換完了: {converted_file}")
             
             shape_metadata = kwargs.get('shape_metadata', False)
-            converter = ExcelToMarkdownConverter(processing_file, output_dir=output_dir, shape_metadata=shape_metadata)
+            output_format = kwargs.get('output_format', 'png')
+            converter = ExcelToMarkdownConverter(
+                processing_file, 
+                output_dir=output_dir, 
+                shape_metadata=shape_metadata,
+                output_format=output_format
+            )
             output_file = converter.convert()
             
         elif file_type == 'word':
@@ -187,19 +194,23 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             
             use_heading_text = kwargs.get('use_heading_text', False)
             shape_metadata = kwargs.get('shape_metadata', False)
+            output_format = kwargs.get('output_format', 'png')
             converter = WordToMarkdownConverter(
                 processing_file, 
                 use_heading_text=use_heading_text,
                 output_dir=output_dir,
-                shape_metadata=shape_metadata
+                shape_metadata=shape_metadata,
+                output_format=output_format
             )
             output_file = converter.convert()
             
         elif file_type == 'powerpoint':
             # PowerPoint変換
+            output_format = kwargs.get('output_format', 'png')
             converter = PowerPointToMarkdownConverter(
                 file_path,
-                output_dir=output_dir
+                output_dir=output_dir,
+                output_format=output_format
             )
             output_file = converter.convert()
         
@@ -259,6 +270,8 @@ def main():
                        help='[Word専用] 章番号の代わりに見出しテキストをリンクに使用')
     parser.add_argument('--shape-metadata', action='store_true',
                        help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
+    parser.add_argument('--format', choices=['png', 'svg'], default='png',
+                       help='出力画像形式を指定（デフォルト: png）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力')
     
@@ -271,7 +284,8 @@ def main():
             args.file,
             output_dir=args.output_dir,
             use_heading_text=args.use_heading_text,
-            shape_metadata=args.shape_metadata
+            shape_metadata=args.shape_metadata,
+            output_format=args.format
         )
         
         print("\n" + "=" * 50)
