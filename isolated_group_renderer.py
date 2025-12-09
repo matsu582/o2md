@@ -2476,19 +2476,20 @@ class IsolatedGroupRenderer:
             traceback.print_exc()
             return None
     
-    def _update_svg_viewbox(self, svg_content, left, top, width, height):
+    def _update_svg_viewbox(self, svg_content, left, top, width, height, scale=2.0):
         """SVGのviewBoxとwidth/heightを更新する
         
         Args:
             svg_content: SVG文字列
             left, top, width, height: 新しいviewBox座標
+            scale: 表示サイズの倍率（デフォルト: 2.0、PNGと同じ）
             
         Returns:
             str: 更新されたSVG文字列
         """
         import re
         
-        # viewBox属性を更新
+        # viewBox属性を更新（座標系はそのまま）
         new_viewbox = f'viewBox="{left:.2f} {top:.2f} {width:.2f} {height:.2f}"'
         svg_content = re.sub(
             r'viewBox="[^"]*"',
@@ -2497,18 +2498,20 @@ class IsolatedGroupRenderer:
             count=1
         )
         
-        # width属性を更新
+        # width属性を更新（表示サイズをscale倍に拡大）
+        display_width = width * scale
         svg_content = re.sub(
             r'width="[^"]*"',
-            f'width="{width:.2f}"',
+            f'width="{display_width:.2f}"',
             svg_content,
             count=1
         )
         
-        # height属性を更新
+        # height属性を更新（表示サイズをscale倍に拡大）
+        display_height = height * scale
         svg_content = re.sub(
             r'height="[^"]*"',
-            f'height="{height:.2f}"',
+            f'height="{display_height:.2f}"',
             svg_content,
             count=1
         )
