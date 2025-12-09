@@ -167,7 +167,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
                     raise RuntimeError("XLS→XLSX変換に失敗しました。")
                 processing_file = converted_file
                 converted_temp_dir = Path(converted_file).parent
-                print(f"[INFO] ✅ XLS→XLSX変換完了: {converted_file}")
+                print(f"[INFO] XLS→XLSX変換完了: {converted_file}")
             
             shape_metadata = kwargs.get('shape_metadata', False)
             output_format = kwargs.get('output_format', 'png')
@@ -190,7 +190,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
                 if converted_file is None:
                     raise RuntimeError("DOC→DOCX変換に失敗しました。")
                 processing_file = converted_file
-                print(f"[INFO] ✅ DOC→DOCX変換完了: {converted_file}")
+                print(f"[INFO] DOC→DOCX変換完了: {converted_file}")
             
             use_heading_text = kwargs.get('use_heading_text', False)
             shape_metadata = kwargs.get('shape_metadata', False)
@@ -289,8 +289,8 @@ def main():
         )
         
         print("\n" + "=" * 50)
-        print("✅ 変換完了!")
-        print(f"📄 出力ファイル: {output_file}")
+        print("変換完了!")
+        print(f"出力ファイル: {output_file}")
         
         # 画像ディレクトリの情報を表示
         if args.output_dir:
@@ -299,21 +299,21 @@ def main():
             images_dir = os.path.join(os.getcwd(), "output", "images")
         
         if os.path.exists(images_dir) and os.listdir(images_dir):
-            print(f"🖼️  画像フォルダ: {images_dir}")
+            print(f"画像フォルダ: {images_dir}")
         
         if args.use_heading_text:
-            print("📝 見出しテキストリンクモード: 有効")
+            print("見出しテキストリンクモード: 有効")
         
         print("=" * 50)
         
     except ValueError as e:
-        print(f"❌ エラー: {e}")
+        print(f"エラー: {e}")
         sys.exit(1)
     except FileNotFoundError as e:
-        print(f"❌ エラー: {e}")
+        print(f"エラー: {e}")
         sys.exit(1)
     except Exception as e:
-        print(f"❌ 変換エラー: {e}")
+        print(f"変換エラー: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

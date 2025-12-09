@@ -10606,7 +10606,7 @@ def main():
         debug_print(f"画像フォルダ: {converter.images_dir}")
         
     except Exception as e:
-        debug_print(f"❌ 変換エラー: {e}")
+        debug_print(f"変換エラー: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
@@ -10616,9 +10616,9 @@ def main():
             try:
                 if converted_temp_dir.exists() and converted_temp_dir.name.startswith('xls2md_conversion_'):
                     shutil.rmtree(converted_temp_dir)
-                    debug_print(f"🗑️  一時ディレクトリを削除: {converted_temp_dir}")
+                    debug_print(f"一時ディレクトリを削除: {converted_temp_dir}")
             except Exception as cleanup_error:
-                debug_print(f"⚠️  一時ファイル削除に失敗: {cleanup_error}")
+                debug_print(f"一時ファイル削除に失敗: {cleanup_error}")
 
 
 if __name__ == "__main__":

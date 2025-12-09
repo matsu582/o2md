@@ -2016,7 +2016,7 @@ def main():
             print("見出しテキストリンクモード: 有効")
         
     except Exception as e:
-        print(f"❌ 変換エラー: {e}")
+        print(f"変換エラー: {e}")
         sys.exit(1)
     finally:
         # 一時的に作成したDOCXファイルとその親ディレクトリを必ず削除
@@ -2030,13 +2030,13 @@ def main():
                 
                 if temp_dir.exists() and temp_dir.name.startswith('word2md_doc_conversion_'):
                     shutil.rmtree(temp_dir)
-                    print(f"🗑️  一時ディレクトリを削除: {temp_dir}")
+                    print(f"一時ディレクトリを削除: {temp_dir}")
                 elif os.path.exists(converted_file):
                     os.remove(converted_file)
-                    print(f"🗑️  一時ファイルを削除: {converted_file}")
+                    print(f"一時ファイルを削除: {converted_file}")
                     
             except Exception as cleanup_error:
-                print(f"⚠️  一時ファイル削除に失敗: {cleanup_error}")
+                print(f"一時ファイル削除に失敗: {cleanup_error}")
 
 
 if __name__ == "__main__":
