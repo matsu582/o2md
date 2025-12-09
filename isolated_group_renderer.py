@@ -29,7 +29,7 @@ from typing import List, Dict, Tuple, Optional, Set
 from collections import deque
 import copy
 import hashlib
-from utils import get_libreoffice_path
+from utils import get_libreoffice_path, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id
 
 
 class IsolatedGroupRenderer:
@@ -203,11 +203,10 @@ class IsolatedGroupRenderer:
             sheet_index = self.converter.workbook.sheetnames.index(sheet.title)
             rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
             
-            if rels_path not in z.namelist():
+            rels_xml = get_xml_from_zip(z, rels_path)
+            if rels_xml is None:
                 debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} missing rels: {rels_path}")
                 return None, None, None, None, None
-            
-            rels_xml = ET.fromstring(z.read(rels_path))
             drawing_target = None
             for rel in rels_xml.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship'):
                 if rel.attrib.get('Type','').endswith('/drawing'):
@@ -218,11 +217,7 @@ class IsolatedGroupRenderer:
                 debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} no drawing relationship found in rels")
                 return None, None, None, None, None
             
-            drawing_path = drawing_target
-            if drawing_path.startswith('..'):
-                drawing_path = drawing_path.replace('../', 'xl/')
-            if drawing_path.startswith('/'):
-                drawing_path = drawing_path.lstrip('/')
+            drawing_path = normalize_excel_path(drawing_target)
             
             debug_print(f"[DEBUG][_iso_entry] sheet={sheet.title} drawing_path={drawing_path}")
             
@@ -1424,11 +1419,11 @@ class IsolatedGroupRenderer:
             
             if original_cell_range:
                 orig_s_col, orig_e_col, orig_s_row, orig_e_row = original_cell_range
-                start_col_letter = self._col_letter(orig_s_col)
-                end_col_letter = self._col_letter(orig_e_col)
+                start_col_letter = col_letter(orig_s_col)
+                end_col_letter = col_letter(orig_e_col)
             else:
-                start_col_letter = self._col_letter(s_col)
-                end_col_letter = self._col_letter(e_col)
+                start_col_letter = col_letter(s_col)
+                end_col_letter = col_letter(e_col)
             
             # Print_Area文字列を作成
             sheet_name_escaped = sheet.title.replace("'", "''")
@@ -1614,7 +1609,7 @@ class IsolatedGroupRenderer:
                                         continue
                                 
                                 new_col_idx = col_idx - shape_offset_col
-                                new_col_letters = self._col_letter(new_col_idx)
+                                new_col_letters = col_letter(new_col_idx)
                                 
                                 new_cell = ET.Element(f'{{{ns}}}c', dict(cell_el.attrib))
                                 new_cell.attrib['r'] = f"{new_col_letters}{new_r_index}"
@@ -1637,8 +1632,8 @@ class IsolatedGroupRenderer:
                         if dim is None:
                             dim = ET.Element(dim_tag)
                             sroot4.insert(0, dim)
-                        start_addr = f"{self._col_letter(1)}1"
-                        end_addr = f"{self._col_letter(orig_e_col - orig_s_col + 1)}{max(1, max_new_r_index)}"
+                        start_addr = f"{col_letter(1)}1"
+                        end_addr = f"{col_letter(orig_e_col - orig_s_col + 1)}{max(1, max_new_r_index)}"
                         dim.set('ref', f"{start_addr}:{end_addr}")
                     
                     cols_tag = f'{{{ns}}}cols'
@@ -2642,12 +2637,3 @@ class IsolatedGroupRenderer:
                 shutil.rmtree(tmpdir)
             except Exception:
                 pass
-    
-    def _col_letter(self, col_num):
-        """列番号をExcelの列文字に変換（1→'A', 27→'AA'）"""
-        result = []
-        while col_num > 0:
-            col_num -= 1
-            result.append(chr(col_num % 26 + ord('A')))
-            col_num //= 26
-        return ''.join(reversed(result))
