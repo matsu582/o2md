@@ -1454,8 +1454,12 @@ class WordToMarkdownConverter:
         return img.crop((left, top, right, bottom))
     
     def _convert_pdf_to_svg(self, pdf_path, output_path):
-        """PDFをSVGに変換（PyMuPDF使用）"""
+        """PDFをSVGに変換（PyMuPDF使用、コンテンツ領域にクロップ）"""
         try:
+            import numpy as np
+            from PIL import Image as PILImage
+            import re
+            
             debug_print("[DEBUG] PyMuPDFでPDF→SVG変換実行...")
             
             doc = fitz.open(pdf_path)
@@ -1466,8 +1470,55 @@ class WordToMarkdownConverter:
             
             page = doc[0]
             
-            # SVGとして出力
+            # 1. 高解像度PNGとしてレンダリングしてコンテンツ領域を検出
+            dpi = 300
+            zoom = dpi / 72
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            
+            img = PILImage.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            img_array = np.array(img)
+            
+            # 2. 非白領域のbboxをピクセル単位で取得
+            if len(img_array.shape) == 3:
+                gray = np.mean(img_array, axis=2)
+            else:
+                gray = img_array
+            
+            threshold = 250
+            non_white_pixels = gray < threshold
+            
+            rows = np.any(non_white_pixels, axis=1)
+            cols = np.any(non_white_pixels, axis=0)
+            
+            # 3. SVG生成
             svg_content = page.get_svg_image()
+            width_units = page.rect.width
+            height_units = page.rect.height
+            
+            if rows.any() and cols.any():
+                row_indices = np.where(rows)[0]
+                col_indices = np.where(cols)[0]
+                
+                top_px = row_indices[0]
+                bottom_px = row_indices[-1] + 1
+                left_px = col_indices[0]
+                right_px = col_indices[-1] + 1
+                
+                # 4. ピクセル座標 → viewBox座標への変換
+                scale_x = width_units / pix.width
+                scale_y = height_units / pix.height
+                
+                left_u = left_px * scale_x
+                top_u = top_px * scale_y
+                width_u = (right_px - left_px) * scale_x
+                height_u = (bottom_px - top_px) * scale_y
+                
+                # 5. SVGのroot <svg> の viewBox / width / height を置き換え
+                svg_content = self._update_svg_viewbox(
+                    svg_content, left_u, top_u, width_u, height_u
+                )
+            
             doc.close()
             
             # SVGファイルに書き込み
@@ -1482,6 +1533,45 @@ class WordToMarkdownConverter:
             import traceback
             traceback.print_exc()
             return False
+    
+    def _update_svg_viewbox(self, svg_content, left, top, width, height):
+        """SVGのviewBoxとwidth/heightを更新する
+        
+        Args:
+            svg_content: SVG文字列
+            left, top, width, height: 新しいviewBox座標
+            
+        Returns:
+            str: 更新されたSVG文字列
+        """
+        import re
+        
+        # viewBox属性を更新
+        new_viewbox = f'viewBox="{left:.2f} {top:.2f} {width:.2f} {height:.2f}"'
+        svg_content = re.sub(
+            r'viewBox="[^"]*"',
+            new_viewbox,
+            svg_content,
+            count=1
+        )
+        
+        # width属性を更新
+        svg_content = re.sub(
+            r'width="[^"]*"',
+            f'width="{width:.2f}"',
+            svg_content,
+            count=1
+        )
+        
+        # height属性を更新
+        svg_content = re.sub(
+            r'height="[^"]*"',
+            f'height="{height:.2f}"',
+            svg_content,
+            count=1
+        )
+        
+        return svg_content
     
     def _convert_pdf_to_image(self, pdf_path, output_path):
         """PDFを画像に変換（出力形式に応じてPNGまたはSVG）"""
