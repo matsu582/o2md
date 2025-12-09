@@ -46,6 +46,8 @@ class IsolatedGroupRenderer:
         self.sheet = None  # renderメソッドで設定される
         self._last_iso_preserved_ids = set()
         self._last_temp_pdf_path = None
+        # 出力形式をコンバータから取得（デフォルトはPNG）
+        self.output_format = getattr(converter, 'output_format', 'png')
     
     def render(self, sheet, shape_indices: List[int], dpi: int = 600, 
                cell_range: Optional[Tuple[int,int,int,int]] = None) -> Optional[Tuple[str, int]]:
@@ -2181,9 +2183,9 @@ class IsolatedGroupRenderer:
 
 
     def _phase9_generate_pdf_png(self, sheet, shape_indices, src_for_conv, tmpdir, dpi, cell_range):
-        """フェーズ9: PDF/PNG生成
+        """フェーズ9: PDF/画像生成
         
-        LibreOfficeを使用してPDF生成、ImageMagickでPNGに変換
+        LibreOfficeを使用してPDF生成、PyMuPDFでPNGまたはSVGに変換
         
         Args:
             sheet: ワークシートオブジェクト
@@ -2194,7 +2196,7 @@ class IsolatedGroupRenderer:
             cell_range: セル範囲 (s_col, e_col, s_row, e_row) または None
             
         Returns:
-            str: 生成されたPNGファイルのパス、失敗時はNone
+            str: 生成された画像ファイルのパス、失敗時はNone
         """
         import os
         import tempfile
@@ -2204,6 +2206,10 @@ class IsolatedGroupRenderer:
         
         # PDF生成用の一時ディレクトリ
         tmp_pdf_dir = tempfile.mkdtemp(prefix='xls2md_pdf_')
+        
+        # 出力形式を決定
+        output_format = self.output_format
+        ext = 'svg' if output_format == 'svg' else 'png'
         
         try:
             # LibreOfficeでPDF生成（一時ディレクトリに出力）
@@ -2234,39 +2240,42 @@ class IsolatedGroupRenderer:
                 except Exception as e:
                     print(f"[WARNING] 分離グループPDF保存失敗: {e}")
             
-            png_filename = os.path.basename(src_for_conv).replace('.xlsx', '.png')
-            final_png_path = os.path.join(self.converter.images_dir, png_filename)
-            debug_print(f"[DEBUG][Phase9] Starting PDF to PNG conversion: pdf={pdf_path}, output={final_png_path}")
+            # 出力ファイル名を決定（拡張子は出力形式に応じて変更）
+            image_filename = os.path.basename(src_for_conv).replace('.xlsx', f'.{ext}')
+            final_image_path = os.path.join(self.converter.images_dir, image_filename)
+            debug_print(f"[DEBUG][Phase9] Starting PDF to {ext.upper()} conversion: pdf={pdf_path}, output={final_image_path}")
             
-            # PDFをPNGに変換（最終出力ディレクトリに直接出力）
-            png_path = self._convert_pdf_to_png_with_output(pdf_path, final_png_path, dpi=dpi)
+            # PDFを画像に変換（最終出力ディレクトリに直接出力）
+            image_path = self._convert_pdf_to_image_with_output(pdf_path, final_image_path, dpi=dpi)
             
-            if png_path is None:
-                print(f"[WARN][Phase9] PDF→PNG変換失敗")
+            if image_path is None:
+                print(f"[WARN][Phase9] PDF→{ext.upper()}変換失敗")
                 return None
-            debug_print(f"[DEBUG][Phase9] PNG generated successfully: {png_path}")
+            debug_print(f"[DEBUG][Phase9] {ext.upper()} generated successfully: {image_path}")
             
-            try:
-                from PIL import Image
-                if os.path.exists(png_path):
-                    im = Image.open(png_path)
-                    bbox = self.converter._find_content_bbox(im, white_thresh=250)
-                    if bbox:
-                        l, t, r, b = bbox
-                        pad = max(4, int(dpi / 300.0 * 6))
-                        l = max(0, l - pad)
-                        t = max(0, t - pad)
-                        r = min(im.width, r + pad)
-                        b = min(im.height, b + pad)
-                        cropped = im.crop((l, t, r, b))
-                        cropped.save(png_path)
-            except Exception as e:
-                print(f"[WARNING] クロップ処理失敗: {e}")
+            # PNGの場合のみクロップ処理を実行（SVGはベクター形式なのでクロップ不要）
+            if output_format != 'svg':
+                try:
+                    from PIL import Image
+                    if os.path.exists(image_path):
+                        im = Image.open(image_path)
+                        bbox = self.converter._find_content_bbox(im, white_thresh=250)
+                        if bbox:
+                            l, t, r, b = bbox
+                            pad = max(4, int(dpi / 300.0 * 6))
+                            l = max(0, l - pad)
+                            t = max(0, t - pad)
+                            r = min(im.width, r + pad)
+                            b = min(im.height, b + pad)
+                            cropped = im.crop((l, t, r, b))
+                            cropped.save(image_path)
+                except Exception as e:
+                    print(f"[WARNING] クロップ処理失敗: {e}")
             
-            return png_path
+            return image_path
             
         except Exception as e:
-            print(f"[ERROR] PDF/PNG生成エラー: {e}")
+            print(f"[ERROR] PDF/画像生成エラー: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -2353,6 +2362,161 @@ class IsolatedGroupRenderer:
         import os
         output_path = pdf_path.replace('.pdf', '.png')
         return self._convert_pdf_to_png_with_output(pdf_path, output_path, dpi)
+    
+    def _convert_pdf_to_image_with_output(self, pdf_path, output_path, dpi=300):
+        """PDFを画像に変換（出力形式に応じてPNGまたはSVG）
+        
+        Args:
+            pdf_path: PDFファイルのパス
+            output_path: 出力ファイルのパス（拡張子で形式を判定）
+            dpi: 解像度（PNGの場合のみ使用）
+            
+        Returns:
+            str: 生成された画像ファイルのパス、失敗時はNone
+        """
+        import os
+        
+        # 出力形式を拡張子から判定
+        ext = os.path.splitext(output_path)[1].lower()
+        
+        if ext == '.svg':
+            return self._convert_pdf_to_svg_with_output(pdf_path, output_path)
+        else:
+            return self._convert_pdf_to_png_with_output(pdf_path, output_path, dpi)
+    
+    def _convert_pdf_to_svg_with_output(self, pdf_path, output_path):
+        """PDFをSVGに変換（PyMuPDF使用、コンテンツ領域にクロップ）
+        
+        Args:
+            pdf_path: PDFファイルのパス
+            output_path: 出力SVGファイルのパス
+            
+        Returns:
+            str: 生成されたSVGファイルのパス、失敗時はNone
+        """
+        import os
+        
+        try:
+            import fitz
+            import numpy as np
+            from PIL import Image as PILImage
+            import re
+            
+            debug_print(f"[DEBUG] PyMuPDFでPDF→SVG変換実行...")
+            
+            doc = fitz.open(pdf_path)
+            if len(doc) == 0:
+                print("[ERROR] PDFにページが含まれていません")
+                doc.close()
+                return None
+            
+            page = doc[0]
+            
+            # 1. 高解像度PNGとしてレンダリングしてコンテンツ領域を検出
+            dpi = 300
+            zoom = dpi / 72
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            
+            img = PILImage.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            img_array = np.array(img)
+            
+            # 2. 非白領域のbboxをピクセル単位で取得
+            if len(img_array.shape) == 3:
+                gray = np.mean(img_array, axis=2)
+            else:
+                gray = img_array
+            
+            threshold = 250
+            non_white_pixels = gray < threshold
+            
+            rows = np.any(non_white_pixels, axis=1)
+            cols = np.any(non_white_pixels, axis=0)
+            
+            # 3. SVG生成
+            svg_content = page.get_svg_image()
+            width_units = page.rect.width
+            height_units = page.rect.height
+            
+            if rows.any() and cols.any():
+                row_indices = np.where(rows)[0]
+                col_indices = np.where(cols)[0]
+                
+                top_px = row_indices[0]
+                bottom_px = row_indices[-1] + 1
+                left_px = col_indices[0]
+                right_px = col_indices[-1] + 1
+                
+                # 4. ピクセル座標 → viewBox座標への変換
+                scale_x = width_units / pix.width
+                scale_y = height_units / pix.height
+                
+                left_u = left_px * scale_x
+                top_u = top_px * scale_y
+                width_u = (right_px - left_px) * scale_x
+                height_u = (bottom_px - top_px) * scale_y
+                
+                # 5. SVGのroot <svg> の viewBox / width / height を置き換え
+                svg_content = self._update_svg_viewbox(
+                    svg_content, left_u, top_u, width_u, height_u
+                )
+            
+            doc.close()
+            
+            # SVGファイルに書き込み
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(svg_content)
+            
+            print(f"[SUCCESS] SVG変換完了: {output_path}")
+            return output_path
+            
+        except Exception as e:
+            print(f"[ERROR] PyMuPDF SVG変換エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _update_svg_viewbox(self, svg_content, left, top, width, height, scale=2.0):
+        """SVGのviewBoxとwidth/heightを更新する
+        
+        Args:
+            svg_content: SVG文字列
+            left, top, width, height: 新しいviewBox座標
+            scale: 表示サイズの倍率（デフォルト: 2.0、PNGと同じ）
+            
+        Returns:
+            str: 更新されたSVG文字列
+        """
+        import re
+        
+        # viewBox属性を更新（座標系はそのまま）
+        new_viewbox = f'viewBox="{left:.2f} {top:.2f} {width:.2f} {height:.2f}"'
+        svg_content = re.sub(
+            r'viewBox="[^"]*"',
+            new_viewbox,
+            svg_content,
+            count=1
+        )
+        
+        # width属性を更新（表示サイズをscale倍に拡大）
+        display_width = width * scale
+        svg_content = re.sub(
+            r'width="[^"]*"',
+            f'width="{display_width:.2f}"',
+            svg_content,
+            count=1
+        )
+        
+        # height属性を更新（表示サイズをscale倍に拡大）
+        display_height = height * scale
+        svg_content = re.sub(
+            r'height="[^"]*"',
+            f'height="{display_height:.2f}"',
+            svg_content,
+            count=1
+        )
+        
+        return svg_content
     
     def _convert_pdf_to_png_with_output(self, pdf_path, output_path, dpi=300):
         """PDFをPNGに変換（出力先を指定）、複数ページの場合は結合"""

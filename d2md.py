@@ -75,7 +75,16 @@ def debug_print(*args, **kwargs):
         print(*args, **kwargs)
 
 class WordToMarkdownConverter:
-    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None, shape_metadata=False):
+    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None, shape_metadata=False, output_format='png'):
+        """Word文書をMarkdownに変換するコンバータ
+        
+        Args:
+            word_file_path: 変換するWordファイルのパス
+            use_heading_text: 章番号の代わりに見出しテキストを使用するか
+            output_dir: 出力ディレクトリ（省略時はデフォルト）
+            shape_metadata: 図形メタデータ出力フラグ
+            output_format: 出力画像形式 ('png' または 'svg')
+        """
         self.word_file = word_file_path
         self.doc = Document(word_file_path)
         self.base_name = Path(word_file_path).stem
@@ -102,6 +111,14 @@ class WordToMarkdownConverter:
         self.vector_image_counter = 0  # ベクター画像専用カウンター
         self.regular_image_counter = 0  # 通常画像専用カウンター
         self.shape_metadata = shape_metadata  # 図形メタデータ出力フラグ
+        self.output_format = output_format.lower() if output_format else 'png'
+        
+        # 出力形式の検証
+        if self.output_format not in ('png', 'svg'):
+            print(f"[WARNING] 不明な出力形式 '{output_format}'。'png'を使用します。")
+            self.output_format = 'png'
+        
+        print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
         
     def convert(self) -> str:
         """メイン変換処理"""
@@ -1150,12 +1167,19 @@ class WordToMarkdownConverter:
             # PDFの内容を確認
             self._debug_pdf_content(temp_pdf_path)
             
-            # PDFからPNGに変換（専用カウンターを使用）
+            # PDFから画像に変換（専用カウンターを使用、出力形式に応じてPNGまたはSVG）
             self.vector_image_counter += 1
-            image_filename = f"{self.base_name}_vector_composite_{self.vector_image_counter:03d}.png"
+            ext = self.output_format
+            image_filename = f"{self.base_name}_vector_composite_{self.vector_image_counter:03d}.{ext}"
             image_path = os.path.join(self.images_dir, image_filename)
             
-            if self._convert_pdf_to_png(temp_pdf_path, image_path):
+            # 出力形式に応じて変換
+            if self.output_format == 'svg':
+                convert_success = self._convert_pdf_to_svg(temp_pdf_path, image_path)
+            else:
+                convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
+            
+            if convert_success:
                 # 生成された画像の詳細を確認
                 self._debug_image_info(image_path)
                 
@@ -1428,6 +1452,138 @@ class WordToMarkdownConverter:
         right = col_indices[-1] + 1
         
         return img.crop((left, top, right, bottom))
+    
+    def _convert_pdf_to_svg(self, pdf_path, output_path):
+        """PDFをSVGに変換（PyMuPDF使用、コンテンツ領域にクロップ）"""
+        try:
+            import numpy as np
+            from PIL import Image as PILImage
+            import re
+            
+            debug_print("[DEBUG] PyMuPDFでPDF→SVG変換実行...")
+            
+            doc = fitz.open(pdf_path)
+            if len(doc) == 0:
+                print("[ERROR] PDFにページが含まれていません")
+                doc.close()
+                return False
+            
+            page = doc[0]
+            
+            # 1. 高解像度PNGとしてレンダリングしてコンテンツ領域を検出
+            dpi = 300
+            zoom = dpi / 72
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            
+            img = PILImage.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            img_array = np.array(img)
+            
+            # 2. 非白領域のbboxをピクセル単位で取得
+            if len(img_array.shape) == 3:
+                gray = np.mean(img_array, axis=2)
+            else:
+                gray = img_array
+            
+            threshold = 250
+            non_white_pixels = gray < threshold
+            
+            rows = np.any(non_white_pixels, axis=1)
+            cols = np.any(non_white_pixels, axis=0)
+            
+            # 3. SVG生成
+            svg_content = page.get_svg_image()
+            width_units = page.rect.width
+            height_units = page.rect.height
+            
+            if rows.any() and cols.any():
+                row_indices = np.where(rows)[0]
+                col_indices = np.where(cols)[0]
+                
+                top_px = row_indices[0]
+                bottom_px = row_indices[-1] + 1
+                left_px = col_indices[0]
+                right_px = col_indices[-1] + 1
+                
+                # 4. ピクセル座標 → viewBox座標への変換
+                scale_x = width_units / pix.width
+                scale_y = height_units / pix.height
+                
+                left_u = left_px * scale_x
+                top_u = top_px * scale_y
+                width_u = (right_px - left_px) * scale_x
+                height_u = (bottom_px - top_px) * scale_y
+                
+                # 5. SVGのroot <svg> の viewBox / width / height を置き換え
+                svg_content = self._update_svg_viewbox(
+                    svg_content, left_u, top_u, width_u, height_u
+                )
+            
+            doc.close()
+            
+            # SVGファイルに書き込み
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(svg_content)
+            
+            print(f"[INFO] SVG変換完了: {output_path}")
+            return True
+                
+        except Exception as e:
+            print(f"[ERROR] SVG変換エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _update_svg_viewbox(self, svg_content, left, top, width, height, scale=2.0):
+        """SVGのviewBoxとwidth/heightを更新する
+        
+        Args:
+            svg_content: SVG文字列
+            left, top, width, height: 新しいviewBox座標
+            scale: 表示サイズの倍率（デフォルト: 2.0、PNGと同じ）
+            
+        Returns:
+            str: 更新されたSVG文字列
+        """
+        import re
+        
+        # viewBox属性を更新（座標系はそのまま）
+        new_viewbox = f'viewBox="{left:.2f} {top:.2f} {width:.2f} {height:.2f}"'
+        svg_content = re.sub(
+            r'viewBox="[^"]*"',
+            new_viewbox,
+            svg_content,
+            count=1
+        )
+        
+        # width属性を更新（表示サイズをscale倍に拡大）
+        display_width = width * scale
+        svg_content = re.sub(
+            r'width="[^"]*"',
+            f'width="{display_width:.2f}"',
+            svg_content,
+            count=1
+        )
+        
+        # height属性を更新（表示サイズをscale倍に拡大）
+        display_height = height * scale
+        svg_content = re.sub(
+            r'height="[^"]*"',
+            f'height="{display_height:.2f}"',
+            svg_content,
+            count=1
+        )
+        
+        return svg_content
+    
+    def _convert_pdf_to_image(self, pdf_path, output_path):
+        """PDFを画像に変換（出力形式に応じてPNGまたはSVG）"""
+        if self.output_format == 'svg':
+            # SVG出力の場合は拡張子を変更
+            svg_path = output_path.replace('.png', '.svg')
+            return self._convert_pdf_to_svg(pdf_path, svg_path), svg_path
+        else:
+            return self._convert_pdf_to_png(pdf_path, output_path), output_path
     
     def _debug_pdf_content(self, pdf_path):
         """PDFの内容をデバッグ（オプション）"""
@@ -1745,13 +1901,16 @@ class WordToMarkdownConverter:
         return '.png'  # デフォルト
     
     def _convert_vector_image(self, image_data: bytes, original_path: str) -> Optional[str]:
-        """ベクター画像をPNGに変換"""
+        """ベクター画像を画像に変換（出力形式に応じてPNGまたはSVG）"""
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=Path(original_path).suffix) as temp_file:
                 temp_file.write(image_data)
                 temp_path = temp_file.name
             
-            output_path = original_path.replace('.emf', '.png').replace('.wmf', '.png')
+            # 出力形式に応じて拡張子を決定
+            fmt = getattr(self, 'output_format', 'png')
+            ext = '.svg' if fmt == 'svg' else '.png'
+            output_path = original_path.replace('.emf', ext).replace('.wmf', ext)
             
             if self._convert_with_libreoffice(temp_path, output_path):
                 os.unlink(temp_path)
@@ -1770,7 +1929,7 @@ class WordToMarkdownConverter:
             return original_path
 
     def _convert_with_libreoffice(self, input_path: str, output_path: str) -> bool:
-        """LibreOfficeを使用してベクター画像を変換"""
+        """LibreOfficeを使用してベクター画像を変換（出力形式に応じてPNGまたはSVG）"""
         temp_dir = None
         try:
             temp_dir = tempfile.mkdtemp()
@@ -1792,28 +1951,38 @@ class WordToMarkdownConverter:
                     break
             
             if pdf_path and os.path.exists(pdf_path):
-                pdf_doc = fitz.open(pdf_path)
-                page = pdf_doc[0]
+                # 出力形式を判定（拡張子から）
+                fmt = 'svg' if output_path.endswith('.svg') else 'png'
                 
-                mat = fitz.Matrix(300 / 72, 300 / 72)
-                pix = page.get_pixmap(matrix=mat, alpha=False)
-                
-                from PIL import Image
-                if pix.alpha:
-                    img = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
-                    bg = Image.new("RGB", img.size, (255, 255, 255))
-                    bg.paste(img, mask=img.split()[3])
+                if fmt == 'svg':
+                    # SVG出力
+                    if self._convert_pdf_to_svg(pdf_path, output_path):
+                        print(f"[SUCCESS] ベクター画像変換完了（LibreOffice→PDF→SVG）: {output_path}")
+                        return True
                 else:
-                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                
-                pdf_doc.close()
-                
-                img = self._trim_white_margins(img)
-                img.save(output_path, "PNG")
-                
-                if os.path.exists(output_path):
-                    print(f"[SUCCESS] ベクター画像変換完了（LibreOffice→PDF→PNG）: {output_path}")
-                    return True
+                    # PNG出力（既存の処理）
+                    pdf_doc = fitz.open(pdf_path)
+                    page = pdf_doc[0]
+                    
+                    mat = fitz.Matrix(300 / 72, 300 / 72)
+                    pix = page.get_pixmap(matrix=mat, alpha=False)
+                    
+                    from PIL import Image
+                    if pix.alpha:
+                        img = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
+                        bg = Image.new("RGB", img.size, (255, 255, 255))
+                        bg.paste(img, mask=img.split()[3])
+                    else:
+                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    
+                    pdf_doc.close()
+                    
+                    img = self._trim_white_margins(img)
+                    img.save(output_path, "PNG")
+                    
+                    if os.path.exists(output_path):
+                        print(f"[SUCCESS] ベクター画像変換完了（LibreOffice→PDF→PNG）: {output_path}")
+                        return True
             
             return False
             
@@ -1894,6 +2063,8 @@ def main():
                        help='出力ディレクトリを指定（デフォルト: 実行ディレクトリ）')
     parser.add_argument('--shape-metadata', action='store_true',
                        help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
+    parser.add_argument('--format', choices=['png', 'svg'], default='png',
+                       help='出力画像形式を指定（デフォルト: png）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力')
     
@@ -1917,22 +2088,28 @@ def main():
         print("DOCファイルが指定されました。DOCXに変換します...")
         converted_file = convert_doc_to_docx(args.word_file)
         if converted_file is None:
-            print("❌ DOC→DOCX変換に失敗しました。")
+            print("DOC→DOCX変換に失敗しました。")
             sys.exit(1)
         processing_file = converted_file
-        print(f"✅ DOC→DOCX変換完了: {converted_file}")
+        print(f"DOC→DOCX変換完了: {converted_file}")
     
     try:
-        converter = WordToMarkdownConverter(processing_file, use_heading_text=args.use_heading_text, output_dir=args.output_dir, shape_metadata=args.shape_metadata)
+        converter = WordToMarkdownConverter(
+            processing_file, 
+            use_heading_text=args.use_heading_text, 
+            output_dir=args.output_dir, 
+            shape_metadata=args.shape_metadata,
+            output_format=args.format
+        )
         output_file = converter.convert()
-        print("\n✅ 変換完了!")
-        print(f"📄 出力ファイル: {output_file}")
-        print(f"🖼️  画像フォルダ: {converter.images_dir}")
+        print("\n変換完了!")
+        print(f"出力ファイル: {output_file}")
+        print(f"画像フォルダ: {converter.images_dir}")
         if args.use_heading_text:
-            print("📝 見出しテキストリンクモード: 有効")
+            print("見出しテキストリンクモード: 有効")
         
     except Exception as e:
-        print(f"❌ 変換エラー: {e}")
+        print(f"変換エラー: {e}")
         sys.exit(1)
     finally:
         # 一時的に作成したDOCXファイルとその親ディレクトリを必ず削除
@@ -1946,13 +2123,13 @@ def main():
                 
                 if temp_dir.exists() and temp_dir.name.startswith('word2md_doc_conversion_'):
                     shutil.rmtree(temp_dir)
-                    print(f"🗑️  一時ディレクトリを削除: {temp_dir}")
+                    print(f"一時ディレクトリを削除: {temp_dir}")
                 elif os.path.exists(converted_file):
                     os.remove(converted_file)
-                    print(f"🗑️  一時ファイルを削除: {converted_file}")
+                    print(f"一時ファイルを削除: {converted_file}")
                     
             except Exception as cleanup_error:
-                print(f"⚠️  一時ファイル削除に失敗: {cleanup_error}")
+                print(f"一時ファイル削除に失敗: {cleanup_error}")
 
 
 if __name__ == "__main__":

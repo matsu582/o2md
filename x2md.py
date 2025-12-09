@@ -102,12 +102,19 @@ class ExcelToMarkdownConverter:
 
             return super().append(item)
 
-    def __init__(self, excel_file_path: str, output_dir=None, debug_mode=False, shape_metadata=False):
+    def __init__(self, excel_file_path: str, output_dir=None, debug_mode=False, shape_metadata=False, output_format='png'):
         """コンバータインスタンスの初期化
 
         CLIから使用できるように、最小限で安全なコンストラクタを提供します。
         意図的に保守的な初期化を維持し、メソッド間で使用される共通のシート毎の
         一時的な状態を準備します。
+        
+        Args:
+            excel_file_path: 変換するExcelファイルのパス
+            output_dir: 出力ディレクトリ（省略時はデフォルト）
+            debug_mode: デバッグモード
+            shape_metadata: 図形メタデータ出力フラグ
+            output_format: 出力画像形式 ('png' または 'svg')
         """
         self.excel_file = excel_file_path
         self.base_name = Path(excel_file_path).stem
@@ -119,6 +126,12 @@ class ExcelToMarkdownConverter:
         
         self.debug_mode = debug_mode
         self.shape_metadata = shape_metadata
+        self.output_format = output_format.lower() if output_format else 'png'
+        
+        # 出力形式の検証
+        if self.output_format not in ('png', 'svg'):
+            print(f"[WARNING] 不明な出力形式 '{output_format}'。'png'を使用します。")
+            self.output_format = 'png'
 
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.images_dir, exist_ok=True)
@@ -130,6 +143,7 @@ class ExcelToMarkdownConverter:
 
         self.workbook = load_workbook(excel_file_path, data_only=True)
         print(f"[INFO] Excelワークブック読み込み完了: {excel_file_path}")
+        print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
 
     def _init_per_sheet_state(self):
         """シート毎の状態変数を初期化"""
@@ -3298,21 +3312,138 @@ class ExcelToMarkdownConverter:
             traceback.print_exc()
             return None
 
+    def _convert_excel_to_svg(self, xlsx_path: str, tmpdir: str, apply_fit_to_page: bool = True) -> Optional[str]:
+        """ExcelファイルをSVGに変換
+        
+        LibreOfficeを使用してExcelファイルをSVG形式に直接変換します。
+        
+        Args:
+            xlsx_path: 変換するExcelファイルのパス
+            tmpdir: SVG出力先ディレクトリ
+            apply_fit_to_page: 1ページに収める設定を適用するか
+        
+        Returns:
+            生成されたSVGファイルのパス または None
+        """
+        try:
+            # 元のファイルを上書きしないように一時コピーを作成
+            tmp_xlsx = os.path.join(tmpdir, os.path.basename(xlsx_path))
+            shutil.copyfile(xlsx_path, tmp_xlsx)
+            
+            # SVG変換前に縦横1ページ設定を適用
+            if apply_fit_to_page:
+                self._set_excel_fit_to_one_page(tmp_xlsx)
+            
+            # LibreOfficeでSVG変換
+            cmd = [LIBREOFFICE_PATH, '--headless', '--convert-to', 'svg', '--outdir', tmpdir, tmp_xlsx]
+            debug_print(f"[DEBUG] LibreOffice SVG export command: {' '.join(cmd)}")
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            
+            if proc.returncode != 0:
+                print(f"[WARNING] LibreOffice SVG 変換失敗: {proc.stderr}")
+                return None
+            
+            # 生成されたSVGを探す
+            svg_name = f"{self.base_name}.svg"
+            svg_path = os.path.join(tmpdir, svg_name)
+            
+            if not os.path.exists(svg_path):
+                # LibreOfficeが異なる名前で出力した可能性
+                candidates = [os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if f.lower().endswith('.svg')]
+                if not candidates:
+                    print("[WARNING] LibreOffice がSVGを出力しませんでした")
+                    return None
+                svg_path = candidates[0]
+            
+            return svg_path
+        
+        except Exception as e:
+            print(f"[WARNING] Excel→SVG変換失敗: {e}")
+            return None
+
+    def _convert_pdf_page_to_svg(self, pdf_path: str, page_index: int,
+                                  output_dir: str, filename_prefix: str) -> Optional[str]:
+        """PDFの指定ページをSVG画像に変換（PyMuPDF使用）
+        
+        PyMuPDFを使用してPDFの特定ページをSVG形式に変換します。
+        
+        Args:
+            pdf_path: 変換するPDFファイルのパス
+            page_index: ページ番号(0始まり)
+            output_dir: SVG出力先ディレクトリ
+            filename_prefix: 出力ファイル名のプレフィックス
+        
+        Returns:
+            生成されたSVGファイル名(相対パス) または None
+        """
+        try:
+            svg_filename = f"{filename_prefix}.svg"
+            svg_path = os.path.join(output_dir, svg_filename)
+            
+            debug_print(f"[DEBUG] PyMuPDFでPDF→SVG変換実行 (ページ {page_index})...")
+            
+            doc = fitz.open(pdf_path)
+            if page_index >= len(doc):
+                print(f"[WARNING] ページ{page_index}が存在しません（全{len(doc)}ページ）")
+                doc.close()
+                return None
+            
+            page = doc[page_index]
+            
+            # SVGとして出力
+            svg_content = page.get_svg_image()
+            doc.close()
+            
+            # SVGファイルに書き込み
+            with open(svg_path, 'w', encoding='utf-8') as f:
+                f.write(svg_content)
+            
+            print(f"[INFO] SVG変換完了: {svg_path}")
+            
+            return svg_filename
+        
+        except Exception as e:
+            print(f"[WARNING] PDF→SVG変換失敗: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _convert_page_to_image(self, pdf_path: str, page_index: int, dpi: int,
+                                output_dir: str, filename_prefix: str) -> Optional[str]:
+        """PDFの指定ページを画像に変換（出力形式に応じてPNGまたはSVG）
+        
+        self.output_formatに基づいて適切な形式で出力します。
+        
+        Args:
+            pdf_path: 変換するPDFファイルのパス
+            page_index: ページ番号(0始まり)
+            dpi: 解像度（PNG時のみ使用）
+            output_dir: 出力先ディレクトリ
+            filename_prefix: 出力ファイル名のプレフィックス
+        
+        Returns:
+            生成された画像ファイル名(相対パス) または None
+        """
+        if self.output_format == 'svg':
+            return self._convert_pdf_page_to_svg(pdf_path, page_index, output_dir, filename_prefix)
+        else:
+            return self._convert_pdf_page_to_png(pdf_path, page_index, dpi, output_dir, filename_prefix)
+
     # ========================================================================
 
     def _render_sheet_fallback(self, sheet, dpi: int = 600, insert_index: Optional[int] = None, insert_images: bool = True) -> bool:
-        """シート全体を1枚のPNG画像にレンダリング(真のフォールバック)
+        """シート全体を1枚の画像にレンダリング(真のフォールバック)
         
         isolated-groupレンダリングが行われない場合、または失敗した場合の最終手段として、
-        シート全体を1枚のPNG画像として出力します。
+        シート全体を1枚の画像として出力します。出力形式はself.output_formatに従います。
         
         注意:
             isolated-groupレンダリングは_process_sheet_imagesで実行されるため、
-            このメソッドでは単純にシート全体をPNG化するのみです。
+            このメソッドでは単純にシート全体を画像化するのみです。
         
         Args:
             sheet: 対象シート
-            dpi: DPI設定(デフォルト: 600)
+            dpi: DPI設定(デフォルト: 600、PNG時のみ使用)
             insert_index: Markdown挿入位置(None=末尾)
             insert_images: True=即座に挿入、False=登録のみ
         
@@ -3324,7 +3455,7 @@ class ExcelToMarkdownConverter:
             # 一時ディレクトリを作成
             tmpdir = tempfile.mkdtemp(prefix='xls2md_render_')
             
-            # 1. Excel→PDF変換 (Phase 1メソッド)
+            # 1. Excel→PDF変換
             debug_print(f"[DEBUG] Fallback rendering for sheet: {sheet.title}")
             pdf_path = self._convert_excel_to_pdf(self.excel_file, tmpdir, apply_fit_to_page=True)
             if pdf_path is None:
@@ -3337,9 +3468,9 @@ class ExcelToMarkdownConverter:
             except (ValueError, TypeError):
                 page_index = 0
             
-            # 3. PDF→PNG変換 (Phase 1メソッド)
+            # 3. PDF→画像変換（出力形式に応じてPNGまたはSVG）
             safe_sheet = self._sanitize_filename(sheet.title)
-            result_filename = self._convert_pdf_page_to_png(
+            result_filename = self._convert_page_to_image(
                 pdf_path,
                 page_index,
                 dpi,
@@ -3348,7 +3479,8 @@ class ExcelToMarkdownConverter:
             )
             
             if result_filename is None:
-                print("[WARNING] ImageMagick による PNG 変換が失敗しました")
+                fmt_name = self.output_format.upper()
+                print(f"[WARNING] {fmt_name} 変換が失敗しました")
                 return False
             
             # 4. 画像をMarkdownに登録または挿入
@@ -10428,6 +10560,8 @@ def main():
                        help='デバッグモード：debug_workbooks、pdfs、diagnosticsフォルダを出力')
     parser.add_argument('--shape-metadata', action='store_true',
                        help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
+    parser.add_argument('--format', choices=['png', 'svg'], default='png',
+                       help='出力画像形式を指定（デフォルト: png）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力')
     
@@ -10452,21 +10586,27 @@ def main():
         debug_print("XLSファイルが指定されました。XLSXに変換します...")
         converted_file = convert_xls_to_xlsx(args.excel_file)
         if converted_file is None:
-            debug_print("❌ XLS→XLSX変換に失敗しました。")
+            debug_print("XLS→XLSX変換に失敗しました。")
             sys.exit(1)
         processing_file = converted_file
         converted_temp_dir = Path(converted_file).parent
-        debug_print(f"✅ XLS→XLSX変換完了: {converted_file}")
+        debug_print(f"XLS→XLSX変換完了: {converted_file}")
     
     try:
-        converter = ExcelToMarkdownConverter(processing_file, output_dir=args.output_dir, debug_mode=args.debug, shape_metadata=args.shape_metadata)
+        converter = ExcelToMarkdownConverter(
+            processing_file, 
+            output_dir=args.output_dir, 
+            debug_mode=args.debug, 
+            shape_metadata=args.shape_metadata,
+            output_format=args.format
+        )
         output_file = converter.convert()
-        debug_print("\n✅ 変換完了!")
-        debug_print(f"📄 出力ファイル: {output_file}")
-        debug_print(f"🖼️  画像フォルダ: {converter.images_dir}")
+        debug_print("\n変換完了!")
+        debug_print(f"出力ファイル: {output_file}")
+        debug_print(f"画像フォルダ: {converter.images_dir}")
         
     except Exception as e:
-        debug_print(f"❌ 変換エラー: {e}")
+        debug_print(f"変換エラー: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
@@ -10476,9 +10616,9 @@ def main():
             try:
                 if converted_temp_dir.exists() and converted_temp_dir.name.startswith('xls2md_conversion_'):
                     shutil.rmtree(converted_temp_dir)
-                    debug_print(f"🗑️  一時ディレクトリを削除: {converted_temp_dir}")
+                    debug_print(f"一時ディレクトリを削除: {converted_temp_dir}")
             except Exception as cleanup_error:
-                debug_print(f"⚠️  一時ファイル削除に失敗: {cleanup_error}")
+                debug_print(f"一時ファイル削除に失敗: {cleanup_error}")
 
 
 if __name__ == "__main__":

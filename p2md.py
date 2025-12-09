@@ -76,12 +76,13 @@ def debug_print(*args, **kwargs):
         print(*args, **kwargs)
 
 class PowerPointToMarkdownConverter:
-    def __init__(self, pptx_file_path: str, output_dir=None):
+    def __init__(self, pptx_file_path: str, output_dir=None, output_format='png'):
         """コンバーター初期化
         
         Args:
             pptx_file_path: 変換するPowerPointファイルのパス（.pptまたは.pptx）
             output_dir: 出力ディレクトリ（省略時は./output）
+            output_format: 出力画像形式 ('png' または 'svg')
         """
         self.original_file = pptx_file_path
         self.base_name = Path(pptx_file_path).stem
@@ -114,6 +115,14 @@ class PowerPointToMarkdownConverter:
         self.markdown_lines = []
         self.image_counter = 0
         self.slide_counter = 0
+        self.output_format = output_format.lower() if output_format else 'png'
+        
+        # 出力形式の検証
+        if self.output_format not in ('png', 'svg'):
+            print(f"[WARNING] 不明な出力形式 '{output_format}'。'png'を使用します。")
+            self.output_format = 'png'
+        
+        print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
     
     def convert(self) -> str:
         """メイン変換処理"""
@@ -651,18 +660,21 @@ class PowerPointToMarkdownConverter:
             if not pdf_path:
                 return
             
-            # PDFから該当ページ（スライド）をPNGに変換
+            # PDFから該当ページ（スライド）を画像に変換
             self.image_counter += 1
-            image_filename = f"{self.base_name}_slide_{slide_idx:03d}.png"
+            ext = self.output_format
+            image_filename = f"{self.base_name}_slide_{slide_idx:03d}.{ext}"
             image_path = os.path.join(self.images_dir, image_filename)
             
-            # PDFの該当ページ（スライドインデックスは0から始まる）をPNGに変換
-            if self._convert_pdf_page_to_png(pdf_path, slide_idx - 1, image_path):
+            # PDFの該当ページ（スライドインデックスは0から始まる）を画像に変換
+            success, actual_path = self._convert_pdf_page_to_image(pdf_path, slide_idx - 1, image_path)
+            if success:
                 # Markdownに追加
-                encoded_filename = urllib.parse.quote(image_filename)
+                actual_filename = os.path.basename(actual_path)
+                encoded_filename = urllib.parse.quote(actual_filename)
                 self.markdown_lines.append(f"![スライド {slide_idx}](images/{encoded_filename})")
                 self.markdown_lines.append("")
-                print(f"[SUCCESS] スライド全体画像化: {image_filename}")
+                print(f"[SUCCESS] スライド全体画像化: {actual_filename}")
             
         except Exception as e:
             print(f"[ERROR] スライド画像化エラー: {e}")
@@ -762,6 +774,63 @@ class PowerPointToMarkdownConverter:
             traceback.print_exc()
             return False
     
+    def _convert_pdf_page_to_svg(self, pdf_path: str, page_index: int, output_path: str) -> bool:
+        """PDFの特定ページをSVGに変換（PyMuPDF使用）
+        
+        Args:
+            pdf_path: PDFファイルのパス
+            page_index: ページインデックス（0から始まる）
+            output_path: 出力SVGファイルのパス
+            
+        Returns:
+            bool: 変換成功時True
+        """
+        try:
+            debug_print(f"[DEBUG] PyMuPDFでPDF→SVG変換実行 (ページ {page_index})...")
+            
+            doc = fitz.open(pdf_path)
+            if page_index >= len(doc):
+                print(f"[ERROR] ページ{page_index}が存在しません（全{len(doc)}ページ）")
+                doc.close()
+                return False
+            
+            page = doc[page_index]
+            
+            # SVGとして出力
+            svg_content = page.get_svg_image()
+            doc.close()
+            
+            # SVGファイルに書き込み
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(svg_content)
+            
+            print(f"[INFO] SVG変換完了: {output_path}")
+            return True
+                
+        except Exception as e:
+            print(f"[ERROR] SVG変換エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _convert_pdf_page_to_image(self, pdf_path: str, page_index: int, output_path: str) -> Tuple[bool, str]:
+        """PDFの特定ページを画像に変換（出力形式に応じてPNGまたはSVG）
+        
+        Args:
+            pdf_path: PDFファイルのパス
+            page_index: ページインデックス（0から始まる）
+            output_path: 出力ファイルのパス（PNG形式で指定）
+            
+        Returns:
+            Tuple[bool, str]: (変換成功フラグ, 実際の出力パス)
+        """
+        if self.output_format == 'svg':
+            # SVG出力の場合は拡張子を変更
+            svg_path = output_path.replace('.png', '.svg')
+            return self._convert_pdf_page_to_svg(pdf_path, page_index, svg_path), svg_path
+        else:
+            return self._convert_pdf_page_to_png(pdf_path, page_index, output_path), output_path
+    
     def cleanup(self):
         """一時ファイルをクリーンアップ"""
         if hasattr(self, '_temp_pdf_dir') and os.path.exists(self._temp_pdf_dir):
@@ -843,6 +912,8 @@ def main():
     parser.add_argument('pptx_file', help='変換するPowerPointファイル（.pptまたは.pptx）')
     parser.add_argument('-o', '--output-dir', type=str,
                        help='出力ディレクトリを指定（デフォルト: ./output）')
+    parser.add_argument('--format', choices=['png', 'svg'], default='png',
+                       help='出力画像形式を指定（デフォルト: png）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力')
     
@@ -862,15 +933,16 @@ def main():
     try:
         converter = PowerPointToMarkdownConverter(
             args.pptx_file,
-            output_dir=args.output_dir
+            output_dir=args.output_dir,
+            output_format=args.format
         )
         output_file = converter.convert()
-        print("\n✅ 変換完了!")
-        print(f"📄 出力ファイル: {output_file}")
-        print(f"🖼️  画像フォルダ: {converter.images_dir}")
+        print("\n変換完了!")
+        print(f"出力ファイル: {output_file}")
+        print(f"画像フォルダ: {converter.images_dir}")
         
     except Exception as e:
-        print(f"❌ 変換エラー: {e}")
+        print(f"変換エラー: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
