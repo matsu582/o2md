@@ -1808,13 +1808,16 @@ class WordToMarkdownConverter:
         return '.png'  # デフォルト
     
     def _convert_vector_image(self, image_data: bytes, original_path: str) -> Optional[str]:
-        """ベクター画像をPNGに変換"""
+        """ベクター画像を画像に変換（出力形式に応じてPNGまたはSVG）"""
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=Path(original_path).suffix) as temp_file:
                 temp_file.write(image_data)
                 temp_path = temp_file.name
             
-            output_path = original_path.replace('.emf', '.png').replace('.wmf', '.png')
+            # 出力形式に応じて拡張子を決定
+            fmt = getattr(self, 'output_format', 'png')
+            ext = '.svg' if fmt == 'svg' else '.png'
+            output_path = original_path.replace('.emf', ext).replace('.wmf', ext)
             
             if self._convert_with_libreoffice(temp_path, output_path):
                 os.unlink(temp_path)
@@ -1833,7 +1836,7 @@ class WordToMarkdownConverter:
             return original_path
 
     def _convert_with_libreoffice(self, input_path: str, output_path: str) -> bool:
-        """LibreOfficeを使用してベクター画像を変換"""
+        """LibreOfficeを使用してベクター画像を変換（出力形式に応じてPNGまたはSVG）"""
         temp_dir = None
         try:
             temp_dir = tempfile.mkdtemp()
@@ -1855,28 +1858,38 @@ class WordToMarkdownConverter:
                     break
             
             if pdf_path and os.path.exists(pdf_path):
-                pdf_doc = fitz.open(pdf_path)
-                page = pdf_doc[0]
+                # 出力形式を判定（拡張子から）
+                fmt = 'svg' if output_path.endswith('.svg') else 'png'
                 
-                mat = fitz.Matrix(300 / 72, 300 / 72)
-                pix = page.get_pixmap(matrix=mat, alpha=False)
-                
-                from PIL import Image
-                if pix.alpha:
-                    img = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
-                    bg = Image.new("RGB", img.size, (255, 255, 255))
-                    bg.paste(img, mask=img.split()[3])
+                if fmt == 'svg':
+                    # SVG出力
+                    if self._convert_pdf_to_svg(pdf_path, output_path):
+                        print(f"[SUCCESS] ベクター画像変換完了（LibreOffice→PDF→SVG）: {output_path}")
+                        return True
                 else:
-                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                
-                pdf_doc.close()
-                
-                img = self._trim_white_margins(img)
-                img.save(output_path, "PNG")
-                
-                if os.path.exists(output_path):
-                    print(f"[SUCCESS] ベクター画像変換完了（LibreOffice→PDF→PNG）: {output_path}")
-                    return True
+                    # PNG出力（既存の処理）
+                    pdf_doc = fitz.open(pdf_path)
+                    page = pdf_doc[0]
+                    
+                    mat = fitz.Matrix(300 / 72, 300 / 72)
+                    pix = page.get_pixmap(matrix=mat, alpha=False)
+                    
+                    from PIL import Image
+                    if pix.alpha:
+                        img = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
+                        bg = Image.new("RGB", img.size, (255, 255, 255))
+                        bg.paste(img, mask=img.split()[3])
+                    else:
+                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    
+                    pdf_doc.close()
+                    
+                    img = self._trim_white_margins(img)
+                    img.save(output_path, "PNG")
+                    
+                    if os.path.exists(output_path):
+                        print(f"[SUCCESS] ベクター画像変換完了（LibreOffice→PDF→PNG）: {output_path}")
+                        return True
             
             return False
             
