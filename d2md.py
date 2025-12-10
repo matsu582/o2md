@@ -2063,7 +2063,7 @@ def main():
                        help='出力ディレクトリを指定（デフォルト: 実行ディレクトリ）')
     parser.add_argument('--shape-metadata', action='store_true',
                        help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
-    parser.add_argument('--format', choices=['png', 'svg'], default='png',
+    parser.add_argument('--format', choices=['png', 'svg'], default='svg',
                        help='出力画像形式を指定（デフォルト: png）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力')

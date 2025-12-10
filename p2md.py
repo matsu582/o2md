@@ -912,7 +912,7 @@ def main():
     parser.add_argument('pptx_file', help='変換するPowerPointファイル（.pptまたは.pptx）')
     parser.add_argument('-o', '--output-dir', type=str,
                        help='出力ディレクトリを指定（デフォルト: ./output）')
-    parser.add_argument('--format', choices=['png', 'svg'], default='png',
+    parser.add_argument('--format', choices=['png', 'svg'], default='svg',
                        help='出力画像形式を指定（デフォルト: png）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力')
