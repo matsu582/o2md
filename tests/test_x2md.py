@@ -28,13 +28,9 @@ class TestExcelToMarkdownConverter:
         """テスト用のサンプルExcelファイルのパスを返す"""
         input_dir = Path(__file__).parent.parent / "input_files"
         files = {
-            'simple': input_dir / "Book1.xlsx",
-            'one_sheet': input_dir / "one_sheet_.xlsx",
-            'two_sheet': input_dir / "tow_sheet_.xlsx",
-            'three_sheet': input_dir / "three_sheet_.xlsx",
-            'five_sheet': input_dir / "five_sheet_.xlsx",
-            'six_sheet': input_dir / "six_sheet_.xlsx",
-            'complex': input_dir / "SurportManagerAPI.xlsx",
+            'simple': input_dir / "simple_data.xlsx",
+            'multi_sheet': input_dir / "multi_sheet_sample.xlsx",
+            'table': input_dir / "table_sample.xlsx",
         }
         
         existing_files = {k: str(v) for k, v in files.items() if v.exists()}
@@ -91,7 +87,7 @@ class TestExcelToMarkdownConverter:
     def test_simple_excel_conversion(self, sample_excel_files, temp_output_dir):
         """シンプルなExcelファイルの変換をテスト"""
         if 'simple' not in sample_excel_files:
-            pytest.skip("Book1.xlsxが存在しません")
+            pytest.skip("simple_data.xlsxが存在しません")
         
         converter = ExcelToMarkdownConverter(
             sample_excel_files['simple'],
@@ -109,13 +105,10 @@ class TestExcelToMarkdownConverter:
 
     def test_multi_sheet_conversion(self, sample_excel_files, temp_output_dir):
         """複数シートを持つExcelファイルの変換をテスト"""
-        multi_sheet_files = [k for k in ['two_sheet', 'three_sheet', 'five_sheet'] 
-                            if k in sample_excel_files]
-        
-        if not multi_sheet_files:
+        if 'multi_sheet' not in sample_excel_files:
             pytest.skip("複数シートのテストファイルが存在しません")
         
-        excel_file = sample_excel_files[multi_sheet_files[0]]
+        excel_file = sample_excel_files['multi_sheet']
         converter = ExcelToMarkdownConverter(
             excel_file,
             output_dir=temp_output_dir
@@ -268,7 +261,7 @@ class TestDataRangeDetection:
     def sample_excel_file(self):
         """テスト用のサンプルExcelファイル"""
         input_dir = Path(__file__).parent.parent / "input_files"
-        excel_file = input_dir / "Book1.xlsx"
+        excel_file = input_dir / "simple_data.xlsx"
         if excel_file.exists():
             return str(excel_file)
         else:
@@ -310,7 +303,7 @@ class TestEdgeCases:
     def test_sanitize_filename(self, temp_output_dir):
         """ファイル名サニタイズ機能をテスト"""
         input_dir = Path(__file__).parent.parent / "input_files"
-        excel_file = input_dir / "Book1.xlsx"
+        excel_file = input_dir / "simple_data.xlsx"
         
         if not excel_file.exists():
             pytest.skip("テスト用ファイルが存在しません")
@@ -351,7 +344,7 @@ class TestLoggingList:
     def test_logging_list_append(self, temp_output_dir):
         """_LoggingListのappendメソッドをテスト"""
         input_dir = Path(__file__).parent.parent / "input_files"
-        excel_file = input_dir / "Book1.xlsx"
+        excel_file = input_dir / "simple_data.xlsx"
         
         if not excel_file.exists():
             pytest.skip("テスト用ファイルが存在しません")
