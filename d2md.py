@@ -915,9 +915,10 @@ class WordToMarkdownConverter:
         """段落内の画像を処理"""
         
         # Word図形キャンバスがある場合は複合図形として処理
+        # 処理が行われた場合のみ早期終了、そうでなければ通常の画像処理にフォールバック
         if self._has_word_processing_canvas(paragraph):
-            self._process_composite_figure(paragraph)
-            return
+            if self._process_composite_figure(paragraph):
+                return
         
         # 段落内のRunを調べて画像があるかチェック
         for run in paragraph.runs:
@@ -1118,6 +1119,10 @@ class WordToMarkdownConverter:
         段落単位で図形を分類し、以下のルールで処理:
         1. wpg/wpcがある段落では、グループのみを処理（個別wspは無視）
         2. wspのみの段落では、すべてのdrawingを1つの画像にまとめる
+        3. pic（通常の画像）がある段落では、段落グループ化をスキップ
+        
+        Returns:
+            bool: 処理が行われた場合はTrue、スキップした場合はFalse
         """
         try:
             print("[INFO] 複合図形を処理中...")
@@ -1125,13 +1130,22 @@ class WordToMarkdownConverter:
             # Drawing要素を取得
             drawings = paragraph._element.xpath('.//w:drawing')
             if not drawings:
-                return
+                return False
             
             # Drawing要素を分類
             canvas_drawings = []  # wpc/wpgを含むdrawing
             shape_only_drawings = []  # wspのみを含むdrawing
+            has_picture = False  # pic（通常の画像）があるかどうか
             
             for drawing in drawings:
+                # pic（通常の画像）をチェック - blip参照を持つ画像
+                pic_elements = drawing.xpath('.//*[local-name()="pic"]')
+                blip_elements = drawing.xpath('.//*[local-name()="blip"]')
+                if pic_elements or blip_elements:
+                    has_picture = True
+                    debug_print("[DEBUG] 段落内にpic（通常の画像）を検出")
+                    continue
+                
                 # Word Processing Canvas (wpc) をチェック
                 canvas_elements = drawing.xpath('.//*[local-name()="wpc"]')
                 if canvas_elements:
@@ -1151,13 +1165,21 @@ class WordToMarkdownConverter:
             
             # wpc/wpgがある場合は、それらのみを処理（個別wspは無視）
             if canvas_drawings:
+                processed = False
                 for drawing, element, element_type in canvas_drawings:
                     print(f"[INFO] Word Processing {element_type.upper()} として処理")
                     if self._process_canvas_as_vector(element, drawing):
                         print("[SUCCESS] ベクター処理成功")
+                        processed = True
                     else:
                         print("[ERROR] ベクター処理失敗")
-                return
+                return processed
+            
+            # pic（通常の画像）がある段落では、段落グループ化をスキップ
+            # 通常の画像処理ロジックに任せる
+            if has_picture:
+                debug_print("[INFO] 段落内にpic（通常の画像）があるため、段落グループ化をスキップ")
+                return False
             
             # wspのみの段落では、すべてのdrawingを1つの画像にまとめる
             if shape_only_drawings:
@@ -1166,18 +1188,25 @@ class WordToMarkdownConverter:
                     print("[INFO] 単一のWord Processing Shape として処理")
                     if self._process_shape_as_vector(None, shape_only_drawings[0]):
                         print("[SUCCESS] 個別図形ベクター処理成功")
+                        return True
                     else:
                         print("[ERROR] 個別図形ベクター処理失敗")
+                        return False
                 else:
                     # 複数の場合は1つの画像にまとめる
                     print(f"[INFO] {len(shape_only_drawings)}個の個別図形を1つの画像にまとめて処理")
                     if self._process_shape_cluster_as_vector(shape_only_drawings):
                         print("[SUCCESS] 図形クラスターベクター処理成功")
+                        return True
                     else:
                         print("[ERROR] 図形クラスターベクター処理失敗")
+                        return False
+            
+            return False
             
         except Exception as e:
             print(f"[ERROR] 複合図形処理エラー: {e}")
+            return False
     
     def _process_shape_as_vector(self, shape_element, drawing_element):
         """個別のWord図形をベクター画像として処理"""
