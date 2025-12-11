@@ -839,13 +839,13 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             # 実行毎のディスク上マーカーを削除; デバッグトレースのみを保持。
             debug_print(f"[DEBUG][_reorder_entry_marker] sheet={sheet.title}")
             max_row = sheet.max_row
-            # avoid creating the per-sheet emitted rows set here; only the
-            # canonical emitter should mutate _sheet_emitted_rows via helpers.
+            # ここでシートごとの出力済み行セットを作成しない。
+            # 正規エミッタのみがヘルパーを通じて_sheet_emitted_rowsを変更すべき。
             emitted = self._sheet_emitted_rows.get(sheet.title, set())
             # マッピングを構築: 行 -> 画像ファイル名のリスト（_sheet_shape_imagesから）
             img_map = {}
             pairs = self._sheet_shape_images.get(sheet.title, []) or []
-            # pairs may be either list of filenames or list of (row, filename)
+            # pairsはファイル名のリストまたは(row, filename)のリストの可能性
             normalized_pairs = []
             for item in pairs:
                 if isinstance(item, (list, tuple)) and len(item) >= 2:
@@ -855,7 +855,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                         r = 1
                     normalized_pairs.append((r, item[1]))
                 else:
-                    # treat as filename with start_row=1
+                    # start_row=1のファイル名として扱う
                     normalized_pairs.append((1, str(item)))
             # normalized_pairsから代表的なstart_rowを直接使用し、
             # 出力が元のExcel行順序に従うようにします。これにより
@@ -1068,23 +1068,23 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                     deferred_tables = self._sheet_deferred_tables.get(sheet.title, []) if hasattr(self, '_sheet_deferred_tables') else []
                     for entry in deferred_tables:
                         try:
-                            # deferred_tables entries may be (anchor, table_data, src_rows)
-                            # or (anchor, table_data, src_rows, meta). Normalize both.
+                            # deferred_tablesエントリは(anchor, table_data, src_rows)
+                            # または(anchor, table_data, src_rows, meta)の可能性。両方を正規化。
                             if isinstance(entry, (list, tuple)) and len(entry) >= 3:
                                 anchor_row = entry[0]
                                 t_data = entry[1]
                                 src_rows = entry[2]
                                 meta = entry[3] if len(entry) >= 4 else None
                             else:
-                                # unexpected shape: skip
+                                # 予期しない形状: スキップ
                                 continue
-                            # use order 0.5 to place tables after text at same row
+                            # 同じ行のテキストの後にテーブルを配置するため順序0.5を使用
                             events_emit.append((int(anchor_row) if anchor_row else 1, 0.5, 'table', (t_data, src_rows, meta)))
                         except (ValueError, TypeError):
                             try:
                                 events_emit.append((int(anchor_row) if anchor_row else 1, 0.5, 'table', (t_data, src_rows, meta)))
                             except (ValueError, TypeError):
-                                # give up on this entry
+                                # このエントリを諦める
                                 continue
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
@@ -1111,7 +1111,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                 src_rows = entry[2]
                                 meta = entry[3] if len(entry) >= 4 else None
                             else:
-                                # unexpected shape: try best-effort unpack
+                                # 予期しない形状: ベストエフォートで展開を試行
                                 try:
                                     anchor_row = entry[0]
                                 except Exception:
@@ -1133,7 +1133,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                             table_src_rows.add(int(rr))
                                             added_any = True
                                         except (ValueError, TypeError):
-                                            # skip non-int-like entries
+                                            # 整数でないエントリをスキップ
                                             continue
                                 except (ValueError, TypeError) as e:
                                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
@@ -1154,13 +1154,13 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                         if cand not in table_src_rows:
                                             has_text = False
                                             try:
-                                                # texts_by_row was built earlier in this scope
+                                                # texts_by_rowはこのスコープで先に構築済み
                                                 if isinstance(texts_by_row, dict) and texts_by_row.get(cand):
                                                     has_text = True
                                             except Exception:
                                                 has_text = False
                                             if not has_text:
-                                                # fallback: inspect sheet for any non-empty cell in the first 60 cols
+                                                # フォールバック: 最初の60列で非空セルを検査
                                                 try:
                                                     for cc in range(1, min(60, sheet.max_column) + 1):
                                                         v = sheet.cell(cand, cc).value
@@ -1204,7 +1204,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                     # 避けるため、同じソース行のフリーテキストをスキップします。
                                     continue
                             except (ValueError, TypeError):
-                                # on error, be conservative and skip the text
+                                # エラー時は保守的にテキストをスキップ
                                 continue
                             filtered.append((r, order, kind, payload))
                         events_emit = filtered
@@ -1268,7 +1268,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                         if kind == 'text':
                             events_log.append((int(r), order, 'text', payload))
                         elif kind == 'table':
-                            # payload is (table_data, src_rows, meta)
+                            # payloadは(table_data, src_rows, meta)
                             try:
                                 tdata = payload[0]
                                 rows_count = len(tdata) if isinstance(tdata, list) else 0
@@ -1320,7 +1320,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                             if kind == 'text':
                                 print(f"  [LOG] text @{row}: {payload}")
                             elif kind == 'table':
-                                # payload may be (table_data, src_rows, meta)
+                                # payloadは(table_data, src_rows, meta)の可能性
                                 tdata = None
                                 src_rows = None
                                 meta = None
@@ -1338,10 +1338,10 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                     print(f"  [LOG] table @{row} title: {title} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
                                 else:
                                     print(f"  [LOG] table @{row} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
-                            else:  # image
+                            else:  # 画像
                                 print(f"  [LOG] image @{row}: {payload}")
                         except (ValueError, TypeError):
-                            # be robust in diagnostic pass; do not raise
+                            # 診断パスでは堅牢に; 例外を発生させない
                             print(f"  [LOG] event @{row} kind={kind} (payload unstable)")
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
@@ -1371,7 +1371,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                 debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     elif kind == 'table':
                         try:
-                            # payload may be either (table_data, src_rows) or
+                            # payloadは(table_data, src_rows)または
                             # (table_data, src_rows, meta). Normalize both shapes.
                             table_data = None
                             src_rows = None
@@ -1383,10 +1383,10 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                     elif len(payload) >= 3:
                                         table_data, src_rows, meta = payload[0], payload[1], payload[2]
                                     else:
-                                        # unexpected small shape
+                                        # 予期しない小さな形状
                                         table_data = payload[0] if len(payload) >= 1 else None
                                 else:
-                                    # unexpected: treat whole payload as table_data
+                                    # 予期しない: payload全体をtable_dataとして扱う
                                     table_data = payload
                             except Exception:
                                 table_data = payload
@@ -1442,20 +1442,20 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                             # 正規出力: テーブルを出力しマッピングを記録
                             try:
                                 if table_data is not None:
-                                    # call output which will use guarded helpers
+                                    # ガード付きヘルパーを使用する出力を呼び出す
                                     self._output_markdown_table(table_data, source_rows=src_rows, sheet_title=sheet.title)
                                     self.markdown_lines.append("")
                             except Exception:
                                 if table_data is not None:
                                     self._output_markdown_table(table_data)
 
-                            # mark source rows as emitted for pruning logic
+                            # プルーニングロジック用にソース行を出力済みとしてマーク
                             if src_rows:
                                 for rr in src_rows:
                                     self._mark_emitted_row(sheet.title, rr)
                         except (ValueError, TypeError) as e:
                             debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                    else:  # image
+                    else:  # 画像
                         img_fn = payload
                         debug_print(f"[DEBUG][_emit_image] row={row} image={img_fn} >> ")
                         ref = f"images/{img_fn}"
@@ -1503,7 +1503,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                             print(f"[WARNING] 図形メタデータ追加失敗: {e}")
                             self.markdown_lines.append(md)
                             self.markdown_lines.append("")
-                        # record authoritative mapping only via helper
+                        # ヘルパーを通じてのみ正式なマッピングを記録
                         try:
                             md_idx = len(self.markdown_lines) - 2
                             self._mark_sheet_map(sheet.title, row, md_idx)
@@ -1559,7 +1559,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             # このシートの延期テーブルをクリア（既に出力済み）
             if hasattr(self, '_sheet_deferred_tables') and sheet.title in self._sheet_deferred_tables:
                 del self._sheet_deferred_tables[sheet.title]
-            # final sorted-events fallback removed: no additional logging here.
+            # 最終ソートイベントフォールバック削除: ここでは追加ログなし
         except Exception as _exc:
             # デバッグ: 簡略化フローが失敗した理由を確認するため例外情報を出力
             debug_print(f"[DEBUG][_reorder_exception] sheet={sheet.title} exc={_exc!r}")
@@ -1630,7 +1630,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                     pruned_table.append(row)
                     pruned_src.append(src)
                 else:
-                    # debug: note that this source row was removed due to prior authoritative emission
+                    # デバッグ: このソース行は以前の正式な出力により削除された
                     debug_print(f"[TRACE][_prune_emitted_rows_removed] sheet={sheet_title} removed_src_row={src}")
             except (ValueError, TypeError):
                 pruned_table.append(row)
@@ -1789,7 +1789,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
 
             return frac >= adjusted_threshold
 
-        # table_regionsを保持するものと重複により除外するものに分割
+        # table_regionsを保持するものと重複で除外するものに分割
         kept_table_regions = []
         excluded_table_regions = []
         for tr in table_regions:
@@ -1900,7 +1900,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         # 除外されたテーブル領域（描画と重複）がある場合、行テキストを収集するが、
         # 他のプレーンテキストとマージするまで実際の出力を遅延させ、
         # 最終出力がシートの厳密な行順序を保持するようにする。
-        excluded_blocks = []  # list of (start_row, end_row, [(row, text), ...])
+        excluded_blocks = []  # (start_row, end_row, [(row, text), ...])のリスト
         excluded_end_rows = set()
         if 'excluded_table_regions' in locals() and excluded_table_regions:
             for excl in excluded_table_regions:
@@ -1909,7 +1909,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                     srow, erow, sc, ec = excl
                     lines = []
                     for rr in range(srow, erow + 1):
-                        # collect row text
+                        # 行テキストを収集
                         row_texts = []
                         for col_num in range(sc, ec + 1):
                             if rr <= sheet.max_row and col_num <= sheet.max_column:
@@ -1923,7 +1923,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                     if lines:
                         excluded_blocks.append((srow, erow, lines))
                         excluded_end_rows.add(erow)
-                        # mark rows as processed so they are not re-collected later
+                        # 後で再収集されないよう行を処理済みとしてマーク
                         # 除外された領域内で実際にテキストをキャプチャした場合のみマーク。
                         # テキストがキャプチャされなかった場合（例：関連テキストが
                         # 除外された列の外側にある場合）、行をマークせず、
@@ -1935,7 +1935,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
 
         # プレーンテキスト領域を先に走査して収集する
         # 変更点: プレーン判定でTrueにならない場合でも、非空の行を"説明文"として出力するフォールバックを追加
-        plain_texts = []  # list of (row_num, text)
+        plain_texts = []  # (row_num, text)のリスト
         for row_num in range(min_row, max_row + 1):
             if row_num in processed_rows:
                 continue
@@ -1960,18 +1960,18 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             else:
                 # フォールバック: 非表形式として出力する候補に含める
                 plain_texts.append((row_num, line))
-            # NOTE: Do NOT mark the row as processed here. Previously we
-            # added the row immediately which prevented the subsequent
-            # implicit-table detection from seeing contiguous multi-column
-            # runs (candidate_rows became empty). We defer marking until
-            # after implicit-table detection and actual emission.
+            # 注意: ここで行を処理済みとしてマークしない。以前は
+            # 行を即座に追加していたため、後続の
+            # 暗黙テーブル検出が連続した複数列の
+            # 実行を見ることができなかった（candidate_rowsが空になった）。
+            # 暗黙テーブル検出と実際の出力後までマークを延期。
 
         # プレーンテキストはシート上の行順でそのまま出力する。
         # plain_texts（processed_rowsにない行）を収集し、
         # 先に収集したexcluded_blocksとマージし、行番号でソートして
         # 最終出力がシートの上から下への順序に従うようにする。
         # plain_texts は (row_num, line) のリストなので行番号でソートしておく。
-        # merge excluded block lines into plain_texts container
+        # 除外ブロック行をplain_textsコンテナにマージ
         merged_texts = []
         for (srow, erow, lines) in excluded_blocks:
             for (r, txt) in lines:
@@ -1999,13 +1999,13 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         # 明らかに表形式である場合（例：2列以上の非空列を持つ多くの行）を回復。
         try:
             candidate_rows = [r for r in range(min_row, max_row + 1) if r not in processed_rows]
-            # map row -> list of non-empty column indices
+            # 行 -> 非空列インデックスのリストをマッピング
             row_cols = {}
             for r in candidate_rows:
                 cols = [c for c in range(min_col, max_col + 1) if r <= sheet.max_row and c <= sheet.max_column and sheet.cell(r, c).value is not None and str(sheet.cell(r, c).value).strip()]
                 row_cols[r] = cols
 
-            # find contiguous runs where each row has at least 2 non-empty cols
+            # 各行が少なくとも2つの非空列を持つ連続した実行を検索
             runs = []
             cur_run = []
             for r in candidate_rows:
@@ -2106,17 +2106,17 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             for (r, txt, is_excl_end) in merged_texts:
                 debug_print(f"[DEBUG] merged_texts出力: 行{r}, text='{txt[:50]}...' (is_excl_end={is_excl_end})")
                 self._emit_free_text(sheet, r, txt)
-                # if this row is the end of an excluded block, append a blank line
-                # and mark emitted rows ONLY during the canonical emission pass.
+                # この行が除外ブロックの終端の場合、空行を追加
+                # 正規出力パス中のみ出力済み行をマーク
                 if is_excl_end and getattr(self, '_in_canonical_emit', False):
                     self.markdown_lines.append("")
-                    # map the end_row to the blank line index and mark emitted rows
+                    # end_rowを空行インデックスにマッピングし出力済み行をマーク
                     try:
                         self._mark_sheet_map(sheet.title, r, len(self.markdown_lines) - 1)
                     except (ValueError, TypeError) as e:
                         debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     try:
-                        # mark all rows in the corresponding excluded block as emitted
+                        # 対応する除外ブロック内のすべての行を出力済みとしてマーク
                         for (srow, erow, lines) in excluded_blocks:
                             if erow == r:
                                 for rr in range(srow, erow + 1):
@@ -2179,7 +2179,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             # 正規出力時のみセパレータを追加し、出力済み行をマーク
             if getattr(self, '_in_canonical_emit', False):
                 self.markdown_lines.append("")  # 空行を追加
-                # map the end_row to the blank line index and mark emitted rows (helper already registered normalized texts)
+                # end_rowを空行インデックスにマッピングし出力済み行をマーク (helper already registered normalized texts)
                 try:
                     self._mark_sheet_map(sheet.title, end_row, len(self.markdown_lines) - 1)
                 except Exception as e:
@@ -2217,7 +2217,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 if text.strip():
                     src_row = start_row + i
                     emitted = self._emit_free_text(sheet, src_row, text)
-                    # emittedがFalseの場合、重複としてスキップされた
+                    # emittedがFalseの場合は重複としてスキップ
             # 空行を追加し、最後のソース行を空白セパレータインデックスにマップ
             # 正規出力時のみ実際に追加し、出力済み行をマーク
             if getattr(self, '_in_canonical_emit', False):
@@ -2226,7 +2226,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                     self._mark_sheet_map(sheet.title, end_row, len(self.markdown_lines) - 1)
                 except Exception as e:
                     pass  # XML解析エラーは無視
-                # mark all emitted rows
+                # すべての出力済み行をマーク
                 try:
                     for r in range(start_row, end_row + 1):
                         self._mark_emitted_row(sheet.title, r)
@@ -2313,7 +2313,7 @@ def main():
         debug_print("エラー: .xlsxまたは.xls形式のファイルを指定してください。")
         sys.exit(1)
     
-    # XLSファイルの場合は事前にXLSXに変換
+    # XLSファイルの場合は事前にXLSXへ変換
     processing_file = args.excel_file
     converted_file = None
     converted_temp_dir = None
