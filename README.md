@@ -1,6 +1,6 @@
 # Office to Markdown Converter (o2md)
 
-Excel、Word、PowerPointファイルを自動判定してMarkdownに変換するツール
+Excel、Word、PowerPointファイルを自動判定して**それっぽい**Markdownに変換するツール
 
 ## 概要
 
