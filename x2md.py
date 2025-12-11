@@ -165,7 +165,7 @@ class ExcelToMarkdownConverter:
         self._last_iso_preserved_ids = set()
 
     def _clear_sheet_state(self, sheet_name: str):
-        """Clear state for a specific sheet."""
+        """特定のシートの状態をクリアする"""
         for dict_attr in ['_cell_to_md_index', '_sheet_shape_images', '_sheet_shape_next_idx',
                           '_sheet_shape_image_start_rows', '_sheet_deferred_texts',
                           '_sheet_deferred_tables', '_sheet_emitted_texts', '_sheet_emitted_rows',
@@ -177,11 +177,11 @@ class ExcelToMarkdownConverter:
         self._last_iso_preserved_ids.clear()
 
     def _is_canonical_emit(self) -> bool:
-        """Check if currently in canonical emission mode."""
+        """現在正規出力モードかどうかを確認する"""
         return getattr(self, '_in_canonical_emit', False)
 
     def _safe_get_cell_value(self, sheet, row: int, col: int) -> Any:
-        """Safely get cell value, return None if error."""
+        """セル値を安全に取得し、エラー時はNoneを返す"""
         try:
             return sheet.cell(row, col).value
         except Exception:
@@ -283,7 +283,7 @@ class ExcelToMarkdownConverter:
                         cols_with_data += 1
                         break
         
-        # Detect merged cells
+        # 結合セルを検出
         merged_cols = set()
         merged_rows = set()
         for merged_range in sheet.merged_cells.ranges:
@@ -834,7 +834,7 @@ class ExcelToMarkdownConverter:
             # 代入前に参照されてUnboundLocalErrorを引き起こしていました。
             insert_pos = len(self.markdown_lines)
             max_head_scan = min(12, sheet.max_row)
-            data_range = self._get_data_range(sheet)  # Initialize here to avoid UnboundLocalError
+            data_range = self._get_data_range(sheet)  # UnboundLocalErrorを避けるためここで初期化
             head_rows = []
             # max_head_scanまで各行をスキャンし、行毎に結合された非空
             # セルテキストを収集します。ここではmarkdownを出力しません --- 出力
@@ -1212,21 +1212,21 @@ class ExcelToMarkdownConverter:
             # その後行でソートし順番に出力します。同一行の場合、テキストを
             # 画像の前に出力し、画像がそのアンカーテキストの直後に表示されるようにします。
             try:
-                # Build the list of events that will actually be emitted.
-                # We avoid mutating the logging list while constructing the
-                # emission list to prevent double-maintenance. Instead, build
-                # `events_emit` first and then synthesize `events_log` from the
-                # existing sheet mappings plus the finalized emit list.
+                # 実際に出力されるイベントのリストを構築します。
+                # 二重メンテナンスを防ぐため、出力リストの構築中はロギングリストを
+                # 変更しません。代わりに、まず`events_emit`を構築し、その後
+                # 既存のシートマッピングと最終的な出力リストから`events_log`を
+                # 合成します。
                 events_emit = []
 
-                # Add freshly-collected text rows that haven't been emitted yet
+                # まだ出力されていない新しく収集されたテキスト行を追加
                 for r, txt in texts_by_row.items():
                     try:
                         events_emit.append((int(r), 0, 'text', txt))
                     except (ValueError, TypeError):
                         events_emit.append((1, 0, 'text', txt))
 
-                # Add image events from the normalized_pairs (order 1)
+                # normalized_pairsから画像イベントを追加（順序1）
                 for start_row, fn in normalized_pairs:
                     try:
                         r = int(start_row) if start_row is not None else 1
@@ -1234,7 +1234,7 @@ class ExcelToMarkdownConverter:
                         r = 1
                     events_emit.append((r, 1, 'image', str(fn)))
 
-                # Add deferred table emissions as events (order 0.5 so they come after text but before images)
+                # 延期されたテーブル出力をイベントとして追加（順序0.5でテキストの後、画像の前に配置）
                 try:
                     deferred_tables = self._sheet_deferred_tables.get(sheet.title, []) if hasattr(self, '_sheet_deferred_tables') else []
                     for entry in deferred_tables:
@@ -1260,7 +1260,7 @@ class ExcelToMarkdownConverter:
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-                # Remove text events that overlap with deferred table source rows
+                # 延期されたテーブルのソース行と重複するテキストイベントを削除
                 try:
                     table_src_rows = set()
                     try:
@@ -1270,7 +1270,7 @@ class ExcelToMarkdownConverter:
 
                     for entry in deferred_tables:
                         try:
-                            # Normalize possible entry shapes: (anchor, table_data, src_rows) or
+                            # 可能なエントリ形状を正規化: (anchor, table_data, src_rows) または
                             # (anchor, table_data, src_rows, meta)
                             anchor_row = None
                             src_rows = None
@@ -1293,7 +1293,7 @@ class ExcelToMarkdownConverter:
                                     tdata = None
                                 src_rows = None
 
-                            # If explicit src_rows provided, sanitize and add them
+                            # 明示的なsrc_rowsが提供された場合、サニタイズして追加
                             added_any = False
                             if src_rows:
                                 try:
@@ -1309,11 +1309,11 @@ class ExcelToMarkdownConverter:
                                 except (ValueError, TypeError) as e:
                                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-                            # Heuristic: sometimes src_rows can be off-by-one and
-                            # the actual table contains one additional row immediately
-                            # after the listed src_rows. If the next row (max+1)
-                            # contains text (we collected texts_by_row earlier) or
-                            # has non-empty cells, conservatively include it.
+                            # ヒューリスティック: src_rowsが1つずれている場合があり、
+                            # 実際のテーブルにはリストされたsrc_rowsの直後に
+                            # 追加の行が含まれることがあります。次の行（max+1）に
+                            # テキストが含まれている（先にtexts_by_rowで収集済み）か、
+                            # 非空のセルがある場合、保守的にそれを含めます。
                             try:
                                 if added_any:
                                     try:
@@ -1348,19 +1348,19 @@ class ExcelToMarkdownConverter:
                             except (ValueError, TypeError) as e:
                                 debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-                            # Fallback: when no explicit src_rows, but we have an anchor and
-                            # table data, conservatively add the anchor..anchor+len(table)-1
+                            # フォールバック: 明示的なsrc_rowsがないが、アンカーと
+                            # テーブルデータがある場合、保守的にanchor..anchor+len(table)-1を追加
                             if (not added_any) and anchor_row and tdata and isinstance(tdata, list) and len(tdata) > 0:
                                 start = int(anchor_row)
                                 cnt = len(tdata)
                                 for rr in range(start, start + cnt):
                                     table_src_rows.add(int(rr))
 
-                            # If this deferred table carries a detected title (meta.title),
-                            # also treat the table anchor row as overlapping text so any
-                            # free-text on the same row (e.g. the raw title) is suppressed
-                            # because the canonical emitter will output the title via
-                            # the table metadata path.
+                            # この延期されたテーブルが検出されたタイトル（meta.title）を持つ場合、
+                            # テーブルのアンカー行も重複テキストとして扱い、同じ行の
+                            # フリーテキスト（例：生のタイトル）を抑制します。
+                            # これは正規の出力器がテーブルメタデータパスを通じて
+                            # タイトルを出力するためです。
                             if meta and isinstance(meta, dict) and meta.get('title') and anchor_row:
                                 table_src_rows.add(int(anchor_row))
                         except (ValueError, TypeError):
@@ -1371,8 +1371,8 @@ class ExcelToMarkdownConverter:
                         for r, order, kind, payload in events_emit:
                             try:
                                 if kind == 'text' and int(r) in table_src_rows:
-                                    # Titles are emitted via table metadata; skip any free-text
-                                    # on the same source rows to avoid duplicate output.
+                                    # タイトルはテーブルメタデータ経由で出力されます。重複出力を
+                                    # 避けるため、同じソース行のフリーテキストをスキップします。
                                     continue
                             except (ValueError, TypeError):
                                 # on error, be conservative and skip the text
@@ -1382,10 +1382,10 @@ class ExcelToMarkdownConverter:
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-                # Sort deterministically by (row, order) and preserve original relative order
+                # (row, order)で決定論的にソートし、元の相対順序を保持
                 events_emit.sort(key=lambda e: (e[0], e[1]))
-                # Log the finalized, sorted emit list for deterministic tracing.
-                # Emit one line per event to make scanning/grabbing rows/kinds easy.
+                # 決定論的トレース用に最終的なソート済み出力リストをログ出力。
+                # スキャン/行/種類の取得を容易にするため、イベントごとに1行出力。
                 try:
                     for e in events_emit:
                         try:
@@ -1395,7 +1395,7 @@ class ExcelToMarkdownConverter:
                         order = e[1]
                         kind = e[2]
                         payload = e[3]
-                        # Build a concise payload summary for readability.
+                        # 可読性のために簡潔なペイロードサマリーを構築。
                         try:
                             if kind == 'table':
                                 tdata, src_rows, meta = payload
@@ -1411,8 +1411,8 @@ class ExcelToMarkdownConverter:
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-                # Now synthesize events_log from the authoritative sheet mapping
-                # (previously-emitted lines) followed by the finalized emit list.
+                # 権威あるシートマッピング（以前に出力された行）と最終的な出力リストから
+                # events_logを合成します。
                 events_log = []
                 try:
                     sheet_map_all = self._cell_to_md_index.get(sheet.title, {})
@@ -1432,8 +1432,8 @@ class ExcelToMarkdownConverter:
                 except (ValueError, TypeError):
                     pass  # データ構造操作失敗は無視
 
-                # Append a logging representation of each event_emit item so
-                # callers can see the full canonical sequence.
+                # 呼び出し元が完全な正規シーケンスを確認できるように、
+                # 各event_emit項目のログ表現を追加します。
                 for r, order, kind, payload in events_emit:
                     try:
                         if kind == 'text':
@@ -1451,14 +1451,14 @@ class ExcelToMarkdownConverter:
                     except (ValueError, TypeError):
                         events_log.append((int(r) if r else 1, order, kind, payload))
 
-                # Ensure deterministic ordering for the log as well
+                # ログの決定論的順序も確保
                 events_log.sort(key=lambda e: (e[0], e[1]))
 
-                # Pre-scan the current in-memory markdown for any already-inserted
-                # image references and mark them as emitted so the canonical
-                # emission pass does not insert duplicates. This handles cases
-                # where an earlier codepath inserted images (insert_images=True)
-                # before the deferred, deterministic emission ran.
+                # 現在のメモリ内markdownを事前スキャンして、既に挿入された
+                # 画像参照を検出し、出力済みとしてマークします。これにより
+                # 正規の出力パスが重複を挿入しないようにします。これは
+                # 延期された決定論的出力が実行される前に、以前のコードパスが
+                # 画像を挿入した（insert_images=True）場合を処理します。
                 try:
                     for ln in list(self.markdown_lines):
                         try:
@@ -1471,21 +1471,21 @@ class ExcelToMarkdownConverter:
                 except Exception as e:
                     print(f"[WARNING] ファイル操作エラー: {e}")
 
-                # Strong debug: always emit events count so we can detect empty/filled
+                # 強力なデバッグ: 空/充填を検出できるように常にイベント数を出力
                 debug_print(f"[DEBUG][_events_sorted] sheet={sheet.title} events_count_emit={len(events_emit)}")
 
-                # Before mutating markdown, emit a canonical, deterministic
-                # logging snapshot derived directly from events_emit. This avoids
-                # maintaining a separate events_log list and ensures the log
-                # matches the actual emission sequence.
+                # markdownを変更する前に、events_emitから直接導出された
+                # 正規の決定論的ログスナップショットを出力します。これにより
+                # 別のevents_logリストを維持する必要がなくなり、ログが
+                # 実際の出力シーケンスと一致することが保証されます。
                 try:
                     debug_print(f"[DEBUG][_sorted_events_block] sheet={sheet.title} events_count={len(events_emit)}")
 
-                    # Diagnostic/log-only pass: emit a deterministic, human-readable
-                    # snapshot of the events_emit sequence for debugging. THIS PASS
-                    # MUST NOT mutate self.markdown_lines or call emission helpers
-                    # that create side-effects (files, mappings). The canonical
-                    # emission loop below is responsible for authoritative writes.
+                    # 診断/ログ専用パス: デバッグ用にevents_emitシーケンスの
+                    # 決定論的で人間が読めるスナップショットを出力します。このパスは
+                    # self.markdown_linesを変更したり、副作用（ファイル、マッピング）を
+                    # 作成する出力ヘルパーを呼び出してはいけません。下の正規の
+                    # 出力ループが権威ある書き込みを担当します。
                     for row, _, kind, payload in events_emit:
                         try:
                             if kind == 'text':
@@ -1517,8 +1517,8 @@ class ExcelToMarkdownConverter:
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-                # Now emit events in deterministic order and record positions.
-                # This mutates self.markdown_lines (canonical output path).
+                # 決定論的順序でイベントを出力し、位置を記録します。
+                # これはself.markdown_linesを変更します（正規の出力パス）。
                 for row, _, kind, payload in events_emit:
                     if kind == 'text':
                         try:
@@ -1526,13 +1526,13 @@ class ExcelToMarkdownConverter:
                         except (ValueError, TypeError):
                             emitted_ok = False
                         if not emitted_ok:
-                            # Best-effort fallback: append escaped/normalized text
+                            # ベストエフォートフォールバック: エスケープ/正規化されたテキストを追加
                             try:
                                 txt = self._escape_angle_brackets(payload) + "  "
                                 debug_print(f"[DEBUG][_emit_fallback] row={row} text={txt} >>")
                                 self.markdown_lines.append(txt)
-                                # Only assign authoritative mappings during canonical pass
-                                # Only record authoritative mappings during canonical pass
+                                # 正規パス中のみ権威あるマッピングを割り当て
+                                # 正規パス中のみ権威あるマッピングを記録
                                 md_idx = len(self.markdown_lines) - 1
                                 self._mark_sheet_map(sheet.title, row, md_idx)
                                 self._mark_emitted_row(sheet.title, row)
@@ -1564,7 +1564,7 @@ class ExcelToMarkdownConverter:
 
                             debug_print(f"[DEBUG][_emit_table] row={row} table_rows={len(table_data) if isinstance(table_data, list) else 0} src_rows={src_rows} meta={meta} >>")
 
-                            # If a title/meta is present, emit it first (canonical pass)
+                            # タイトル/メタが存在する場合、最初に出力（正規パス）
                             try:
                                 title = None
                                 if isinstance(meta, dict):
@@ -1610,7 +1610,7 @@ class ExcelToMarkdownConverter:
                             except Exception as e:
                                 pass  # XML解析エラーは無視
 
-                            # In canonical emission: output table and record mappings
+                            # 正規出力: テーブルを出力しマッピングを記録
                             try:
                                 if table_data is not None:
                                     # call output which will use guarded helpers
@@ -1630,11 +1630,11 @@ class ExcelToMarkdownConverter:
                         img_fn = payload
                         debug_print(f"[DEBUG][_emit_image] row={row} image={img_fn} >> ")
                         ref = f"images/{img_fn}"
-                        # Gate duplicate images deterministically
+                        # 重複画像を決定論的にゲート
                         if ref in self._emitted_images or img_fn in self._emitted_images:
                             continue
                         md = f"![{sheet.title}](images/{img_fn})"
-                        # Insert image with metadata using helper method
+                        # ヘルパーメソッドを使用してメタデータ付き画像を挿入
                         try:
                             if self.shape_metadata:
                                 filter_ids = self._image_shape_ids.get(img_fn)
@@ -1681,27 +1681,27 @@ class ExcelToMarkdownConverter:
                         except (ValueError, TypeError):
                             debug_print(f"WARNING self._mark_sheet_map({sheet.title}, {row}, {md_idx})")
                         try:
-                            # Mark emitted_images regardless to prevent duplicates; it is safe
-                            # because emitted_images only tracks filenames and does not affect pruning.
+                            # 重複を防ぐためemitted_imagesを常にマーク。これは安全です。
+                            # emitted_imagesはファイル名のみを追跡し、プルーニングに影響しないため。
                             self._mark_image_emitted(img_fn)
                         except (ValueError, TypeError):
                             debug_print(f"WARNING self._mark_image_emitted({img_fn})")
             except (ValueError, TypeError):
-                # If anything goes wrong in the simplified flow, fall back to the
-                # original complex insertion path by re-raising and letting the
-                # outer exception handler perform a conservative insertion later.
+                # 簡略化フローで何か問題が発生した場合、再スローして
+                # 外部の例外ハンドラが後で保守的な挿入を実行できるように
+                # 元の複雑な挿入パスにフォールバックします。
                 raise
 
-            # We intentionally skip the subsequent anchor-based/fallback insertion
-            # pass because the canonical events emission above already placed
-            # images deterministically and recorded them in self._emitted_images.
-            # This avoids double-insertions caused by multiple insertion codepaths.
-            # Exit canonical emission mode so future calls to _emit_free_text
-            # will defer again until the next canonical pass.
+            # 上記の正規イベント出力が既に画像を決定論的に配置し、
+            # self._emitted_imagesに記録したため、後続のアンカーベース/
+            # フォールバック挿入パスを意図的にスキップします。
+            # これにより複数の挿入コードパスによる二重挿入を回避します。
+            # 正規出力モードを終了し、将来の_emit_free_text呼び出しが
+            # 次の正規パスまで再び延期されるようにします。
             self._in_canonical_emit = False
 
-            # Finally, ensure any images with start_row out of bounds or start_row==1
-            # that weren't inserted are appended at end (safety net).
+            # 最後に、start_rowが範囲外またはstart_row==1で挿入されなかった
+            # 画像が末尾に追加されることを確認（セーフティネット）。
             remaining_imgs = []
             for r, imgs in img_map.items():
                 if r > max_row or r < 1:
@@ -1767,13 +1767,13 @@ class ExcelToMarkdownConverter:
         except (ValueError, TypeError):
             emitted = set()
 
-        # 記録された出力済み行のうち、実際にmarkdown
-        # mapping. Some code paths may have added rows to the emitted set
-        # conservatively (or erroneously) before a canonical write occurred.
-        # Only prune rows that both appear in _sheet_emitted_rows AND have a
-        # concrete mapping in _cell_to_md_index (i.e. were written to
-        # self.markdown_lines). This avoids removing rows that were merely
-        # registered but not yet emitted.
+        # 記録された出力済み行のうち、実際にmarkdownマッピングを持つもののみを
+        # 刈り込みます。一部のコードパスは正規の書き込みが発生する前に、
+        # 保守的に（または誤って）行を出力済みセットに追加した可能性があります。
+        # _sheet_emitted_rowsに存在し、かつ_cell_to_md_indexに具体的な
+        # マッピングを持つ（つまりself.markdown_linesに書き込まれた）行のみを
+        # 刈り込みます。これにより、登録されただけでまだ出力されていない行が
+        # 削除されることを回避します。
         try:
             sheet_map = self._cell_to_md_index.get(sheet_title, {}) if hasattr(self, '_cell_to_md_index') else {}
         except Exception:
@@ -1795,9 +1795,8 @@ class ExcelToMarkdownConverter:
         for row, src in zip(table_data, source_rows):
             try:
                 # ソース行が実際にmarkdownに出力された場合のみ刈り込み
-                # (present in authoritative_emitted). Rows that are only listed in
-                # the broader emitted set but lack a markdown mapping will be
-                # preserved here.
+                # （authoritative_emittedに存在）。より広いemittedセットにのみ
+                # リストされ、markdownマッピングを持たない行はここで保持されます。
                 if src not in authoritative_emitted:
                     pruned_table.append(row)
                     pruned_src.append(src)
@@ -1871,30 +1870,30 @@ class ExcelToMarkdownConverter:
             debug_print(f"[DEBUG][_process_sheet_images_entry] sheet={sheet.title} insert_index={insert_index} insert_images={insert_images}")
             debug_print(f"[DEBUG][_process_sheet_images_entry] sheet={sheet.title} insert_index={insert_index} insert_images={insert_images}")
             # 重複した重い処理を防止: 図形が既に生成されている場合
-            # for this sheet earlier in the run, skip processing to avoid
-            # repeatedly creating tmp_xlsx and invoking external converters.
+            # このシートの実行中に既に生成されている場合、処理をスキップして
+            # tmp_xlsxの繰り返し作成と外部コンバーターの呼び出しを回避します。
             if sheet.title in self._sheet_shapes_generated:
                 debug_print(f"[DEBUG][_process_sheet_images] sheet={sheet.title} shapes already generated; skipping repeated processing")
                 return False
             images_found = False
             # 描画図形（ベクトル図形、コネクタなど）を確認
-            # of whether embedded images were found. This ensures that sheets with
-            # only vector shapes (no embedded images) are still processed correctly.
+            # 埋め込み画像が見つかったかどうかに関係なく確認します。これにより
+            # ベクトル図形のみ（埋め込み画像なし）のシートも正しく処理されます。
             # Phase 2-D修正: images_found=Trueの時だけでなく、常に描画図形を確認
-            if True:  # Always execute isolated-group processing for drawing shapes
+            if True:  # 描画図形の分離グループ処理を常に実行
                     debug_print(f"[DEBUG] {len(sheet._images)} 個の埋め込み画像が検出されました。描画要素を調査中...")
                     # 埋め込み画像が1つ（またはゼロ）の場合、
-                    # use that image directly rather than performing costly
-                    # isolated-group clustering and trimmed workbook rendering.
+                    # コストのかかるisolated-groupクラスタリングとトリミングされた
+                    # ワークブックレンダリングを実行する代わりに、その画像を直接使用します。
                     # これによりtmp_xlsx/.fixed.xlsxの作成と
-                    # external converters when unnecessary (common for simple
-                    # sheets like input_files/three_sheet_.xlsx).
+                    # 不要な場合の外部コンバーターを回避します（input_files/three_sheet_.xlsx
+                    # のような単純なシートで一般的）。
                     try:
                         emb_count = len(getattr(sheet, '_images', []) or [])
                         # 埋め込み画像がちょうど1つ存在する場合、その画像を優先
-                        # directly and skip heavy isolated-group/fallback rendering.
-                        # これはクラスタリングを避けるユーザーのリクエストを尊重
-                        # a single embedded graphic is present.
+                        # 直接使用し、重いisolated-group/フォールバックレンダリングをスキップします。
+                        # これは単一の埋め込みグラフィックが存在する場合に
+                        # クラスタリングを避けるユーザーのリクエストを尊重します。
                         if emb_count == 1:
                             debug_print(f"[DEBUG][_process_sheet_images_shortcircuit] sheet={sheet.title} single embedded image detected; using embedded image without clustering")
                             for image in sheet._images:
@@ -1915,7 +1914,7 @@ class ExcelToMarkdownConverter:
                                 pass  # データ構造操作失敗は無視
                             return True
                         # 埋め込み画像がゼロの場合、描画チェックにフォールスルー
-                        # and possibly run isolated-group or full-sheet fallback.
+                        # し、必要に応じてisolated-groupまたはフルシートフォールバックを実行します。
                     except (ValueError, TypeError):
                         pass  # データ構造操作失敗は無視
                     try:
@@ -2041,10 +2040,10 @@ class ExcelToMarkdownConverter:
                                                 debug_print(f"[DEBUG] clustering debug_info: {debug_info}")
                                                 
                                                 # 各クラスタを分離グループとしてレンダリング
-                                                # Using stable _render_sheet_isolated_group method (not v2)
-                                                # v2 is experimental and incomplete (missing connector cosmetic processing)
+                                                # 安定した_render_sheet_isolated_groupメソッドを使用（v2ではない）
+                                                # v2は実験的で不完全（コネクタの外観処理が欠落）
                                                 isolated_produced = False
-                                                isolated_images = []  # List of (filename, row) tuples
+                                                isolated_images = []  # (filename, row)タプルのリスト
                                                 debug_print(f"[DEBUG] Starting to render {len(clusters)} clusters for sheet '{sheet.title}'")
                                                 for idx, cluster in enumerate(clusters):
                                                     if len(cluster) > 0:
@@ -2103,17 +2102,17 @@ class ExcelToMarkdownConverter:
                                         # end of drawing parsing block
                     except (ValueError, TypeError) as e:
                         debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
-            # If no parser-detected images were found, attempt a conservative
-            # fallback: render the sheet to PDF via LibreOffice and rasterize the
-            # corresponding PDF page to PNG using ImageMagick. This captures vector
-            # shapes and drawings that openpyxl doesn't expose as images.
+            # パーサーで検出された画像が見つからなかった場合、保守的な
+            # フォールバックを試行: LibreOffice経由でシートをPDFにレンダリングし、
+            # ImageMagickを使用して対応するPDFページをPNGにラスタライズします。
+            # これによりopenpyxlが画像として公開しないベクトル図形や描画をキャプチャします。
             if hasattr(sheet, '_images') and sheet._images:
                 print(f"[INFO] シート '{sheet.title}' 内の画像を処理中...")
                 images_found = True
-                # 埋め込みメディアからのマッピングを事前に設定（描画relsから）
-                # to cNvPr ids so that when we process embedded images below we
-                # can decide whether to suppress them if a clustered/group
-                # render already preserved the same drawing anchor.
+                    # 埋め込みメディアからのマッピングを事前に設定（描画relsから）
+                    # cNvPr IDへのマッピングを行い、下で埋め込み画像を処理する際に
+                    # クラスタ化/グループレンダリングが既に同じ描画アンカーを
+                    # 保持している場合に抑制するかどうかを決定できるようにします。
                 try:
                     z = zipfile.ZipFile(self.excel_file)
                     sheet_index = self.workbook.sheetnames.index(sheet.title)
@@ -2341,31 +2340,31 @@ class ExcelToMarkdownConverter:
 
             if not images_found:
                 debug_print(f"[DEBUG] イメージが見つかりませんでした。")
-                # Avoid rendering sheets that contain only cell text; only fallback
-                # when the sheet has drawing elements.
+                # セルテキストのみを含むシートのレンダリングを回避。シートに
+                # 描画要素がある場合のみフォールバックします。
                 if not self._sheet_has_drawings(sheet):
                     return False
-                # Before launching the heavy PDF->PNG pipeline, try to extract
-                # drawing bounding boxes from the drawing XML. If XML parsing
-                # returns an empty list it is likely there are no visible shapes
-                # to render and we should skip producing a full-page image.
+                # 重いPDF->PNGパイプラインを起動する前に、描画XMLから
+                # 描画バウンディングボックスの抽出を試みます。XML解析が
+                # 空のリストを返した場合、レンダリングする可視図形がない可能性が高く、
+                # フルページ画像の生成をスキップする必要があります。
                 shapes = None
                 try:
                     shapes = self._extract_drawing_shapes(sheet)
                 except Exception:
                     shapes = None
 
-                # If extraction succeeded and returned an empty list, skip fallback
-                # to avoid inserting a full-sheet raster when no drawable elements
-                # are present. If extraction errored (shapes is None) or returned
-                # non-empty, proceed with rendering as before.
+                # 抽出が成功し空のリストを返した場合、描画可能な要素がない時に
+                # フルシートラスターを挿入することを避けるためフォールバックをスキップします。
+                # 抽出がエラー（shapesがNone）または非空を返した場合、
+                # 以前と同様にレンダリングを続行します。
                 if shapes == []:
                     print(f"[INFO] シート '{sheet.title}' に描画要素が見つかりませんでした（XML解析結果）。フォールバックレンダリングをスキップします。")
                     return False
 
                 print(f"[INFO] シート '{sheet.title}' に検出されたラスタ画像がありません。フォールバックレンダリングを試行します...")
                 try:
-                    # Generate sheet-level shape images (will be saved into images_dir)
+                    # シートレベルの図形画像を生成（images_dirに保存されます）
                     rendered = self._render_sheet_fallback(sheet, insert_index=insert_index, insert_images=insert_images)
                     if rendered:
                         # mark shapes as generated for this sheet
@@ -2373,13 +2372,13 @@ class ExcelToMarkdownConverter:
                         # initialize next index
                         if sheet.title not in self._sheet_shape_next_idx:
                             self._sheet_shape_next_idx[sheet.title] = 0
-                        # If shapes were created, insert them at insert_index (table end) in markdown.
+                        # 図形が作成された場合、markdownのinsert_index（テーブル末尾）に挿入します。
                         try:
                             imgs = self._sheet_shape_images.get(sheet.title, [])
                             if imgs:
-                                # Prefer to insert shapes based on a row-ordered merge so
-                                # text and images appear in the final Markdown in the
-                                # same top-to-bottom order as the Excel sheet.
+                                # 行順序のマージに基づいて図形を挿入することを優先し、
+                                # テキストと画像が最終的なMarkdownでExcelシートと
+                                # 同じ上から下への順序で表示されるようにします。
                                 imgs_by_row = {}
                                 assigned = self._sheet_shape_images.get(sheet.title, []) or []
 
@@ -2399,14 +2398,14 @@ class ExcelToMarkdownConverter:
                                         except (ValueError, TypeError) as e:
                                             debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-                                # allow small adjustments: if a representative start_row
-                                # is near an existing textual anchor (within SNAP_DIST rows),
-                                # snap the image to that anchor to keep group images
-                                # adjacent to nearby headers. Prefer earlier rows on ties.
+                                # 小さな調整を許可: 代表的なstart_rowが既存のテキストアンカーの
+                                # 近く（SNAP_DIST行以内）にある場合、グループ画像を近くの
+                                # ヘッダーに隣接させるためにその画像をそのアンカーにスナップします。
+                                # 同点の場合は早い行を優先します。
                                 SNAP_DIST = getattr(self, '_anchor_snap_distance', 3)
-                                # Ensure we have a sheet->md mapping available for snapping
+                                # スナッピング用のsheet->mdマッピングが利用可能であることを確認
                                 sheet_map = self._cell_to_md_index.get(sheet.title, {}) or {}
-                                # precompute sorted text rows for snapping
+                                # スナッピング用にソートされたテキスト行を事前計算
                                 try:
                                     text_rows_sorted = sorted(list(sheet_map.keys()))
                                 except Exception:
@@ -2415,7 +2414,7 @@ class ExcelToMarkdownConverter:
                                     adjusted_row = r
                                     try:
                                         if text_rows_sorted:
-                                            # find nearest textual row and snap if within SNAP_DIST
+                                            # 最も近いテキスト行を見つけ、SNAP_DIST以内ならスナップ
                                             nearest = min(text_rows_sorted, key=lambda tr: (abs(tr - r), tr))
                                             if abs(nearest - r) <= SNAP_DIST:
                                                 adjusted_row = nearest
@@ -2423,28 +2422,28 @@ class ExcelToMarkdownConverter:
                                         pass  # データ構造操作失敗は無視
                                     imgs_by_row.setdefault(adjusted_row, []).append(img)
 
-                                # get existing text->md mapping for this sheet
-                                # sheet_map is already defined above; reuse it (or fetch fresh)
+                                # このシートの既存のtext->mdマッピングを取得
+                                # sheet_mapは上で既に定義済み。再利用（または新規取得）
                                 sheet_map = self._cell_to_md_index.get(sheet.title, {}) or sheet_map
 
-                                # NOTE: legacy code used a persisted start_map (self._sheet_shape_image_start_rows)
-                                # to reassign image insertion rows across runs. That logic could collapse
-                                # multiple distinct group images into a single insertion bucket. Prefer the
-                                # freshly computed representative start_row values stored in normalized
-                                # and do NOT consult persisted start_map here.
+                                # 注: レガシーコードは永続化されたstart_map（self._sheet_shape_image_start_rows）を
+                                # 使用して実行間で画像挿入行を再割り当てしていました。そのロジックは
+                                # 複数の異なるグループ画像を単一の挿入バケットに折りたたむ可能性がありました。
+                                # normalizedに格納された新しく計算された代表的なstart_row値を優先し、
+                                # ここでは永続化されたstart_mapを参照しません。
                                 if hasattr(self, '_sheet_shape_image_start_rows') and self._sheet_shape_image_start_rows.get(sheet.title):
-                                    # clear any persisted hints for this sheet to avoid overriding
-                                    # the computed start_row pairs we just generated.
+                                    # このシートの永続化されたヒントをクリアして、
+                                    # 生成したばかりの計算されたstart_rowペアを上書きしないようにします。
                                     try:
                                         # log for diagnostics but do not use it
                                         debug_print(f"[DEBUG] Ignoring persisted start_map for sheet={sheet.title}")
                                     except (ValueError, TypeError) as e:
                                         debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-                                # determine a sensible set of rows to iterate (union of text rows and image rows)
+                                # 反復する適切な行セットを決定（テキスト行と画像行の和集合）
                                 rows = sorted(set(list(sheet_map.keys()) + list(imgs_by_row.keys())))
 
-                                # Diagnostic debug: emit the current mapping of source rows -> markdown indices
+                                # 診断デバッグ: ソース行 -> markdownインデックスの現在のマッピングを出力
                                 try:
                                     debug_print(f"[DEBUG][_img_insertion_debug] sheet={sheet.title} sheet_map={sheet_map}")
                                     debug_print(f"[DEBUG][_img_insertion_debug] imgs_by_row={imgs_by_row}")
@@ -2452,35 +2451,34 @@ class ExcelToMarkdownConverter:
                                 except (ValueError, TypeError) as e:
                                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-                                # base insertion index when no mapped text exists for a row
+                                # 行にマップされたテキストが存在しない場合の基本挿入インデックス
                                 insert_base = insert_index if insert_index is not None else len(self.markdown_lines)
 
-                                # precompute sorted text rows for nearest-neighbor mapping
+                                # 最近傍マッピング用にソートされたテキスト行を事前計算
                                 text_rows_sorted = sorted(list(sheet_map.keys()))
 
-                                # For each image row, choose an insertion point that best reflects
-                                # the representative start_row: prefer the first textual row >= start_row
-                                # (so the image appears just before that text block). If no such row
-                                # exists, prefer the last textual row < start_row (insert after it).
-                                # If the sheet has no textual mapping at all, fall back to inserting
-                                # sequentially at insert_base in ascending start_row order. This keeps
-                                # group images at their representative start_rows without collapsing
-                                # distinct groups into the same insertion bucket unless they truly
-                                # map to the same textual anchor.
-                                # Collect final insertion mapping for verification: md_index -> [filenames]
+                                # 各画像行について、代表的なstart_rowを最もよく反映する挿入ポイントを選択:
+                                # start_row以上の最初のテキスト行を優先（画像がそのテキストブロックの
+                                # 直前に表示されるように）。そのような行が存在しない場合、
+                                # start_row未満の最後のテキスト行を優先（その後に挿入）。
+                                # シートにテキストマッピングがまったくない場合、start_rowの昇順で
+                                # insert_baseに順次挿入するフォールバック。これにより、グループ画像は
+                                # 同じテキストアンカーに真にマップされない限り、同じ挿入バケットに
+                                # 折りたたまれることなく、代表的なstart_rowに保持されます。
+                                # 検証用の最終挿入マッピングを収集: md_index -> [filenames]
                                 md_index_map = {}
                                 for row_num in sorted(imgs_by_row.keys()):
                                     imgs_for_row = imgs_by_row.get(row_num, [])
-                                    # determine candidate text anchor
+                                    # 候補テキストアンカーを決定
                                     md_pos = None
                                     if row_num in sheet_map:
                                         md_pos = sheet_map.get(row_num)
                                         insert_at = md_pos + 1 if md_pos is not None else insert_base
                                     else:
-                                        # Choose the nearest textual anchor to this image start_row.
-                                        # Using the nearest anchor avoids binding to a distant
-                                        # later block (e.g. row26) when the logical anchor is
-                                        # the nearby header (e.g. row3). Prefer earlier rows on ties.
+                                        # この画像のstart_rowに最も近いテキストアンカーを選択。
+                                        # 最も近いアンカーを使用することで、論理的なアンカーが
+                                        # 近くのヘッダー（例: row3）である場合に、遠い後のブロック
+                                        # （例: row26）にバインドすることを回避します。同点の場合は早い行を優先。
                                         if text_rows_sorted:
                                             try:
                                                 nearest = min(text_rows_sorted, key=lambda tr: (abs(tr - row_num), tr))
@@ -2489,7 +2487,7 @@ class ExcelToMarkdownConverter:
                                             except Exception:
                                                 insert_at = insert_base
                                         else:
-                                            # no textual mapping; append sequentially at insert_base
+                                            # テキストマッピングなし。insert_baseに順次追加
                                             insert_at = insert_base
 
                                     # insert_atをクランプ to valid markdown range
@@ -2498,27 +2496,26 @@ class ExcelToMarkdownConverter:
                                     if insert_at > len(self.markdown_lines):
                                         insert_at = len(self.markdown_lines)
 
-                                    # Ensure we do not insert images before the textual anchor
-                                    # we specifically chose for this group (md_pos). The
-                                    # previous global clamp (using the latest anchor index)
-                                    # could move images after unrelated later anchors,
-                                    # causing images to appear far from their logical
-                                    # textual context. Only enforce a minimum relative to
-                                    # the anchor we used for this image (if any).
+                                    # このグループ用に特に選択したテキストアンカー（md_pos）の前に
+                                    # 画像を挿入しないようにします。以前のグローバルクランプ
+                                    # （最新のアンカーインデックスを使用）は、無関係な後のアンカーの
+                                    # 後に画像を移動させ、画像が論理的なテキストコンテキストから
+                                    # 遠く離れて表示される可能性がありました。この画像に使用した
+                                    # アンカー（存在する場合）に対してのみ最小値を強制します。
                                     try:
                                         if md_pos is not None:
-                                            # md_pos is the markdown index of the chosen anchor
-                                            # insert_at should be at least one line after it.
+                                            # md_posは選択されたアンカーのmarkdownインデックス
+                                            # insert_atは少なくともその1行後である必要があります。
                                             if insert_at <= md_pos:
                                                 insert_at = md_pos + 1
                                     except Exception:
-                                        # conservative fallback: leave insert_at unchanged
+                                        # 保守的なフォールバック: insert_atを変更しない
                                         pass
 
-                                    # insert each image for this row, preserving original relative order
+                                    # この行の各画像を挿入し、元の相対順序を保持
                                     for img in imgs_for_row:
                                         if not insert_images:
-                                            # if caller requested deferred insertion, just record mapping
+                                            # 呼び出し元が遅延挿入を要求した場合、マッピングを記録するだけ
                                             md_index_map.setdefault(row_num, []).append(img)
                                             continue
                                         ref = f"images/{img}"
@@ -2526,7 +2523,7 @@ class ExcelToMarkdownConverter:
                                         if already:
                                             continue
                                         md = f"![{sheet.title}](images/{img})"
-                                        # Use helper to insert and mark emitted
+                                        # ヘルパーを使用して挿入し、出力済みとしてマーク
                                         try:
                                             new_at = self._insert_markdown_image(insert_at, md, img, sheet=sheet)
                                             md_index_map.setdefault(insert_at, []).append(img)
@@ -2540,41 +2537,41 @@ class ExcelToMarkdownConverter:
                                             except Exception as e:
                                                 print(f"[WARNING] ファイル操作エラー: {e}")
 
-                                    # if we inserted at the global insert_base position, advance it
+                                    # グローバルinsert_base位置に挿入した場合、それを進める
                                     if (row_num not in sheet_map) and insert_at > insert_base:
                                         insert_base = insert_at
 
-                                    # update sheet_map offsets for subsequent insertions that rely on it
+                                    # それに依存する後続の挿入のためにsheet_mapオフセットを更新
                                     if sheet_map and md_pos is not None:
-                                        # Only update existing sheet_map offsets during canonical emission
+                                        # 正規出力時のみ既存のsheet_mapオフセットを更新
                                         if getattr(self, '_in_canonical_emit', False):
                                             for k, v in list(sheet_map.items()):
                                                 try:
                                                     if v > (md_pos if md_pos is not None else -1):
-                                                        # don't update the anchor we just used
+                                                        # 使用したばかりのアンカーは更新しない
                                                         if k != (row_num if row_num in sheet_map else None):
-                                                            # update mapping to new index
+                                                            # マッピングを新しいインデックスに更新
                                                             self._mark_sheet_map(sheet.title, k, v + 2 * len(imgs_for_row))
                                                 except Exception as e:
                                                     pass  # XML解析エラーは無視
                                         else:
                                             debug_print(f"[TRACE] Skipping sheet_map offset updates in non-canonical pass for sheet={sheet.title}")
 
-                                # mark all images used
+                                # すべての画像を使用済みとしてマーク
                                 self._sheet_shape_next_idx[sheet.title] = len(imgs)
-                                # Log final insertion mapping for this sheet (if any)
+                                # このシートの最終挿入マッピングをログ出力（存在する場合）
                                 try:
                                         if md_index_map:
                                             print(f"[INFO][_final_img_map] sheet={sheet.title} insert_mappings={md_index_map}")
                                 except (ValueError, TypeError) as e:
                                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                         except (ValueError, TypeError):
-                            # fallback to previous simple insertion if anything fails
+                            # 何か失敗した場合、以前の単純な挿入にフォールバック
                             try:
                                 if insert_index is not None:
                                     insert_at = insert_index
                                     for item in imgs:
-                                        # item may be a filename (str) or a (row, filename) pair
+                                        # itemはファイル名（str）または(row, filename)ペアの可能性あり
                                         if isinstance(item, (list, tuple)) and len(item) >= 2:
                                             img_fn = str(item[1])
                                         else:
@@ -2597,7 +2594,7 @@ class ExcelToMarkdownConverter:
                                                 self._mark_image_emitted(img_fn)
                                             except Exception as e:
                                                 print(f"[WARNING] ファイル操作エラー: {e}")
-                                    # record next idx as number of saved images (filenames)
+                                    # 保存された画像（ファイル名）の数として次のインデックスを記録
                                     try:
                                         self._sheet_shape_next_idx[sheet.title] = len(imgs)
                                     except Exception as e:
@@ -2621,23 +2618,24 @@ class ExcelToMarkdownConverter:
             
             # 画像データを取得
             image_data = None
-            # Prefer image._data() when available. However, openpyxl may have
-            # created a ZipExtFile which becomes invalid if its parent ZipFile
-            # was closed; PIL then raises ValueError: I/O operation on closed file.
-            # Detect that and fall back to reading the media bytes directly from
-            # the XLSX zip by using image.ref (path or basename) when possible.
+            # 利用可能な場合はimage._data()を優先。ただし、openpyxlは
+            # 親のZipFileが閉じられると無効になるZipExtFileを作成している
+            # 可能性があります。PILはValueError: I/O operation on closed fileを
+            # 発生させます。それを検出し、可能な場合はimage.ref（パスまたは
+            # ベース名）を使用してXLSX zipからメディアバイトを直接読み取る
+            # フォールバックを行います。
             if hasattr(image, '_data') and callable(getattr(image, '_data')):
                 try:
                     image_data = image._data()
                     debug_print(f"[DEBUG] image._data() succeeded for image #{self.image_counter} on sheet '{sheet_name}'")
                 except ValueError:
-                    # Likely a closed ZipExtFile. Fall through to zip-based fallback.
+                    # 閉じられたZipExtFileの可能性が高い。zipベースのフォールバックにフォールスルー。
                     image_data = None
                 except (ValueError, TypeError):
                     image_data = None
 
             if image_data is None:
-                # Try to load from the workbook ZIP using image.ref if it looks like a path
+                # パスのように見える場合、image.refを使用してワークブックZIPから読み込みを試行
                 try:
                     ref = getattr(image, 'ref', None)
                     if isinstance(ref, bytes):
@@ -2650,11 +2648,11 @@ class ExcelToMarkdownConverter:
                         try:
                             z = zipfile.ZipFile(self.excel_file, 'r')
                             try:
-                                # direct match first
+                                # まず直接一致を試行
                                 if ref_path in z.namelist():
                                     image_data = z.read(ref_path)
                                 else:
-                                    # try to match by basename
+                                    # ベース名で一致を試行
                                     import os as _os
                                     b = _os.path.basename(ref_path)
                                     for nm in z.namelist():
@@ -2682,23 +2680,23 @@ class ExcelToMarkdownConverter:
             
             # ファイル名を生成（安全化）
             safe_sheet_name = self._sanitize_filename(sheet_name)
-            # Use a deterministic filename based on the image bytes so repeated
-            # conversions of the same workbook won't produce new files.
-            # Compute a short SHA1 of the image bytes.
+            # 画像バイトに基づく決定論的なファイル名を使用して、同じワークブックの
+            # 繰り返し変換で新しいファイルが生成されないようにします。
+            # 画像バイトの短いSHA1を計算します。
             try:
                 import hashlib
                 h = hashlib.sha1(image_data).hexdigest()[:8]
                 image_filename = f"{self.base_name}_{safe_sheet_name}_image_{h}{extension}"
             except Exception:
-                # fallback to sheet-level stable name
+                # シートレベルの安定した名前にフォールバック
                 image_filename = f"{self.base_name}_{safe_sheet_name}_image{extension}"
             image_path = os.path.join(self.images_dir, image_filename)
             
             # 画像を保存
-            # If a file with this content-hash already exists, avoid rewriting it.
+            # このコンテンツハッシュを持つファイルが既に存在する場合、再書き込みを回避します。
             try:
                 if os.path.exists(image_path):
-                    # Verify existing file content matches; if so, reuse.
+                    # 既存のファイル内容が一致するか確認。一致する場合は再利用。
                     try:
                         with open(image_path, 'rb') as ef:
                             existing = ef.read()
@@ -2706,7 +2704,7 @@ class ExcelToMarkdownConverter:
                             # reuse
                             debug_print(f"[DEBUG] 既存の画像ファイルを再利用: {image_filename}")
                         else:
-                            # collision unlikely, fallback to unique suffix
+                            # 衝突は稀。一意のサフィックスにフォールバック
                             import time
                             alt = f"_{int(time.time())}"
                             image_filename = f"{self.base_name}_{safe_sheet_name}_image_{h}{alt}{extension}"
@@ -2720,16 +2718,16 @@ class ExcelToMarkdownConverter:
                     with open(image_path, 'wb') as f:
                         f.write(image_data)
             except (OSError, IOError, FileNotFoundError):
-                # last-resort write
+                # 最後の手段として書き込み
                 with open(image_path, 'wb') as f:
                     f.write(image_data)
             
             # 画像位置情報を取得
             position_info = self._get_image_position(image)
             
-            # return the saved image filename (basename). Caller will generate
-            # the markdown using this concrete filename so that links always
-            # point to an existing file on disk.
+            # 保存された画像ファイル名（ベース名）を返します。呼び出し元は
+            # この具体的なファイル名を使用してmarkdownを生成し、リンクが
+            # 常にディスク上の既存ファイルを指すようにします。
             print(f"[SUCCESS] 画像を処理: {image_filename}")
             return os.path.basename(image_filename)
         except Exception as e:
@@ -2756,7 +2754,7 @@ class ExcelToMarkdownConverter:
             if not os.path.isdir(img_dir):
                 return
 
-            # Debug: log image filenames and their SHA256 before building groups
+            # デバッグ: グループ構築前に画像ファイル名とそのSHA256をログ出力
             try:
                 import hashlib as _hashlib
                 debug_print('[DEBUG][_dedupe] listing images and computing sha256 before dedupe:')
@@ -2773,10 +2771,10 @@ class ExcelToMarkdownConverter:
                     except Exception as _e:
                         debug_print(f"[DEBUG][_dedupe] pre-sha {_fn} FAILED: {_e}")
             except (OSError, IOError, FileNotFoundError):
-                # non-fatal; continue with normal dedupe
+                # 致命的ではない。通常の重複排除を続行
                 pass
 
-            # build hash -> [files]
+            # ハッシュ -> [ファイル] を構築
             groups = collections.defaultdict(list)
             for fn in os.listdir(img_dir):
                 fp = os.path.join(img_dir, fn)
@@ -2790,33 +2788,33 @@ class ExcelToMarkdownConverter:
                 except (OSError, IOError, FileNotFoundError):
                     continue
 
-            # For each group with >1 file, choose canonical and update references
+            # 1つ以上のファイルを持つ各グループについて、正規名を選択し参照を更新
             for h, items in groups.items():
                 if len(items) <= 1:
                     continue
-                # choose canonical filename: prefer shortest, then lexicographic
+                # 正規ファイル名を選択: 最短を優先、次に辞書順
                 items_sorted = sorted(items, key=lambda it: (len(it[0]), it[0]))
                 canonical = items_sorted[0][0]
                 duplicate_names = [it[0] for it in items_sorted[1:]]
                 if not duplicate_names:
                     continue
 
-                # Determine whether all files in this hash-group originate from
-                # the same workbook (self.base_name). If not, skip dedupe for
-                # this group to respect the user's requirement that images
-                # from different Excel files be treated as distinct.
+                # このハッシュグループ内のすべてのファイルが同じワークブック
+                # （self.base_name）から発生しているかどうかを判定。そうでない場合、
+                # 異なるExcelファイルからの画像を別々に扱うというユーザーの
+                # 要件を尊重するため、このグループの重複排除をスキップします。
                 try:
                     bases = set([fn.split('_', 1)[0] if '_' in fn else fn for fn, _ in items_sorted])
                     if len(bases) != 1 or (self.base_name not in bases):
                         debug_print(f"[DEBUG][_dedupe] skipping cross-workbook dedupe for hash {h}: bases={bases}")
-                        # Do not remove any files in this group; leave as-is
+                        # このグループのファイルは削除しない。そのまま残す
                         continue
                 except (ValueError, TypeError):
-                    # If any failure determining origin, be conservative and skip
+                    # 発生元の判定に失敗した場合、保守的にスキップ
                     debug_print(f"[DEBUG][_dedupe] skipping dedupe for hash {h} due to error determining origins")
                     continue
 
-                # Update markdown_lines references (only for files belonging to this workbook)
+                # markdown_lines参照を更新（このワークブックに属するファイルのみ）
                 try:
                     import re
                     new_lines = []
@@ -2833,7 +2831,7 @@ class ExcelToMarkdownConverter:
                 except Exception as e:
                     print(f"[WARNING] ファイル操作エラー: {e}")
 
-                # Remove duplicate files (keep canonical)
+                # 重複ファイルを削除（正規ファイルを保持）
                 for dup in duplicate_names:
                     try:
                         p = os.path.join(img_dir, dup)
@@ -2843,7 +2841,7 @@ class ExcelToMarkdownConverter:
                     except (ValueError, TypeError):
                         pass  # ファイル操作失敗は無視
 
-            # Also rebuild emitted images set to reflect final filenames
+            # 最終ファイル名を反映するためにemitted imagesセットも再構築
             try:
                 self._emitted_images = set()
                 for ln in self.markdown_lines:
@@ -3007,19 +3005,19 @@ class ExcelToMarkdownConverter:
         keep_cnvpr_ids: Set[str]
     ) -> Set[str]:
         """
-        Resolve connector references using BFS to determine complete set of anchor IDs to preserve.
+        BFSを使用してコネクタ参照を解決し、保持するアンカーIDの完全なセットを決定します。
         
         Args:
-            drawing_xml: Root element of the drawing XML
-            anchors: List of filtered anchor elements
-            keep_cnvpr_ids: Initial set of cNvPr IDs to keep
+            drawing_xml: 描画XMLのルート要素
+            anchors: フィルタリングされたアンカー要素のリスト
+            keep_cnvpr_ids: 保持するcNvPr IDの初期セット
         
         Returns:
-            Complete set of cNvPr IDs to preserve (including connectors and endpoints)
+            保持するcNvPr IDの完全なセット（コネクタとエンドポイントを含む）
         """
         from collections import deque
         
-        # Build reference mappings
+        # 参照マッピングを構築
         refs = {}
         reverse_refs = {}
         
@@ -3031,7 +3029,7 @@ class ExcelToMarkdownConverter:
             if cid is None:
                 continue
             
-            # Find referenced IDs
+            # 参照されているIDを検索
             rset = set()
             for sub in orig.iter():
                 st = sub.tag.split('}')[-1].lower()
@@ -3044,7 +3042,7 @@ class ExcelToMarkdownConverter:
                 for rid in rset:
                     reverse_refs.setdefault(rid, set()).add(cid)
         
-        # Build row mappings
+        # 行マッピングを構築
         id_to_row = {}
         all_id_to_row = {}
         ns_xdr = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
@@ -3062,7 +3060,7 @@ class ExcelToMarkdownConverter:
                     except (ValueError, TypeError) as e:
                         debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
-        # Fallback mapping from ALL anchors
+        # すべてのアンカーからのフォールバックマッピング
         for orig_an in list(drawing_xml):
             lname2 = orig_an.tag.split('}')[-1].lower()
             if lname2 not in ('twocellanchor', 'onecellanchor'):
@@ -3079,14 +3077,14 @@ class ExcelToMarkdownConverter:
                     except (ValueError, TypeError) as e:
                         debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
         
-        # Determine group's row span
+        # グループの行範囲を決定
         group_rows = set()
         for cid in keep_cnvpr_ids:
             rowval = id_to_row.get(str(cid))
             if rowval is not None:
                 group_rows.add(int(rowval))
         
-        # BFS expansion
+        # BFS展開
         preserve = set(keep_cnvpr_ids)
         q = deque(keep_cnvpr_ids)
         
@@ -3101,7 +3099,7 @@ class ExcelToMarkdownConverter:
                     preserve.add(rev)
                     q.append(rev)
         
-        # Include connector-only anchors on group rows (±1 tolerance)
+        # グループ行のコネクタのみのアンカーを含める（±1の許容範囲）
         for cid in list(all_id_to_row.keys()):
             scid = str(cid)
             if scid in preserve:
@@ -3123,14 +3121,14 @@ class ExcelToMarkdownConverter:
         group_rows: Set[int]
     ) -> None:
         """
-        Prune drawing XML to keep only specified anchors.
+        指定されたアンカーのみを保持するように描画XMLを刈り込みます。
         
         Args:
-            drawing_relpath: Path to the drawing XML file
-            keep_cnvpr_ids: Set of cNvPr IDs to preserve
-            referenced_ids: Set of IDs referenced by connectors
-            cell_range: Optional cell range (s_col, e_col, s_row, e_row)
-            group_rows: Set of row numbers within the group's range
+            drawing_relpath: 描画XMLファイルへのパス
+            keep_cnvpr_ids: 保持するcNvPr IDのセット
+            referenced_ids: コネクタによって参照されるIDのセット
+            cell_range: オプションのセル範囲 (s_col, e_col, s_row, e_row)
+            group_rows: グループの範囲内の行番号のセット
         """
         try:
             def node_contains_referenced_id(n):
@@ -3518,23 +3516,23 @@ class ExcelToMarkdownConverter:
                     pass  # 一時ディレクトリ削除失敗は無視
 
     def _detect_image_format(self, image_data: bytes) -> str:
-        """Detect common image formats from initial bytes and return extension.
+        """先頭バイトから一般的な画像形式を検出し、拡張子を返します。
 
-        Falls back to .png if unknown.
+        不明な場合は.pngにフォールバックします。
         """
         try:
             if not image_data or len(image_data) < 4:
                 return '.png'
-            # JPEG
+            # JPEG形式
             if image_data.startswith(b'\xff\xd8'):
                 return '.jpg'
-            # PNG
+            # PNG形式
             if image_data.startswith(b'\x89PNG'):
                 return '.png'
-            # GIF
+            # GIF形式
             if image_data.startswith(b'GIF87a') or image_data.startswith(b'GIF89a'):
                 return '.gif'
-            # BMP
+            # BMP形式
             if image_data.startswith(b'BM'):
                 return '.bmp'
             return '.png'
@@ -3553,13 +3551,13 @@ class ExcelToMarkdownConverter:
         if s is None:
             return 'image'
         txt = unicodedata.normalize('NFKC', str(s))
-        # replace whitespace with underscore
+        # 空白をアンダースコアに置換
         txt = re.sub(r"\s+", '_', txt)
-        # remove characters that are problematic in filenames
+        # ファイル名で問題となる文字を削除
         txt = re.sub(r'[/\\:*?"<>|]', '', txt)
-        # collapse multiple underscores
+        # 複数のアンダースコアを1つに統合
         txt = re.sub(r'_+', '_', txt)
-        # remove leading/trailing underscores
+        # 先頭/末尾のアンダースコアを削除
         txt = txt.strip('_')
         if not txt:
             return 'image'
@@ -3629,10 +3627,10 @@ class ExcelToMarkdownConverter:
             return None, None
 
     def _compute_sheet_cell_pixel_map(self, sheet, DPI=300, min_cols=None, min_rows=None):
-        """Compute approximate pixel positions for column right-edges and row bottom-edges.
+        """列の右端と行の下端のおおよそのピクセル位置を計算します。
 
-        Returns (col_x, row_y) where col_x[0] == 0 and col_x[i] is the right edge
-        of column i (1-based). row_y similar for rows.
+        col_x[0] == 0 で col_x[i] は列i（1始まり）の右端を返します。
+        row_y も同様に行に対応します。
         
         図形が参照する列・行がシートの max_column/max_row より大きい場合は、
         図形の範囲まで計算を拡張します。
@@ -3660,12 +3658,12 @@ class ExcelToMarkdownConverter:
             from openpyxl.utils import get_column_letter
             for c in range(1, max_col+1):
                 cd = sheet.column_dimensions.get(get_column_letter(c))
-                # Excel column width is in character units. Use a more
-                # accurate conversion based on Microsoft's documented
-                # equation: pixels = floor(((256*W + floor(128/MAX_DIGIT_WIDTH))/256) * MAX_DIGIT_WIDTH)
-                # where MAX_DIGIT_WIDTH approximates the maximum digit width
-                # in pixels for the workbook's default font. We use 7 as a
-                # conservative default (common for Calibri/Arial at default size).
+                # Excelの列幅は文字単位です。Microsoftのドキュメントに基づく
+                # より正確な変換を使用します:
+                # pixels = floor(((256*W + floor(128/MAX_DIGIT_WIDTH))/256) * MAX_DIGIT_WIDTH)
+                # MAX_DIGIT_WIDTHはワークブックのデフォルトフォントでの最大数字幅
+                # （ピクセル単位）を近似します。Calibri/Arialのデフォルトサイズで
+                # 一般的な7を保守的なデフォルト値として使用します。
                 width = getattr(cd, 'width', None) if cd is not None else None
                 if width is None:
                     try:
@@ -3675,20 +3673,21 @@ class ExcelToMarkdownConverter:
                         width = 8.43
                 try:
                     import math
-                    # Compute base pixel width at standard screen DPI (96). Then
-                    # scale to the requested DPI so EMU offsets (which are later
-                    # converted using the target rasterization DPI) align with the
-                    # produced PDF/PNG pixels. This reduces mismatches between
-                    # drawing EMU conversions and column pixel map used elsewhere.
+                    # 標準画面DPI（96）での基本ピクセル幅を計算します。その後、
+                    # 要求されたDPIにスケーリングして、EMUオフセット（後で
+                    # ターゲットラスタライズDPIを使用して変換される）が
+                    # 生成されたPDF/PNGピクセルと一致するようにします。
+                    # これにより、描画EMU変換と他で使用される列ピクセルマップ間の
+                    # 不一致を軽減します。
                     MAX_DIGIT_WIDTH = 7
                     base_px = int(math.floor(((256.0 * float(width) + math.floor(128.0 / MAX_DIGIT_WIDTH)) / 256.0) * MAX_DIGIT_WIDTH))
                     if base_px < 1:
                         base_px = 1
-                    # scale from 96 DPI (typical screen) to target DPI
+                    # 96 DPI（一般的な画面）からターゲットDPIにスケーリング
                     scale = float(DPI) / 96.0 if DPI and DPI > 0 else 1.0
                     px = max(1, int(round(base_px * scale)))
                 except (ValueError, TypeError):
-                    # fallback heuristic, also scale by DPI
+                    # フォールバックヒューリスティック、DPIでもスケーリング
                     try:
                         base = max(1, int(float(width) * 7 + 5))
                         px = max(1, int(round(base * (float(DPI) / 96.0))))
@@ -3706,7 +3705,7 @@ class ExcelToMarkdownConverter:
                         hpts = _units.DEFAULT_ROW_HEIGHT
                     except Exception:
                         hpts = 15
-                # Row heights are in points; convert to pixels at the target DPI
+                # 行の高さはポイント単位。ターゲットDPIでピクセルに変換
                 try:
                     px = max(1, int(float(hpts) * DPI / 72.0))
                 except (ValueError, TypeError):
@@ -3725,17 +3724,17 @@ class ExcelToMarkdownConverter:
             return [0], [0]
 
     def _to_positive(self, value, orig_ext, orig_ch_ext, target_px):
-        """Ensure the EMU extent is positive.
+        """EMU範囲が正であることを確認します。
 
-        Priority for choosing a positive extent:
-        1. keep 'value' if it's already positive
-        2. fall back to orig_ext (if provided and >0)
-        3. fall back to orig_ch_ext (if provided and >0)
-        4. fall back to converting target_px -> EMU (at least 1 px)
-        5. finally return 1 EMU as absolute safe minimum
+        正の範囲を選択する優先順位:
+        1. 'value'が既に正の場合はそれを保持
+        2. orig_ext（提供され、>0の場合）にフォールバック
+        3. orig_ch_ext（提供され、>0の場合）にフォールバック
+        4. target_px -> EMU変換にフォールバック（最低1ピクセル）
+        5. 最終的に絶対安全最小値として1 EMUを返す
 
-        This helper is defensive and avoids raising errors; it always
-        returns an int > 0.
+        このヘルパーは防御的で、エラーを発生させません。
+        常に > 0 の int を返します。
         """
         try:
             v = int(value) if value is not None else 0
@@ -3758,7 +3757,7 @@ class ExcelToMarkdownConverter:
         except (ValueError, TypeError):
             pass  # 型変換失敗は無視
         try:
-            # target_px is in pixels; convert to EMU using object's dpi if available
+            # target_pxはピクセル単位。利用可能な場合はオブジェクトのdpiを使用してEMUに変換
             DPI = int(getattr(self, 'dpi', 300) or 300)
             EMU_PER_INCH = 914400
             emu_per_pixel = EMU_PER_INCH / float(DPI) if DPI and DPI > 0 else EMU_PER_INCH / 300.0
@@ -3768,19 +3767,19 @@ class ExcelToMarkdownConverter:
                 return emu
         except (ValueError, TypeError):
             pass  # 型変換失敗は無視
-        # absolute fallback
+        # 絶対フォールバック
         return 1
 
     def _snap_box_to_cell_bounds(self, box, col_x, row_y, DPI=300):
-        """Snap a pixel box (l,t,r,b) to nearest enclosing cell boundaries using
-        the provided col_x and row_y arrays. Returns integer pixel box.
+        """ピクセルボックス(l,t,r,b)を、提供されたcol_xとrow_y配列を使用して
+        最も近い囲むセル境界にスナップします。整数ピクセルボックスを返します。
         """
         try:
             l, t, r, btm = box
-            # find start column: smallest c such that col_x[c] >= l (allow small tolerance)
-            # tol scales with DPI to preserve previous behavior when DPI differs
+            # 開始列を検索: col_x[c] >= l となる最小のc（小さな許容範囲を許可）
+            # tolはDPIに応じてスケーリングし、DPIが異なる場合の以前の動作を保持
             try:
-                tol = max(1, int(DPI / 300.0 * 3))  # a few pixels tolerance dependent on DPI
+                tol = max(1, int(DPI / 300.0 * 3))  # DPIに依存する数ピクセルの許容範囲
             except (ValueError, TypeError):
                 tol = 3
             start_col = None
@@ -3791,7 +3790,7 @@ class ExcelToMarkdownConverter:
             if start_col is None:
                 start_col = max(1, len(col_x)-1)
 
-            # find end column: smallest c such that col_x[c] >= r (allow small tolerance)
+            # 終了列を検索: col_x[c] >= r となる最小のc（小さな許容範囲を許可）
             end_col = None
             for c in range(1, len(col_x)):
                 if col_x[c] >= r + tol:
@@ -3800,7 +3799,7 @@ class ExcelToMarkdownConverter:
             if end_col is None:
                 end_col = max(1, len(col_x)-1)
 
-            # rows
+            # 行
             start_row = None
             for rr in range(1, len(row_y)):
                 if row_y[rr] >= t - tol:
@@ -3827,11 +3826,11 @@ class ExcelToMarkdownConverter:
             return int(box[0]), int(box[1]), int(box[2]), int(box[3])
 
     def _find_content_bbox(self, pil_image, white_thresh: int = 245):
-        """Find bounding box of non-white content in a PIL Image.
+        """PIL画像内の非白色コンテンツのバウンディングボックスを検索します。
 
-        white_thresh: pixel brightness threshold (0-255). Pixels with all channels
-        >= white_thresh are considered background/white. Returns (l,t,r,b) or None
-        if no content detected.
+        white_thresh: ピクセル輝度閾値（0-255）。すべてのチャンネルが
+        >= white_threshのピクセルは背景/白と見なされます。
+        コンテンツが検出されない場合は(l,t,r,b)またはNoneを返します。
         """
         try:
             if pil_image.mode not in ('RGB', 'RGBA'):
@@ -3853,16 +3852,16 @@ class ExcelToMarkdownConverter:
                         if y > bottom: bottom = y
             if not found:
                 return None
-            # make right/bottom inclusive -> convert to typical crop coords (r+1,b+1)
+            # right/bottomを包含的に -> 一般的なクロップ座標(r+1,b+1)に変換
             return (left, top, right + 1, bottom + 1)
         except Exception:
             return None
 
     def _crop_image_preserving_connectors(self, image_path: str, dpi: int = 300, white_thresh: int = 245):
-        """Open image at image_path, find non-white bbox and crop with padding.
+        """image_pathの画像を開き、非白色のbboxを検索してパディング付きでクロップします。
 
-        Adds small padding (dependent on DPI) to avoid cutting connector/arrow tips.
-        Overwrites the original file with the cropped result.
+        コネクタ/矢印の先端を切り取らないように、小さなパディング（DPIに依存）を追加します。
+        クロップ結果で元のファイルを上書きします。
         """
         try:
             from PIL import Image
@@ -3871,13 +3870,13 @@ class ExcelToMarkdownConverter:
             im = Image.open(image_path)
             bbox = self._find_content_bbox(im, white_thresh=white_thresh)
             if not bbox:
-                # nothing to crop
+                # クロップするものがない
                 im.close()
                 return True
             l, t, r, b = bbox
-            # padding to avoid cutting thin arrow tips; scale with DPI
+            # 細い矢印の先端を切り取らないためのパディング。DPIでスケーリング
             base_pad = max(6, int(dpi / 300.0 * 12))
-            # Bias bottom padding slightly larger to avoid clipped tails/arrowheads
+            # 尾部/矢じりがクリップされないように、下部パディングをやや大きくバイアス
             pad_top = base_pad
             pad_left = base_pad
             pad_right = base_pad
@@ -3886,13 +3885,13 @@ class ExcelToMarkdownConverter:
             t = max(0, t - pad_top)
             r = min(im.width, r + pad_right)
             b = min(im.height, b + pad_bottom)
-            # perform crop and save (preserve mode)
+            # クロップを実行して保存（モードを保持）
             try:
                 cropped = im.crop((l, t, r, b))
                 cropped.save(image_path)
                 cropped.close()
             except (ValueError, TypeError):
-                # fallback: do not overwrite if crop fails
+                # フォールバック: クロップが失敗した場合は上書きしない
                 pass
             im.close()
             return True
@@ -3900,15 +3899,15 @@ class ExcelToMarkdownConverter:
             return False
 
     def _get_pdf_page_box_points(self, pdf_path: str):
-        """Return (width_points, height_points) for the first page using CropBox or MediaBox in the PDF.
+        """PDFのCropBoxまたはMediaBoxを使用して、最初のページの(width_points, height_points)を返します。
 
-        This is a lightweight parser that searches for '/CropBox' or '/MediaBox' arrays in the PDF bytes.
-        Returns None on failure.
+        これはPDFバイト内の'/CropBox'または'/MediaBox'配列を検索する軽量パーサーです。
+        失敗時はNoneを返します。
         """
         try:
             with open(pdf_path, 'rb') as f:
                 data = f.read()
-            # search for CropBox first then MediaBox
+            # まずCropBoxを検索し、次にMediaBoxを検索
             import re
             pat = re.compile(rb"/CropBox\s*\[\s*([0-9.+\-eE]+)\s+([0-9.+\-eE]+)\s+([0-9.+\-eE]+)\s+([0-9.+\-eE]+)\s*\]")
             m = pat.search(data)
@@ -3928,14 +3927,14 @@ class ExcelToMarkdownConverter:
             return None
 
     def _extract_drawing_cell_ranges(self, sheet) -> List[Tuple[int,int,int,int]]:
-        """Extract drawing cell ranges (start_col, end_col, start_row, end_row) for each drawable anchor.
+        """各描画可能アンカーの描画セル範囲(start_col, end_col, start_row, end_row)を抽出します。
 
-        Uses drawing XML when available. Returns list aligned with anchors order used in other extractors.
+        利用可能な場合は描画XMLを使用します。他の抽出器で使用されるアンカー順序に揃えたリストを返します。
         """
         print(f"[INFO] シート図形セル範囲抽出: {sheet.title}")
         ranges = []
         try:
-            # Use Phase 1 foundation method to get drawing XML
+            # Phase 1基盤メソッドを使用して描画XMLを取得
             metadata = self._get_drawing_xml_and_metadata(sheet)
             if metadata is None:
                 return ranges
@@ -3943,8 +3942,8 @@ class ExcelToMarkdownConverter:
             z = metadata['zip']
             drawing_xml = metadata['drawing_xml']
 
-            # prepare pixel map for oneCell ext conversions
-            # Use a consistent DPI when converting EMU offsets to pixels.
+            # oneCellのext変換用にピクセルマップを準備
+            # EMUオフセットをピクセルに変換する際に一貫したDPIを使用
             DPI = 300
             try:
                 DPI = int(getattr(self, 'dpi', DPI) or DPI)
@@ -3966,7 +3965,7 @@ class ExcelToMarkdownConverter:
                 lname = node.tag.split('}')[-1].lower()
                 if lname not in ('twocellanchor', 'onecellanchor'):
                     continue
-                # determine cell indices
+                # セルインデックスを決定
                 if lname == 'twocellanchor':
                     fr = node.find('xdr:from', ns)
                     to = node.find('xdr:to', ns)
@@ -3992,7 +3991,7 @@ class ExcelToMarkdownConverter:
                             if prst_geom is not None:
                                 prst = prst_geom.get('prst', '')
                                 if 'callout' in prst.lower():
-                                    # This is a callout shape, check adjustment values
+                                    # これはコールアウト図形。調整値を確認
                                     av_lst = prst_geom.find('a:avLst', ns_a)
                                     if av_lst is not None:
                                         adj1_elem = av_lst.find('a:gd[@name="adj1"]', ns_a)
@@ -4023,7 +4022,7 @@ class ExcelToMarkdownConverter:
 
                     ranges.append((start_col, end_col, start_row, end_row))
                 else:
-                    # oneCellAnchor: use from.col/from.row and ext cx/cy to derive end cell
+                    # oneCellAnchor: from.col/from.rowとext cx/cyを使用して終了セルを導出
                     fr = node.find('xdr:from', ns)
                     ext = node.find('xdr:ext', ns)
                     if fr is None or ext is None:
@@ -4040,8 +4039,8 @@ class ExcelToMarkdownConverter:
                     right_px = left_px + (cx / EMU_PER_PIXEL)
                     top_px = row_y[row] if row < len(row_y) else row_y[-1]
                     bottom_px = top_px + (cy / EMU_PER_PIXEL)
-                    # map pixels to cell indices
-                    # find start_col index
+                    # ピクセルをセルインデックスにマップ
+                    # start_colインデックスを検索
                     start_col = 1
                     for ci in range(1, len(col_x)):
                         if col_x[ci] >= left_px:
@@ -4069,10 +4068,9 @@ class ExcelToMarkdownConverter:
         return ranges
 
     def _anchor_is_connector_only(self, sheet, anchor_idx) -> bool:
-        """Return True if the anchor at anchor_idx in the sheet's drawing
-        appears to be a connector-only anchor (i.e. contains connector endpoint
-        references but no drawable pictorial/shape elements). Conservative:
-        return False if information can't be determined.
+        """シートの描画内のanchor_idxにあるアンカーがコネクタのみのアンカー
+        （つまり、コネクタエンドポイント参照を含むが、描画可能な画像/図形要素を
+        含まない）であるかどうかを返します。保守的: 情報が判定できない場合はFalseを返します。
         """
         try:
             z = zipfile.ZipFile(self.excel_file)
@@ -4104,7 +4102,7 @@ class ExcelToMarkdownConverter:
                 if lname not in ('twocellanchor', 'onecellanchor'):
                     continue
                 if idx == anchor_idx:
-                    # inspect node children for drawable types vs connector refs
+                    # ノードの子を検査して描画可能タイプとコネクタ参照を比較
                     has_drawable = False
                     has_connector_ref = False
                     for desc in node.iter():
@@ -4123,8 +4121,8 @@ class ExcelToMarkdownConverter:
         return False
 
     def _sheet_has_drawings(self, sheet) -> bool:
-        """Return True if the sheet has drawing relationships pointing to drawing XML
-        that contain drawable elements (pic/sp/graphicFrame)."""
+        """シートが描画可能要素（pic/sp/graphicFrame）を含む描画XMLを指す
+        描画リレーションシップを持つ場合にTrueを返します。"""
         try:
             z = zipfile.ZipFile(self.excel_file)
             sheet_index = self.workbook.sheetnames.index(sheet.title)
@@ -4148,7 +4146,7 @@ class ExcelToMarkdownConverter:
             drawing_xml = get_xml_from_zip(z, drawing_path)
             if drawing_xml is None:
                 return False
-            # look for drawable descendants
+            # 描画可能な子孫要素を検索
             for node in drawing_xml.iter():
                 lname = node.tag.split('}')[-1].lower()
                 if lname in ('pic', 'sp', 'graphicframe', 'graphic', 'grpsp'):
@@ -4405,16 +4403,16 @@ class ExcelToMarkdownConverter:
         return json.dumps(output_data, ensure_ascii=False, indent=2)
 
     def _anchor_has_drawable(self, a) -> bool:
-        """Shared helper: determine whether a drawing anchor contains drawable
-        content (pictures, shapes, graphicFrames or connector references).
-        This central implementation keeps extraction and trimming logic
-        consistent so clustering indices align with anchors.
+        """共有ヘルパー: 描画アンカーが描画可能なコンテンツ（画像、図形、
+        graphicFrame、またはコネクタ参照）を含むかどうかを判定します。
+        この中央実装により、抽出とトリミングのロジックが一貫し、
+        クラスタリングインデックスがアンカーと整合します。
         """
         try:
-            # Create cache dict on the instance to avoid re-evaluating the same
-            # anchor multiple times during a single conversion run. Use the
-            # closest cNvPr/@id attribute as a stable key when available; fall
-            # back to a short hash of the anchor XML when no id is present.
+            # 単一の変換実行中に同じアンカーを複数回再評価することを避けるため、
+            # インスタンスにキャッシュ辞書を作成します。利用可能な場合は最も近い
+            # cNvPr/@id属性を安定したキーとして使用し、IDがない場合は
+            # アンカーXMLの短いハッシュにフォールバックします。
             try:
                 cache = getattr(self, '_anchor_drawable_cache')
             except Exception:
@@ -4434,7 +4432,7 @@ class ExcelToMarkdownConverter:
 
             if key is None:
                 try:
-                    # fallback: small stable fingerprint of the anchor XML
+                    # フォールバック: アンカーXMLの小さな安定したフィンガープリント
                     import hashlib
                     raw = ET.tostring(a) if hasattr(ET, 'tostring') else None
                     if raw:
@@ -4444,7 +4442,7 @@ class ExcelToMarkdownConverter:
                 except Exception:
                     key = 'anon'
 
-            # Return cached result if present
+            # キャッシュされた結果があれば返す
             try:
                 if key in cache:
                     return cache[key]
@@ -4456,19 +4454,19 @@ class ExcelToMarkdownConverter:
             has_connector_ref = False
             for desc in a.iter():
                 lname = desc.tag.split('}')[-1].lower()
-                # detect text content
+                # テキストコンテンツを検出
                 if lname == 't' and (desc.text and desc.text.strip()):
                     has_text = True
-                # explicit pictorial/shape types (including connector shapes)
+                # 明示的な画像/図形タイプ（コネクタ図形を含む）
                 if lname in ('pic', 'sp', 'graphicframe', 'grpsp', 'cxnsp'):
-                    # check for hidden flag on closest cNvPr child
+                    # 最も近いcNvPr子要素の非表示フラグを確認
                     if anchor_is_hidden(desc):
                         continue
                     drawable_types.append(lname)
-                # detect connector endpoint references
+                # コネクタエンドポイント参照を検出
                 if lname in ('stcxn', 'endcxn', 'stcxnpr', 'endcxnpr'):
                     has_connector_ref = True
-                # detect non-cNvPr elements exposing an id attribute (heuristic)
+                # id属性を公開する非cNvPr要素を検出（ヒューリスティック）
                 for k in desc.attrib.keys():
                     if k.lower() == 'id' and desc.tag.split('}')[-1].lower() != 'cnvpr':
                         has_connector_ref = True
@@ -4487,18 +4485,18 @@ class ExcelToMarkdownConverter:
                 debug_print(f"[DEBUG] Anchor has no drawable elements")
                 result = False
 
-            # cache and return
+            # キャッシュして返す
             cache[key] = result
             return result
         except (ValueError, TypeError):
             return False
     
     def _cluster_shapes_common(self, sheet, shapes, cell_ranges=None, max_groups=2):
-        """Centralized clustering by integer row gaps when cell_ranges are available.
+        """cell_rangesが利用可能な場合、整数行ギャップによる集中クラスタリング。
 
-        Returns (clusters, debug_dict). clusters is a list of groups (lists of indices).
-        debug_dict contains diagnostic information useful for tracing split decisions.
-        If cell_ranges is not provided or insufficient, falls back to centroid clustering.
+        (clusters, debug_dict)を返します。clustersはグループ（インデックスのリスト）のリストです。
+        debug_dictには分割決定の追跡に役立つ診断情報が含まれます。
+        cell_rangesが提供されないか不十分な場合、重心クラスタリングにフォールバックします。
         """
         try:
             debug = {'method': 'row_gap', 'clusters': None, 'indices_sorted': None, 'chosen_split': None, 'reason': None}
@@ -4508,13 +4506,13 @@ class ExcelToMarkdownConverter:
                 debug['clusters'] = clusters
                 return clusters, debug
 
-            # build centers by vertical midpoint and sort
+            # 垂直中点で中心を構築してソート
             row_centers = [(((cr[2] + cr[3]) / 2.0) if (cr[2] is not None and cr[3] is not None) else 0.0, idx) for idx, cr in enumerate(cell_ranges)]
             row_centers.sort(key=lambda x: x[0])
             indices_sorted = [idx for _, idx in row_centers]
             debug['indices_sorted'] = indices_sorted
 
-            # compute per-index start/end rows
+            # インデックスごとの開始/終了行を計算
             s_rows = []
             e_rows = []
             for idx in indices_sorted:
@@ -4525,7 +4523,7 @@ class ExcelToMarkdownConverter:
                 except (ValueError, TypeError):
                     s_rows.append(None); e_rows.append(None)
 
-            # build covered rows set
+            # カバーされた行のセットを構築
             all_covered = set()
             for cr in cell_ranges:
                 try:
@@ -4536,7 +4534,7 @@ class ExcelToMarkdownConverter:
                     all_covered.add(rr)
             debug['all_covered_count'] = len(all_covered)
 
-            # check for dominating large spans (relative)
+            # 支配的な大きなスパンをチェック（相対的）
             try:
                 row_spans = []
                 s_list = [int(cr[2]) for cr in cell_ranges if cr[2] is not None]
@@ -4558,12 +4556,12 @@ class ExcelToMarkdownConverter:
             except (ValueError, TypeError) as e:
                 debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-            # try adjacent pair splits where integer empty rows exist
+            # 整数の空行が存在する隣接ペア分割を試行
             split_at = None
             chosen_row = None
             total_rows = None
             try:
-                # Calculate total_rows from cell_ranges instead of sheet.max_row
+                # sheet.max_rowの代わりにcell_rangesからtotal_rowsを計算
                 e_list = [int(cr[3]) for cr in cell_ranges if cr[3] is not None]
                 total_rows = max(e_list) if e_list else None
             except (ValueError, TypeError):
@@ -4584,13 +4582,13 @@ class ExcelToMarkdownConverter:
                         chosen_row = candidate
                         break
 
-            # fallback: find largest uncovered interior gap
+            # フォールバック: 最大の未カバー内部ギャップを検索
             if split_at is None:
                 try:
                     if total_rows:
                         uncovered = [r for r in range(1, total_rows+1) if r not in all_covered]
                         if uncovered:
-                            # build contiguous gaps
+                            # 連続するギャップを構築
                             gaps = []
                             start = uncovered[0]; prev = uncovered[0]
                             for r in uncovered[1:]:
@@ -4629,7 +4627,7 @@ class ExcelToMarkdownConverter:
                 debug['clusters'] = clusters
                 return clusters, debug
 
-            # no valid integer row split found; return all shapes as single cluster
+            # 有効な整数行分割が見つからない場合、すべての図形を単一クラスタとして返す
             clusters = [list(range(len(shapes)))]
             debug['reason'] = 'no_row_split'
             debug['clusters'] = clusters
@@ -4652,36 +4650,36 @@ class ExcelToMarkdownConverter:
         try:
             if hasattr(image, 'anchor'):
                 anchor = image.anchor
-                # openpyxl anchor may expose a _from attribute with 0-based col/row
+                # openpyxlアンカーは0ベースのcol/rowを持つ_from属性を公開する場合がある
                 if hasattr(anchor, '_from'):
                     try:
                         col_idx = getattr(anchor._from, 'col', None)
                         row_idx = getattr(anchor._from, 'row', None)
-                        # convert to 1-based indices when present
+                        # 存在する場合は1ベースのインデックスに変換
                         col_val = int(col_idx) + 1 if col_idx is not None else None
                         row_val = int(row_idx) + 1 if row_idx is not None else None
                         if row_val is not None:
                             return {'col': col_val, 'row': row_val}
                     except (ValueError, TypeError):
-                        # fall through to string fallback
+                        # 文字列フォールバックに移行
                         pass
             return "位置情報なし"
         except (ValueError, TypeError):
             return "位置情報不明"
 
     def _extract_drawing_shapes(self, sheet) -> List[Tuple[int,int,int,int]]:
-        """Extract shape bounding boxes from the workbook drawing XML and convert
-        coordinates to pixel units matching the DPI used for rasterization.
-        Returns list of (left, top, right, bottom) tuples.
+        """ワークブックの描画XMLから図形のバウンディングボックスを抽出し、
+        ラスタライズに使用されるDPIに一致するピクセル単位に座標を変換します。
+        (left, top, right, bottom)タプルのリストを返します。
         """
         try:
-            # Use Phase 1 foundation method to get drawing XML
+            # Phase 1基盤メソッドを使用して描画XMLを取得
             metadata = self._get_drawing_xml_and_metadata(sheet)
             if metadata is None:
                 return []
             
             drawing_xml = metadata['drawing_xml']
-            # prepare simple column/row pixel mapping using runtime DPI
+            # ランタイムDPIを使用して単純な列/行ピクセルマッピングを準備
             DPI = 300
             try:
                 DPI = int(getattr(self, 'dpi', DPI) or DPI)
@@ -4720,20 +4718,20 @@ class ExcelToMarkdownConverter:
 
             ns = {'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'}
             bboxes = []
-            # helper to check if anchor contains drawable element
-            # delegate to centralized helper for consistency
+            # アンカーが描画可能要素を含むかチェックするヘルパー
+            # 一貫性のため中央ヘルパーに委譲
             def anchor_has_drawable(a):
                 return self._anchor_has_drawable(a)
 
-            # Iterate top-level drawing children in document order so the
-            # ordering matches the anchors list built by the isolated-shape
-            # trimming path. This prevents index/anchor mismatches when
-            # clustering by shape centers.
+            # ドキュメント順序でトップレベルの描画子要素を反復処理し、
+            # 分離図形トリミングパスで構築されたアンカーリストと順序を一致させます。
+            # これにより、図形中心によるクラスタリング時のインデックス/アンカーの
+            # 不一致を防ぎます。
             for node in list(drawing_xml):
                 lname = node.tag.split('}')[-1].lower()
                 if lname not in ('twocellanchor', 'onecellanchor'):
                     continue
-                # only consider anchors that have drawable content
+                # 描画可能なコンテンツを持つアンカーのみを考慮
                 if not anchor_has_drawable(node):
                     continue
                 if lname == 'twocellanchor':
@@ -4782,7 +4780,7 @@ class ExcelToMarkdownConverter:
                     top = row_y[row] + (rowOff / EMU_PER_PIXEL)
                     right = left + (cx / EMU_PER_PIXEL)
                     bottom = top + (cy / EMU_PER_PIXEL)
-                # filter out boxes that cover most of the page (likely not a small drawing)
+                # ページの大部分をカバーするボックスを除外（小さな描画ではない可能性が高い）
                 page_w = col_x[-1]
                 page_h = row_y[-1]
                 try:
@@ -4794,7 +4792,7 @@ class ExcelToMarkdownConverter:
                     print(f"[WARNING] ファイル操作エラー: {e}")
                 bboxes.append((left, top, right, bottom))
 
-            # return bboxes (list of (left, top, right, bottom) in pixel-ish units)
+            # bboxesを返す（ピクセル単位の(left, top, right, bottom)のリスト）
             debug_print(f"[DEBUG] _extract_drawing_shapes found {len(bboxes)} bboxes")
             return bboxes
         except Exception as e:
@@ -4846,19 +4844,19 @@ class ExcelToMarkdownConverter:
         )
         
         try:
-            # Reset preserved IDs marker
+            # 保持されたIDマーカーをリセット
             try:
                 self._last_iso_preserved_ids = set()
             except Exception:
                 pass  # ファイルクローズ失敗は無視
             
-            # Open Excel file and locate drawing
+            # Excelファイルを開いて描画を検索
             zpath = self.excel_file
             with zipfile.ZipFile(zpath, 'r') as z:
                 sheet_index = self.workbook.sheetnames.index(sheet.title)
                 rels_path = f"xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels"
                 
-                # Find drawing relationship
+                # 描画リレーションシップを検索
                 rels_xml = get_xml_from_zip(z, rels_path)
                 if rels_xml is None:
                     debug_print(f"[DEBUG][_iso_v2] sheet={sheet.title} missing rels")
@@ -4873,7 +4871,7 @@ class ExcelToMarkdownConverter:
                     debug_print(f"[DEBUG][_iso_v2] sheet={sheet.title} no drawing relationship")
                     return None
                 
-                # Normalize drawing path
+                # 描画パスを正規化
                 drawing_path = normalize_excel_path(drawing_target)
                 
                 if drawing_path not in z.namelist():
@@ -4882,11 +4880,11 @@ class ExcelToMarkdownConverter:
                         debug_print(f"[DEBUG][_iso_v2] drawing_path not found: {drawing_path}")
                         return None
                 
-                # Parse drawing XML
+                # 描画XMLを解析
                 drawing_xml_bytes = z.read(drawing_path)
                 drawing_xml = ET.fromstring(drawing_xml_bytes)
             
-            # Filter anchors to drawable elements only
+            # 描画可能要素のみにアンカーをフィルタリング
             anchors = []
             for node in drawing_xml:
                 lname = node.tag.split('}')[-1].lower()
@@ -4897,9 +4895,9 @@ class ExcelToMarkdownConverter:
                 debug_print(f"[DEBUG][_iso_v2] no drawable anchors found")
                 return None
             
-                # Compute cell_range if not provided
-            # Also track the minimum row for this cluster (used for markdown ordering)
-            cluster_min_row = 1  # Default fallback
+                # cell_rangeが提供されていない場合は計算
+            # このクラスタの最小行も追跡（マークダウン順序付けに使用）
+            cluster_min_row = 1  # デフォルトフォールバック
             if cell_range is None and shape_indices:
                 try:
                     all_ranges = self._extract_drawing_cell_ranges(sheet)
@@ -4910,11 +4908,11 @@ class ExcelToMarkdownConverter:
                         s_row = min(r[2] for r in picked)
                         e_row = max(r[3] for r in picked)
                         
-                        # Store cluster minimum row for later use in markdown ordering
+                        # マークダウン順序付けで後で使用するためにクラスタ最小行を保存
                         cluster_min_row = s_row
                         
-                        # Add 10% padding to ensure shapes are fully visible
-                        # Some shapes may have borders or connectors that extend beyond their anchor points
+                        # 図形が完全に表示されるように10%のパディングを追加
+                        # 一部の図形はアンカーポイントを超えて境界線やコネクタが延びる場合がある
                         col_padding = max(2, int((e_col - s_col) * 0.1))
                         row_padding = max(2, int((e_row - s_row) * 0.1))
                         s_col = max(1, s_col - col_padding)
@@ -4926,7 +4924,7 @@ class ExcelToMarkdownConverter:
                         debug_print(f"[DEBUG][_iso_v2] Computed cell_range from shapes: cols {s_col}-{e_col}, rows {s_row}-{e_row} (with padding)")
                         debug_print(f"[DEBUG][_iso_v2] Original shape ranges: {picked}")
                 except Exception as e:
-                    debug_print(f"[DEBUG][_iso_v2] Failed to compute cell_range: {e}")            # Build keep_cnvpr_ids from shape_indices
+                    debug_print(f"[DEBUG][_iso_v2] Failed to compute cell_range: {e}")            # shape_indicesからkeep_cnvpr_idsを構築
             keep_cnvpr_ids = set()
             for si in shape_indices:
                 if 0 <= si < len(anchors):
@@ -4936,31 +4934,31 @@ class ExcelToMarkdownConverter:
             
             debug_print(f"[DEBUG][_iso_v2] anchors={len(anchors)} keep_ids={sorted(list(keep_cnvpr_ids))}")
             
-            # Use helper method to resolve connector references
+            # ヘルパーメソッドを使用してコネクタ参照を解決
             referenced_ids = self._resolve_connector_references(
                 drawing_xml=drawing_xml,
                 anchors=anchors,
                 keep_cnvpr_ids=keep_cnvpr_ids
             )
             
-            # Expose preserved IDs for callers
+            # 呼び出し元のために保持されたIDを公開
             try:
                 self._last_iso_preserved_ids = set(referenced_ids)
             except Exception as e:
                 print(f"[WARNING] ファイル操作エラー: {e}")
             
-            # Create temp directory and extract workbook
+            # 一時ディレクトリを作成してワークブックを展開
             tmp_base = tempfile.mkdtemp(prefix='xls2md_iso_v2_base_')
             tmpdir = tempfile.mkdtemp(prefix='xls2md_iso_v2_', dir=tmp_base)
             try:
                 with zipfile.ZipFile(zpath, 'r') as zin:
                     zin.extractall(tmpdir)
                 
-                # Remove all sheets except the target sheet to avoid including unrelated sheets in output
-                # This ensures the generated Excel file contains only the trimmed target sheet
-                # Keep the target sheet's drawing file to maintain proper references
+                # 出力に無関係なシートが含まれないように、対象シート以外のすべてのシートを削除
+                # これにより、生成されたExcelファイルにはトリミングされた対象シートのみが含まれます
+                # 適切な参照を維持するために対象シートの描画ファイルを保持
                 try:
-                    # Get the target sheet's drawing file name (if any) to preserve it
+                    # 対象シートの描画ファイル名を取得して保持（存在する場合）
                     target_sheet_drawing = None
                     target_sheet_rels_path = os.path.join(tmpdir, f'xl/worksheets/_rels/sheet{sheet_index+1}.xml.rels')
                     if os.path.exists(target_sheet_rels_path):
@@ -4972,13 +4970,13 @@ class ExcelToMarkdownConverter:
                                 if '/drawing' in rel_type:
                                     target_drawing = rel.attrib.get('Target', '')
                                     if target_drawing:
-                                        # Normalize path: ../drawings/drawing1.xml -> drawing1.xml
+                                        # パスを正規化: ../drawings/drawing1.xml -> drawing1.xml
                                         target_sheet_drawing = os.path.basename(target_drawing)
                                         break
                         except (ET.ParseError, KeyError, AttributeError) as e:
                             debug_print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
                     
-                    # Parse workbook.xml to get sheet relationships
+                    # workbook.xmlを解析してシートリレーションシップを取得
                     wb_path = os.path.join(tmpdir, 'xl/workbook.xml')
                     wb_rels_path = os.path.join(tmpdir, 'xl/_rels/workbook.xml.rels')
                     
@@ -4988,7 +4986,7 @@ class ExcelToMarkdownConverter:
                         wb_ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
                         rel_ns = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
                         
-                        # Find all sheets and keep only the target sheet
+                        # すべてのシートを検索し、対象シートのみを保持
                         sheets_el = wb_root.find(f'{{{wb_ns}}}sheets')
                         if sheets_el is not None:
                             target_sheet_rid = None
@@ -4996,35 +4994,35 @@ class ExcelToMarkdownConverter:
                             
                             for idx, sheet_el in enumerate(list(sheets_el)):
                                 if idx == sheet_index:
-                                    # This is our target sheet - keep it and get its relationship ID
+                                    # これは対象シート - 保持してリレーションシップIDを取得
                                     target_sheet_rid = sheet_el.attrib.get(f'{{{rel_ns}}}id')
                                 else:
-                                    # Mark for removal
+                                    # 削除対象としてマーク
                                     sheets_to_remove.append((idx, sheet_el))
                             
-                            # Remove non-target sheets from workbook.xml
+                            # workbook.xmlから非対象シートを削除
                             for _, sheet_el in sheets_to_remove:
                                 sheets_el.remove(sheet_el)
                             
-                            # Renumber the target sheet to be sheet 1 (sheetId="1")
-                            # This ensures Excel/LibreOffice properly recognize it as the first sheet
+                            # 対象シートをシート1に再番号付け（sheetId="1"）
+                            # これにより、Excel/LibreOfficeが最初のシートとして正しく認識します
                             if sheets_el is not None:
                                 for sheet_el in list(sheets_el):
-                                    # Set sheetId to 1 (first sheet)
+                                    # sheetIdを1に設定（最初のシート）
                                     sheet_el.set('sheetId', '1')
-                                    # Update relationship ID to rId1
+                                    # リレーションシップIDをrId1に更新
                                     sheet_el.set(f'{{{rel_ns}}}id', 'rId1')
                             
-                            # Write back modified workbook.xml
+                            # 変更されたworkbook.xmlを書き戻す
                             wb_tree.write(wb_path, encoding='utf-8', xml_declaration=True)
                             
-                            # Parse workbook.xml.rels to find which relationship IDs to keep
+                            # workbook.xml.relsを解析して保持するリレーションシップIDを検索
                             if os.path.exists(wb_rels_path):
                                 rels_tree = ET.parse(wb_rels_path)
                                 rels_root = rels_tree.getroot()
                                 pkg_rel_ns = 'http://schemas.openxmlformats.org/package/2006/relationships'
                                 
-                                # Find sheet relationship targets to remove
+                                # 削除するシートリレーションシップターゲットを検索
                                 rels_to_remove = []
                                 target_sheet_rel = None
                                 for rel in list(rels_root):
@@ -5032,46 +5030,46 @@ class ExcelToMarkdownConverter:
                                     target = rel.attrib.get('Target')
                                     rel_type = rel.attrib.get('Type', '')
                                     
-                                    # Keep target sheet relationship, remove others
+                                    # 対象シートのリレーションシップを保持し、他を削除
                                     if rel_type.endswith('/worksheet'):
                                         if rid == target_sheet_rid:
                                             target_sheet_rel = rel
                                         else:
                                             rels_to_remove.append(rel)
                                 
-                                # Remove non-target sheet relationships
+                                # 非対象シートのリレーションシップを削除
                                 for rel in rels_to_remove:
                                     rels_root.remove(rel)
                                 
-                                # Renumber target sheet relationship to rId1
+                                # 対象シートのリレーションシップをrId1に再番号付け
                                 if target_sheet_rel is not None:
                                     target_sheet_rel.set('Id', 'rId1')
                                 
-                                # Write back modified rels
+                                # 変更されたrelsを書き戻す
                                 rels_tree.write(wb_rels_path, encoding='utf-8', xml_declaration=True)
                             
-                            # Remove physical sheet files for non-target sheets
+                            # 非対象シートの物理シートファイルを削除
                             for idx, _ in sheets_to_remove:
-                                # Remove sheet XML file
+                                # シートXMLファイルを削除
                                 sheet_file = os.path.join(tmpdir, f'xl/worksheets/sheet{idx+1}.xml')
                                 if os.path.exists(sheet_file):
                                     os.remove(sheet_file)
                                 
-                                # Remove sheet rels file
+                                # シートrelsファイルを削除
                                 sheet_rels = os.path.join(tmpdir, f'xl/worksheets/_rels/sheet{idx+1}.xml.rels')
                                 if os.path.exists(sheet_rels):
                                     os.remove(sheet_rels)
                             
-                            # Remove ALL drawing files EXCEPT the target sheet's drawing
-                            # This prevents orphaned drawing references from causing errors
+                            # 対象シートの描画以外のすべての描画ファイルを削除
+                            # これにより、孤立した描画参照によるエラーを防ぎます
                             drawings_dir = os.path.join(tmpdir, 'xl/drawings')
                             if os.path.exists(drawings_dir):
                                 for fname in os.listdir(drawings_dir):
-                                    # Skip the target sheet's drawing file
+                                    # 対象シートの描画ファイルをスキップ
                                     if target_sheet_drawing and fname == target_sheet_drawing:
                                         continue
                                     
-                                    # Remove other drawing XML files
+                                    # 他の描画XMLファイルを削除
                                     if fname.endswith('.xml') and not fname.startswith('_rels'):
                                         drawing_file = os.path.join(drawings_dir, fname)
                                         try:
@@ -5082,7 +5080,7 @@ class ExcelToMarkdownConverter:
 
                                             pass  # ファイル削除失敗は無視
                                 
-                                # Remove drawing rels that don't belong to target sheet
+                                # 対象シートに属さない描画relsを削除
                                 rels_dir = os.path.join(drawings_dir, '_rels')
                                 if os.path.exists(rels_dir) and target_sheet_drawing:
                                     target_rels = target_sheet_drawing.replace('.xml', '.xml.rels')
@@ -5101,7 +5099,7 @@ class ExcelToMarkdownConverter:
                         import traceback
                         traceback.print_exc()
                 
-                # Compute group_rows from cell_range
+                # cell_rangeからgroup_rowsを計算
                 group_rows = set()
                 if cell_range:
                     try:
@@ -5110,7 +5108,7 @@ class ExcelToMarkdownConverter:
                     except (ValueError, TypeError) as e:
                         debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 
-                # Use helper method to prune drawing anchors
+                # ヘルパーメソッドを使用して描画アンカーを剪定
                 drawing_relpath = os.path.join(tmpdir, drawing_path)
                 self._prune_drawing_anchors(
                     drawing_relpath=drawing_relpath,
@@ -5120,39 +5118,39 @@ class ExcelToMarkdownConverter:
                     group_rows=group_rows
                 )
                 
-                # CRITICAL: Do NOT adjust drawing coordinates
-                # Keep original drawing.xml coordinates intact
-                # LibreOffice needs the original coordinates to properly render shapes
-                # We only trim the cell data, not the drawing positions
+                # 重要: 描画座標を調整しない
+                # 元のdrawing.xml座標をそのまま保持
+                # LibreOfficeは図形を正しくレンダリングするために元の座標が必要
+                # セルデータのみをトリミングし、描画位置は変更しない
                 debug_print(f"[DEBUG][_iso_v2] Preserving original drawing coordinates (no adjustment)")
                 if cell_range:
                     s_col, e_col, s_row, e_row = cell_range
                     debug_print(f"[DEBUG][_iso_v2] Cell range for data trimming: cols {s_col}-{e_col}, rows {s_row}-{e_row}")
                 
-                # DO NOT reconstruct worksheet - keep all original data
-                # This preserves the original cell positions so shapes can reference them correctly
-                # Only prune the drawing anchors, not the cell data
+                # ワークシートを再構築しない - すべての元データを保持
+                # これにより、図形が正しく参照できるように元のセル位置が保持されます
+                # 描画アンカーのみを剪定し、セルデータは変更しない
                 sheet_rel = os.path.join(tmpdir, f"xl/worksheets/sheet{sheet_index+1}.xml")
                 
-                # However, we MUST fix the pageSetup to prevent scale=25 shrinking
-                # This is done separately from worksheet reconstruction
+                # ただし、scale=25の縮小を防ぐためにpageSetupを修正する必要がある
+                # これはワークシート再構築とは別に行われる
                 if os.path.exists(sheet_rel):
                     try:
                         stree = ET.parse(sheet_rel)
                         sroot = stree.getroot()
                         ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
                         
-                        # Configure pageSetup with proper scaling
-                        # CRITICAL: Remove existing pageSetup and create new one with scale=100
-                        # fitToHeight/fitToWidth can shrink shapes to microscopic sizes
-                        # Remove all existing pageSetup elements
+                        # 適切なスケーリングでpageSetupを設定
+                        # 重要: 既存のpageSetupを削除し、scale=100で新しいものを作成
+                        # fitToHeight/fitToWidthは図形を極小サイズに縮小する可能性がある
+                        # 既存のすべてのpageSetup要素を削除
                         for old_ps in list(sroot.findall(f'.//{{{ns}}}pageSetup')):
                             sroot.remove(old_ps)
                         
-                        # Create new pageSetup with normal 100% scale
+                        # 通常の100%スケールで新しいpageSetupを作成
                         ps = ET.Element(f'{{{ns}}}pageSetup')
                         ps.set('scale', '100')
-                        ps.set('paperSize', '1')  # Letter (standard)
+                        ps.set('paperSize', '1')  # レター（標準）
                         ps.set('orientation', 'portrait')
                         ps.set('pageOrder', 'downThenOver')
                         ps.set('blackAndWhite', 'false')
@@ -5161,17 +5159,17 @@ class ExcelToMarkdownConverter:
                         ps.set('horizontalDpi', '300')
                         ps.set('verticalDpi', '300')
                         ps.set('copies', '1')
-                        # Append at the end of sheet
+                        # シートの末尾に追加
                         sroot.append(ps)
                         
-                        # Write back the modified sheet
+                        # 変更されたシートを書き戻す
                         stree.write(sheet_rel, encoding='utf-8', xml_declaration=True)
                         debug_print(f"[DEBUG][_iso_v2] Set pageSetup to scale=100 (normal size) to preserve shapes")
                     except Exception as e:
                         if getattr(self, 'verbose', False):
                             print(f"[WARN][_iso_v2] Failed to fix pageSetup: {e}")
                 
-                # Worksheet reconstruction code (DISABLED - keep original sheet data)
+                # ワークシート再構築コード（無効 - 元のシートデータを保持）
                 if False and os.path.exists(sheet_rel) and cell_range:
                     try:
                         s_col, e_col, s_row, e_row = cell_range
@@ -5179,7 +5177,7 @@ class ExcelToMarkdownConverter:
                         sroot = stree.getroot()
                         ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
                         
-                        # Read original sheet.xml from source Excel file to get cell values
+                        # セル値を取得するためにソースExcelファイルから元のsheet.xmlを読み取る
                         with zipfile.ZipFile(self.excel_file, 'r') as src_z:
                             src_sheet_path = f"xl/worksheets/sheet{sheet_index+1}.xml"
                             src_sheet_xml = get_xml_from_zip(src_z, src_sheet_path)
@@ -5188,8 +5186,8 @@ class ExcelToMarkdownConverter:
                             else:
                                 src_sheet_data = None
                         
-                        # Reconstruct sheetData to only include rows/columns in range
-                        # KEEP ORIGINAL ROW/COLUMN NUMBERS (do not renumber from 1)
+                        # 範囲内の行/列のみを含むようにsheetDataを再構築
+                        # 元の行/列番号を保持（1から再番号付けしない）
                         sheet_data_tag = f'{{{ns}}}sheetData'
                         sheet_data = sroot.find(sheet_data_tag)
                         if sheet_data is not None and src_sheet_data is not None:
@@ -5198,7 +5196,7 @@ class ExcelToMarkdownConverter:
                             debug_print(f"[DEBUG][_iso_v2] Found {len(src_rows)} rows in source sheet.xml")
                             cells_copied = 0
                             
-                            # Copy rows in range, keeping original row numbers
+                            # 範囲内の行をコピーし、元の行番号を保持
                             for row_el in src_rows:
                                 try:
                                     rnum = int(row_el.attrib.get('r', '0'))
@@ -5207,16 +5205,16 @@ class ExcelToMarkdownConverter:
                                 if rnum < s_row or rnum > e_row:
                                     continue
                                 
-                                # Create new row with ORIGINAL row number
+                                # 元の行番号で新しい行を作成
                                 new_row = ET.Element(f'{{{ns}}}row')
-                                new_row.set('r', str(rnum))  # Keep original row number
+                                new_row.set('r', str(rnum))  # 元の行番号を保持
                                 
-                                # Copy row attributes
+                                # 行属性をコピー
                                 for attr in ('ht', 'hidden', 'customHeight'):
                                     if attr in row_el.attrib:
                                         new_row.set(attr, row_el.attrib.get(attr))
                                 
-                                # Copy cells in column range, keeping original column letters
+                                # 列範囲内のセルをコピーし、元の列文字を保持
                                 for c in list(row_el):
                                     if c.tag.split('}')[-1] != 'c':
                                         continue
@@ -5225,42 +5223,42 @@ class ExcelToMarkdownConverter:
                                     if not col_letters:
                                         continue
                                     
-                                    # Convert column letters to index
+                                    # 列文字をインデックスに変換
                                     col_idx = 0
                                     for ch in col_letters:
                                         col_idx = col_idx * 26 + (ord(ch.upper()) - 64)
                                     if col_idx < s_col or col_idx > e_col:
                                         continue
                                     
-                                    # Copy cell with ORIGINAL cell reference (e.g., "D17")
+                                    # 元のセル参照でセルをコピー（例: "D17"）
                                     import copy
                                     new_cell = copy.deepcopy(c)
                                     new_row.append(new_cell)
                                     cells_copied += 1
                                 
-                                if len(new_row) > 0:  # Only add row if it has cells
+                                if len(new_row) > 0:  # セルがある場合のみ行を追加
                                     new_sheet_data.append(new_row)
                             
                             debug_print(f"[DEBUG][_iso_v2] Copied {cells_copied} cells with original row/col numbers")
                             
-                            # Replace old sheetData with new one
+                            # 古いsheetDataを新しいものに置き換え
                             for child in list(sroot):
                                 if child.tag == sheet_data_tag:
                                     sroot.remove(child)
                             sroot.append(new_sheet_data)
                             
-                            # Update dimension element with ORIGINAL row/column numbers
+                            # 元の行/列番号でdimension要素を更新
                             dim_tag = f'{{{ns}}}dimension'
                             dim = sroot.find(dim_tag)
                             if dim is None:
                                 dim = ET.Element(dim_tag)
                                 sroot.insert(0, dim)
-                            # Use original row/col numbers
+                            # 元の行/列番号を使用
                             start_addr = f"{col_letter(s_col)}{s_row}"
                             end_addr = f"{col_letter(e_col)}{e_row}"
                             dim.set('ref', f"{start_addr}:{end_addr}")
                         
-                        # Rebuild cols element with ORIGINAL column numbers
+                        # 元の列番号でcols要素を再構築
                         cols_tag = f'{{{ns}}}cols'
                         col_tag = f'{{{ns}}}col'
                         for child in list(sroot):
@@ -5282,7 +5280,7 @@ class ExcelToMarkdownConverter:
                                     width = default_col_w
                                 
                                 col_el = ET.Element(col_tag)
-                                # Use ORIGINAL column indices (not renumbered)
+                                # 元の列インデックスを使用（再番号付けしない）
                                 col_el.set('min', str(c))
                                 col_el.set('max', str(c))
                                 col_el.set('width', str(float(width)))
@@ -5292,7 +5290,7 @@ class ExcelToMarkdownConverter:
                                     col_el.set('hidden', '1')
                                 cols_el.append(col_el)
                         except (ValueError, TypeError):
-                            # Fallback: set default widths with ORIGINAL column numbers
+                            # フォールバック: 元の列番号でデフォルト幅を設定
                             for c in range(s_col, e_col + 1):
                                 col_el = ET.Element(col_tag)
                                 col_el.set('min', str(c))
@@ -5300,12 +5298,12 @@ class ExcelToMarkdownConverter:
                                 col_el.set('width', '8.43')
                                 cols_el.append(col_el)
                         
-                        # Insert cols before sheetData
+                        # sheetDataの前にcolsを挿入
                         sd_idx = list(sroot).index(new_sheet_data)
                         sroot.insert(sd_idx, cols_el)
                         
-                        # Set page margins to zero (same as original method)
-                        # Add or modify sheetPr with pageSetupPr fitToPage attribute
+                        # ページマージンをゼロに設定（元のメソッドと同じ）
+                        # pageSetupPr fitToPage属性でsheetPrを追加または変更
                         sheet_pr = sroot.find(f'.//{{{ns}}}sheetPr')
                         if sheet_pr is None:
                             sheet_pr = ET.Element(f'{{{ns}}}sheetPr')
@@ -5315,7 +5313,7 @@ class ExcelToMarkdownConverter:
                             page_setup_pr = ET.SubElement(sheet_pr, f'{{{ns}}}pageSetUpPr')
                         page_setup_pr.set('fitToPage', '1')
                         
-                        # Add or modify printOptions
+                        # printOptionsを追加または変更
                         print_opts = sroot.find(f'.//{{{ns}}}printOptions')
                         if print_opts is None:
                             print_opts = ET.Element(f'{{{ns}}}printOptions')
@@ -5323,17 +5321,17 @@ class ExcelToMarkdownConverter:
                         print_opts.set('horizontalCentered', '1')
                         print_opts.set('verticalCentered', '1')
                         
-                        # Configure pageSetup with proper scaling
-                        # CRITICAL: Remove existing pageSetup and create new one with scale=100
-                        # fitToHeight/fitToWidth can shrink shapes to microscopic sizes
-                        # Remove all existing pageSetup elements
+                        # 適切なスケーリングでpageSetupを設定
+                        # 重要: 既存のpageSetupを削除し、scale=100で新しいものを作成
+                        # fitToHeight/fitToWidthは図形を極小サイズに縮小する可能性がある
+                        # 既存のすべてのpageSetup要素を削除
                         for old_ps in list(sroot.findall(f'.//{{{ns}}}pageSetup')):
                             sroot.remove(old_ps)
                         
-                        # Create new pageSetup with normal 100% scale
+                        # 通常の100%スケールで新しいpageSetupを作成
                         ps = ET.Element(f'{{{ns}}}pageSetup')
                         ps.set('scale', '100')
-                        ps.set('paperSize', '1')  # Letter (standard)
+                        ps.set('paperSize', '1')  # レター（標準）
                         ps.set('orientation', 'portrait')
                         ps.set('pageOrder', 'downThenOver')
                         ps.set('blackAndWhite', 'false')
@@ -5342,11 +5340,11 @@ class ExcelToMarkdownConverter:
                         ps.set('horizontalDpi', '300')
                         ps.set('verticalDpi', '300')
                         ps.set('copies', '1')
-                        # Append at the end of sheet
+                        # シートの末尾に追加
                         sroot.append(ps)
                         debug_print(f"[DEBUG][_iso_v2] Set pageSetup to scale=100 (normal size) to preserve shapes")
                         
-                        # Set page margins (as attributes, standard Excel format)
+                        # ページマージンを設定（属性として、標準Excelフォーマット）
                         pm_tag = f'{{{ns}}}pageMargins'
                         pm = sroot.find(pm_tag)
                         if pm is None:
@@ -5359,7 +5357,7 @@ class ExcelToMarkdownConverter:
                         pm.set('header', '0.3')
                         pm.set('footer', '0.3')
                         
-                        # Remove header/footer elements
+                        # ヘッダー/フッター要素を削除
                         hf_tag = f'{{{ns}}}headerFooter'
                         for hf in list(sroot.findall(hf_tag)):
                             sroot.remove(hf)
@@ -5370,9 +5368,9 @@ class ExcelToMarkdownConverter:
                         if getattr(self, 'verbose', False):
                             print(f"[WARN][_iso_v2] Failed to reconstruct worksheet: {e}")
 
-                # CRITICAL: Remove Print_Area completely to ensure all shapes are visible
-                # Print_Area restricts the visible area and can hide shapes outside the defined range
-                # Since we're preserving the full sheet structure, we don't need Print_Area
+                # 重要: すべての図形が表示されるようにPrint_Areaを完全に削除
+                # 印刷範囲は表示領域を制限し、定義された範囲外の図形を非表示にする可能性がある
+                # 完全なシート構造を保持しているため、Print_Areaは不要
                 try:
                     wb_rel = os.path.join(tmpdir, 'xl/workbook.xml')
                     if os.path.exists(wb_rel):
@@ -5380,11 +5378,11 @@ class ExcelToMarkdownConverter:
                         wroot = wtree.getroot()
                         ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
                         
-                        # Find definedNames element
+                        # definedNames要素を検索
                         dn_tag = f'{{{ns}}}definedNames'
                         dn = wroot.find(dn_tag)
                         
-                        # Remove ALL defined names (including Print_Area) to prevent display issues
+                        # 表示の問題を防ぐためにすべての定義名（Print_Areaを含む）を削除
                         if dn is not None:
                             wroot.remove(dn)
                             debug_print(f"[DEBUG][_iso_v2] Removed Print_Area and all defined names to ensure shapes are visible")
@@ -5394,13 +5392,13 @@ class ExcelToMarkdownConverter:
                     if getattr(self, 'verbose', False):
                         print(f"[WARN][_iso_v2] Failed to remove Print_Area: {e}")
 
-                # Create trimmed workbook ZIP for debugging (saved in output dir)
+                # デバッグ用にトリミングされたワークブックZIPを作成（出力ディレクトリに保存）
                 debug_xlsx_filename = f"{self.base_name}_{sheet.title}_group_{shape_indices[0] if shape_indices else 0}_debug.xlsx"
                 debug_xlsx_path = os.path.join(self.output_dir, debug_xlsx_filename)
                 debug_zip_base = os.path.join(self.output_dir, f"{self.base_name}_{sheet.title}_group_{shape_indices[0] if shape_indices else 0}_debug")
                 
                 try:
-                    # Remove old files if they exist
+                    # 古いファイルが存在する場合は削除
                     if os.path.exists(debug_xlsx_path):
                         os.remove(debug_xlsx_path)
                     if os.path.exists(debug_zip_base + '.zip'):
@@ -5414,13 +5412,13 @@ class ExcelToMarkdownConverter:
                         print(f"[WARN][_iso_v2] Failed to create trimmed workbook: {e}")
                     return None
 
-                # Convert to PDF and PNG (save PDF for debugging)
+                # PDFとPNGに変換（デバッグ用にPDFを保存）
                 try:
-                    # DO NOT apply fit-to-page - it shrinks shapes to 25% making them invisible
-                    # pageSetup is already configured properly in the worksheet XML above
-                    # self._set_excel_fit_to_one_page(debug_xlsx_path)  # DISABLED
+                    # fit-to-pageを適用しない - 図形を25%に縮小して見えなくなる
+                    # pageSetupは上記のワークシートXMLで既に適切に設定されている
+                    # self._set_excel_fit_to_one_page(debug_xlsx_path)  # 無効
                     
-                    # Convert to PDF (output to same directory as xlsx)
+                    # PDFに変換（xlsxと同じディレクトリに出力）
                     cmd = [LIBREOFFICE_PATH, '--headless', '--convert-to', 'pdf', '--outdir', self.output_dir, debug_xlsx_path]
                     debug_print(f"[DEBUG][_iso_v2] LibreOffice command: {' '.join(cmd)}")
                     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
@@ -5430,12 +5428,12 @@ class ExcelToMarkdownConverter:
                             print(f"[WARN][_iso_v2] LibreOffice PDF conversion failed: {proc.stderr}")
                         return None
                     
-                    # Find generated PDF
+                    # 生成されたPDFを検索
                     debug_pdf_filename = debug_xlsx_filename.replace('.xlsx', '.pdf')
                     pdf_path = os.path.join(self.output_dir, debug_pdf_filename)
                     
                     if not os.path.exists(pdf_path):
-                        # Try to find any PDF that was created
+                        # 作成されたPDFを検索
                         pdf_candidates = [f for f in os.listdir(self.output_dir) 
                                         if f.lower().endswith('.pdf') and 'group' in f and sheet.title in f]
                         if not pdf_candidates:
@@ -5446,16 +5444,16 @@ class ExcelToMarkdownConverter:
                     
                     debug_print(f"[DEBUG][_iso_v2] Saved debug PDF: {pdf_path}")
                     
-                    # Convert PDF to PNG (final output in images directory)
+                    # PDFをPNGに変換（最終出力はimagesディレクトリ）
                     png_filename = f"{self.base_name}_{sheet.title}_group_{shape_indices[0] if shape_indices else 0}.png"
                     png_path = os.path.join(self.images_dir, png_filename)
                     
-                    # Remove old PNG if exists
+                    # 古いPNGが存在する場合は削除
                     if os.path.exists(png_path):
                         os.remove(png_path)
                     
-                    # ImageMagick: Use -background white -flatten to prevent transparent/black areas
-                    # -flatten composites all layers onto a white background
+                    # ImageMagick: 透明/黒い領域を防ぐために-background white -flattenを使用
+                    # -flattenはすべてのレイヤーを白い背景に合成
                     cmd = ['convert', '-density', str(dpi), f'{pdf_path}[0]', 
                            '-background', 'white', '-flatten',
                            '-colorspace', 'sRGB', '-quality', str(IMAGE_QUALITY), png_path]
@@ -5470,18 +5468,18 @@ class ExcelToMarkdownConverter:
                     debug_print(f"[DEBUG][_iso_v2] Successfully rendered group: {png_filename}")
                     debug_print(f"[DEBUG][_iso_v2] Debug files: {debug_xlsx_filename}, {debug_pdf_filename}")
                     
-                    # Crop image to remove excess whitespace while preserving connectors
-                    # Use tighter cropping for isolated groups (white_thresh=250 for more aggressive)
+                    # コネクタを保持しながら余分な空白を削除するために画像をクロップ
+                    # 分離グループにはより厳密なクロップを使用（より積極的なwhite_thresh=250）
                     try:
-                        # More aggressive cropping with higher white threshold
+                        # より高い白しきい値でより積極的なクロップ
                         from PIL import Image
                         if os.path.exists(png_path):
                             im = Image.open(png_path)
                             bbox = self._find_content_bbox(im, white_thresh=250)
                             if bbox:
                                 l, t, r, b = bbox
-                                # Minimal padding for isolated groups (shapes already have proper margins)
-                                pad = max(4, int(dpi / 300.0 * 6))  # Half of normal padding
+                                # 分離グループの最小パディング（図形は既に適切なマージンを持っている）
+                                pad = max(4, int(dpi / 300.0 * 6))  # 通常のパディングの半分
                                 l = max(0, l - pad)
                                 t = max(0, t - pad)
                                 r = min(im.width, r + pad)
@@ -5495,7 +5493,7 @@ class ExcelToMarkdownConverter:
                         if getattr(self, 'verbose', False):
                             print(f"[WARN][_iso_v2] Failed to crop image: {crop_err}")
                     
-                    # Return tuple: (filename, minimum_row_for_cluster)
+                    # タプルを返す: (ファイル名, クラスタの最小行)
                     debug_print(f"[DEBUG][_iso_v2] Returning: filename={png_filename}, cluster_min_row={cluster_min_row}")
                     return (png_filename, cluster_min_row)
                     
@@ -5556,9 +5554,9 @@ class ExcelToMarkdownConverter:
         table_regions = self._detect_bordered_tables(sheet, min_row, max_row, min_col, max_col)
         debug_print(f"[DEBUG][_convert_sheet_data] bordered_table_regions_count={len(table_regions)} sample={table_regions[:5]}")
 
-        # If no bordered tables found, or if bordered tables don't include the top rows (1-4),
-        # attempt a broader table-region detection that uses heuristics (merged cells, annotations, column separations).
-        # This ensures that header rows at the top of sheets are properly detected even when
+        # 罫線テーブルが見つからない場合、または罫線テーブルが上部の行（1-4）を含まない場合、
+        # ヒューリスティック（結合セル、注釈、列分離）を使用するより広範なテーブル領域検出を試行。
+        # これにより、シート上部のヘッダー行が適切に検出されることを保証
         top_region_in_bordered = any(r[0] == 1 and r[1] <= 4 for r in table_regions)
         if not table_regions or not top_region_in_bordered:
             try:
@@ -5641,7 +5639,7 @@ class ExcelToMarkdownConverter:
 
             return frac >= adjusted_threshold
 
-        # Split table_regions into those to keep and those to exclude due to overlap
+        # table_regionsを保持するものと重複により除外するものに分割
         kept_table_regions = []
         excluded_table_regions = []
         for tr in table_regions:
@@ -5730,28 +5728,28 @@ class ExcelToMarkdownConverter:
         debug_print(f"[DEBUG][_convert_sheet_data] deduplicated_table_regions_count={len(table_regions)} deduplicated_sample={table_regions[:5]}")
 
         processed_rows = set()
-        # Emit detected table regions as actual tables (not just reserve rows).
-        # We convert each detected table region into markdown here, then mark
-        # the rows as processed so subsequent plain-text collection skips them.
+        # 検出されたテーブル領域を実際のテーブルとして出力（行の予約だけでなく）。
+        # ここで検出された各テーブル領域をマークダウンに変換し、
+        # 行を処理済みとしてマークして、後続のプレーンテキスト収集がスキップするようにする。
         table_index = 0
         for region in table_regions:
             debug_print(f"[DEBUG] emitting detected table region: {region}")
             try:
-                # Convert the detected region to a markdown table. Use a
-                # monotonically increasing table_index so filenames/ids are
-                # deterministic across runs.
+                # 検出された領域をマークダウンテーブルに変換。単調増加する
+                # table_indexを使用して、ファイル名/IDが実行間で
+                # 決定論的になるようにする。
                 self._convert_table_region(sheet, region, table_number=table_index)
                 table_index += 1
             except Exception as _e:
                 debug_print(f"[DEBUG] _convert_table_region failed for region={region}: {_e}")
-            # Mark rows as processed regardless of conversion success so
-            # they won't be re-collected as plain text.
+            # 変換の成否に関わらず行を処理済みとしてマークし、
+            # プレーンテキストとして再収集されないようにする。
             for r in range(region[0], region[1]+1):
                 processed_rows.add(r)
 
-        # If there are excluded table regions (overlapping drawings), collect their
-        # row texts but defer actual emission until we merge with other plain text
-        # so that final output preserves strict sheet row ordering.
+        # 除外されたテーブル領域（描画と重複）がある場合、行テキストを収集するが、
+        # 他のプレーンテキストとマージするまで実際の出力を遅延させ、
+        # 最終出力がシートの厳密な行順序を保持するようにする。
         excluded_blocks = []  # list of (start_row, end_row, [(row, text), ...])
         excluded_end_rows = set()
         if 'excluded_table_regions' in locals() and excluded_table_regions:
@@ -5776,11 +5774,10 @@ class ExcelToMarkdownConverter:
                         excluded_blocks.append((srow, erow, lines))
                         excluded_end_rows.add(erow)
                         # mark rows as processed so they are not re-collected later
-                        # Only mark when we actually captured text within the excluded
-                        # region. If no text was captured (e.g. relevant text is in
-                        # columns outside the excluded columns), do not mark the
-                        # rows so that they can still be discovered as plain text
-                        # later.
+                        # 除外された領域内で実際にテキストをキャプチャした場合のみマーク。
+                        # テキストがキャプチャされなかった場合（例：関連テキストが
+                        # 除外された列の外側にある場合）、行をマークせず、
+                        # 後でプレーンテキストとして発見できるようにする。
                         for (rr, _) in lines:
                             processed_rows.add(rr)
                 except Exception:
@@ -5820,9 +5817,9 @@ class ExcelToMarkdownConverter:
             # after implicit-table detection and actual emission.
 
         # プレーンテキストはシート上の行順でそのまま出力する。
-        # Collect plain_texts (rows not in processed_rows) and merge with
-        # excluded_blocks collected earlier, then sort by row number so final
-        # emission follows sheet top-to-bottom order.
+        # plain_texts（processed_rowsにない行）を収集し、
+        # 先に収集したexcluded_blocksとマージし、行番号でソートして
+        # 最終出力がシートの上から下への順序に従うようにする。
         # plain_texts は (row_num, line) のリストなので行番号でソートしておく。
         # merge excluded block lines into plain_texts container
         merged_texts = []
@@ -5834,10 +5831,10 @@ class ExcelToMarkdownConverter:
         for (r, line) in plain_texts:
             merged_texts.append((r, line, False))
 
-        # Ensure that any rows already processed as detected tables are not
-        # present in merged_texts. This avoids emitting the same content both
-        # as a converted table and as free-form text during the final sort
-        # and output stage.
+        # 検出されたテーブルとして既に処理された行がmerged_textsに
+        # 存在しないことを確認。これにより、最終ソートと出力段階で
+        # 同じコンテンツが変換されたテーブルとフリーフォームテキストの
+        # 両方として出力されることを回避。
         if processed_rows:
             try:
                 before_count = len(merged_texts)
@@ -5846,10 +5843,10 @@ class ExcelToMarkdownConverter:
             except (ValueError, TypeError) as e:
                 debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-        # Before emitting merged_texts, attempt to detect implicit tables formed
-        # by contiguous rows that have multiple non-empty columns. This recovers
-        # cases where table detection heuristics missed a table but the data is
-        # clearly tabular (e.g. many rows with >=2 non-empty columns).
+        # merged_textsを出力する前に、複数の非空列を持つ連続した行で
+        # 形成される暗黙のテーブルを検出しようとする。これにより、
+        # テーブル検出ヒューリスティックがテーブルを見逃したが、データが
+        # 明らかに表形式である場合（例：2列以上の非空列を持つ多くの行）を回復。
         try:
             candidate_rows = [r for r in range(min_row, max_row + 1) if r not in processed_rows]
             # map row -> list of non-empty column indices
@@ -5871,10 +5868,10 @@ class ExcelToMarkdownConverter:
             if cur_run:
                 runs.append((cur_run[0], cur_run[-1]))
 
-            # emit any sufficiently long runs as tables (threshold=3 rows)
+            # 十分に長い実行をテーブルとして出力（閾値=3行）
             for (srow, erow) in runs:
                 if (erow - srow + 1) >= 3:
-                    # compute min/max cols across the run
+                    # 実行全体の最小/最大列を計算
                     cols_used = [c for r in range(srow, erow + 1) for c in row_cols.get(r, [])]
                     if cols_used:
                         smin = min(cols_used)
@@ -5884,9 +5881,9 @@ class ExcelToMarkdownConverter:
                         if self._is_colon_separated_list(sheet, srow, erow, smin, smax):
                             debug_print(f"[DEBUG] implicit table is colon-separated list; skipping rows={srow}-{erow}")
                             continue
-                        # Strong guard: if the run is a two-column numbered/list style
-                        # (left column is enumeration markers like ①, 1., a) and right
-                        # column is descriptive text, skip converting to an implicit table
+                        # 強力なガード: 実行が2列の番号付き/リストスタイルの場合
+                        # （左列が①、1.、a)などの列挙マーカーで、右列が
+                        # 説明テキストの場合、暗黙のテーブルへの変換をスキップ
                         try:
                             content_cols_set = set(cols_used)
                             if len(content_cols_set) == 2:
@@ -5929,10 +5926,10 @@ class ExcelToMarkdownConverter:
                         except (ValueError, TypeError) as e:
                             debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-                        # convert region as a table (this will append to markdown_lines)
+                        # 領域をテーブルとして変換（これはmarkdown_linesに追加される）
                         try:
                             self._convert_table_region(sheet, (srow, erow, smin, smax), table_number=0)
-                            # mark these rows as processed so they won't be emitted as plain text
+                            # これらの行を処理済みとしてマークし、プレーンテキストとして出力されないようにする
                             for rr in range(srow, erow + 1):
                                 processed_rows.add(rr)
                         except Exception:
@@ -5940,11 +5937,11 @@ class ExcelToMarkdownConverter:
         except Exception:
             pass  # データ構造操作失敗は無視
 
-        # sort merged_texts by row number (ascending) to preserve sheet order
+        # merged_textsを行番号（昇順）でソートしてシート順序を保持
         merged_texts.sort(key=lambda x: x[0])
-        # If implicit-table detection above converted any rows, ensure merged_texts
-        # no longer contains those rows. This double-check prevents duplicates when
-        # implicit tables were found after merged_texts was initially constructed.
+        # 上記の暗黙テーブル検出で行が変換された場合、merged_textsを確認
+        # これらの行がもう含まれていないことを確認。この二重チェックにより、
+        # merged_textsが最初に構築された後に暗黙テーブルが見つかった場合の重複を防止。
         if processed_rows:
             try:
                 before_count2 = len(merged_texts)
@@ -5952,7 +5949,7 @@ class ExcelToMarkdownConverter:
                 debug_print(f"[DEBUG] post-implicit-filter: removed {before_count2 - len(merged_texts)} rows processed by implicit-table conversion")
             except (ValueError, TypeError) as e:
                 debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
-        # Emit merged free-form text entries in ascending row order.
+        # マージされたフリーフォームテキストエントリを行番号の昇順で出力。
         last_emitted_row = None
         if merged_texts:
             debug_print(f"[DEBUG] merged_texts出力開始: {len(merged_texts)}件")
@@ -5978,7 +5975,7 @@ class ExcelToMarkdownConverter:
                     except Exception as e:
                         pass  # XML解析エラーは無視
                 last_emitted_row = r
-            # Add a separating blank line after any merged free-text region (only when actually emitting)
+            # マージされたフリーテキスト領域の後に区切りの空行を追加（実際に出力する場合のみ）
             if getattr(self, '_in_canonical_emit', False):
                 self.markdown_lines.append("")
     
@@ -6029,7 +6026,7 @@ class ExcelToMarkdownConverter:
                 self._emit_free_text(sheet, row_num, line_text)
         
         if end_row >= start_row:  # 何らかのテキストが処理された場合
-            # Only append separator and mark emitted rows during canonical emission
+            # 正規出力時のみセパレータを追加し、出力済み行をマーク
             if getattr(self, '_in_canonical_emit', False):
                 self.markdown_lines.append("")  # 空行を追加
                 # map the end_row to the blank line index and mark emitted rows (helper already registered normalized texts)
@@ -6063,16 +6060,16 @@ class ExcelToMarkdownConverter:
 
         # 空でないテキストのみ出力
         if text_content:
-            # Do not create a mapping here if it does not exist; mapping is authoritative
-            # and should only be populated during canonical emission via _mark_sheet_map.
+            # ここでマッピングが存在しない場合は作成しない。マッピングは権威的であり、
+            # _mark_sheet_mapを介した正規出力時にのみ設定されるべき。
             sheet_map = self._cell_to_md_index.get(sheet.title, {})
             for i, text in enumerate(text_content):
                 if text.strip():
                     src_row = start_row + i
                     emitted = self._emit_free_text(sheet, src_row, text)
-                    # if emitted is False, it was a duplicate and skipped
-            # append blank line and map the last source row to the blank separator index
-            # Only actually append and mark emitted rows during the canonical emission
+                    # emittedがFalseの場合、重複としてスキップされた
+            # 空行を追加し、最後のソース行を空白セパレータインデックスにマップ
+            # 正規出力時のみ実際に追加し、出力済み行をマーク
             if getattr(self, '_in_canonical_emit', False):
                 self.markdown_lines.append("")  # 空行を追加
                 try:
@@ -6130,7 +6127,7 @@ class ExcelToMarkdownConverter:
         
         final_regions = self._filter_real_tables(sheet, final_regions, processed_rows)
         
-        # Trace summary of detected regions
+        # 検出された領域のトレースサマリー
         summary = f"DET_EXCL sheet={getattr(sheet,'title',None)} regions={len(final_regions)} " + ",".join([f"{r[0]}-{r[1]}" for r in final_regions[:10]])
         debug_print(summary)
         return final_regions, annotations
@@ -6260,7 +6257,7 @@ class ExcelToMarkdownConverter:
         """罫線情報を基に表の領域を検出"""
         print("[INFO] 罫線による表領域の検出を開始...")
         debug_print(f"[DEBUG][_detect_table_regions_entry] sheet={getattr(sheet,'title',None)} min_row={min_row} max_row={max_row} min_col={min_col} max_col={max_col}")
-        # Debug: basic sheet metrics
+        # デバッグ: 基本的なシートメトリクス
         debug_print(f"[DEBUG][_detect_table_regions_entry] sheet={sheet.title} rows={min_row}-{max_row} cols={min_col}-{max_col} max_row={sheet.max_row} max_col={sheet.max_column}")
         
         table_boundaries = []
@@ -6285,7 +6282,7 @@ class ExcelToMarkdownConverter:
         summary = f"DET sheet={getattr(sheet,'title',None)} regions={len(separated_tables)} " + ",".join([f"{r[0]}-{r[1]}" for r in separated_tables[:10]])
         debug_print(summary)
 
-        # Postprocess: merge adjacent single-row regions that have identical non-empty column masks
+        # 後処理: 同一の非空列マスクを持つ隣接する単一行領域をマージ
         merged = []
         i = 0
         masks = []
@@ -6846,7 +6843,7 @@ class ExcelToMarkdownConverter:
         
         debug_print(f"[DEBUG] _optimize_table_for_two_columns: headers={headers}, len={len(headers)}, header_positions={len(header_positions)}")
 
-        # Guard: ヘッダー数が3でない場合は最適化をスキップ
+        # ガード: ヘッダー数が3でない場合は最適化をスキップ
         # (正規化後のヘッダー数で判定、元の列数ではない)
         if len(headers) != 3:
             debug_print(f"[DEBUG] 2列最適化スキップ（ヘッダー数が3ではない: {len(headers)}列）")
@@ -6860,7 +6857,7 @@ class ExcelToMarkdownConverter:
         # 3列で、1列目が冗長な場合を検出
         # 第1列と第2列の組み合わせが設定項目のパターンかチェック(名前|初期値のパターン)
         debug_print(f"[DEBUG] 3列テーブル検出、パターンチェック: '{headers[0]}' と '{headers[1]}' (列{header_positions[0]}, 列{header_positions[1]})")
-        # Use column-range based check (inspect the data under header columns) instead
+        # 代わりに列範囲ベースのチェックを使用（ヘッダー列の下のデータを検査）
         if self._is_setting_item_pattern_columns(sheet, region, header_positions[0], header_positions[1]):
             # 第1列と第3列のデータ密度を比較して、第1列が有用かどうか判定
             total_rows = end_row - start_row
@@ -7384,7 +7381,7 @@ class ExcelToMarkdownConverter:
                 cell = sheet.cell(row, col)
                 if cell.value and isinstance(cell.value, str):
                     text = str(cell.value).strip()
-                    # Markdown強調や太字はタイトル候補として扱う（特定キーワードには依存しない）
+                    # マークダウン強調や太字はタイトル候補として扱う（特定キーワードには依存しない）
                     if text.startswith('**') and text.endswith('**') and len(text) > 4:
                         return True
                     if cell.font and cell.font.bold:
@@ -7595,17 +7592,17 @@ class ExcelToMarkdownConverter:
                     debug_print(f"[DEBUG][_prune_result_single] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                # Pre-output deterministic dump for debugging: capture small preview of table_data and source_rows
+                # デバッグ用の出力前決定論的ダンプ: table_dataとsource_rowsの小さなプレビューをキャプチャ
                 try:
                     src_sample = source_rows[:10] if source_rows else None
                     rows_len = len(table_data) if table_data else 0
                     debug_print(f"[DEBUG][_pre_output_call] path=single_table sheet={sheet.title} rows={rows_len} source_rows_sample={src_sample}")
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                # Defer table emission to canonical pass so authoritative mappings
-                # are recorded only during that pass. Use the first source row as
-                # the anchor. Include optional metadata (no title available in
-                # this path) for backwards-compatible shape.
+                # 正規パスまでテーブル出力を遅延させ、権威的マッピングが
+                # そのパス中にのみ記録されるようにする。最初のソース行を
+                # アンカーとして使用。後方互換性のある形状のために
+                # オプションのメタデータ（このパスではタイトルなし）を含める。
                 try:
                     anchor = (source_rows[0] if source_rows else min_row)
                 except (ValueError, TypeError):
@@ -7615,16 +7612,16 @@ class ExcelToMarkdownConverter:
                     self._sheet_deferred_tables.setdefault(sheet.title, []).append((anchor, table_data, source_rows, meta))
                     debug_print(f"DEFER_TABLE single_table sheet={sheet.title} anchor={anchor} rows={len(table_data)}")
                 except (ValueError, TypeError):
-                    # On any failure, fallback to immediate output to avoid data loss
+                    # 失敗時はデータ損失を避けるため即時出力にフォールバック
                     self._output_markdown_table(table_data, source_rows=source_rows, sheet_title=sheet.title)
     
     def _convert_table_region(self, sheet, region: Tuple[int, int, int, int], table_number: int):
         """指定された領域をテーブルとして変換（結合セル対応、ヘッダー行検出）"""
         start_row, end_row, start_col, end_col = region
-        # Diagnostic entry log: print region and a small sample of raw cell values
+        # 診断エントリログ: 領域と生セル値の小さなサンプルを出力
         try:
             debug_print(f"[DEBUG][_convert_table_region_entry] sheet={getattr(sheet, 'title', None)} region={start_row}-{end_row},{start_col}-{end_col}")
-            # Dump up to 5 rows of raw values to help identify whether a table was detected
+            # テーブルが検出されたかどうかを識別するために最大5行の生値をダンプ
             max_dump = min(5, end_row - start_row + 1)
             for rr in range(start_row, start_row + max_dump):
                 rowvals = []
@@ -7663,17 +7660,16 @@ class ExcelToMarkdownConverter:
         # テーブルタイトルを常に検出（OnlineQC、StartupReportなど）
         title_text = self._find_table_title_in_region(sheet, region)
         
-        # If we detected a title text for this region, keep it locally and
-        # attach it to the deferred table metadata later when the table_data
-        # is constructed. This avoids emitting the title as a separate
-        # deferred text entry (in _sheet_deferred_texts) which complicates
-        # duplicate-suppression and ordering.
+        # この領域のタイトルテキストを検出した場合、ローカルに保持し、
+        # table_dataが構築された後で遅延テーブルメタデータに添付する。
+        # これにより、タイトルを別の遅延テキストエントリ（_sheet_deferred_texts内）
+        # として出力することを避け、重複抑制と順序付けを複雑にしない。
         safe_title = None
         if title_text:
             safe_title = self._escape_angle_brackets(str(title_text))
 
-        # If the detected title is actually part of the region (appears in the top row),
-        # skip that row when building the table so the title isn't misinterpreted as a header cell.
+        # 検出されたタイトルが実際に領域の一部（先頭行に表示）の場合、
+        # テーブル構築時にその行をスキップし、タイトルがヘッダーセルとして誤解されないようにする。
         try:
             found_title_in_region = False
             for c in range(start_col, end_col + 1):
@@ -7702,10 +7698,10 @@ class ExcelToMarkdownConverter:
                                   for r in range(start_row, end_row + 1))]
             # 限度: 2〜8列のときのみ適用
             if 1 < len(unique_cols) <= 8:
-                # Heuristic: if the left-most unique col is a repeated section label (same value for many rows)
-                # and the next column contains varying property names, drop the left-most column so that
-                # property column is used as the first data column. This prevents the first output column
-                # from being filled with a section name like 'TransferFileList'.
+                # ヒューリスティック: 左端のユニーク列が繰り返しセクションラベル（多くの行で同じ値）で、
+                # 次の列が異なるプロパティ名を含む場合、左端の列を削除して
+                # プロパティ列が最初のデータ列として使用されるようにする。これにより、
+                # 最初の出力列が'TransferFileList'のようなセクション名で埋められることを防ぐ。
                 try:
                     col_stats = []
                     for c in unique_cols:
@@ -7880,7 +7876,7 @@ class ExcelToMarkdownConverter:
                     debug_print(f"[DEBUG][_prune_result_unique] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                # Pre-output deterministic dump for debugging (unique_cols path)
+                # デバッグ用の出力前決定論的ダンプ（unique_colsパス）
                 try:
                     src_sample = source_rows[:10] if source_rows else None
                     rows_len = len(table_data) if table_data else 0
@@ -7888,8 +7884,8 @@ class ExcelToMarkdownConverter:
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                 try:
-                    # Defer table emission to canonical pass. Use first source row
-                    # as anchor when available and include no title meta here.
+                    # 正規パスまでテーブル出力を遅延。利用可能な場合は最初のソース行を
+                    # アンカーとして使用し、ここではタイトルメタを含めない。
                     try:
                         anchor = (source_rows[0] if source_rows else start_row)
                     except (ValueError, TypeError):
@@ -7947,17 +7943,17 @@ class ExcelToMarkdownConverter:
                 debug_print(f"[DEBUG][_prune_result_headerdata] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} approx_rows_sample={approx_rows[:10] if approx_rows else None}")
             except (ValueError, TypeError) as e:
                 debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
-            # Pre-output deterministic dump for debugging (header/data path)
+            # デバッグ用の出力前決定論的ダンプ（ヘッダー/データパス）
             try:
                 src_sample = approx_rows[:10] if approx_rows else None
                 rows_len = len(table_data) if table_data else 0
                 debug_print(f"[DEBUG][_pre_output_call] path=header_data sheet={sheet.title} rows={rows_len} source_rows_sample={src_sample}")
             except (ValueError, TypeError) as e:
                 debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
-            # Defer table emission until canonical pass so authoritative maps are
-            # recorded only during that pass. Store anchor row = first source row
+            # 正規パスまでテーブル出力を遅延させ、権威的マップが
+            # そのパス中にのみ記録されるようにする。アンカー行 = 最初のソース行を保存
             try:
-                # Prefer the detected title row as the table anchor when available.
+                # 利用可能な場合は検出されたタイトル行をテーブルアンカーとして優先。
                 title_anchor = getattr(self, '_last_table_title_row', None) if safe_title else None
                 if title_anchor and isinstance(title_anchor, int):
                     anchor = title_anchor
@@ -7966,11 +7962,10 @@ class ExcelToMarkdownConverter:
             except Exception:
                 anchor = start_row
             try:
-                # Include optional metadata (title) with the deferred table so
-                # the canonical emitter can output the title together with the
-                # table in a single, atomic event. Backwards-compatible shape
-                # for deferred tables: (anchor, table_data, approx_rows) ->
-                # (anchor, table_data, approx_rows, meta_dict)
+                # 遅延テーブルにオプションのメタデータ（タイトル）を含め、
+                # 正規エミッターがタイトルとテーブルを単一のアトミックイベントで
+                # 出力できるようにする。遅延テーブルの後方互換性のある形状:
+                # (anchor, table_data, approx_rows) -> (anchor, table_data, approx_rows, meta_dict)
                 meta = {'title': safe_title} if safe_title else None
                 self._sheet_deferred_tables.setdefault(sheet.title, []).append((anchor, table_data, approx_rows, meta))
                 # clear transient title row after deferring
@@ -8035,7 +8030,7 @@ class ExcelToMarkdownConverter:
     def _is_plain_text_region(self, sheet, region: Tuple[int, int, int, int]) -> bool:
         """領域が通常のテキスト（非表形式）かどうかを判定"""
         start_row, end_row, start_col, end_col = region
-        # Early debug: report entry and simple metrics
+        # 早期デバッグ: エントリと単純なメトリクスを報告
         try:
             rows = end_row - start_row + 1
             cols = end_col - start_col + 1
@@ -8065,7 +8060,7 @@ class ExcelToMarkdownConverter:
         # データが1セルでもあれば判定対象
         if non_empty_cells < 1:
             return False
-        # Debug: report computed heuristics for this region
+        # デバッグ: この領域の計算されたヒューリスティックを報告
         debug_print(f"PLAIN_ENTRY sheet={getattr(sheet,'title',None)} region={start_row}-{end_row},{start_col}-{end_col} non_empty={non_empty_cells} total={total_cells}")
         text_content = ' '.join(texts)
         
@@ -8073,8 +8068,8 @@ class ExcelToMarkdownConverter:
         
         # token-based heuristic: a single row containing multiple short tokens
         # is likely a compact table header or data row (e.g. "名前 初期値 設定値").
-        # Be conservative: require the average cell length to be not too large so
-        # we don't misclassify descriptive sentences as tables.
+        # 保守的に: 平均セル長が大きすぎないことを要求し、
+        # 説明文をテーブルとして誤分類しないようにする。
         try:
             tokens = [tok for tok in text_content.split() if tok]
             if row_count == 1 and len(tokens) >= 2 and avg_len <= 60:
@@ -8106,10 +8101,10 @@ class ExcelToMarkdownConverter:
         row_std = statistics.pstdev(row_counts) if len(row_counts) > 0 else 0
         avg_row_nonempty = sum(row_counts) / len(row_counts) if len(row_counts) > 0 else 0
 
-        # Exception: two-column numbered-list pattern -> treat as plain text
-        # If left column mostly contains numbering/markers (①, 1, A, i, etc.) and
-        # right column contains longer descriptive text, prefer treating the
-        # region as a numbered list / descriptive lines rather than a table.
+        # 例外: 2列の番号付きリストパターン -> プレーンテキストとして扱う
+        # 左列が主に番号/マーカー（①、1、A、iなど）を含み、
+        # 右列がより長い説明テキストを含む場合、領域をテーブルではなく
+        # 番号付きリスト/説明行として扱うことを優先。
         try:
             content_cols = sorted([c for c, v in col_nonempty.items() if v > 0])
             if len(content_cols) == 2:
@@ -8136,26 +8131,26 @@ class ExcelToMarkdownConverter:
                     circled = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'
                     for t in left_texts:
                         tt = t.strip()
-                        # Normalize fullwidth digits/punctuation to their ASCII equivalents
+                        # 全角数字/句読点をASCII相当に正規化
                         try:
                             nn = unicodedata.normalize('NFKC', tt)
                         except Exception:
                             nn = tt
 
-                        # Check circled numbers first (they don't normalize to ascii)
+                        # 丸数字を最初にチェック（ASCIIに正規化されない）
                         if any(ch in circled for ch in tt):
                             num_matches += 1
                             continue
 
-                        # Accept patterns like:
+                        # 以下のパターンを受け入れる:
                         #  - (1) / （1） / 1) / 1）
                         #  - 1. / 1．
-                        #  - 1 / １ (fullwidth normalized by NFKC)
+                        #  - 1 / １ (NFKCで正規化された全角)
                         #  - (a) / a)
-                        #  - roman numerals I, II, III optionally with punctuation
-                        # Use normalized string for regex so fullwidth punctuation is handled
-                        # Allow optional surrounding parentheses (both ASCII and fullwidth)
-                        # and optional trailing punctuation like '.' or '．'
+                        #  - ローマ数字 I, II, III（オプションで句読点付き）
+                        # 正規化された文字列を正規表現に使用し、全角句読点を処理
+                        # オプションの括弧（ASCIIと全角の両方）と
+                        # オプションの末尾句読点（'.'や'．'など）を許可
                         try:
                             if re.match(r'^[\(\（]?\s*(?:\d+|[IVXivx]+|[A-Za-z])\s*[\)\）]?[\.．]?$', nn):
                                 num_matches += 1
@@ -8173,7 +8168,7 @@ class ExcelToMarkdownConverter:
 
                     ratio = (num_matches / len(left_texts)) if left_texts else 0.0
                     right_avg = sum(len(s) for s in right_texts) / len(right_texts) if right_texts else 0
-                    # Heuristic thresholds: >=80% left are numbering-like and right avg length >=10
+                    # ヒューリスティック閾値: 左の80%以上が番号のようで、右の平均長が10以上
                     if ratio >= 0.8 and right_avg >= 10:
                         debug_print(f"[DEBUG] 番号付きリスト検出: 行{start_row}〜{end_row} 左番号率={num_matches}/{len(left_texts)} 右平均長={right_avg:.1f}")
                         return True
@@ -8182,7 +8177,7 @@ class ExcelToMarkdownConverter:
 
         # ルール1: ファイルパス/URL/XMLが多い場合はプレーンテキスト（説明的な列）
         if non_empty_cells > 0 and (path_like_count / non_empty_cells) > 0.25:
-            # If there are strong vertical borders that indicate multiple columns, prefer table interpretation
+            # 複数列を示す強い縦罫線がある場合、テーブル解釈を優先
             try:
                 border_cols = self._detect_table_columns_by_borders(sheet, start_row, end_row, start_col, end_col)
             except (ValueError, TypeError):
@@ -8200,8 +8195,8 @@ class ExcelToMarkdownConverter:
             debug_print(f"[DEBUG] プレーンテキスト判定(長文多): 行{start_row}〜{end_row}, avg_len={avg_len:.1f}")
             return True
 
-        # Exception: single-row with multiple short columns likely represents a compact table
-        # e.g. a single row of short labels like 'A  B  C' should be treated as a table
+        # 例外: 複数の短い列を持つ単一行はコンパクトなテーブルを表す可能性が高い
+        # 例: 'A  B  C'のような短いラベルの単一行はテーブルとして扱うべき
         try:
             if row_count == 1 and cols_with_content >= 2 and avg_len < 40:
                 debug_print(f"[DEBUG] 単一行短文複数列は表扱い: 行{start_row}〜{end_row}, cols_with_content={cols_with_content}, avg_len={avg_len:.1f}")
@@ -8230,7 +8225,7 @@ class ExcelToMarkdownConverter:
         
         text_lines = []  # 改行を含むテキスト行を収集
         
-        # Emit each source row as a single combined line using the centralized emitter
+        # 集中エミッターを使用して各ソース行を単一の結合行として出力
         for row_num in range(start_row, end_row + 1):
             row_texts = []
             for col_num in range(start_col, min(start_col + 10, end_col + 1)):
@@ -8249,14 +8244,14 @@ class ExcelToMarkdownConverter:
                 except (ValueError, TypeError):
                     # fallback to direct append if emitter fails
                     # fallback to direct append if emitter fails
-                    # Do NOT mutate authoritative mappings unless we're in the
-                    # canonical emission pass. Prematurely marking rows/texts as
-                    # emitted caused pruning of legitimate table rows.
+                    # 正規出力パス中でない限り権威的マッピングを変更しない。
+                    # 行/テキストを早期に出力済みとしてマークすると、
+                    # 正当なテーブル行が削除される原因となった。
                     try:
                         self.markdown_lines.append(self._escape_angle_brackets(combined) + "  ")
                         if getattr(self, '_in_canonical_emit', False):
                             try:
-                                # Only record authoritative mappings during canonical pass
+                                # 正規パス中のみ権威的マッピングを記録
                                 md_idx = len(self.markdown_lines) - 1
                                 self._mark_sheet_map(sheet.title, row_num, md_idx)
                             except Exception as e:
@@ -8367,14 +8362,14 @@ class ExcelToMarkdownConverter:
                     dedup_parts.append(p)
             # filter out parts that likely belong to data rows (appear frequently below header)
             try:
-                # Determine if this column contains any merged/master header cells within the header rows.
+                # この列がヘッダー行内に結合/マスターヘッダーセルを含むかどうかを判定。
                 is_master_col = False
                 for r in range(header_row, min(header_row + header_height, end_row + 1)):
                     keym = f"{r}_{col}"
                     if keym in merged_info:
                         mi = merged_info[keym]
-                        # If the master cell is within the header candidate rows and/or spans multiple rows/cols,
-                        # treat this column as a master/header column and avoid aggressive data-token removal.
+                        # マスターセルがヘッダー候補行内にあるか、複数の行/列にまたがる場合、
+                        # この列をマスター/ヘッダー列として扱い、積極的なデータトークン削除を避ける。
                         mr = int(mi.get('master_row', header_row))
                         mc = int(mi.get('master_col', col))
                         span_r = int(mi.get('span_rows', 1) or 1)
@@ -8384,8 +8379,8 @@ class ExcelToMarkdownConverter:
                             break
 
                 filtered_parts = []
-                # If this column is a master/header column, or if we have a multi-row header (height>1),
-                # skip the sampling-based drop and keep dedup_parts intact
+                # この列がマスター/ヘッダー列の場合、または複数行ヘッダー（height>1）の場合、
+                # サンプリングベースの削除をスキップし、dedup_partsをそのまま保持
                 if is_master_col or header_height > 1:
                     filtered_parts = list(dedup_parts)
                 else:
@@ -8413,17 +8408,17 @@ class ExcelToMarkdownConverter:
                                 cnt += 1
 
                         frac = (cnt / total) if total > 0 else 0.0
-                        # Conservative rule: only drop tokens that are both relatively long and
-                        # appear frequently in data rows. This avoids removing short header labels
-                        # like '装置名' or 'PSコード' that may also reappear in data samples.
+                        # 保守的ルール: 比較的長く、データ行に頻繁に出現するトークンのみを削除。
+                        # これにより、データサンプルにも再出現する可能性のある
+                        # '装置名'や'PSコード'のような短いヘッダーラベルの削除を避ける。
                         drop = False
                         try:
                             plen = len(p.strip()) if p else 0
-                            # Strong evidence: very frequent (>=90%) -> drop only for tokens of reasonable length
-                            # (avoid dropping short label-like tokens such as '装置名')
+                            # 強い証拠: 非常に頻繁（>=90%）-> 適切な長さのトークンのみ削除
+                            # （'装置名'のような短いラベル的トークンの削除を避ける）
                             if frac >= 0.9 and plen >= 4:
                                 drop = True
-                            # Moderate evidence: frequent (>=60%) and token not very short -> drop
+                            # 中程度の証拠: 頻繁（>=60%）でトークンが非常に短くない -> 削除
                             elif frac >= 0.6 and plen >= 8:
                                 drop = True
                         except Exception:
@@ -8537,11 +8532,11 @@ class ExcelToMarkdownConverter:
         debug_print(f"[DEBUG] 最終ヘッダー: {headers}")
         debug_print(f"[DEBUG] ヘッダー位置: {header_positions}")
 
-        # Fallback: if the detected headers are mostly empty, the real header
-        # content may be shifted by one row (common when a title row was skipped).
-        # Try a single one-line downward shift and re-extract simple header texts
-        # conservatively. This is a small, low-risk heuristic to avoid losing
-        # columns when header tokens actually appear on the next row.
+        # フォールバック: 検出されたヘッダーがほとんど空の場合、実際のヘッダー
+        # コンテンツが1行下にシフトしている可能性がある（タイトル行がスキップされた場合に一般的）。
+        # 1行下にシフトして単純なヘッダーテキストを保守的に再抽出する。
+        # これは、ヘッダートークンが実際に次の行に表示される場合に
+        # 列を失わないための小さな低リスクのヒューリスティック。
         try:
             nonempty_headers = sum(1 for h in headers if h and str(h).strip())
             total_headers = len(headers) if headers else 0
@@ -8569,8 +8564,8 @@ class ExcelToMarkdownConverter:
                         shifted_positions.append(col)
 
                 if any(shifted_headers):
-                    # adopt shifted headers conservatively: only replace when we found
-                    # any non-empty header tokens on the shifted row(s)
+                    # シフトされたヘッダーを保守的に採用: シフトされた行で
+                    # 空でないヘッダートークンが見つかった場合のみ置換
                     headers = shifted_headers
                     header_positions = shifted_positions
                     header_row = shifted_row
@@ -8727,21 +8722,21 @@ class ExcelToMarkdownConverter:
             groups.append((i, j))
             i = j
 
-        # expand groups to respect explicit borders: if columns within a group are separated by vertical borders in the header_row,
-        # split that group into single-column groups so they won't be compressed
+        # 明示的な罫線を尊重するためにグループを展開: グループ内の列がheader_rowで縦罫線で区切られている場合、
+        # そのグループを単一列グループに分割して圧縮されないようにする
         final_groups = []
         for (a, b) in groups:
             if b - a <= 1:
                 final_groups.append((a, b))
                 continue
 
-            # header_positions indices for this group
+            # このグループのheader_positionsインデックス
             cols = [header_positions[k] for k in range(a, b) if k < len(header_positions)]
-            # if any adjacent column boundary in the sheet has a right border on header_row, do not compress across it
+            # シート内の隣接する列境界にheader_rowで右罫線がある場合、その境界を越えて圧縮しない
             split_points = [a]
             for idx in range(len(cols) - 1):
                 col_left = cols[idx]
-                # Check vertical border presence across the header->data rows, not only the header row.
+                # ヘッダー行だけでなく、ヘッダー→データ行全体で縦罫線の存在を確認。
                 right_count = 0
                 total_check = 0
                 for rr in range(header_row, end_row + 1):
@@ -8756,9 +8751,9 @@ class ExcelToMarkdownConverter:
 
                 has_strong_right = (total_check > 0 and (right_count / total_check) >= 0.5)
 
-                # Additional strict check: if any right-border exists on the header row itself,
-                # treat that as a definitive column separator and force a split. This prevents
-                # collapsing identical header labels when explicit vertical borders separate columns.
+                # 追加の厳密チェック: ヘッダー行自体に右罫線が存在する場合、
+                # それを決定的な列区切りとして扱い、分割を強制する。これにより、
+                # 明示的な縦罫線が列を区切っている場合に同一のヘッダーラベルが圧縮されることを防ぐ。
                 try:
                     hdr_cell = sheet.cell(header_row, col_left)
                     if hdr_cell and hdr_cell.border and hdr_cell.border.right and getattr(hdr_cell.border.right, 'style', None):
@@ -8766,7 +8761,7 @@ class ExcelToMarkdownConverter:
                 except Exception as e:
                     pass  # XML解析エラーは無視
 
-                # Also check merged-cell masters for differences across header rows
+                # ヘッダー行間で結合セルのマスターの違いもチェック
                 masters_differ = False
                 try:
                     header_height = int(getattr(self, '_detected_header_height', 1) or 1)
@@ -8791,21 +8786,21 @@ class ExcelToMarkdownConverter:
                     masters_differ = False
 
                 if has_strong_right:
-                    # force split between this and next
+                    # この列と次の列の間で分割を強制
                     split_points.append(a + idx + 1)
                 elif masters_differ:
-                    # also force split when masters differ across header rows
+                    # ヘッダー行間でマスターが異なる場合も分割を強制
                     split_points.append(a + idx + 1)
 
             split_points.append(b)
-            # build ranges from split_points
+            # split_pointsから範囲を構築
             for si in range(len(split_points) - 1):
                 final_groups.append((split_points[si], split_points[si+1]))
 
-        # Post-process final_groups: if a group's header fragments are all empty, do not compress that group.
+        # final_groupsの後処理: グループのヘッダーフラグメントがすべて空の場合、そのグループを圧縮しない。
         processed_groups = []
         for (a, b) in final_groups:
-            # build sample header fragments across the group's header positions
+            # グループのヘッダー位置全体でサンプルヘッダーフラグメントを構築
             try:
                 fragments = []
                 for idx in range(a, b):
@@ -8813,9 +8808,9 @@ class ExcelToMarkdownConverter:
                         fragments.append(str(headers[idx] or '').strip())
                     else:
                         fragments.append('')
-                # determine if all fragments are empty (i.e., effectively no header label)
+                # すべてのフラグメントが空かどうかを判定（つまり、実質的にヘッダーラベルがない）
                 if all((not f) for f in fragments):
-                    # expand to single-column groups to preserve all underlying columns
+                    # すべての基礎となる列を保持するために単一列グループに展開
                     for col_idx in range(a, b):
                         processed_groups.append((col_idx, col_idx + 1))
                 else:
@@ -8907,7 +8902,7 @@ class ExcelToMarkdownConverter:
             group_column_ranges.append((col_start, col_end))
         debug_print(f"[DEBUG] group_column_ranges={group_column_ranges}")
 
-        # Build a helper to get cell value considering merged cells
+        # 結合セルを考慮してセル値を取得するヘルパーを構築
         def _get_cell_value(r, c):
             key = f"{r}_{c}"
             if key in merged_info and merged_info[key]['is_merged']:
@@ -8917,7 +8912,7 @@ class ExcelToMarkdownConverter:
             cell = sheet.cell(r, c)
             return self._format_cell_content(cell) if cell.value is not None else ''
 
-        # For each group, compute column priority based on number of distinct non-empty values
+        # 各グループについて、異なる非空値の数に基づいて列の優先度を計算
         group_column_priority = []
         for (col_start, col_end) in group_column_ranges:
             col_scores = []
@@ -8929,23 +8924,23 @@ class ExcelToMarkdownConverter:
                         vals.append(v.strip())
                 distinct = len(set(vals))
                 nonempty = len(vals)
-                # compute dominance: frequency of most common value
+                # 支配度を計算: 最も一般的な値の頻度
                 max_freq = 0
                 if vals:
                     from collections import Counter
                     counts = Counter(vals)
                     max_freq = max(counts.values())
                 dominance = (max_freq / nonempty) if nonempty > 0 else 0
-                # score tuple: prefer more distinct values, then lower dominance (less dominated by single token),
-                # then more non-empty cells, finally leftmost column
+                # スコアタプル: より多くの異なる値を優先、次に低い支配度（単一トークンによる支配が少ない）、
+                # 次により多くの非空セル、最後に左端の列
                 col_scores.append((c, distinct, dominance, nonempty))
-            # sort by: distinct desc, dominance asc, nonempty desc, col asc
+            # ソート: distinct降順、dominance昇順、nonempty降順、col昇順
             col_scores.sort(key=lambda x: (-x[1], x[2], -x[3], x[0]))
             ordered_cols = [c for (c, _, _, _) in col_scores]
             group_column_priority.append(ordered_cols)
         debug_print(f"[DEBUG] group_column_priority={group_column_priority}")
 
-        # write compact group/priority info to debug file for offline analysis
+        # オフライン分析用にコンパクトなグループ/優先度情報をデバッグファイルに書き込む
         sheet_name = getattr(sheet, 'title', None)
 
         # データ行を構築（ヘッダー行の次から）。各グループ内では行ごとに優先列順で最初の非空セルを参照して値を取得する
@@ -9017,16 +9012,16 @@ class ExcelToMarkdownConverter:
 
                 # 各列について分割が多く発生するか確認する
                 col_details = []
-                # prepare two regex patterns: a stricter primary one and a permissive fallback
-                # primary: stricter split pattern but avoid explicit Unicode range checks.
-                # accept a middle token that is non-whitespace and does not contain obvious path/XML chars
+                # 2つの正規表現パターンを準備: より厳密なプライマリと寛容なフォールバック
+                # プライマリ: より厳密な分割パターンだが、明示的なUnicode範囲チェックを避ける。
+                # 空白でなく、明らかなパス/XML文字を含まない中間トークンを受け入れる
                 primary_re = re.compile(r'^(.*?)\s+([^\\\/<>:\"\s]{1,60})\s+(.+)$')
-                # permissive: allow many chars for middle token but exclude path/XML chars later
-                # also accept Japanese quotes and fullwidth punctuation after normalizing
+                # 寛容: 中間トークンに多くの文字を許可するが、後でパス/XML文字を除外
+                # 正規化後に日本語の引用符と全角句読点も受け入れる
                 permissive_re = re.compile(r'^(.*?)\s+([^\\\/<>:\\"]{1,60})\s+(.+)$')
 
                 def _normalize_for_split(s: str) -> str:
-                    # normalize full-width spaces/quotes/parentheses to improve matching
+                    # マッチングを改善するために全角スペース/引用符/括弧を正規化
                     if not s:
                         return ''
                     s = s.replace('\u3000', ' ')
@@ -9034,7 +9029,7 @@ class ExcelToMarkdownConverter:
                     s = s.replace('（', '(').replace('）', ')')
                     s = s.replace('「', ' ').replace('」', ' ')
                     s = s.replace('”', '"').replace('“', '"')
-                    # collapse multiple spaces
+                    # 複数のスペースを圧縮
                     import re as _re
                     s = _re.sub(r'\s+', ' ', s).strip()
                     return s
@@ -9054,17 +9049,17 @@ class ExcelToMarkdownConverter:
                             if primary_re.match(norm):
                                 matches += 1
                             else:
-                                # 次に緩いパターンを試みるが、パスやXML等のトークンを含む場合は除外して誤検出を抑制
+                                # 次に寛容なパターンを試みるが、パスやXML等のトークンを含む場合は除外して誤検出を抑制
                                 m2 = permissive_re.match(norm)
                                 if m2:
                                     mid = m2.group(2)
-                                    # exclude obvious path-like or xml-like tokens
+                                    # 明らかなパスのようなまたはXMLのようなトークンを除外
                                     if ('\\' not in mid and '/' not in mid and '<' not in mid and '>' not in mid and ':' not in mid):
                                         matches += 1
                     # 非空行が一定数以上かつマッチ率が高ければ分割候補とする
                     ratio = (matches / non_empty) if non_empty > 0 else 0
                     col_details.append((col_idx, non_empty, matches, ratio))
-                    # increase threshold to reduce false positives for splitting
+                    # 分割の誤検出を減らすために閾値を上げる
                     if non_empty >= 2 and ratio >= 0.40:
                         cols_to_split.add(col_idx)
 
@@ -9089,7 +9084,7 @@ class ExcelToMarkdownConverter:
                         for idx in range(len(headers)):
                             cell = row[idx] if idx < len(row) else ''
                             if idx in cols_to_split:
-                                # match against normalized form but preserve original pieces where possible
+                                # 正規化された形式に対してマッチするが、可能な限り元のピースを保持
                                 norm_cell = _normalize_for_split(cell or '')
                                 m = primary_re.match(norm_cell)
                                 used_a = used_b = used_c = None
@@ -9102,7 +9097,7 @@ class ExcelToMarkdownConverter:
 
                                 if m:
                                     a, b, c = m.groups()
-                                    # try to extract corresponding substrings from original cell loosely
+                                    # 元のセルから対応する部分文字列を緩く抽出しようとする
                                     new_row.extend([a.strip(), b.strip(), c.strip()])
                                 else:
                                     # マッチしない場合はオリジナルを維持し、Property/Value は空にする
@@ -9249,14 +9244,14 @@ class ExcelToMarkdownConverter:
         best_row = None
         best_group_count = -1
 
-        # Evaluate single-row and multi-row header candidates (up to height 3).
+        # 単一行および複数行のヘッダー候補を評価（最大高さ3）。
         for row in candidate_rows:
             for height in (1, 2, 3):
                 if row + height - 1 > end_row:
                     break
 
                 header_values = []
-                # build combined header text per column across `height` rows
+                # `height`行にわたって列ごとに結合されたヘッダーテキストを構築
                 for col in range(start_col, min(start_col + 20, end_col + 1)):
                     parts = []
                     contributors = set()
@@ -9275,14 +9270,14 @@ class ExcelToMarkdownConverter:
                                 contributors.add(r2)
 
                         if text and len(text) <= 120:
-                            # avoid duplicates when stacking rows
+                            # 行をスタックする際の重複を避ける
                             if not parts or parts[-1] != text:
                                 parts.append(text)
 
                     combined = '<br>'.join(parts) if parts else ''
                     header_values.append(combined)
 
-                # count groups
+                # グループをカウント
                 group_count = 0
                 prev = None
                 nonempty = 0
@@ -9293,15 +9288,15 @@ class ExcelToMarkdownConverter:
                         group_count += 1
                     prev = v or prev
 
-                # determine how many columns actually draw header fragments from multiple
-                # physical rows. If only a small fraction (<25%) of columns have fragments
-                # coming from multiple rows, it's likely the '<br>'s are internal to a single
-                # cell rather than a true multi-row header; skip multi-row candidate.
+                # 実際に複数の物理行からヘッダーフラグメントを取得している列の数を判定。
+                # 複数行からフラグメントを取得している列が少数（<25%）の場合、
+                # '<br>'は真の複数行ヘッダーではなく単一セル内のものである可能性が高い。
+                # 複数行候補をスキップ。
                 try:
                     multirow_cols = 0
                     total_columns = min(start_col + 20, end_col + 1) - start_col
-                    # contributors_per_col recorded alongside header_values where available
-                    # rebuild lightweight contributors detection for this candidate
+                    # 利用可能な場合はheader_valuesと一緒にcontributors_per_colを記録
+                    # この候補のための軽量なcontributors検出を再構築
                     for col in range(start_col, start_col + total_columns):
                         contribs = set()
                         for r2 in range(row, row + height):
@@ -9332,7 +9327,7 @@ class ExcelToMarkdownConverter:
                         debug_print(f"[DEBUG] 複数行ヘッダ候補をスキップ（実際には単一セル内改行が多い）: row={row}, height={height}, multirow_frac={multirow_frac:.2f}, nonempty={nonempty}/{total_columns}")
                         continue
 
-                # compute fraction of columns in the top row that are part of multi-column merged masters
+                # 最上行で複数列結合マスターの一部である列の割合を計算
                 top_row = row
                 top_merged_count = 0
                 total_columns = min(start_col + 20, end_col + 1) - start_col
@@ -9346,13 +9341,13 @@ class ExcelToMarkdownConverter:
                 debug_print(f"[DEBUG] 行{row}..{row+height-1} combined header_values (first16): {header_values[:16]}")
                 debug_print(f"[DEBUG] 行{row} height={height} group_count={group_count}, nonempty_cols={nonempty}")
 
-                # prefer larger group_count; tie-breaker: prefer full-column coverage, then stronger bottom-border alignment,
-                # then fewer top-row multi-column merges (favor lower-level splits), then deeper bottom row, then larger height
+                # より大きなgroup_countを優先。タイブレーカー: 全列カバレッジを優先、次に強い下罫線の整列、
+                # 次に最上行の複数列結合が少ないもの（下位レベルの分割を優先）、次により深い最下行、次により大きな高さ
                 bottom_row = row + height - 1
                 total_columns = min(start_col + 20, end_col + 1) - start_col
                 full_coverage = (nonempty == total_columns)
 
-                # compute header bottom-border alignment: fraction of columns where bottom_row has a bottom border or next row has top border
+                # ヘッダーの下罫線整列を計算: bottom_rowに下罫線があるか、次の行に上罫線がある列の割合
                 border_hits = 0
                 border_total = 0
                 for c in range(start_col, start_col + total_columns):
@@ -9362,7 +9357,7 @@ class ExcelToMarkdownConverter:
                         if (br_cell.border and br_cell.border.bottom and getattr(br_cell.border.bottom, 'style', None)):
                             border_hits += 1
                         else:
-                            # check next row's top border when available
+                            # 利用可能な場合は次の行の上罫線をチェック
                             if bottom_row + 1 <= end_row:
                                 nx = sheet.cell(bottom_row + 1, c)
                                 if nx.border and nx.border.top and getattr(nx.border.top, 'style', None):
@@ -9371,7 +9366,7 @@ class ExcelToMarkdownConverter:
                         continue
                 header_border_fraction = (border_hits / border_total) if border_total > 0 else 0.0
 
-                # compute merged-master alignment score: fraction of header columns whose merged master is located within the header rows
+                # 結合マスター整列スコアを計算: 結合マスターがヘッダー行内に位置するヘッダー列の割合
                 master_aligned = 0
                 master_total = 0
                 for c in range(start_col, start_col + total_columns):
@@ -9380,13 +9375,13 @@ class ExcelToMarkdownConverter:
                     if mi:
                         master_total += 1
                         mr = int(mi.get('master_row', row))
-                        # aligned if master_row is within the header candidate rows
+                        # master_rowがヘッダー候補行内にある場合は整列
                         if row <= mr <= bottom_row:
                             master_aligned += 1
                 masters_alignment_frac = (master_aligned / master_total) if master_total > 0 else 0.0
 
-                # compute a lightweight "header-likeness" score for the bottom row of this candidate
-                # higher score favors rows that look like labels (short tokens, few <br>, not path-like, bold)
+                # この候補の最下行に対して軽量な「ヘッダーらしさ」スコアを計算
+                # 高いスコアはラベルのように見える行を優先（短いトークン、少ない<br>、パスのようでない、太字）
                 def _row_header_likeness(rnum):
                     try:
                         total_nonempty = 0
@@ -9428,7 +9423,7 @@ class ExcelToMarkdownConverter:
                         nobr_frac = nobr_count / total_nonempty
                         path_frac = path_like_count / total_nonempty
                         bold_frac = bold_count / total_nonempty
-                        # weights chosen conservatively to avoid overfitting
+                        # 過学習を避けるために保守的に選択された重み
                         score = short_frac + 0.45 * nobr_frac + 0.35 * bold_frac - 0.9 * path_frac
                         return max(0.0, score)
                     except Exception:
@@ -9476,7 +9471,7 @@ class ExcelToMarkdownConverter:
                 if first_row_bonus > 0:
                     debug_print(f"[DEBUG] 最初の行ボーナス適用: row={row}, border_fraction={header_border_fraction:.3f} -> {adjusted_border_fraction:.3f}")
 
-                # build metric tuple for this candidate
+                # この候補のメトリクスタプルを構築
                 # 罫線を最優先、次に拡張グループ数を考慮
                 # 同等の場合は上部の行を優先（-rowで小さい行番号が大きい値になる）
                 # heightは小さい方を優先（より保守的なヘッダー検出）
@@ -9494,7 +9489,7 @@ class ExcelToMarkdownConverter:
                 )
 
 
-                # compare with best metrics
+                # 最良のメトリクスと比較
                 # 拡張範囲で2つ以上のグループがある、またはテーブル範囲内でgroup_count>=2の場合に候補とする
                 if extended_group_count >= 2 or group_count >= 2:
                     if best_group_count < 0:
@@ -9507,7 +9502,7 @@ class ExcelToMarkdownConverter:
                         except Exception:
                             pass  # エラーは無視
                     else:
-                        # compare lexicographically
+                        # 辞書順で比較
                         try:
                             if metrics > best_metrics:
                                 best_group_count = group_count
@@ -9519,20 +9514,20 @@ class ExcelToMarkdownConverter:
                                 except Exception:
                                     pass  # エラーは無視
                         except Exception:
-                            # fallback to previous tie-breaker
+                            # 以前のタイブレーカーにフォールバック
                             if group_count > best_group_count:
                                 best_group_count = group_count
                                 best_row = row
                                 best_height = height
 
         if best_row:
-            # store detected header start and height for downstream heuristics
+            # 下流のヒューリスティック用に検出されたヘッダー開始と高さを保存
             self._detected_header_start = best_row
             self._detected_header_height = best_height
-            # Guard: prefer single-row header when promoting to multi-row yields little benefit.
+            # ガード: 複数行への昇格がほとんど利益をもたらさない場合は単一行ヘッダーを優先。
             try:
                 if best_height and best_height > 1:
-                    # recompute group_count for height=1 at the chosen start row
+                    # 選択された開始行でheight=1のgroup_countを再計算
                     single_vals = []
                     for col in range(start_col, min(start_col + 20, end_col + 1)):
                         parts = []
@@ -9559,17 +9554,17 @@ class ExcelToMarkdownConverter:
                             group_count_one += 1
                         prev = v or prev
 
-                    # require a meaningful gain to keep multi-row header; small gains often indicate
-                    # the lower rows are data-like and should not be absorbed. Threshold set to 1.
+                    # 複数行ヘッダーを維持するには意味のある利益が必要。小さな利益は
+                    # 下位行がデータのようで吸収すべきでないことを示すことが多い。閾値は1に設定。
                     if (best_group_count - group_count_one) <= 1:
                         debug_print(f"[DEBUG] ヘッダー高さの見直し: 複数行によるグループ増分が小さいため単一行を優先します (row={best_row}, before_height={best_height}, groups_before={best_group_count}, groups_one={group_count_one})")
                         best_height = 1
                         self._detected_header_height = best_height
             except (ValueError, TypeError) as e:
                 debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
-            # Additional guard: if the bottom row of the selected multi-row header
-            # by itself provides equal or better grouping coverage, prefer it as a
-            # single-row header (avoids pulling first data row into header).
+            # 追加のガード: 選択された複数行ヘッダーの最下行が
+            # 単独で同等以上のグループカバレッジを提供する場合、
+            # 単一行ヘッダーとして優先（最初のデータ行をヘッダーに引き込むことを避ける）。
             try:
                 if best_height and best_height > 1:
                     bottom_row = best_row + best_height - 1
@@ -9599,7 +9594,7 @@ class ExcelToMarkdownConverter:
                         prev = v or prev
 
                     total_columns = min(start_col + 20, end_col + 1) - start_col
-                    # prefer bottom row when its grouping equals the multi-row grouping and covers many columns
+                    # 最下行のグループが複数行グループと等しく、多くの列をカバーする場合は最下行を優先
                     if group_count_bottom >= best_group_count and nonempty_bottom >= max(2, int(total_columns * 0.6)):
                         debug_print(f"[DEBUG] ヘッダー行選択の調整: 下端行が十分に代表的なヘッダーのため下端行を単一行ヘッダーにします (from row={best_row}, height={best_height} -> row={bottom_row}, height=1)")
                         best_row = bottom_row
@@ -9874,19 +9869,19 @@ class ExcelToMarkdownConverter:
         except (ValueError, TypeError) as e:
             debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-        # Diagnostics: for every original sheet column in the region, record why it was
-        # kept or dropped. This helps trace which branch collapsed columns.
+        # 診断: 領域内のすべての元のシート列について、なぜそれが
+        # 保持または削除されたかを記録。これはどのブランチが列を圧縮したかを追跡するのに役立つ。
         try:
             per_column_diag = []
             num_all_cols = end_col - start_col + 1
-            # map original relative index -> whether in initial_useful, header_keep, guard_keep
+            # 元の相対インデックス -> initial_useful、header_keep、guard_keepに含まれるかどうかをマップ
             for rel in range(0, num_all_cols):
                 abs_col = start_col + rel
                 in_initial = rel in initial_useful_columns
                 in_final = rel in useful_columns
                 header_present = False
                 header_texts = []
-                # attempt to pull header fragments from detected header rows if available
+                # 利用可能な場合は検出されたヘッダー行からヘッダーフラグメントを取得しようとする
                 try:
                     hdr_row = header_row or actual_start_row
                     detected_h = int(getattr(self, '_detected_header_height') or 1)
@@ -9896,7 +9891,7 @@ class ExcelToMarkdownConverter:
                             header_present = True
                             header_texts.append(str(val).strip())
                 except (ValueError, TypeError):
-                    # fallback: use filtered_table_data header if exists
+                    # フォールバック: filtered_table_dataヘッダーが存在する場合は使用
                     try:
                         if filtered_table_data and rel < len(filtered_table_data[0]):
                             hv = filtered_table_data[0][rel]
@@ -9906,7 +9901,7 @@ class ExcelToMarkdownConverter:
                     except (ValueError, TypeError) as e:
                         debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-                # data non-empty count for this original rel column
+                # この元のrel列のデータ非空カウント
                 data_count = 0
                 for r in filtered_table_data[1:]:
                     if rel < len(r) and r[rel] and str(r[rel]).strip():
@@ -9915,7 +9910,7 @@ class ExcelToMarkdownConverter:
                 reason = 'kept' if in_final else 'dropped'
                 per_column_diag.append((abs_col, rel, in_initial, header_present, header_texts, data_count, reason))
 
-            # print diagnostics
+            # 診断を出力
             debug_print('[COLUMN-MAP] region_abs_cols={} ->'.format((start_col, end_col)))
             for t in per_column_diag:
                 abs_col, rel, in_initial, header_present, header_texts, data_count, reason = t
@@ -9937,7 +9932,7 @@ class ExcelToMarkdownConverter:
         # --- 追加: ヘッダーに同一テキストが連続している場合、それらの列をまとめる ---
         if table_data:
             header = table_data[0]
-            # compute per-column non-empty counts to decide whether to preserve columns
+            # 列を保持するかどうかを決定するために列ごとの非空カウントを計算
             col_nonempty_counts = []
             for ci in range(len(header)):
                 cnt = 0
@@ -9946,26 +9941,26 @@ class ExcelToMarkdownConverter:
                         cnt += 1
                 col_nonempty_counts.append(cnt)
             debug_print(f"[DEBUG-DUMP] per-column nonempty counts (after useful_columns): {col_nonempty_counts}")
-            # groups: list of (start_idx, end_idx) for consecutive identical headers
+            # groups: 連続する同一ヘッダーの(start_idx, end_idx)のリスト
             groups = []
             i = 0
             while i < len(header):
                 j = i + 1
-                # Only merge consecutive identical headers when the header value is non-empty.
-                # If the header is empty, treat each column separately to avoid accidental collapse
-                # of multiple data columns into one when header row lacks labels.
+                # ヘッダー値が空でない場合のみ連続する同一ヘッダーをマージ。
+                # ヘッダーが空の場合、ヘッダー行にラベルがないときに複数のデータ列が
+                # 1つに誤って圧縮されるのを避けるため、各列を個別に扱う。
                 while j < len(header) and header[j] == header[i] and (header[i] and str(header[i]).strip()):
                     j += 1
                 groups.append((i, j))
                 i = j
 
-            # Post-process groups: if a group (whether header non-empty or not) contains
-            # multiple columns that have non-empty data, avoid collapsing that group.
+            # グループの後処理: グループ（ヘッダーが空かどうかに関わらず）に
+            # 非空データを持つ複数の列が含まれる場合、そのグループの圧縮を避ける。
             final_groups = []
             for (a, b) in groups:
-                # count how many columns in this group have non-empty data
+                # このグループ内で非空データを持つ列の数をカウント
                 nonempty_cols_in_group = sum(1 for k in range(a, b) if k < len(col_nonempty_counts) and col_nonempty_counts[k] > 0)
-                # if more than one data-bearing column, split into singletons to preserve columns
+                # データを持つ列が複数ある場合、列を保持するために単一列に分割
                 if nonempty_cols_in_group > 1:
                     for k in range(a, b):
                         final_groups.append((k, k+1))
@@ -9998,7 +9993,7 @@ class ExcelToMarkdownConverter:
             debug_print(f"[DEBUG] _build_table_data_with_merges内で2列最適化チェック: headers={headers}")
             
             # 2列最適化を試行（簡易版）
-            # In this path we have only table_data available higher up; keep the table-data based check
+            # このパスでは上位でtable_dataのみが利用可能。テーブルデータベースのチェックを維持
             if self._is_setting_item_pattern_tabledata(table_data, 1, 2):
                 # 第1列と第3列を保持して2列テーブルを作る
                 debug_print(f"[DEBUG] 2列最適化実行: {headers[0]} | {headers[2]}")
@@ -10012,12 +10007,12 @@ class ExcelToMarkdownConverter:
                         optimized_table.append([row[0], row[2]])
                         matched += 1
 
-                # Require a reasonable fraction of rows to match before collapsing
+                # 圧縮前に合理的な割合の行がマッチすることを要求
                 total_data_rows = max(1, len(table_data) - 1)
                 required = max(1, int(total_data_rows * 0.5))  # at least 50% of rows
-                # extra diagnostic dump for 2-col optimization decision
+                # 2列最適化決定のための追加診断ダンプ
                 debug_print(f"[DEBUG-DUMP] 2col optimization: total_data_rows={total_data_rows}, matched={matched}, required={required}")
-                # show sample of rows used for decision
+                # 決定に使用された行のサンプルを表示
                 for j, r in enumerate(table_data[1: min(len(table_data), 1+10) ]):
                     debug_print(f"[DEBUG-DUMP] data row sample {j+1}: {r}")
 
@@ -10125,15 +10120,15 @@ class ExcelToMarkdownConverter:
         return cell_text
 
     def _collapse_repeated_sequence(self, parts: List[str]) -> List[str]:
-        """Detect if parts is a repeated sequence (like [A,B,A,B,A,B]) and return the minimal repeating pattern once.
+        """partsが繰り返しシーケンス（[A,B,A,B,A,B]のような）かどうかを検出し、最小の繰り返しパターンを1回返す。
 
-        If no perfect repetition is found, return parts unchanged.
+        完全な繰り返しが見つからない場合は、partsをそのまま返す。
         """
         try:
             if not parts:
                 return parts
             n = len(parts)
-            # try all possible pattern lengths up to n//2
+            # n//2までのすべての可能なパターン長を試す
             for plen in range(1, n // 2 + 1):
                 if n % plen != 0:
                     continue
@@ -10176,12 +10171,12 @@ class ExcelToMarkdownConverter:
                 return ''
             t = str(text)
 
-            # Preserve programmatically inserted <br> (and common variants) so they are
-            # not escaped — Excel-originated '<' '>' should still be escaped.
-            # We replace allowed tags with placeholders, perform generic escaping,
-            # then restore the placeholders back to the literal tags.
+            # プログラムで挿入された<br>（および一般的なバリアント）を保持し、
+            # エスケープされないようにする。Excel由来の'<' '>'は引き続きエスケープする。
+            # 許可されたタグをプレースホルダーに置き換え、汎用エスケープを実行し、
+            # プレースホルダーをリテラルタグに戻す。
             allowed_tags = []
-            # normalize tag variants we want to keep (lowercase)
+            # 保持したいタグのバリアントを正規化（小文字）
             for m in re.finditer(r'(?i)<br\s*/?>', t):
                 allowed_tags.append(m.group(0))
 
@@ -10192,16 +10187,16 @@ class ExcelToMarkdownConverter:
                 t = t.replace(tag, ph, 1)
                 placeholders[ph] = tag
 
-            # Protect existing HTML entities: convert '&' that are not part of an entity
+            # 既存のHTMLエンティティを保護: エンティティの一部でない'&'を変換
             t = re.sub(r'&(?![A-Za-z]+;|#\d+;)', '&amp;', t)
 
-            # Escape remaining angle brackets (these come from Excel cell content)
+            # 残りの角括弧をエスケープ（これらはExcelセルコンテンツから来る）
             t = t.replace('<', '&lt;').replace('>', '&gt;')
 
-            # Escape Markdown table pipe
+            # Markdownテーブルのパイプをエスケープ
             t = t.replace('|', '\\|')
 
-            # Restore allowed tags (placeholders) back to their literal forms
+            # 許可されたタグ（プレースホルダー）をリテラル形式に戻す
             for ph, tag in placeholders.items():
                 # use the normalized '<br>' form
                 t = t.replace(ph, '<br>')
@@ -10224,7 +10219,7 @@ class ExcelToMarkdownConverter:
                     caller_info.append(f"{frame.name}:{frame.lineno}")
             debug_print(f"[DEBUG][{sheet_title}] テーブル生成: rows={source_rows[:5]}, cols={len(table_data[0]) if table_data else 0}, caller={' <- '.join(caller_info)}")
 
-        # normalize row lengths
+        # 行の長さを正規化
         max_cols = max(len(row) for row in table_data)
         for row in table_data:
             while len(row) < max_cols:
@@ -10253,7 +10248,7 @@ class ExcelToMarkdownConverter:
             path_like_frac = (path_like_total / nonempty_total) if nonempty_total else 0
             return nonempty_total, avg_len, path_like_frac
 
-        # pick header rows count heuristically
+        # ヒューリスティックにヘッダー行数を選択
         best_candidate = 1
         best_metrics = None
         for candidate in range(1, max_header_rows + 1):
@@ -10267,19 +10262,19 @@ class ExcelToMarkdownConverter:
         chosen_coverage = chosen_nonempty / max(1, num_cols)
         header_rows_count = 1 if chosen_coverage < 0.10 else best_candidate
 
-        # respect previously detected header height if available
+        # 利用可能な場合は以前に検出されたヘッダー高さを尊重
         if hasattr(self, '_detected_header_height'):
             detected = int(getattr(self, '_detected_header_height') or 0)
             if 1 <= detected <= max_header_rows:
-                # If the first header row already contains combined pieces (i.e. many '<br>'),
-                # avoid re-joining additional rows which can duplicate fragments.
+                # 最初のヘッダー行が既に結合されたピース（多くの'<br>'）を含む場合、
+                # フラグメントを重複させる可能性のある追加行の再結合を避ける。
                 try:
                     first_row = table_data[0]
-                    # count non-empty header cells and those that already contain '<br>'
+                    # 非空のヘッダーセルと既に'<br>'を含むものをカウント
                     nonempty_hdr = sum(1 for h in first_row if h and str(h).strip())
                     combined_hdr = sum(1 for h in first_row if h and '<br>' in str(h))
-                    # if any header cells already contain '<br>', treat as single combined header
-                    # (because _build_table_with_header_row already merged multi-row headers with '<br>')
+                    # ヘッダーセルに既に'<br>'が含まれている場合、単一の結合ヘッダーとして扱う
+                    # （_build_table_with_header_rowが既に複数行ヘッダーを'<br>'でマージしているため）
                     if combined_hdr > 0:
                         header_rows_count = 1
                     else:
@@ -10287,17 +10282,17 @@ class ExcelToMarkdownConverter:
                 except (ValueError, TypeError):
                     header_rows_count = detected
 
-        # previously a fill-down copied the last seen value into later data rows
-        # which could populate truly-empty data cells with unrelated values from above.
-        # Limit fill-down to header-area completion only: if there are multiple header
-        # rows and some header row cells are empty, fill them from nearby header rows
-        # rather than propagating into the data area.
+        # 以前はフィルダウンが最後に見た値を後のデータ行にコピーしていたが、
+        # これにより真に空のデータセルが上からの無関係な値で埋められる可能性があった。
+        # フィルダウンをヘッダー領域の補完のみに制限: 複数のヘッダー行があり、
+        # 一部のヘッダー行セルが空の場合、データ領域に伝播するのではなく、
+        # 近くのヘッダー行から埋める。
         try:
             if header_rows_count > 1:
                 for col_idx in range(num_cols):
-                    # gather header row values for this column
+                    # この列のヘッダー行の値を収集
                     hdr_vals = [table_data[r][col_idx] if col_idx < len(table_data[r]) else '' for r in range(0, header_rows_count)]
-                    # forward-fill within header rows only
+                    # ヘッダー行内でのみ前方フィル
                     last = None
                     for ri in range(0, header_rows_count):
                         v = hdr_vals[ri]
@@ -10305,23 +10300,23 @@ class ExcelToMarkdownConverter:
                             last = v
                         else:
                             if last is not None:
-                                # write back into table_data header cell
+                                # table_dataのヘッダーセルに書き戻す
                                 if col_idx < len(table_data[ri]):
                                     table_data[ri][col_idx] = last
         except (ValueError, TypeError) as e:
             debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-        # build header cells by joining header rows
-        # NOTE: each header row cell may already contain '<br>' sequences (from merged/header assembly).
-        # To avoid duplicating subparts when joining multiple header rows, split on '<br>' and dedupe
-        # consecutive subparts across rows.
+        # ヘッダー行を結合してヘッダーセルを構築
+        # 注: 各ヘッダー行セルは既に'<br>'シーケンスを含んでいる可能性がある（マージ/ヘッダー組み立てから）。
+        # 複数のヘッダー行を結合する際にサブパーツの重複を避けるため、'<br>'で分割し、
+        # 行間で連続するサブパーツを重複排除する。
         header_cells = []
         for col in range(num_cols):
             subparts = []
             for ri in range(0, header_rows_count):
                 v = table_data[ri][col]
                 if v is not None and str(v).strip():
-                    # normalize similarly to header builder to avoid near-duplicate parts
+                    # ほぼ重複するパーツを避けるためにヘッダービルダーと同様に正規化
                     try:
                         import re as _re
                         vv = str(v).replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br>')
@@ -10331,23 +10326,23 @@ class ExcelToMarkdownConverter:
                         vv = vv.strip()
                     except (ValueError, TypeError):
                         vv = str(v).replace('\n', '<br>').strip()
-                    # split already-normalized vv into atomic parts and extend
+                    # 既に正規化されたvvをアトミックパーツに分割して拡張
                     for part in [p.strip() for p in vv.split('<br>') if p.strip()]:
                         subparts.append(part)
 
-            # dedupe consecutive subparts to avoid repeated fragments introduced by per-row combined cells
+            # 行ごとの結合セルによって導入された繰り返しフラグメントを避けるために連続するサブパーツを重複排除
             dedup = []
             for p in subparts:
                 if not dedup or dedup[-1] != p:
                     dedup.append(p)
-            # collapse perfect repeated sequences like [A,B,A,B,A,B] -> [A,B]
+            # [A,B,A,B,A,B] -> [A,B]のような完全な繰り返しシーケンスを圧縮
             try:
                 collapsed = self._collapse_repeated_sequence(dedup)
             except Exception:
                 collapsed = dedup
             header_cells.append('<br>'.join(collapsed) if collapsed else '')
 
-        # collapse consecutive identical headers conservatively
+        # 連続する同一ヘッダーを保守的に圧縮
         try:
             groups = []
             i = 0
@@ -10358,10 +10353,9 @@ class ExcelToMarkdownConverter:
                 groups.append((i, j))
                 i = j
 
-            # Only perform conservative collapsing of consecutive identical headers
-            # when the header value is non-empty. If header_cells are empty strings
-            # (common when header row is absent or misaligned), skip collapsing to
-            # avoid merging multiple data columns into a single column.
+            # ヘッダー値が空でない場合のみ連続する同一ヘッダーの保守的な圧縮を実行。
+            # header_cellsが空文字列の場合（ヘッダー行が存在しないか位置がずれている場合に一般的）、
+            # 複数のデータ列が単一の列にマージされるのを避けるために圧縮をスキップ。
             collapse_needed = any((b - a > 1 and header_cells[a] and str(header_cells[a]).strip()) for (a, b) in groups)
             if collapse_needed:
                 new_header = []
@@ -10380,18 +10374,18 @@ class ExcelToMarkdownConverter:
         except (ValueError, TypeError) as e:
             debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-    # output header
+    # ヘッダーを出力
         safe_header = [self._escape_cell_for_table(h) for h in header_cells]
         self.markdown_lines.append("| " + " | ".join(safe_header) + " |")
         self.markdown_lines.append("| " + " | ".join(["---"] * len(header_cells)) + " |")
 
-        # filter out immediate rows that are actually fragments of the header
-        # (some table builders return raw header rows followed by a combined header;
-        # detect and skip those to avoid duplicated header fragments in the data)
+        # 実際にはヘッダーのフラグメントである直後の行をフィルタリング
+        # （一部のテーブルビルダーは生のヘッダー行の後に結合されたヘッダーを返す。
+        # データ内の重複したヘッダーフラグメントを避けるためにこれらを検出してスキップ）
         try:
             skip_count = 0
             max_check = min(max_header_rows, len(table_data) - header_rows_count)
-            # prepare header parts per column
+            # 列ごとのヘッダーパーツを準備
             header_parts = [ [p.strip() for p in (hc or '').split('<br>') if p.strip()] for hc in header_cells ]
 
             def _is_row_header_like(row) -> bool:
@@ -10407,26 +10401,26 @@ class ExcelToMarkdownConverter:
                         continue
                     nonempty += 1
                     parts = header_parts[ci]
-                    # Skip overly long cells which are unlikely to be header fragments
+                    # ヘッダーフラグメントである可能性が低い過度に長いセルをスキップ
                     if len(cell) > 200:
-                        # treat as data-like
+                        # データのように扱う
                         continue
 
-                    # if the cell equals any of the header parts for that column, count as match
-                    # but be conservative: require either exact short match or that both
-                    # header-part and cell are reasonably short and do not contain '<br>' mismatch.
+                    # セルがその列のヘッダーパーツのいずれかと等しい場合、マッチとしてカウント
+                    # ただし保守的に: 正確な短いマッチか、ヘッダーパーツとセルの両方が
+                    # 適度に短く、'<br>'の不一致を含まないことを要求。
                     part_match = False
                     for hp in parts:
                         if not hp:
                             continue
-                        # if one contains <br> and the other does not, avoid matching
+                        # 一方に<br>が含まれ、もう一方に含まれない場合、マッチを避ける
                         if ('<br>' in hp) != ('<br>' in cell):
                             continue
-                        # allow exact match
+                        # 完全一致を許可
                         if cell == hp:
                             part_match = True
                             break
-                        # allow short fuzzy match: both short and similar length
+                        # 短いファジーマッチを許可: 両方とも短く、長さが類似
                         if len(cell) <= max(60, int(len(hp) * 1.2)) and len(hp) <= 120 and abs(len(cell) - len(hp)) <= max(10, int(len(hp) * 0.2)):
                             if cell in hp or hp in cell:
                                 part_match = True
@@ -10447,11 +10441,11 @@ class ExcelToMarkdownConverter:
         except Exception:
             skip_count = 0
 
-        # output data rows (skip detected header-like rows)
+        # データ行を出力（検出されたヘッダーのような行をスキップ）
         start_idx = header_rows_count + skip_count
-        # prepare mapping if source_rows provided
+        # source_rowsが提供された場合はマッピングを準備
         sheet_map = None
-        # Only obtain existing authoritative mapping; do not create it here.
+        # 既存の権威的マッピングのみを取得。ここでは作成しない。
         if source_rows and sheet_title:
             try:
                 sheet_map = self._cell_to_md_index.get(sheet_title, {})
@@ -10463,10 +10457,10 @@ class ExcelToMarkdownConverter:
                 row.append("")
             row = row[:len(header_cells)]
             safe_row = [self._escape_cell_for_table(c) for c in row]
-            # record mapping from source row to markdown index if available
+            # 利用可能な場合はソース行からmarkdownインデックスへのマッピングを記録
             if source_rows and idx < len(source_rows) and sheet_map is not None:
                 src = source_rows[idx]
-                # append line, then map src -> index (guarded)
+                # 行を追加し、src -> indexをマップ（ガード付き）
                 self.markdown_lines.append("| " + " | ".join(safe_row) + " |")
                 try:
                     self._mark_sheet_map(sheet_title, src, len(self.markdown_lines) - 1)

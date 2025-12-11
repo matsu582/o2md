@@ -1352,7 +1352,7 @@ class WordToMarkdownConverter:
             
             # 環境変数でPDF品質を最高設定に
             env = os.environ.copy()
-            env['SAL_DISABLE_OPENCL'] = '1'  # OpenCL無効化で安定性向上
+            env['SAL_DISABLE_OPENCL'] = '1'  # OpenCLを無効化して安定性を向上
             
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
             

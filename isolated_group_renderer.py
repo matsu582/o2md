@@ -850,11 +850,10 @@ class IsolatedGroupRenderer:
                 except (ValueError, TypeError) as e:
                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-                # Fallback: when keep_cnvpr_ids is empty but a cell_range
-                # was computed for the group, preserve any anchor whose
-                # "from" row lies within the group's rows. This handles
-                # cases where indices were synthesized from cell ranges
-                # and direct id matching fails.
+                # フォールバック: keep_cnvpr_idsが空でもグループのcell_rangeが
+                # 計算されている場合、"from"行がグループの行内にあるアンカーを保持。
+                # これはセル範囲からインデックスが合成され、直接IDマッチングが
+                # 失敗するケースを処理します。
                 try:
                     if (not keep_cnvpr_ids) and group_rows:
                         ns_xdr = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
@@ -915,13 +914,13 @@ class IsolatedGroupRenderer:
                         sroot.append(ps)
                     except Exception:
                         pass
-                        # Remove any header/footer elements from this sheet
-                        # node so isolated-group PDF/PNG renders do not
-                        # include workbook headers or footers. This keeps
-                        # the output image focused on the drawing shapes
-                        # only. We'll still perform a defensive sweep later
-                        # over all worksheet files in tmpdir just before
-                        # creating the tmp_xlsx to be certain none remain.
+                        # このシートノードからヘッダー/フッター要素を削除し、
+                        # 分離グループPDF/PNGレンダリングにワークブックの
+                        # ヘッダーやフッターが含まれないようにします。
+                        # これにより出力画像は描画図形のみに焦点を当てます。
+                        # tmp_xlsxを作成する直前にtmpdir内のすべてのワークシート
+                        # ファイルに対して防御的なスイープを実行し、
+                        # 残っていないことを確認します。
                         try:
                             hf_tag = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}headerFooter'
                             removed = 0
@@ -944,8 +943,8 @@ class IsolatedGroupRenderer:
         # write modified drawing xml back
         tree.write(drawing_relpath, encoding='utf-8', xml_declaration=True)
 
-        # If pruning removed all anchors, skip isolated rendering to avoid
-        # producing empty trimmed workbooks and placeholder images.
+        # 刈り込みですべてのアンカーが削除された場合、空のトリミングされた
+        # ワークブックとプレースホルダー画像の生成を避けるため分離レンダリングをスキップ。
         try:
             try:
                 dtree_check = ET.parse(drawing_relpath)
@@ -965,7 +964,7 @@ class IsolatedGroupRenderer:
                                           connector_children_by_id, theme_color_map, 
                                           drawing_xml_bytes, drawing_xml):
         """フェーズ7: コネクタコスメティック処理"""
-        # After writing, ensure kept anchors have connector cosmetic children copied
+        # 書き込み後、保持されたアンカーにコネクタコスメティック子要素がコピーされていることを確認
         try:
             # reload tree to operate on current root
             try:
@@ -1001,7 +1000,7 @@ class IsolatedGroupRenderer:
                                 print(f"[ERROR] ch is not an XML element: type={type(ch)}, value={ch}")
                                 continue
                             new_ch = copy.deepcopy(ch)
-                            # Replace any a:schemeClr children with explicit a:srgbClr using parsed theme
+                            # a:schemeClr子要素を解析されたテーマを使用して明示的なa:srgbClrに置換
                             try:
                                 a_ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
                                 for elem in list(new_ch.iter()):
@@ -1054,7 +1053,7 @@ class IsolatedGroupRenderer:
         except Exception as e:
             print(f"[WARNING] ファイル操作エラー: {e}")
 
-        # Ensure shapes/groups/pictures have aspect-locks so Excel won't auto-stretch them
+        # 図形/グループ/画像にアスペクトロックを設定し、Excelが自動的に引き伸ばさないようにする
         try:
             try:
                 tree_locks = ET.parse(drawing_relpath)
@@ -1107,12 +1106,10 @@ class IsolatedGroupRenderer:
         except Exception as e:
             print(f"[WARNING] spLocks追加エラー: {e}")
 
-        # Extra pass: for any kept anchor that corresponds to an original
-        # connector anchor (cxnSp/cxn), replace the connector element in
-        # the trimmed drawing with a deep-copy of the original connector
-        # element from the source drawing. This is a conservative step to
-        # preserve exact <a:ln> children (w/prstDash/headEnd/tailEnd) and
-        # other connector-specific structure that some renderers rely on.
+        # 追加パス: 元のコネクタアンカー（cxnSp/cxn）に対応する保持されたアンカーについて、
+        # トリミングされた描画内のコネクタ要素をソース描画からの元のコネクタ要素の
+        # ディープコピーで置換。これは正確な<a:ln>子要素（w/prstDash/headEnd/tailEnd）と
+        # 一部のレンダラーが依存するコネクタ固有の構造を保持するための保守的なステップ。
         try:
             try:
                 tree3 = ET.parse(drawing_relpath)
@@ -1145,7 +1142,7 @@ class IsolatedGroupRenderer:
             except (ValueError, TypeError):
                 orig_cxn_by_id = {}
 
-            # Now replace/inject in the trimmed drawing for kept anchors
+            # 保持されたアンカーのためにトリミングされた描画で置換/注入
             for kept in list(root3):
                 try:
                     if kept.tag.split('}')[-1].lower() not in ('twocellanchor', 'onecellanchor'):
@@ -1174,7 +1171,7 @@ class IsolatedGroupRenderer:
                         except Exception:
                             continue
                     
-                    # Remove all connector children
+                    # すべてのコネクタ子要素を削除
                     for cxn_child in cxn_children_to_remove:
                         try:
                             kept.remove(cxn_child)
@@ -1194,10 +1191,10 @@ class IsolatedGroupRenderer:
                             kept.append(copy.deepcopy(orig_cxn))
                         except Exception:
                             pass  # データ構造操作失敗は無視
-                    # Post-process the injected connector element to ensure
-                    # a single concrete <a:ln> exists under spPr and to remove
-                    # any style/<a:lnRef> entries that may cause LibreOffice
-                    # to prefer theme defaults (which can change dash/width).
+                    # 注入されたコネクタ要素を後処理し、spPr下に単一の具体的な<a:ln>が
+                    # 存在することを確認し、LibreOfficeがテーマのデフォルトを優先する
+                    # 原因となる可能性のあるstyle/<a:lnRef>エントリを削除
+                    # （これによりダッシュ/幅が変更される可能性がある）。
                     try:
                         # find the (new) connector child we just inserted
                         conn_elem = None
@@ -1588,7 +1585,7 @@ class IsolatedGroupRenderer:
                                 if not col_letters:
                                     continue
                                 
-                                # Convert column letters to index
+                                # 列文字をインデックスに変換
                                 col_idx = 0
                                 for ch in col_letters.upper():
                                     col_idx = col_idx * 26 + (ord(ch) - 64)
