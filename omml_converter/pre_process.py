@@ -143,7 +143,7 @@ def pre_process_docx(input_docx: BinaryIO) -> BinaryIO:
                 if name in pre_process_enable_files:
                     try:
                         # コンテンツを前処理
-                        updated_content = _pre_process_math(content)
+                        updated_content = _process_math_in_xml(content)
                         zip_output.writestr(name, updated_content)
                     except Exception as e:
                         # 処理エラーの場合は元のコンテンツを書き込む
