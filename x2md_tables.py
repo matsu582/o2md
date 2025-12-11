@@ -13,7 +13,7 @@ ExcelToMarkdownConverterクラスのテーブル検出・構築・出力機能�
 
 from typing import List, Dict, Tuple, Optional, Any, Set
 
-# debug_printはx2mdモジュールからインポート
+# デバッグ_printはx2mdモジュールからインポート
 # 注意: 循環インポートを避けるため、関数レベルでインポートするか、
 # または遅延インポートを使用する必要がある場合があります
 def _get_debug_print():
@@ -261,7 +261,7 @@ class _TablesMixin:
                         if not cell_value:
                             continue
                         lower = cell_value.lower()
-                        # generic heuristics for descriptive content: file paths, urls, xml, very long text
+                        # 説明的コンテンツの一般的なヒューリスティック: ファイルパス、URL、XML、非常に長いテキスト
                         if ('\\' in cell_value and ':' in cell_value) or '/' in cell_value or lower.startswith('http'):
                             descriptive_content_count += 1
                             break
@@ -941,7 +941,7 @@ class _TablesMixin:
             debug_print(f"[DEBUG] 2列最適化スキップ（ヘッダー数が3ではない: {len(headers)}列）")
             return None
         
-        # header_positionsが3つ以上必要
+        # header_positionsは3つ以上必要
         if len(header_positions) < 3:
             debug_print(f"[DEBUG] 2列最適化スキップ（ヘッダー位置が3未満: {len(header_positions)}位置）")
             return None
@@ -972,9 +972,9 @@ class _TablesMixin:
                             optimized_table.append([col0_val, col2_val])
                     if len(optimized_table) > 1:
                         return optimized_table
-                # fallthrough: if not enough rows, try the original fallback below
+                # フォールスルー: 行が不足している場合、以下の元のフォールバックを試行
 
-            # original fallback: use headers[1] and headers[2]
+            # 元のフォールバック: headers[1]とheaders[2]を使用
             debug_print(f"[DEBUG] 2列最適化: {headers[1]} | {headers[2]}")
             optimized_table = [[headers[1], headers[2]]]
             for row_num in range(start_row + 1, end_row + 1):
@@ -1148,7 +1148,7 @@ class _TablesMixin:
             if col2_nonempty >= max(2, int(total_rows * 0.2)):
                 score += 1
                 debug_print(f"[DEBUG] スコア+1: col2_nonempty({col2_nonempty}) >= max(2, total_rows*0.2({int(total_rows*0.2)}))")
-            # if value column distinct is low relative to nonempty, it's likely flag-like
+            # 値列のユニーク数が非空に対して低い場合、フラグ的な可能性が高い
             if col2_nonempty > 0 and (col2_distinct / col2_nonempty) <= 0.5:
                 score += 1
                 debug_print(f"[DEBUG] スコア+1: col2_distinct/col2_nonempty({col2_distinct}/{col2_nonempty}={col2_distinct/col2_nonempty:.2f}) <= 0.5")
@@ -1664,7 +1664,7 @@ class _TablesMixin:
             table_data.append(row_data)
         
         if table_data:
-            # dump table_data for debugging before output
+            # 出力前にデバッグ用にtable_dataをダンプ
             try:
                 cols = max(len(r) for r in table_data) if table_data else 0
             except Exception:
@@ -1672,12 +1672,12 @@ class _TablesMixin:
             debug_print(f"[DEBUG] _output_markdown_table called (single_table path): rows={len(table_data)}, max_cols={cols}")
             for i, r in enumerate(table_data[:10]):
                 debug_print(f"[DEBUG] table_data row {i} cols={len(r)}: {r}")
-            # build source_rows sequentially from min_row..max_row assumption
+            # min_row..max_rowの仮定からsource_rowsを順次構築
                 try:
                     source_rows = list(range(min_row, max_row + 1))[:len(table_data)]
                 except (ValueError, TypeError):
                     source_rows = None
-                # prune rows already emitted earlier in the sheet (pre-data rows)
+                # シートで既に出力済みの行を削除（データ前の行）
                 try:
                     debug_print(f"[DEBUG][_prune_call_single] sheet={sheet.title} before_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
                     table_data, source_rows = self._prune_emitted_rows(sheet.title, table_data, source_rows)
@@ -1753,7 +1753,7 @@ class _TablesMixin:
         title_text = self._find_table_title_in_region(sheet, region)
         
         # この領域のタイトルテキストを検出した場合、ローカルに保持し、
-        # table_dataが構築された後で遅延テーブルメタデータに添付する。
+        # table_data構築後に遅延テーブルメタデータに添付
         # これにより、タイトルを別の遅延テキストエントリ（_sheet_deferred_texts内）
         # として出力することを避け、重複抑制と順序付けを複雑にしない。
         safe_title = None
@@ -1778,8 +1778,8 @@ class _TablesMixin:
         
         # 結合セル情報を取得
         merged_cells = self._get_merged_cell_info(sheet, region)
-        # table_data may be assigned only in some conditional branches below; ensure it's defined
-        # to avoid UnboundLocalError when later code checks `if table_data:`
+        # table_dataは以下の一部の条件分岐でのみ割り当てられる可能性がある; 定義を確保
+        # 後続コードで`if table_data:`をチェックする際のUnboundLocalErrorを回避
         table_data = None
 
         # フォールバック: ヘッダー行が無い場合、領域内の非空セルが存在する列の集合を使って
@@ -1804,8 +1804,8 @@ class _TablesMixin:
                     if len(col_stats) >= 2:
                         left = col_stats[0]
                         right = col_stats[1]
-                        # if left has a single repeated non-empty value and right has multiple distinct non-empty values,
-                        # and left is present in fewer than 95% of rows (to avoid eliminating true data columns), drop left
+                        # 左が単一の繰り返し非空値を持ち、右が複数の異なる非空値を持つ場合、
+                        # かつ左が行の95%未満に存在する場合（真のデータ列の削除を避けるため）、左を削除
                         total_rows = end_row - start_row + 1
                         if left['distinct'] == 1 and right['distinct'] > 1 and left['nonempty'] / max(1, total_rows) < 0.95:
                             debug_print(f"[DEBUG] unique_cols heuristic: dropping left repeated column {left['col']} in favor of {right['col']}")
@@ -1829,33 +1829,33 @@ class _TablesMixin:
                     # 判定: 最初の行がヘッダーっぽい（全て短いテキストかつ複数非空）ならヘッダー行として使う
                     nonempty_in_first = sum(1 for v in first_row_vals if v)
                     if nonempty_in_first >= max(1, len(unique_cols)//3) and all(len(v) < 120 for v in first_row_vals if v):
-                        # first_row_vals will be treated as header row, but sometimes it contains
-                        # empty entries (e.g. ['', '']) that should be merged into the left
-                        # non-empty header (like '名前'). Merge such empty-header columns
-                        # into their left neighbour to avoid producing empty header columns.
+                        # first_row_valsはヘッダー行として扱われるが、時々
+                        # 空のエントリ（例: ['', '']）が含まれ、左の
+                        # 非空ヘッダー（'名前'など）にマージすべき。そのような空ヘッダー列を
+                        # 左隣にマージして空ヘッダー列の生成を回避。
                         headers_candidate = list(first_row_vals)
 
-                        # determine columns to merge: if a header is empty and left header exists
+                        # マージする列を決定: ヘッダーが空で左ヘッダーが存在する場合
                         merge_into_left = set()
                         for idx in range(1, len(headers_candidate)):
                             if not headers_candidate[idx] and headers_candidate[idx-1]:
                                 merge_into_left.add(idx)
 
                         if merge_into_left:
-                            # build mapping from original unique_cols indices to new columns
+                            # 元のunique_colsインデックスから新しい列へのマッピングを構築
                             new_unique_cols = []
-                            merge_map = {}  # col_idx -> target_new_index
+                            merge_map = {}  # col_idx -> target_new_indexのマッピング
                             new_idx = 0
                             for idx, col in enumerate(unique_cols):
                                 if idx in merge_into_left:
-                                    # merge this column into previous new_idx-1
+                                    # この列を前のnew_idx-1にマージ
                                     merge_map[idx] = new_idx - 1
                                 else:
                                     new_unique_cols.append(col)
                                     merge_map[idx] = new_idx
                                     new_idx += 1
 
-                            # build header row for new columns by merging text from merged columns
+                            # マージされた列からテキストをマージして新しい列のヘッダー行を構築
                             new_headers = []
                             for old_idx, col in enumerate(unique_cols):
                                 target = merge_map[old_idx]
@@ -1868,7 +1868,7 @@ class _TablesMixin:
                                 else:
                                     new_headers[target] = val
 
-                            # replace unique_cols and header row with merged versions
+                            # unique_colsとヘッダー行をマージ版に置換
                             unique_cols = new_unique_cols
                             first_row_vals = new_headers
 
@@ -1887,12 +1887,12 @@ class _TablesMixin:
             if table_data:
                 debug_print(f"[DEBUG] unique_cols-based table used: cols={unique_cols}, rows={len(table_data)}")
                 # 追加ダンプ: unique_cols フォールバック時の内部状態確認
-                # safe dump: some variables may not exist in this scope (like header_positions etc.)
+                # 安全なダンプ: このスコープに存在しない変数がある可能性（header_positionsなど）
                 try:
                     ctx = {}
                     ctx['unique_cols'] = unique_cols
                     ctx['table_data_rows'] = len(table_data)
-                    # header_positions/final_groups/compressed_headers may not be defined here
+                    # header_positions/final_groups/compressed_headersはここで定義されていない可能性
                     if 'header_positions' in locals():
                         ctx['header_positions'] = header_positions
                     if 'final_groups' in locals():
@@ -1904,7 +1904,7 @@ class _TablesMixin:
                         debug_print(f"[DEBUG-DUMP] unique_cols table_data row {i}: {r}")
                 except Exception as _e:
                     debug_print(f"[DEBUG-DUMP] failed unique_cols dump: {_e}")
-                # write compact machine-friendly trace to file (if debug log available)
+                # コンパクトな機械可読トレースをファイルに書き込み（デバッグログが利用可能な場合）
                 try:
                     sheet_name = getattr(sheet, 'title', None)
                     first_row_sample = first_row_vals[:8] if 'first_row_vals' in locals() else None
@@ -1925,18 +1925,18 @@ class _TablesMixin:
                         debug_print('[DEBUG-TRACE] Detected target sheet/region for deep dump: XMLファイル自動生成')
                         debug_print(f"[DEBUG-TRACE] region={region}")
                         debug_print(f"[DEBUG-TRACE] unique_cols={unique_cols}")
-                        # dump first_row_vals if present
+                        # first_row_valsが存在する場合はダンプ
                         if 'first_row_vals' in locals():
                             debug_print(f"[DEBUG-TRACE] first_row_vals={first_row_vals}")
                         if 'merge_into_left' in locals():
                             debug_print(f"[DEBUG-TRACE] merge_into_left={merge_into_left}")
                         if 'merge_map' in locals():
                             debug_print(f"[DEBUG-TRACE] merge_map={merge_map}")
-                        # header-related structures if present
+                        # ヘッダー関連の構造体が存在する場合
                         for name in ('header_positions', 'final_groups', 'compressed_headers', 'group_positions'):
                             if name in locals():
                                 debug_print(f"[DEBUG-TRACE] {name}={locals()[name]}")
-                        # dump a few raw cell values for the region to cross-check
+                        # クロスチェック用に領域の生のセル値をいくつかダンプ
                         try:
                             for rr in range(region[0], min(region[0]+6, region[1]+1)):
                                 rowvals = []
@@ -1953,7 +1953,7 @@ class _TablesMixin:
                     debug_print(f"[DEBUG-TRACE] deep dump failed: {_e}")
                 # 列ヘッダーが無ければプレーンな表として出力
                 debug_print(f"[DEBUG] 出力前テーブルプレビュー(unique_cols): rows={len(table_data)}, first_row={table_data[0] if table_data else None}")
-                # dump table_data shape and first rows for debugging
+                # デバッグ用にtable_dataの形状と最初の行をダンプ
                 try:
                     cols = max(len(r) for r in table_data) if table_data else 0
                 except (ValueError, TypeError):
@@ -1962,7 +1962,7 @@ class _TablesMixin:
                 for i, r in enumerate(table_data[:10]):
                     debug_print(f"[DEBUG] table_data row {i} cols={len(r)}: {r}")
                 try:
-                    # prune pre-emitted rows that may duplicate earlier lines
+                    # 以前の行と重複する可能性のある事前出力行を削除
                     debug_print(f"[DEBUG][_prune_call_unique] sheet={sheet.title} before_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
                     table_data, source_rows = self._prune_emitted_rows(sheet.title, table_data, source_rows)
                     debug_print(f"[DEBUG][_prune_result_unique] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
@@ -1987,13 +1987,13 @@ class _TablesMixin:
                         self._sheet_deferred_tables.setdefault(sheet.title, []).append((anchor, table_data, source_rows, meta))
                         debug_print(f"DEFER_TABLE unique_cols sheet={sheet.title} anchor={anchor} rows={len(table_data)}")
                     except (ValueError, TypeError):
-                        # fallback to immediate output on any failure to avoid data loss
+                        # データ損失を避けるため失敗時は即時出力にフォールバック
                         try:
                             self._output_markdown_table(table_data, source_rows=source_rows)
                         except (ValueError, TypeError):
                             self._output_markdown_table(table_data)
                 except (ValueError, TypeError):
-                    # outer try - if anything else fails, try direct output
+                    # 外側のtry - 他に失敗した場合、直接出力を試行
                     try:
                         self._output_markdown_table(table_data)
                     except Exception as e:
@@ -2013,7 +2013,7 @@ class _TablesMixin:
         
         if table_data:
             debug_print(f"[DEBUG] 出力前テーブルプレビュー: rows={len(table_data)}, first_row={table_data[0] if table_data else None}")
-            # dump table_data shape before output
+            # 出力前にtable_dataの形状をダンプ
             try:
                 cols = max(len(r) for r in table_data) if table_data else 0
             except (ValueError, TypeError):
@@ -2023,7 +2023,7 @@ class _TablesMixin:
                 debug_print(f"[DEBUG] table_data row {i} cols={len(r)}: {r}")
             try:
                 # actual_start_rowから開始（header_rowまたはstart_row）
-                # regionのend_rowを使用して、実際のテーブル範囲全体をカバー
+                # regionのend_rowを使用し実際のテーブル範囲全体をカバー
                 # これにより、table_dataから除外された行(空行など)も含めて、
                 # テーブル領域全体がprocessed_rowsとして記録される
                 approx_rows = list(range(actual_start_row, region[1] + 1))  # region[1]はend_row
@@ -2060,14 +2060,14 @@ class _TablesMixin:
                 # (anchor, table_data, approx_rows) -> (anchor, table_data, approx_rows, meta_dict)
                 meta = {'title': safe_title} if safe_title else None
                 self._sheet_deferred_tables.setdefault(sheet.title, []).append((anchor, table_data, approx_rows, meta))
-                # clear transient title row after deferring
+                # 延期後に一時的なタイトル行をクリア
                 try:
                     self._last_table_title_row = None
                 except Exception as e:
                     pass  # XML解析エラーは無視
                 debug_print(f"DEFER_TABLE sheet={sheet.title} anchor={anchor} rows={len(table_data)} title_present={bool(safe_title)}")
             except (ValueError, TypeError):
-                # fallback to immediate output if deferral fails
+                # 延期が失敗した場合は即時出力にフォールバック
                 try:
                     self._output_markdown_table(table_data, source_rows=approx_rows, sheet_title=sheet.title)
                 except (ValueError, TypeError) as e:
@@ -2108,12 +2108,12 @@ class _TablesMixin:
                         debug_print(f"[DEBUG] _output_right_side_plain_text: 行{row_num}列{col_num} text='{text}'")
             # 右側にテキストがあれば出力
             if right_texts:
-                # emit via centralized emitter so duplicates and emitted-rows are tracked
+                # 重複と出力済み行を追跡するため集中エミッタ経由で出力
                 for text in right_texts:
                     try:
                         self._emit_free_text(sheet, row_num, text)
                     except (ValueError, TypeError):
-                        # fallback to direct append if emitter fails for some reason
+                        # エミッタが何らかの理由で失敗した場合は直接追加にフォールバック
                         self.markdown_lines.append(f"{text}  ")
         # テーブル右隣のテキストがあれば空行で区切る
         if any(sheet.cell(row=row_num, column=col_num).value for row_num in range(start_row, end_row + 1) for col_num in range(end_col + 1, max_col + 1)):
@@ -2158,8 +2158,8 @@ class _TablesMixin:
         
         avg_len = sum(len(t) for t in texts) / non_empty_cells if non_empty_cells > 0 else 0
         
-        # token-based heuristic: a single row containing multiple short tokens
-        # is likely a compact table header or data row (e.g. "名前 初期値 設定値").
+        # トークンベースのヒューリスティック: 複数の短いトークンを含む単一行
+        # はコンパクトなテーブルヘッダーまたはデータ行の可能性が高い（例: "名前 初期値 設定値"）
         # 保守的に: 平均セル長が大きすぎないことを要求し、
         # 説明文をテーブルとして誤分類しないようにする。
         try:
@@ -2219,7 +2219,7 @@ class _TablesMixin:
                     import re
                     import unicodedata
                     num_matches = 0
-                    # include common circled numbers explicitly (①〜⑳)
+                    # 一般的な丸数字を明示的に含める（①〜⑳）
                     circled = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'
                     for t in left_texts:
                         tt = t.strip()
@@ -2250,7 +2250,7 @@ class _TablesMixin:
                         except Exception:
                             pass  # データ構造操作失敗は無視
 
-                        # fallback: single-character markers (e.g. '-', 'a', '1')
+                        # フォールバック: 単一文字マーカー（例: '-', 'a', '1'）
                         try:
                             if len(nn.strip()) == 1 and re.match(r'^[A-Za-z0-9\-]$', nn.strip()):
                                 num_matches += 1
@@ -2334,8 +2334,8 @@ class _TablesMixin:
                 try:
                     self._emit_free_text(sheet, row_num, combined)
                 except (ValueError, TypeError):
-                    # fallback to direct append if emitter fails
-                    # fallback to direct append if emitter fails
+                    # エミッタが失敗した場合は直接追加にフォールバック
+                    # エミッタが失敗した場合は直接追加にフォールバック
                     # 正規出力パス中でない限り権威的マッピングを変更しない。
                     # 行/テキストを早期に出力済みとしてマークすると、
                     # 正当なテーブル行が削除される原因となった。
@@ -2357,12 +2357,12 @@ class _TablesMixin:
                             except Exception as e:
                                 pass  # XML解析エラーは無視
                         else:
-                            # non-canonical context: canonical pass will assign indices
+                            # 非正規コンテキスト: 正規パスがインデックスを割り当てる
                             debug_print(f"[TRACE] Skipping authoritative mapping for plain-text fallback row={row_num} (non-canonical)")
                     except (ValueError, TypeError) as e:
                         debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
 
-        # add a separating blank line if any lines were emitted
+        # 行が出力された場合は区切りの空行を追加
         try:
             emitted = self._sheet_emitted_rows.get(sheet.title, set())
             any_emitted = any(r in emitted for r in range(start_row, end_row + 1))
@@ -2430,13 +2430,13 @@ class _TablesMixin:
                     cell = sheet.cell(r, col)
                     raw_text = (str(cell.value) if cell.value is not None else '')
 
-                # normalize newlines to <br> and collapse/trim redundant <br> tokens
+                # 改行を<br>に正規化し、冗長な<br>トークンを折りたたみ/トリム
                 try:
                     import re as _re
                     text = raw_text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br>')
-                    # collapse multiple consecutive <br> into one
+                    # 複数の連続した<br>を1つに折りたたむ
                     text = _re.sub(r'(<br>\s*){2,}', '<br>', text)
-                    # strip any leading/trailing <br>
+                    # 先頭/末尾の<br>を削除
                     text = _re.sub(r'^(?:<br>\s*)+', '', text)
                     text = _re.sub(r'(?:\s*<br>)+$', '', text)
                     text = text.strip()
@@ -2447,12 +2447,12 @@ class _TablesMixin:
                     if not parts or parts[-1] != text:
                         parts.append(text)
 
-            # remove consecutive duplicate parts to avoid repeated concatenation
+            # 繰り返し連結を避けるため連続した重複部分を削除
             dedup_parts = []
             for p in parts:
                 if not dedup_parts or dedup_parts[-1] != p:
                     dedup_parts.append(p)
-            # filter out parts that likely belong to data rows (appear frequently below header)
+            # データ行に属する可能性が高い部分をフィルタリング（ヘッダー下で頻繁に出現）
             try:
                 # この列がヘッダー行内に結合/マスターヘッダーセルを含むかどうかを判定。
                 is_master_col = False
@@ -2477,12 +2477,12 @@ class _TablesMixin:
                     filtered_parts = list(dedup_parts)
                 else:
                     for p in dedup_parts:
-                        # keep very short tokens (e.g. '-', single char markers)
+                        # 非常に短いトークンを保持（例: '-', 単一文字マーカー）
                         if not p or len(p.strip()) <= 2:
                             filtered_parts.append(p)
                             continue
 
-                        # count occurrences of this token in rows below the header area
+                        # ヘッダー領域下の行でこのトークンの出現回数をカウント
                         cnt = 0
                         total = 0
                         for rr in range(header_row + header_height, end_row + 1):
@@ -2495,7 +2495,7 @@ class _TablesMixin:
                             if not vv:
                                 continue
                             total += 1
-                            # consider exact match or contained match as evidence
+                            # 完全一致または部分一致を証拠として考慮
                             if vv == p or vv == p.replace('<br>', '\n') or vv in p or p in vv:
                                 cnt += 1
 
@@ -2522,18 +2522,18 @@ class _TablesMixin:
                         filtered_parts.append(p)
 
                 combined = '<br>'.join(filtered_parts) if filtered_parts else ''
-                # additionally remove repeated subparts while preserving order to avoid
-                # patterns like 'A<br>B<br>A<br>B<br>A<br>B' appearing due to multi-row joins
+                # さらに順序を保持しながら繰り返しサブパーツを削除し、
+                # 複数行結合による'A<br>B<br>A<br>B<br>A<br>B'のようなパターンを回避
                 try:
                     if combined:
                         subs = [s.strip() for s in combined.split('<br>') if s.strip()]
-                        # first remove consecutive duplicates while preserving order
+                        # まず順序を保持しながら連続した重複を削除
                         seen = set()
                         uniq = []
                         for s in subs:
                             if not uniq or uniq[-1] != s:
                                 uniq.append(s)
-                        # then collapse perfect repeated sequences like [A,B,A,B,A,B] -> [A,B]
+                        # 次に[A,B,A,B,A,B] -> [A,B]のような完全な繰り返しシーケンスを折りたたむ
                         collapsed = self._collapse_repeated_sequence(uniq)
                         combined = '<br>'.join(collapsed)
                 except Exception:
@@ -2805,7 +2805,7 @@ class _TablesMixin:
                 normalized_headers[i] = headers[i]
         
         # ただし、罫線で明確に区切られている列は圧縮しない（罫線がある = 別列）
-        groups = []  # list of (start_idx, end_idx) exclusive-end (based on headers index)
+        groups = []  # (start_idx, end_idx)のリスト、排他的終端（headersインデックスベース）
         i = 0
         while i < len(normalized_headers):
             j = i + 1
@@ -2838,7 +2838,7 @@ class _TablesMixin:
                         if cell_l.border and cell_l.border.right and cell_l.border.right.style:
                             right_count += 1
                     except Exception:
-                        # ignore and continue
+                        # 無視して続行
                         pass
 
                 has_strong_right = (total_check > 0 and (right_count / total_check) >= 0.5)
@@ -2885,7 +2885,7 @@ class _TablesMixin:
                     split_points.append(a + idx + 1)
 
             split_points.append(b)
-            # split_pointsから範囲を構築
+            # split_pointsから範囲を構築する
             for si in range(len(split_points) - 1):
                 final_groups.append((split_points[si], split_points[si+1]))
 
@@ -2974,7 +2974,7 @@ class _TablesMixin:
 
         # グループごとに実際の列範囲（header_positions 間）を使ってデータ列を扱う
         # これにより、ヘッダーが結合セルで左端に存在し、実際のデータがその右側に複数列に分散しているケースに対応
-        group_column_ranges = []  # list of (col_start, col_end) inclusive
+        group_column_ranges = []  # (col_start, col_end)のリスト、包含的
         for (a, b) in final_groups:
             if a < len(header_positions):
                 col_start = header_positions[a]
@@ -2984,7 +2984,7 @@ class _TablesMixin:
                 col_end = header_positions[b] - 1
             else:
                 col_end = end_col
-            # normalize bounds
+            # 境界を正規化
             if col_start < start_col:
                 col_start = start_col
             if col_end > end_col:
@@ -3036,7 +3036,7 @@ class _TablesMixin:
         sheet_name = getattr(sheet, 'title', None)
 
         # データ行を構築（ヘッダー行の次から）。各グループ内では行ごとに優先列順で最初の非空セルを参照して値を取得する
-        # header_heightを考慮してヘッダー行をスキップ
+        # header_heightを考慮しヘッダー行をスキップ
         data_start_row = header_row + (header_height if header_height else 1)
         for row_num in range(data_start_row, end_row + 1):
             row_data = []
@@ -3117,7 +3117,7 @@ class _TablesMixin:
                     if not s:
                         return ''
                     s = s.replace('\u3000', ' ')
-                    s = s.replace('\uFF08', '(').replace('\uFF09', ')')  # fullwidth parens
+                    s = s.replace('\uFF08', '(').replace('\uFF09', ')')  # 全角括弧
                     s = s.replace('（', '(').replace('）', ')')
                     s = s.replace('「', ' ').replace('」', ' ')
                     s = s.replace('”', '"').replace('“', '"')
@@ -3257,7 +3257,7 @@ class _TablesMixin:
                     # 太字やMarkdown強調は優先的にタイトル候補とする
                     if cell.font and cell.font.bold:
                         distance = abs(row - start_row)
-                        # mark as bold/high-priority
+                        # 太字/高優先度としてマーク
                         row_relation = 0 if row < start_row else (1 if row == start_row else 2)
                         title_candidates.append((text, distance, row, col, 'bold', row_relation))
                         continue
@@ -3292,11 +3292,11 @@ class _TablesMixin:
                 immediate_priority = 0 if is_immediately_before else 1
                 kind_priority = 0 if kind in ('bold', 'markdown') else 1
                 length_priority = -len(text) if is_immediately_before else len(text)
-                # row_relation: 0: above table, 1: same row, 2: below table
+                # row_relation: 0: テーブルの上、1: 同じ行、2: テーブルの下
                 return (immediate_priority, kind_priority, row_relation, length_priority, distance)
 
             best_title = min(title_candidates, key=_title_key)
-            # record the detected title row so callers can use it as an anchor
+            # 検出されたタイトル行を記録し、呼び出し元がアンカーとして使用できるようにする
             try:
                 self._last_table_title_row = int(best_title[2])
             except (ValueError, TypeError):
@@ -3313,7 +3313,7 @@ class _TablesMixin:
             debug_print("[DEBUG] タイトル選択: '{}' (type={}, row={})".format(best_title[0], best_title[4], best_title[2]))
             return best_title[0]
 
-        # clear any previous title row if no title found
+        # タイトルが見つからない場合は以前のタイトル行をクリア
         self._last_table_title_row = None
         debug_print("[DEBUG] テーブルタイトルが見つかりませんでした")
         return None
@@ -3409,10 +3409,10 @@ class _TablesMixin:
                     multirow_frac = 1.0
 
                 # 複数行ヘッダーの判定を改善:
-                # multirow_fracが低くても、全体として多くの非空セルがあれば有効なヘッダーとする
+                # multirow_fracが低くても全体として多くの非空セルがあれば有効なヘッダー
                 # (行3-4のような「上段と下段で異なる列にテキストがある」構造に対応)
                 if height > 1 and multirow_frac < 0.25:
-                    # nonemptyが多ければ（全体の50%以上）、有効な複数行ヘッダーとして扱う
+                    # nonemptyが多ければ（全体の50%以上）有効な複数行ヘッダーとして扱う
                     if nonempty >= total_columns * 0.5:
                         debug_print(f"[DEBUG] 複数行ヘッダ候補を維持（非空セルが多い）: row={row}, height={height}, multirow_frac={multirow_frac:.2f}, nonempty={nonempty}/{total_columns}")
                     else:
@@ -3429,7 +3429,7 @@ class _TablesMixin:
                         top_merged_count += 1
                 top_merged_fraction = (top_merged_count / total_columns) if total_columns > 0 else 0
 
-                # debug
+                # デバッグ
                 debug_print(f"[DEBUG] 行{row}..{row+height-1} combined header_values (first16): {header_values[:16]}")
                 debug_print(f"[DEBUG] 行{row} height={height} group_count={group_count}, nonempty_cols={nonempty}")
 
@@ -3467,7 +3467,7 @@ class _TablesMixin:
                     if mi:
                         master_total += 1
                         mr = int(mi.get('master_row', row))
-                        # master_rowがヘッダー候補行内にある場合は整列
+                        # master_rowがヘッダー候補行内にある場合整列
                         if row <= mr <= bottom_row:
                             master_aligned += 1
                 masters_alignment_frac = (master_aligned / master_total) if master_total > 0 else 0.0
@@ -3522,12 +3522,12 @@ class _TablesMixin:
                         return 0.0
 
                 likeness_score = _row_header_likeness(bottom_row)
-                # debug print for inspection
+                # デバッグ print for inspection
                 debug_print(f"[DEBUG] header-likeness(bottom_row={bottom_row})={likeness_score:.3f}")
                 debug_print(f"[DEBUG] header_border_fraction(bottom_row={bottom_row})={header_border_fraction:.3f}")
 
                 # 拡張列範囲でのグループ数を計算（テーブル範囲外のヘッダーも考慮）
-                # height>1の場合は全行を走査して結合した値でグループをカウント
+                # height>1の場合全行を走査し結合した値でグループをカウント
                 extended_group_count = 0
                 prev_val = None
                 for c in range(max(1, start_col - 5), min(start_col + 30, end_col + 10)):
@@ -3566,7 +3566,7 @@ class _TablesMixin:
                 # この候補のメトリクスタプルを構築
                 # 罫線を最優先、次に拡張グループ数を考慮
                 # 同等の場合は上部の行を優先（-rowで小さい行番号が大きい値になる）
-                # heightは小さい方を優先（より保守的なヘッダー検出）
+                # heightは小さい方を優先（保守的なヘッダー検出）
                 metrics = (
                     adjusted_border_fraction,  # 1st: 罫線が最も重要な判断基準（start_rowにボーナス）
                     extended_group_count,    # 2nd: 拡張範囲でのグループ数（範囲外ヘッダー対応）
@@ -3918,7 +3918,7 @@ class _TablesMixin:
 
         # 空列の検出と除去
         useful_columns = self._identify_useful_columns(filtered_table_data)
-        # capture initial useful columns for diagnostics
+        # 診断用に初期の有用な列をキャプチャ
         initial_useful_columns = list(useful_columns)
 
         # 重要: ヘッダー行に値がある列は必ず保持する。
@@ -3942,13 +3942,13 @@ class _TablesMixin:
             num_cols_all = max(len(r) for r in filtered_table_data) if filtered_table_data else 0
             for ci in range(num_cols_all):
                 cnt = 0
-                # skip header row (index 0) when counting data-bearing cells
+                # データを持つセルをカウントする際にヘッダー行（インデックス0）をスキップ
                 for r in filtered_table_data[1:]:
                     if ci < len(r) and r[ci] and str(r[ci]).strip():
                         cnt += 1
                 col_counts.append(cnt)
 
-            # decision: keep if cnt >= 1 OR fraction >= 0.05 (5%)
+            # 判定: cnt >= 1 または fraction >= 0.05 (5%) なら保持
             kept_by_guard = []
             for ci, cnt in enumerate(col_counts):
                 frac = cnt / total_rows_for_data if total_rows_for_data > 0 else 0
@@ -4016,7 +4016,7 @@ class _TablesMixin:
             compressed_row = [row_data[i] if i < len(row_data) else "" for i in useful_columns]
             table_data.append(compressed_row)
 
-        # dump after column compression step
+        # 列圧縮ステップ後にダンプ
         debug_print(f"[DEBUG-DUMP] after useful_columns compression: useful_columns={useful_columns}, table_rows={len(table_data)} sample (first 6):")
         for i, r in enumerate(table_data[:6]):
             debug_print(f"[DEBUG-DUMP] compressed row {i}: cols={len(r)} -> {r}")
@@ -4033,7 +4033,7 @@ class _TablesMixin:
                         cnt += 1
                 col_nonempty_counts.append(cnt)
             debug_print(f"[DEBUG-DUMP] per-column nonempty counts (after useful_columns): {col_nonempty_counts}")
-            # groups: 連続する同一ヘッダーの(start_idx, end_idx)のリスト
+            # groups: 連続する同一ヘッダーの(start_idx,end_idx)リスト
             groups = []
             i = 0
             while i < len(header):
@@ -4101,7 +4101,7 @@ class _TablesMixin:
 
                 # 圧縮前に合理的な割合の行がマッチすることを要求
                 total_data_rows = max(1, len(table_data) - 1)
-                required = max(1, int(total_data_rows * 0.5))  # at least 50% of rows
+                required = max(1, int(total_data_rows * 0.5))  # 少なくとも行の50%
                 # 2列最適化決定のための追加診断ダンプ
                 debug_print(f"[DEBUG-DUMP] 2col optimization: total_data_rows={total_data_rows}, matched={matched}, required={required}")
                 # 決定に使用された行のサンプルを表示
@@ -4198,7 +4198,7 @@ class _TablesMixin:
         import re
         cell_text = re.sub(r'(<br>\s*){2,}', '<br><br>', cell_text)
 
-        # Markdownテーブル内で問題となる文字をエスケープ
+        # Markdownテーブル内の問題文字をエスケープ
         # '|' はテーブル区切りになるためエスケープ
         cell_text = cell_text.replace('|', '\\|')
 
@@ -4275,7 +4275,7 @@ class _TablesMixin:
             placeholders = {}
             for i, tag in enumerate(allowed_tags):
                 ph = f'___BR_TAG_PLACEHOLDER_{i}___'
-                # replace only the first occurrence each time to keep mapping
+                # マッピングを維持するため毎回最初の出現のみを置換
                 t = t.replace(tag, ph, 1)
                 placeholders[ph] = tag
 
@@ -4285,12 +4285,12 @@ class _TablesMixin:
             # 残りの角括弧をエスケープ（これらはExcelセルコンテンツから来る）
             t = t.replace('<', '&lt;').replace('>', '&gt;')
 
-            # Markdownテーブルのパイプをエスケープ
+            # Markdownテーブルのパイプ文字をエスケープ
             t = t.replace('|', '\\|')
 
             # 許可されたタグ（プレースホルダー）をリテラル形式に戻す
             for ph, tag in placeholders.items():
-                # use the normalized '<br>' form
+                # 正規化された'<br>'形式を使用
                 t = t.replace(ph, '<br>')
 
             return t
@@ -4446,7 +4446,7 @@ class _TablesMixin:
                 i = j
 
             # ヘッダー値が空でない場合のみ連続する同一ヘッダーの保守的な圧縮を実行。
-            # header_cellsが空文字列の場合（ヘッダー行が存在しないか位置がずれている場合に一般的）、
+            # header_cellsが空文字列の場合（ヘッダー行が存在しないか位置ずれの場合）
             # 複数のデータ列が単一の列にマージされるのを避けるために圧縮をスキップ。
             collapse_needed = any((b - a > 1 and header_cells[a] and str(header_cells[a]).strip()) for (a, b) in groups)
             if collapse_needed:
@@ -4535,7 +4535,7 @@ class _TablesMixin:
 
         # データ行を出力（検出されたヘッダーのような行をスキップ）
         start_idx = header_rows_count + skip_count
-        # source_rowsが提供された場合はマッピングを準備
+        # source_rows提供時はマッピングを準備
         sheet_map = None
         # 既存の権威的マッピングのみを取得。ここでは作成しない。
         if source_rows and sheet_title:
