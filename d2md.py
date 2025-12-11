@@ -29,6 +29,13 @@ import io
 
 from utils import get_libreoffice_path
 
+# 数式変換モジュール (オプション)
+try:
+    from omml_converter.pre_process import pre_process_docx, has_math_content
+    MATH_SUPPORT = True
+except ImportError:
+    MATH_SUPPORT = False
+
 try:
     from docx import Document
     from docx.shared import Inches
@@ -86,7 +93,15 @@ class WordToMarkdownConverter:
             output_format: 出力画像形式 ('png' または 'svg')
         """
         self.word_file = word_file_path
-        self.doc = Document(word_file_path)
+        
+        # 数式前処理: OMML を LaTeX に変換
+        if MATH_SUPPORT and has_math_content(word_file_path):
+            print("[INFO] 数式を検出しました。LaTeX 形式に変換します...")
+            with open(word_file_path, 'rb') as f:
+                processed_docx = pre_process_docx(f)
+            self.doc = Document(processed_docx)
+        else:
+            self.doc = Document(word_file_path)
         self.base_name = Path(word_file_path).stem
         
         # 出力ディレクトリの設定
@@ -134,6 +149,9 @@ class WordToMarkdownConverter:
         # 2. 文書本体を変換（Word文書の構造をそのまま再現）
         # 目次は文書内の適切な位置で挿入される
         self._convert_document_body()
+        
+        # 2.5. テキストボックス内テキストを抽出
+        self._extract_textbox_content()
         
         # 3. Markdownファイルを保存
         markdown_content = "\n".join(self.markdown_lines)
@@ -440,20 +458,78 @@ class WordToMarkdownConverter:
                 return table
         return None
     
-    def _get_paragraph_text_without_hidden(self, paragraph) -> str:
-        """段落から隠しテキスト（vanish属性を持つrun）を除外してテキストを取得"""
+    def _get_paragraph_text_without_hidden(self, paragraph, preserve_format: bool = True) -> str:
+        """段落から隠しテキスト（vanish属性を持つrun）を除外してテキストを取得
+        
+        Args:
+            paragraph: 段落オブジェクト
+            preserve_format: フォーマット情報を保持するかどうか（デフォルト: True）
+        
+        Returns:
+            str: テキスト（フォーマット情報付き）
+        """
         text_parts = []
         for run in paragraph.runs:
             try:
                 vanish_elem = run._element.xpath('.//w:vanish')
                 if not vanish_elem:
                     if run.text:
-                        text_parts.append(run.text)
+                        text = run.text
+                        if preserve_format:
+                            text = self._apply_run_formatting(run, text)
+                        text_parts.append(text)
             except Exception:
                 if run.text:
                     text_parts.append(run.text)
         
         return ''.join(text_parts)
+    
+    def _apply_run_formatting(self, run, text: str) -> str:
+        """Run のフォーマット情報を Markdown 記法に変換
+        
+        Args:
+            run: python-docx の Run オブジェクト
+            text: 元のテキスト
+        
+        Returns:
+            str: フォーマット適用後のテキスト
+        """
+        if not text or not text.strip():
+            return text
+        
+        # 上付き文字
+        if run.font.superscript:
+            text = f"<sup>{text}</sup>"
+        
+        # 下付き文字
+        if run.font.subscript:
+            text = f"<sub>{text}</sub>"
+        
+        # 取り消し線 (strike または dstrike)
+        if run.font.strike or self._has_double_strike(run):
+            text = f"~~{text}~~"
+        
+        # 下線 (Markdown では直接サポートされないため HTML タグを使用)
+        if run.font.underline and run.font.underline is not False:
+            text = f"<u>{text}</u>"
+        
+        # 斜体
+        if run.font.italic:
+            text = f"*{text}*"
+        
+        # 太字
+        if run.font.bold:
+            text = f"**{text}**"
+        
+        return text
+    
+    def _has_double_strike(self, run) -> bool:
+        """Run に二重取り消し線があるかチェック"""
+        try:
+            dstrike_elem = run._element.xpath('.//w:dstrike')
+            return bool(dstrike_elem)
+        except Exception:
+            return False
     
     def _convert_paragraph(self, paragraph):
         """段落を変換"""
@@ -1042,6 +1118,202 @@ class WordToMarkdownConverter:
                 
                 if not already_processed:
                     self._extract_and_convert_image(rel)
+    
+    def _extract_textbox_content(self):
+        """テキストボックス内のテキストを抽出して details タグで出力
+        
+        VML (<v:textbox>) と DrawingML (txbxContent) の両方からテキストを抽出します。
+        """
+        print("[INFO] テキストボックス内テキストを抽出中...")
+        
+        # python-docx のモジュールレベル nsmap には v, wps, mc プレフィックスが含まれていないため
+        # lxml の xpath を直接呼び出し、要素の nsmap を使用する
+        from lxml import etree
+        
+        textbox_texts = []
+        processed_ids = set()
+        
+        # 文書の XML を取得
+        doc_element = self.doc.element
+        # 要素の nsmap を取得 (v, wps, mc などが含まれている)
+        elem_nsmap = doc_element.nsmap
+        
+        # VML テキストボックス (<v:textbox>) を検索
+        # lxml の xpath を直接呼び出し、要素の nsmap を使用
+        vml_textboxes = etree.ElementBase.xpath(doc_element, './/v:textbox', namespaces=elem_nsmap)
+        
+        for textbox in vml_textboxes:
+            textbox_id = id(textbox)
+            if textbox_id in processed_ids:
+                continue
+            processed_ids.add(textbox_id)
+            
+            # テキストボックス内の段落を取得
+            paragraphs = etree.ElementBase.xpath(textbox, './/w:p', namespaces=elem_nsmap)
+            texts = self._extract_texts_from_xml_paragraphs_lxml(paragraphs, elem_nsmap)
+            if texts:
+                textbox_texts.append(texts)
+        
+        # DrawingML テキストボックス (txbxContent) を検索
+        txbx_contents = etree.ElementBase.xpath(
+            doc_element, './/wps:txbx//w:txbxContent', namespaces=elem_nsmap
+        )
+        for txbx in txbx_contents:
+            txbx_id = id(txbx)
+            if txbx_id in processed_ids:
+                continue
+            processed_ids.add(txbx_id)
+            
+            # テキストボックス内の段落を取得
+            paragraphs = etree.ElementBase.xpath(txbx, './/w:p', namespaces=elem_nsmap)
+            texts = self._extract_texts_from_xml_paragraphs_lxml(paragraphs, elem_nsmap)
+            if texts:
+                textbox_texts.append(texts)
+        
+        # mc:AlternateContent 内のテキストボックスも検索
+        alt_txbx = etree.ElementBase.xpath(
+            doc_element, './/mc:AlternateContent//wps:txbx//w:txbxContent', namespaces=elem_nsmap
+        )
+        for txbx in alt_txbx:
+            txbx_id = id(txbx)
+            if txbx_id in processed_ids:
+                continue
+            processed_ids.add(txbx_id)
+            
+            paragraphs = etree.ElementBase.xpath(txbx, './/w:p', namespaces=elem_nsmap)
+            texts = self._extract_texts_from_xml_paragraphs_lxml(paragraphs, elem_nsmap)
+            if texts:
+                textbox_texts.append(texts)
+        
+        # テキストボックスが見つかった場合、details タグで出力
+        if textbox_texts:
+            print(f"[INFO] {len(textbox_texts)} 個のテキストボックスを検出しました")
+            self.markdown_lines.append("")
+            self.markdown_lines.append("---")
+            self.markdown_lines.append("")
+            self.markdown_lines.append("<details>")
+            self.markdown_lines.append("<summary>テキストボックス内テキスト</summary>")
+            self.markdown_lines.append("")
+            
+            for i, texts in enumerate(textbox_texts, 1):
+                self.markdown_lines.append(f"### テキストボックス {i}")
+                self.markdown_lines.append("")
+                for text in texts:
+                    if text.strip():
+                        self.markdown_lines.append(text)
+                        self.markdown_lines.append("")
+            
+            self.markdown_lines.append("</details>")
+            self.markdown_lines.append("")
+        else:
+            debug_print("[DEBUG] テキストボックスは見つかりませんでした")
+    
+    def _xpath_with_ns(self, element, xpath_expr: str, namespaces: dict) -> list:
+        """名前空間を考慮した XPath クエリを実行
+        
+        lxml の xpath メソッドは namespaces キーワード引数をサポートしていますが、
+        python-docx の BaseOxmlElement では動作が異なる場合があります。
+        この関数は両方のケースに対応します。
+        
+        Args:
+            element: XML 要素
+            xpath_expr: XPath 式 (名前空間プレフィックス付き)
+            namespaces: 名前空間の辞書
+        
+        Returns:
+            list: マッチした要素のリスト
+        """
+        try:
+            return element.xpath(xpath_expr, namespaces=namespaces)
+        except TypeError:
+            # namespaces キーワードがサポートされていない場合
+            # XPath 式を Clark 記法に変換
+            clark_xpath = xpath_expr
+            for prefix, uri in namespaces.items():
+                clark_xpath = clark_xpath.replace(f'{prefix}:', f'{{{uri}}}')
+            return element.xpath(clark_xpath)
+    
+    def _extract_texts_from_xml_paragraphs(self, paragraphs, namespaces) -> list:
+        """XML 段落要素からテキストを抽出
+        
+        Args:
+            paragraphs: XML 段落要素のリスト
+            namespaces: XML 名前空間の辞書
+        
+        Returns:
+            list: 抽出されたテキストのリスト
+        """
+        texts = []
+        for p in paragraphs:
+            # 段落内のテキスト要素を取得
+            text_elements = self._xpath_with_ns(p, './/w:t', namespaces)
+            paragraph_text = ''.join(t.text or '' for t in text_elements)
+            if paragraph_text.strip():
+                texts.append(paragraph_text)
+        return texts
+    
+    def _extract_texts_from_xml_paragraphs_clark(self, paragraphs, ns_w: str) -> list:
+        """XML 段落要素からテキストを抽出 (Clark 記法版)
+        
+        Args:
+            paragraphs: XML 段落要素のリスト
+            ns_w: WordprocessingML 名前空間 (Clark 記法、例: '{http://...}')
+        
+        Returns:
+            list: 抽出されたテキストのリスト
+        """
+        texts = []
+        for p in paragraphs:
+            # 段落内のテキスト要素を取得 (Clark 記法)
+            # ns_w は既に '{namespace}' 形式なのでそのまま連結
+            text_elements = p.xpath('.//' + ns_w + 't')
+            paragraph_text = ''.join(t.text or '' for t in text_elements)
+            if paragraph_text.strip():
+                texts.append(paragraph_text)
+        return texts
+    
+    def _extract_texts_from_xml_paragraphs_prefix(self, paragraphs) -> list:
+        """XML 段落要素からテキストを抽出 (名前空間プレフィックス版)
+        
+        python-docx の BaseOxmlElement.xpath() は内部で nsmap を使用するため
+        名前空間プレフィックス (w:t など) を直接使用可能
+        
+        Args:
+            paragraphs: XML 段落要素のリスト
+        
+        Returns:
+            list: 抽出されたテキストのリスト
+        """
+        texts = []
+        for p in paragraphs:
+            # 段落内のテキスト要素を取得 (名前空間プレフィックス)
+            text_elements = p.xpath('.//w:t')
+            paragraph_text = ''.join(t.text or '' for t in text_elements)
+            if paragraph_text.strip():
+                texts.append(paragraph_text)
+        return texts
+    
+    def _extract_texts_from_xml_paragraphs_lxml(self, paragraphs, nsmap: dict) -> list:
+        """XML 段落要素からテキストを抽出 (lxml 直接使用版)
+        
+        lxml の xpath を直接呼び出し、要素の nsmap を使用する
+        
+        Args:
+            paragraphs: XML 段落要素のリスト
+            nsmap: 名前空間マップ
+        
+        Returns:
+            list: 抽出されたテキストのリスト
+        """
+        from lxml import etree
+        texts = []
+        for p in paragraphs:
+            # 段落内のテキスト要素を取得
+            text_elements = etree.ElementBase.xpath(p, './/w:t', namespaces=nsmap)
+            paragraph_text = ''.join(t.text or '' for t in text_elements)
+            if paragraph_text.strip():
+                texts.append(paragraph_text)
+        return texts
     
     def _extract_and_convert_image(self, rel):
         """画像を抽出・変換（重複防止強化）"""
