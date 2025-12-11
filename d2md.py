@@ -1386,6 +1386,106 @@ class WordToMarkdownConverter:
             print(f"[ERROR] ベクター画像処理エラー: {e}")
             return False
     
+    def _build_theme_color_map(self, theme_data):
+        """テーマデータからカラーマップを構築
+        
+        Args:
+            theme_data: テーマXMLのバイナリデータ
+            
+        Returns:
+            dict: テーマ色名からRGB値へのマッピング（例: {'lt1': 'FFFFFF', 'dk1': '000000'}）
+        """
+        color_map = {}
+        if not theme_data:
+            return color_map
+        
+        try:
+            from lxml import etree
+            theme_tree = etree.fromstring(theme_data)
+            
+            # カラースキームを探す
+            clr_scheme = theme_tree.xpath('.//*[local-name()="clrScheme"]')
+            if not clr_scheme:
+                return color_map
+            
+            for child in clr_scheme[0]:
+                # タグ名からテーマ色名を取得（例: dk1, lt1, accent1）
+                tag_name = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                
+                # srgbClrを探す
+                srgb_elems = child.xpath('.//*[local-name()="srgbClr"]/@val')
+                if srgb_elems:
+                    color_map[tag_name] = srgb_elems[0]
+                    continue
+                
+                # sysClrを探す（lastClr属性にRGB値がある）
+                sys_clr_elems = child.xpath('.//*[local-name()="sysClr"]')
+                if sys_clr_elems:
+                    last_clr = sys_clr_elems[0].get('lastClr')
+                    if last_clr:
+                        color_map[tag_name] = last_clr
+            
+            debug_print(f"[DEBUG] テーマカラーマップ構築: {len(color_map)}色")
+        except Exception as e:
+            debug_print(f"[DEBUG] テーマカラーマップ構築エラー: {e}")
+        
+        return color_map
+    
+    def _convert_text_scheme_colors(self, drawing_element, theme_color_map):
+        """drawing要素内のテキスト色のschemeClrをsrgbClrに変換
+        
+        fontRef内のschemeClrを変換する（テキストのフォント色を定義）
+        
+        Args:
+            drawing_element: drawing要素
+            theme_color_map: テーマ色名からRGB値へのマッピング
+            
+        Returns:
+            str: 変換後のXML文字列
+        """
+        if not theme_color_map:
+            return ET.tostring(drawing_element, encoding='unicode')
+        
+        try:
+            from lxml import etree
+            xml_str = ET.tostring(drawing_element, encoding='unicode')
+            tree = etree.fromstring(xml_str.encode('utf-8'))
+            
+            ns_a = "http://schemas.openxmlformats.org/drawingml/2006/main"
+            converted_count = 0
+            
+            # fontRef内のschemeClrを変換（テキスト色）
+            font_ref_schemes = tree.xpath(
+                './/*[local-name()="fontRef"]/*[local-name()="schemeClr"]'
+            )
+            
+            for scheme_clr in font_ref_schemes:
+                val = scheme_clr.get('val')
+                if val and val in theme_color_map:
+                    rgb_val = theme_color_map[val]
+                    font_ref = scheme_clr.getparent()
+                    
+                    # srgbClr要素を作成
+                    new_srgb = etree.Element(f"{{{ns_a}}}srgbClr", val=rgb_val)
+                    
+                    # 子要素をコピー
+                    for child in list(scheme_clr):
+                        new_srgb.append(child)
+                    
+                    # 置換
+                    font_ref.remove(scheme_clr)
+                    font_ref.append(new_srgb)
+                    converted_count += 1
+            
+            if converted_count > 0:
+                debug_print(f"[DEBUG] テキスト色変換: {converted_count}箇所")
+            
+            return etree.tostring(tree, encoding='unicode')
+            
+        except Exception as e:
+            debug_print(f"[DEBUG] テキスト色変換エラー: {e}")
+            return ET.tostring(drawing_element, encoding='unicode')
+    
     def _create_canvas_document(self, canvas_element, drawing_elements):
         """キャンバス要素のみを含む一時Word文書を作成
         
@@ -1420,10 +1520,15 @@ class WordToMarkdownConverter:
             except Exception as rel_error:
                 debug_print(f"[DEBUG] リレーション取得エラー: {rel_error}")
             
-            # 複数のdrawing XMLを連結
-            drawings_xml = "".join(
-                ET.tostring(d, encoding='unicode') for d in drawing_elements
-            )
+            # テーマからカラーマップを作成（schemeClr→srgbClr変換用）
+            theme_color_map = self._build_theme_color_map(theme_data)
+            
+            # 複数のdrawing XMLを連結し、テキスト色のschemeClrをsrgbClrに変換
+            converted_drawings = []
+            for d in drawing_elements:
+                converted_xml = self._convert_text_scheme_colors(d, theme_color_map)
+                converted_drawings.append(converted_xml)
+            drawings_xml = "".join(converted_drawings)
             debug_print(f"[DEBUG] Drawing XML長: {len(drawings_xml)}")
             
             # より適切なWord文書XMLを作成
