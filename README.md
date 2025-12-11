@@ -5,7 +5,7 @@ Excel、Word、PowerPointファイルを自動判定して**それっぽい**Mar
 ## 概要
 
 o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）を**それっぽい**Markdown形式に変換するPythonツールです。ファイルの種類を自動判定し、適切な変換エンジンを使用して処理します。
-古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換は**LibreOffice**に依存しています。必ずlibreOfficeをインストールしてください。
+古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換は**LibreOffice**に依存しています。必ず**LibreOffice**をインストールしてください。
 
 ### 主な特徴
 
