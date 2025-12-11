@@ -110,6 +110,7 @@ class WordToMarkdownConverter:
         self.referenced_images = set()  # 実際に文書内で参照されている画像のrId
         self.vector_image_counter = 0  # ベクター画像専用カウンター
         self.regular_image_counter = 0  # 通常画像専用カウンター
+        self.shape_image_counter = 0  # 個別図形専用カウンター
         self.shape_metadata = shape_metadata  # 図形メタデータ出力フラグ
         self.output_format = output_format.lower() if output_format else 'png'
         
@@ -1084,7 +1085,7 @@ class WordToMarkdownConverter:
             print(f"[ERROR] 画像処理エラー: {e}")
     
     def _has_word_processing_canvas(self, paragraph):
-        """段落にWord図形キャンバス（またはグループ）があるかチェック"""
+        """段落にWord図形キャンバス（またはグループ、または個別図形）があるかチェック"""
         try:
             drawings = paragraph._element.xpath('.//w:drawing')
             for drawing in drawings:
@@ -1099,6 +1100,12 @@ class WordToMarkdownConverter:
                 if group_elements:
                     debug_print("[DEBUG] Word Processing Group検出")
                     return True
+                
+                # 個別のWord図形 (wps:wsp) をチェック（グループに含まれないもの）
+                shape_elements = drawing.xpath('.//*[local-name()="wsp"]')
+                if shape_elements:
+                    debug_print("[DEBUG] Word Processing Shape検出")
+                    return True
                     
             return False
         except Exception as e:
@@ -1106,7 +1113,7 @@ class WordToMarkdownConverter:
             return False
     
     def _process_composite_figure(self, paragraph):
-        """Word図形キャンバス/グループから複合図形を処理"""
+        """Word図形キャンバス/グループ/個別図形から複合図形を処理"""
         try:
             print("[INFO] 複合図形を処理中...")
             
@@ -1115,34 +1122,96 @@ class WordToMarkdownConverter:
             if not drawings:
                 return
             
-            # Word図形キャンバス/グループを探す
+            # 各Drawing要素を処理（グループ優先、次に個別図形）
             for drawing in drawings:
                 # Word Processing Canvas (wpc) を処理
                 canvas_elements = drawing.xpath('.//*[local-name()="wpc"]')
                 if canvas_elements:
                     print("[INFO] Word Processing Canvas として処理")
-                    # キャンバス全体をベクター画像として処理
                     if self._process_canvas_as_vector(canvas_elements[0], drawing):
                         print("[SUCCESS] ベクター処理成功")
-                        return
                     else:
-                        print("[ERROR] ベクター処理失敗 - 複合図形処理をスキップ")
-                        return
+                        print("[ERROR] ベクター処理失敗")
+                    continue
                 
                 # Word Processing Group (wpg) を処理
                 group_elements = drawing.xpath('.//*[local-name()="wgp"]')
                 if group_elements:
                     print("[INFO] Word Processing Group として処理")
-                    # ベクター処理を試行
                     if self._process_canvas_as_vector(group_elements[0], drawing):
                         print("[SUCCESS] ベクター処理成功")
-                        return
                     else:
-                        print("[ERROR] ベクター処理失敗 - 複合図形処理をスキップ")
-                        return
+                        print("[ERROR] ベクター処理失敗")
+                    continue
+                
+                # 個別のWord図形 (wps:wsp) を処理（グループに含まれないもの）
+                shape_elements = drawing.xpath('.//*[local-name()="wsp"]')
+                if shape_elements:
+                    print("[INFO] Word Processing Shape として処理")
+                    # drawing要素全体をベクター画像として処理
+                    if self._process_shape_as_vector(shape_elements[0], drawing):
+                        print("[SUCCESS] 個別図形ベクター処理成功")
+                    else:
+                        print("[ERROR] 個別図形ベクター処理失敗")
+                    continue
             
         except Exception as e:
             print(f"[ERROR] 複合図形処理エラー: {e}")
+    
+    def _process_shape_as_vector(self, shape_element, drawing_element):
+        """個別のWord図形をベクター画像として処理"""
+        try:
+            debug_print("[INFO] 個別図形をベクター画像として処理中...")
+            
+            # 一時的なWord文書を作成して図形のみを含める
+            temp_doc_path = self._create_canvas_document(shape_element, drawing_element)
+            if not temp_doc_path:
+                return False
+            
+            debug_print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
+            
+            # LibreOfficeでPDFに変換
+            temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
+            if not temp_pdf_path:
+                os.unlink(temp_doc_path)
+                return False
+            
+            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            
+            # PDFから画像に変換（個別図形用カウンターを使用）
+            self.shape_image_counter += 1
+            ext = self.output_format
+            image_filename = f"{self.base_name}_shape_{self.shape_image_counter:03d}.{ext}"
+            image_path = os.path.join(self.images_dir, image_filename)
+            
+            # 出力形式に応じて変換
+            if self.output_format == 'svg':
+                convert_success = self._convert_pdf_to_svg(temp_pdf_path, image_path)
+            else:
+                convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
+            
+            if convert_success:
+                # Markdownに追加（ファイル名をURLエンコード）
+                encoded_filename = urllib.parse.quote(image_filename)
+                self.markdown_lines.append(f"![](images/{encoded_filename})")
+                self.markdown_lines.append("")
+                
+                debug_print(f"[SUCCESS] 個別図形を処理: {image_filename}")
+                
+                # 一時ファイルを削除
+                os.unlink(temp_doc_path)
+                os.unlink(temp_pdf_path)
+                return True
+            
+            # 一時ファイルを削除
+            os.unlink(temp_doc_path)
+            if os.path.exists(temp_pdf_path):
+                os.unlink(temp_pdf_path)
+            return False
+            
+        except Exception as e:
+            print(f"[ERROR] 個別図形処理エラー: {e}")
+            return False
     
     def _process_canvas_as_vector(self, canvas_element, drawing_element):
         """Word図形キャンバス全体をベクター画像として処理"""
