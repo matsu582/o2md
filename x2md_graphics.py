@@ -149,16 +149,16 @@ class _GraphicsMixin:
                                     drawing_path = drawing_path.replace('worksheets', 'drawings')
                                 drawing_xml = get_xml_from_zip(z, drawing_path)
                                 if drawing_xml is not None:
-                                    # 簡素化されバランスの取れた解析: アンカーIDを収集
-                                    # and count pic/sp anchors. Also attempt to map any
-                                    # embedded image filenames to their cNvPr ids. Keep
-                                    # errors non-fatal and avoid deep nesting of try/except.
+                                    # 簡素化されバランスの取れた解析: アンカーIDを収集し、
+                                    # pic/spアンカーをカウント。また、埋め込み画像の
+                                    # ファイル名をcNvPr IDにマッピングを試みる。
+                                    # エラーは致命的ではなく、try/exceptの深いネストを避ける。
                                     anchors_cid_list = []
                                     total_anchors = 0
                                     pic_anchors = 0
                                     sp_anchors = 0
                                     try:
-                                        # collect anchor ids and basic counts
+                                        # アンカーIDと基本カウントを収集
                                         for node in list(drawing_xml):
                                             lname = node.tag.split('}')[-1].lower()
                                             if lname not in ('twocellanchor', 'onecellanchor'):
@@ -174,7 +174,7 @@ class _GraphicsMixin:
                                                     cid_val = sub.attrib.get('id') or sub.attrib.get('idx')
                                                     anchors_cid_list.append(str(cid_val) if cid_val is not None else None)
 
-                                        # attempt to read drawing relationships and map embedded images
+                                        # 描画リレーションシップを読み取り、埋め込み画像をマッピング
                                         self._embedded_image_cid_by_name.setdefault(sheet.title, {})
                                         drawing_rels_path = os.path.dirname(drawing_path) + '/_rels/' + os.path.basename(drawing_path) + '.rels'
                                         rels_xml = get_xml_from_zip(z, drawing_rels_path)
@@ -204,7 +204,7 @@ class _GraphicsMixin:
                                                                 debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                                                             break
                                     except (ValueError, TypeError):
-                                        # non-fatal: ensure we have defaults
+                                        # 致命的ではない: デフォルト値を確保
                                         anchors_cid_list = anchors_cid_list if 'anchors_cid_list' in locals() else []
                                         total_anchors = total_anchors if 'total_anchors' in locals() else 0
                                         pic_anchors = pic_anchors if 'pic_anchors' in locals() else 0
@@ -214,7 +214,7 @@ class _GraphicsMixin:
                                     debug_print(f"[DEBUG] Sheet '{sheet.title}': total_anchors={total_anchors}, pic_anchors={pic_anchors}, sp_anchors={sp_anchors}, sheet._images={len(sheet._images)}")
                                     
                                     # 埋め込み画像よりアンカーが多く、少なくとも1つの図形がある場合、
-                                    # attempt isolated-group rendering to capture vector shapes
+                                    # ベクトル図形をキャプチャするためisolated-groupレンダリングを試行
                                     debug_print(f"[DEBUG] Checking condition: total_anchors({total_anchors}) > len(sheet._images)({len(sheet._images)}) = {total_anchors > len(sheet._images)} AND sp_anchors({sp_anchors}) > 0 = {sp_anchors > 0}")
                                     if total_anchors > len(sheet._images) and sp_anchors > 0:
                                         debug_print(f"[DEBUG] Condition TRUE - entering isolated group rendering block for sheet '{sheet.title}'")
@@ -243,7 +243,7 @@ class _GraphicsMixin:
                                                     cell_ranges_all = []
                                                 
                                                 # 適切なクラスタリングのため_cluster_shapes_commonを使用
-                                                # max_groups=1 means cluster into 1 group if possible (no splitting)
+                                                # max_groups=1は可能であれば1グループにクラスタリング（分割なし）
                                                 # ただし、このメソッドは大きなギャップがある場合は分割します
                                                 debug_print(f"[DEBUG] Calling _cluster_shapes_common with {len(shapes)} shapes")
                                                 clusters, debug_info = self._cluster_shapes_common(
@@ -313,7 +313,7 @@ class _GraphicsMixin:
                                             traceback.print_exc()
                                             isolated_produced = False
                                         
-                                        # end of drawing parsing block
+                                        # 描画解析ブロックの終了
                     except (ValueError, TypeError) as e:
                         debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
             # パーサーで検出された画像が見つからなかった場合、保守的な
@@ -345,9 +345,9 @@ class _GraphicsMixin:
                                 drawing_path = drawing_path.replace('worksheets', 'drawings')
                             drawing_xml = get_xml_from_zip(z, drawing_path)
                             if drawing_xml is not None:
-                                # ensure map exists
+                                # マップの存在を確認
                                 self._embedded_image_cid_by_name.setdefault(sheet.title, {})
-                                # attempt to read drawing rels if present and map rId -> target
+                                # 描画リレーションシップが存在する場合は読み取り、rId -> targetをマッピング
                                 drawing_rels_path = os.path.dirname(drawing_path) + '/_rels/' + os.path.basename(drawing_path) + '.rels'
                                 try:
                                     rels_xml2 = get_xml_from_zip(z, drawing_rels_path)
@@ -359,7 +359,7 @@ class _GraphicsMixin:
                                             if rid and tgt:
                                                 tgtp = normalize_excel_path(tgt)
                                                 rid_to_target[rid] = tgtp
-                                        # iterate anchors and map both media basename and media SHA8 -> cNvPr
+                                        # アンカーを反復し、メディアのベース名とメディアSHA8の両方をcNvPrにマッピング
                                         import hashlib as _hashlib
                                         for node_c in list(drawing_xml):
                                             lname_c = node_c.tag.split('}')[-1].lower()
@@ -371,9 +371,9 @@ class _GraphicsMixin:
                                                     rid = sub.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed') or sub.attrib.get('embed')
                                                     if rid and rid in rid_to_target:
                                                         target = rid_to_target[rid]
-                                                        # normalize path
+                                                        # パスを正規化
                                                         tgtp = normalize_excel_path(target)
-                                                        # extract basename
+                                                        # ベース名を抽出
                                                         fname = os.path.basename(tgtp)
                                                         try:
                                                             media_bytes = z.read(tgtp) if tgtp in z.namelist() else None
@@ -387,12 +387,12 @@ class _GraphicsMixin:
                                                                 sha8 = None
                                                         if cid_val is not None:
                                                             try:
-                                                                # map by original basename
+                                                                # 元のベース名でマッピング
                                                                 self._embedded_image_cid_by_name[sheet.title][fname] = str(cid_val)
                                                             except (ValueError, TypeError):
                                                                 pass  # データ構造操作失敗は無視
                                                             try:
-                                                                # map by short sha if available
+                                                                # 利用可能な場合は短いSHAでマッピング
                                                                 if sha8:
                                                                     self._embedded_image_cid_by_name[sheet.title][sha8] = str(cid_val)
                                                             except (ValueError, TypeError):
@@ -425,29 +425,29 @@ class _GraphicsMixin:
                                 except Exception:
                                     pos = None
                                 if pos and isinstance(pos, dict):
-                                    # prefer explicit row if provided
+                                    # 明示的な行が提供されている場合はそれを優先
                                     if 'row' in pos and isinstance(pos['row'], int):
                                         start_row = pos['row']
                             except Exception:
                                 start_row = 1
 
                             # 正規出力パス中の場合、即座に挿入し
-                            # the image appears inline with emitted text. Otherwise,
-                            # defer by registering into self._sheet_shape_images so the
-                            # canonical emission will place it deterministically.
+                            # 画像は出力されたテキストとインラインで表示される。それ以外の場合は、
+                            # self._sheet_shape_imagesに登録して延期し、
+                            # 正規の出力が決定論的に配置する。
                             if getattr(self, '_in_canonical_emit', False):
                                 md_line = f"![{sheet.title}の図](images/{img_name})"
                                 ref = f"images/{img_name}"
                                 # この埋め込み画像が描画アンカーに対応する場合
-                                # that has already been preserved by a grouped render,
-                                # skip emitting it to avoid duplicate presentation.
+                                # グループレンダリングで既に保存されている場合、
+                                # 重複表示を避けるため出力をスキップ。
                                 try:
                                     cid_map = self._embedded_image_cid_by_name.get(sheet.title, {}) if hasattr(self, '_embedded_image_cid_by_name') else {}
                                     mapped_cid = cid_map.get(img_name)
                                     # ファイル名に_<sha8>.extのような短いハッシュサフィックスが含まれる場合、それを抽出してキーとして試行
                                     if mapped_cid is None:
                                         try:
-                                            # try extracting trailing 8-hex from filename
+                                            # ファイル名から末尾の8桁16進数を抽出を試行
                                             import re
                                             m = re.search(r'([0-9a-f]{8})', img_name)
                                             if m:
@@ -494,8 +494,8 @@ class _GraphicsMixin:
                                         print(f"[WARNING] ファイル操作エラー: {e}")
                                 # 挿入を延期: 正規の行ソート済み出力のため登録
                                 try:
-                                    # check mapped cNvPr for this embedded image and
-                                    # skip deferral if already preserved by a group render
+                                    # この埋め込み画像のマッピングされたcNvPrを確認し、
+                                    # グループレンダリングで既に保存されている場合は延期をスキップ
                                     cid_map = self._embedded_image_cid_by_name.get(sheet.title, {}) if hasattr(self, '_embedded_image_cid_by_name') else {}
                                     mapped_cid = cid_map.get(img_name)
                                     global_iso_preserved_ids = getattr(self, '_global_iso_preserved_ids', set()) or set()
@@ -508,7 +508,7 @@ class _GraphicsMixin:
                                     debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                             else:
                                 # 非正規コンテキスト: 画像を登録/延期し
-                                # canonical emitter will place it deterministically.
+                                # 正規エミッタが決定論的に配置する。
                                 try:
                                     cid_map = self._embedded_image_cid_by_name.get(sheet.title, {}) if hasattr(self, '_embedded_image_cid_by_name') else {}
                                     mapped_cid = cid_map.get(img_name)
@@ -581,9 +581,9 @@ class _GraphicsMixin:
                     # シートレベルの図形画像を生成（images_dirに保存されます）
                     rendered = self._render_sheet_fallback(sheet, insert_index=insert_index, insert_images=insert_images)
                     if rendered:
-                        # mark shapes as generated for this sheet
+                        # このシートの図形を生成済みとしてマーク
                         self._sheet_shapes_generated.add(sheet.title)
-                        # initialize next index
+                        # 次のインデックスを初期化
                         if sheet.title not in self._sheet_shape_next_idx:
                             self._sheet_shape_next_idx[sheet.title] = 0
                         # 図形が作成された場合、markdownのinsert_index（テーブル末尾）に挿入します。
@@ -596,7 +596,7 @@ class _GraphicsMixin:
                                 imgs_by_row = {}
                                 assigned = self._sheet_shape_images.get(sheet.title, []) or []
 
-                                # assigned may be list of pairs or list of filenames (backcompat)
+                                # assignedはペアのリストまたはファイル名のリスト（後方互換性）
                                 normalized = []
                                 for item in assigned:
                                     if isinstance(item, (list, tuple)) and len(item) >= 2:
@@ -606,7 +606,7 @@ class _GraphicsMixin:
                                             row_key = 1
                                         normalized.append((row_key, item[1]))
                                     else:
-                                        # fallback: treat as filename with default row=1
+                                        # フォールバック: デフォルトrow=1のファイル名として扱う
                                         try:
                                             normalized.append((1, str(item)))
                                         except (ValueError, TypeError) as e:
@@ -649,7 +649,7 @@ class _GraphicsMixin:
                                     # このシートの永続化されたヒントをクリアして、
                                     # 生成したばかりの計算されたstart_rowペアを上書きしないようにします。
                                     try:
-                                        # log for diagnostics but do not use it
+                                        # 診断用にログ出力するが使用しない
                                         debug_print(f"[DEBUG] Ignoring persisted start_map for sheet={sheet.title}")
                                     except (ValueError, TypeError) as e:
                                         debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
@@ -704,7 +704,7 @@ class _GraphicsMixin:
                                             # テキストマッピングなし。insert_baseに順次追加
                                             insert_at = insert_base
 
-                                    # insert_atをクランプ to valid markdown range
+                                    # insert_atを有効なmarkdown範囲にクランプ
                                     if insert_at < 0:
                                         insert_at = 0
                                     if insert_at > len(self.markdown_lines):
@@ -718,8 +718,8 @@ class _GraphicsMixin:
                                     # アンカー（存在する場合）に対してのみ最小値を強制します。
                                     try:
                                         if md_pos is not None:
-                                            # md_posは選択されたアンカーのmarkdownインデックス
-                                            # insert_atは少なくともその1行後である必要があります。
+                                            # md_posは選択されたアンカーのMarkdownインデックス
+                                            # insert_atは少なくともその1行後である必要がある
                                             if insert_at <= md_pos:
                                                 insert_at = md_pos + 1
                                     except Exception:
@@ -743,7 +743,7 @@ class _GraphicsMixin:
                                             md_index_map.setdefault(insert_at, []).append(img)
                                             insert_at = new_at
                                         except Exception:
-                                            # fallback
+                                            # フォールバック
                                             try:
                                                 self.markdown_lines.append(md)
                                                 self.markdown_lines.append("")
@@ -785,7 +785,7 @@ class _GraphicsMixin:
                                 if insert_index is not None:
                                     insert_at = insert_index
                                     for item in imgs:
-                                        # itemはファイル名（str）または(row, filename)ペアの可能性あり
+                                        # itemはファイル名（str）または(row, filename)ペアの可能性
                                         if isinstance(item, (list, tuple)) and len(item) >= 2:
                                             img_fn = str(item[1])
                                         else:
@@ -880,7 +880,7 @@ class _GraphicsMixin:
                                     print(f"[WARNING] ファイル操作エラー: {e}")
                         except Exception:
                             image_data = None
-                    # refがstrでない場合はimage_dataはNone
+                    # refがstrでない場合image_dataはNone
                     debug_print(f"[DEBUG] image.ref-based extraction succeeded for image #{self.image_counter} on sheet '{sheet_name}'")
                 except (ValueError, TypeError):
                     image_data = None
@@ -915,7 +915,7 @@ class _GraphicsMixin:
                         with open(image_path, 'rb') as ef:
                             existing = ef.read()
                         if existing == image_data:
-                            # reuse
+                            # 再利用
                             debug_print(f"[DEBUG] 既存の画像ファイルを再利用: {image_filename}")
                         else:
                             # 衝突は稀。一意のサフィックスにフォールバック
@@ -1028,7 +1028,7 @@ class _GraphicsMixin:
                     debug_print(f"[DEBUG][_dedupe] skipping dedupe for hash {h} due to error determining origins")
                     continue
 
-                # markdown_lines参照を更新（このワークブックに属するファイルのみ）
+                # Markdown行参照を更新（このワークブックに属するファイルのみ）
                 try:
                     import re
                     new_lines = []
@@ -1116,7 +1116,7 @@ class _GraphicsMixin:
                 z.close()
                 return None
             
-            # drawing_pathの正規化
+            # drawing_pathを正規化
             drawing_path = normalize_excel_path(drawing_target)
             if drawing_path not in z.namelist():
                 drawing_path = drawing_path.replace('worksheets', 'drawings')
@@ -1189,7 +1189,7 @@ class _GraphicsMixin:
                     if hexval:
                         theme_color_map[name.lower()] = hexval
             
-            # lnStyleLstの抽出
+            # lnStyleLstを抽出
             try:
                 ns = {'a': a_ns}
                 ln_style_lst = theme_xml.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}lnStyleLst')
@@ -1971,7 +1971,7 @@ class _GraphicsMixin:
         except (ValueError, TypeError):
             pass  # 型変換失敗は無視
         try:
-            # target_pxはピクセル単位。利用可能な場合はオブジェクトのdpiを使用してEMUに変換
+            # target_pxはピクセル単位。利用可能な場合はオブジェクトのDPIを使用してEMUに変換
             DPI = int(getattr(self, 'dpi', 300) or 300)
             EMU_PER_INCH = 914400
             emu_per_pixel = EMU_PER_INCH / float(DPI) if DPI and DPI > 0 else EMU_PER_INCH / 300.0
@@ -1991,7 +1991,7 @@ class _GraphicsMixin:
         try:
             l, t, r, btm = box
             # 開始列を検索: col_x[c] >= l となる最小のc（小さな許容範囲を許可）
-            # tolはDPIに応じてスケーリングし、DPIが異なる場合の以前の動作を保持
+            # tolはDPIに応じてスケーリングし、異なるDPIでの以前の動作を保持
             try:
                 tol = max(1, int(DPI / 300.0 * 3))  # DPIに依存する数ピクセルの許容範囲
             except (ValueError, TypeError):
@@ -2066,7 +2066,7 @@ class _GraphicsMixin:
                         if y > bottom: bottom = y
             if not found:
                 return None
-            # right/bottomを包含的に -> 一般的なクロップ座標(r+1,b+1)に変換
+            # right/bottomを包含的から一般的なクロップ座標(r+1,b+1)に変換
             return (left, top, right + 1, bottom + 1)
         except Exception:
             return None
@@ -2156,7 +2156,7 @@ class _GraphicsMixin:
             z = metadata['zip']
             drawing_xml = metadata['drawing_xml']
 
-            # oneCellのext変換用にピクセルマップを準備
+            # oneCellのext変換用ピクセルマップを準備
             # EMUオフセットをピクセルに変換する際に一貫したDPIを使用
             DPI = 300
             try:
@@ -2236,7 +2236,7 @@ class _GraphicsMixin:
 
                     ranges.append((start_col, end_col, start_row, end_row))
                 else:
-                    # oneCellAnchor: from.col/from.rowとext cx/cyを使用して終了セルを導出
+                    # oneCellAnchor: from.col/from.rowとext cx/cyから終了セルを導出
                     fr = node.find('xdr:from', ns)
                     ext = node.find('xdr:ext', ns)
                     if fr is None or ext is None:
@@ -2254,7 +2254,7 @@ class _GraphicsMixin:
                     top_px = row_y[row] if row < len(row_y) else row_y[-1]
                     bottom_px = top_px + (cy / EMU_PER_PIXEL)
                     # ピクセルをセルインデックスにマップ
-                    # start_colインデックスを検索
+                    # start_colのインデックスを検索
                     start_col = 1
                     for ci in range(1, len(col_x)):
                         if col_x[ci] >= left_px:
@@ -2309,7 +2309,7 @@ class _GraphicsMixin:
             drawing_xml = get_xml_from_zip(z, drawing_path)
             if drawing_xml is None:
                 return False
-            # locate the requested anchor node
+            # 要求されたアンカーノードを検索
             idx = 0
             for node in drawing_xml:
                 lname = node.tag.split('}')[-1].lower()
@@ -2625,7 +2625,7 @@ class _GraphicsMixin:
         try:
             # 単一の変換実行中に同じアンカーを複数回再評価することを避けるため、
             # インスタンスにキャッシュ辞書を作成します。利用可能な場合は最も近い
-            # cNvPr/@id属性を安定したキーとして使用し、IDがない場合は
+            # cNvPr/@id属性を安定したキーとして使用、IDがない場合は
             # アンカーXMLの短いハッシュにフォールバックします。
             try:
                 cache = getattr(self, '_anchor_drawable_cache')
@@ -2680,7 +2680,7 @@ class _GraphicsMixin:
                 # コネクタエンドポイント参照を検出
                 if lname in ('stcxn', 'endcxn', 'stcxnpr', 'endcxnpr'):
                     has_connector_ref = True
-                # id属性を公開する非cNvPr要素を検出（ヒューリスティック）
+                # id属性を持つ非cNvPr要素を検出（ヒューリスティック）
                 for k in desc.attrib.keys():
                     if k.lower() == 'id' and desc.tag.split('}')[-1].lower() != 'cnvpr':
                         has_connector_ref = True
@@ -2775,7 +2775,7 @@ class _GraphicsMixin:
             chosen_row = None
             total_rows = None
             try:
-                # sheet.max_rowの代わりにcell_rangesからtotal_rowsを計算
+                # sheet.max_rowの代わりにcell_rangesからtotal_rowsを算出
                 e_list = [int(cr[3]) for cr in cell_ranges if cr[3] is not None]
                 total_rows = max(e_list) if e_list else None
             except (ValueError, TypeError):
@@ -2864,7 +2864,7 @@ class _GraphicsMixin:
         try:
             if hasattr(image, 'anchor'):
                 anchor = image.anchor
-                # openpyxlアンカーは0ベースのcol/rowを持つ_from属性を公開する場合がある
+                # openpyxlアンカーは0ベースのcol/rowを持つ_from属性を公開することがある
                 if hasattr(anchor, '_from'):
                     try:
                         col_idx = getattr(anchor._from, 'col', None)
@@ -3006,7 +3006,7 @@ class _GraphicsMixin:
                     print(f"[WARNING] ファイル操作エラー: {e}")
                 bboxes.append((left, top, right, bottom))
 
-            # bboxesを返す（ピクセル単位の(left, top, right, bottom)のリスト）
+            # bboxesを返す（ピクセル単位の(left,top,right,bottom)のリスト）
             debug_print(f"[DEBUG] _extract_drawing_shapes found {len(bboxes)} bboxes")
             return bboxes
         except Exception as e:
@@ -3109,7 +3109,7 @@ class _GraphicsMixin:
                 debug_print(f"[DEBUG][_iso_v2] no drawable anchors found")
                 return None
             
-                # cell_rangeが提供されていない場合は計算
+                # cell_rangeが提供されていない場合は算出
             # このクラスタの最小行も追跡（マークダウン順序付けに使用）
             cluster_min_row = 1  # デフォルトフォールバック
             if cell_range is None and shape_indices:
@@ -3190,7 +3190,7 @@ class _GraphicsMixin:
                         except (ET.ParseError, KeyError, AttributeError) as e:
                             debug_print(f"[DEBUG] XML解析エラー（無視）: {type(e).__name__}")
                     
-                    # workbook.xmlを解析してシートリレーションシップを取得
+                    # workbook.xmlを解析しシートリレーションシップを取得
                     wb_path = os.path.join(tmpdir, 'xl/workbook.xml')
                     wb_rels_path = os.path.join(tmpdir, 'xl/_rels/workbook.xml.rels')
                     
@@ -3214,7 +3214,7 @@ class _GraphicsMixin:
                                     # 削除対象としてマーク
                                     sheets_to_remove.append((idx, sheet_el))
                             
-                            # workbook.xmlから非対象シートを削除
+                            # workbook.xmlから対象外シートを削除
                             for _, sheet_el in sheets_to_remove:
                                 sheets_el.remove(sheet_el)
                             
@@ -3222,7 +3222,7 @@ class _GraphicsMixin:
                             # これにより、Excel/LibreOfficeが最初のシートとして正しく認識します
                             if sheets_el is not None:
                                 for sheet_el in list(sheets_el):
-                                    # sheetIdを1に設定（最初のシート）
+                                    # sheetIdを1に設定（先頭シート）
                                     sheet_el.set('sheetId', '1')
                                     # リレーションシップIDをrId1に更新
                                     sheet_el.set(f'{{{rel_ns}}}id', 'rId1')
@@ -3230,7 +3230,7 @@ class _GraphicsMixin:
                             # 変更されたworkbook.xmlを書き戻す
                             wb_tree.write(wb_path, encoding='utf-8', xml_declaration=True)
                             
-                            # workbook.xml.relsを解析して保持するリレーションシップIDを検索
+                            # workbook.xml.relsを解析し保持するリレーションシップIDを検索
                             if os.path.exists(wb_rels_path):
                                 rels_tree = ET.parse(wb_rels_path)
                                 rels_root = rels_tree.getroot()
@@ -3313,7 +3313,7 @@ class _GraphicsMixin:
                         import traceback
                         traceback.print_exc()
                 
-                # cell_rangeからgroup_rowsを計算
+                # cell_rangeからgroup_rowsを算出
                 group_rows = set()
                 if cell_range:
                     try:
@@ -3356,7 +3356,7 @@ class _GraphicsMixin:
                         
                         # 適切なスケーリングでpageSetupを設定
                         # 重要: 既存のpageSetupを削除し、scale=100で新しいものを作成
-                        # fitToHeight/fitToWidthは図形を極小サイズに縮小する可能性がある
+                        # fitToHeight/fitToWidthは図形を極小サイズに縮小する可能性
                         # 既存のすべてのpageSetup要素を削除
                         for old_ps in list(sroot.findall(f'.//{{{ns}}}pageSetup')):
                             sroot.remove(old_ps)
@@ -3512,12 +3512,12 @@ class _GraphicsMixin:
                                 col_el.set('width', '8.43')
                                 cols_el.append(col_el)
                         
-                        # sheetDataの前にcolsを挿入
+                        # sheetDataの前にcolsを挿入する
                         sd_idx = list(sroot).index(new_sheet_data)
                         sroot.insert(sd_idx, cols_el)
                         
                         # ページマージンをゼロに設定（元のメソッドと同じ）
-                        # pageSetupPr fitToPage属性でsheetPrを追加または変更
+                        # pageSetupPr fitToPage属性でsheetPrを追加・変更
                         sheet_pr = sroot.find(f'.//{{{ns}}}sheetPr')
                         if sheet_pr is None:
                             sheet_pr = ET.Element(f'{{{ns}}}sheetPr')
@@ -3527,7 +3527,7 @@ class _GraphicsMixin:
                             page_setup_pr = ET.SubElement(sheet_pr, f'{{{ns}}}pageSetUpPr')
                         page_setup_pr.set('fitToPage', '1')
                         
-                        # printOptionsを追加または変更
+                        # printOptionsを追加・変更
                         print_opts = sroot.find(f'.//{{{ns}}}printOptions')
                         if print_opts is None:
                             print_opts = ET.Element(f'{{{ns}}}printOptions')
@@ -3537,7 +3537,7 @@ class _GraphicsMixin:
                         
                         # 適切なスケーリングでpageSetupを設定
                         # 重要: 既存のpageSetupを削除し、scale=100で新しいものを作成
-                        # fitToHeight/fitToWidthは図形を極小サイズに縮小する可能性がある
+                        # fitToHeight/fitToWidthは図形を極小サイズに縮小する可能性
                         # 既存のすべてのpageSetup要素を削除
                         for old_ps in list(sroot.findall(f'.//{{{ns}}}pageSetup')):
                             sroot.remove(old_ps)
@@ -3592,7 +3592,7 @@ class _GraphicsMixin:
                         wroot = wtree.getroot()
                         ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
                         
-                        # definedNames要素を検索
+                        # definedNames要素を探索
                         dn_tag = f'{{{ns}}}definedNames'
                         dn = wroot.find(dn_tag)
                         
@@ -3626,13 +3626,13 @@ class _GraphicsMixin:
                         print(f"[WARN][_iso_v2] Failed to create trimmed workbook: {e}")
                     return None
 
-                # PDFとPNGに変換（デバッグ用にPDFを保存）
+                # PDFとPNGに変換（デバッグ用PDFを保存）
                 try:
-                    # fit-to-pageを適用しない - 図形を25%に縮小して見えなくなる
-                    # pageSetupは上記のワークシートXMLで既に適切に設定されている
+                    # fit-to-pageを適用しない（図形が25%に縮小され見えなくなる）
+                    # pageSetupは上記のワークシートXMLで既に適切に設定済み
                     # self._set_excel_fit_to_one_page(debug_xlsx_path)  # 無効
                     
-                    # PDFに変換（xlsxと同じディレクトリに出力）
+                    # PDFに変換（xlsxと同じディレクトリへ出力）
                     cmd = [LIBREOFFICE_PATH, '--headless', '--convert-to', 'pdf', '--outdir', self.output_dir, debug_xlsx_path]
                     debug_print(f"[DEBUG][_iso_v2] LibreOffice command: {' '.join(cmd)}")
                     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
@@ -3658,7 +3658,7 @@ class _GraphicsMixin:
                     
                     debug_print(f"[DEBUG][_iso_v2] Saved debug PDF: {pdf_path}")
                     
-                    # PDFをPNGに変換（最終出力はimagesディレクトリ）
+                    # PDFをPNGに変換（最終出力はimagesディレクトリへ）
                     png_filename = f"{self.base_name}_{sheet.title}_group_{shape_indices[0] if shape_indices else 0}.png"
                     png_path = os.path.join(self.images_dir, png_filename)
                     
@@ -3666,7 +3666,7 @@ class _GraphicsMixin:
                     if os.path.exists(png_path):
                         os.remove(png_path)
                     
-                    # ImageMagick: 透明/黒い領域を防ぐために-background white -flattenを使用
+                    # ImageMagick: 透明・黒い領域を防ぐため-background white -flattenを使用
                     # -flattenはすべてのレイヤーを白い背景に合成
                     cmd = ['convert', '-density', str(dpi), f'{pdf_path}[0]', 
                            '-background', 'white', '-flatten',
