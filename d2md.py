@@ -1495,6 +1495,7 @@ class WordToMarkdownConverter:
         """
         try:
             debug_print("[DEBUG] Word文書作成開始...")
+            debug_print("[DEBUG] SCHEMECLR_PATCH_V3_20251211")
             
             # drawing_elementsがリストでない場合は単一要素として扱う
             if not isinstance(drawing_elements, (list, tuple)):
@@ -1618,6 +1619,14 @@ class WordToMarkdownConverter:
                 docx.writestr('word/document.xml', doc_xml)
             
             print(f"[INFO] 一時Word文書作成完了: {temp_docx_path}")
+            
+            # デバッグ用に一時Word文書を保存
+            debug_docx_dir = os.path.join('output', 'debug')
+            os.makedirs(debug_docx_dir, exist_ok=True)
+            debug_docx_path = os.path.join(debug_docx_dir, f"temp_docx_{os.path.basename(temp_docx_path)}")
+            shutil.copy2(temp_docx_path, debug_docx_path)
+            debug_print(f"[DEBUG] 一時Word文書デバッグコピー: {debug_docx_path}")
+            
             return temp_docx_path
             
         except Exception as e:
