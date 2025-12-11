@@ -1084,7 +1084,7 @@ class WordToMarkdownConverter:
             print(f"[ERROR] 画像処理エラー: {e}")
     
     def _has_word_processing_canvas(self, paragraph):
-        """段落にWord図形キャンバス（またはグループ）があるかチェック"""
+        """段落にWord図形キャンバス、グループ、または個別図形があるかチェック"""
         try:
             drawings = paragraph._element.xpath('.//w:drawing')
             for drawing in drawings:
@@ -1099,6 +1099,12 @@ class WordToMarkdownConverter:
                 if group_elements:
                     debug_print("[DEBUG] Word Processing Group検出")
                     return True
+                
+                # 個別のWord図形 (wps:wsp) をチェック
+                shape_elements = drawing.xpath('.//*[local-name()="wsp"]')
+                if shape_elements:
+                    debug_print("[DEBUG] 個別Word図形検出")
+                    return True
                     
             return False
         except Exception as e:
@@ -1106,7 +1112,7 @@ class WordToMarkdownConverter:
             return False
     
     def _process_composite_figure(self, paragraph):
-        """Word図形キャンバス/グループから複合図形を処理"""
+        """Word図形キャンバス/グループ/個別図形から複合図形を処理"""
         try:
             print("[INFO] 複合図形を処理中...")
             
@@ -1121,7 +1127,6 @@ class WordToMarkdownConverter:
                 canvas_elements = drawing.xpath('.//*[local-name()="wpc"]')
                 if canvas_elements:
                     print("[INFO] Word Processing Canvas として処理")
-                    # キャンバス全体をベクター画像として処理
                     if self._process_canvas_as_vector(canvas_elements[0], drawing):
                         print("[SUCCESS] ベクター処理成功")
                         return
@@ -1133,16 +1138,186 @@ class WordToMarkdownConverter:
                 group_elements = drawing.xpath('.//*[local-name()="wgp"]')
                 if group_elements:
                     print("[INFO] Word Processing Group として処理")
-                    # ベクター処理を試行
                     if self._process_canvas_as_vector(group_elements[0], drawing):
                         print("[SUCCESS] ベクター処理成功")
                         return
                     else:
                         print("[ERROR] ベクター処理失敗 - 複合図形処理をスキップ")
                         return
+                
+                # 個別のWord図形 (wps:wsp) を処理
+                shape_elements = drawing.xpath('.//*[local-name()="wsp"]')
+                if shape_elements:
+                    print("[INFO] 個別Word図形として処理")
+                    if self._process_individual_shape(drawing):
+                        print("[SUCCESS] 個別図形処理成功")
+                        return
+                    else:
+                        print("[ERROR] 個別図形処理失敗")
+                        return
             
         except Exception as e:
             print(f"[ERROR] 複合図形処理エラー: {e}")
+    
+    def _process_individual_shape(self, drawing_element):
+        """個別のWord図形を画像として処理"""
+        try:
+            print("[INFO] 個別Word図形を画像として処理中...")
+            
+            # 一時的なWord文書を作成してdrawing要素を含める
+            temp_doc_path = self._create_shape_document(drawing_element)
+            if not temp_doc_path:
+                return False
+            
+            debug_print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
+            
+            # LibreOfficeでPDFに変換
+            temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
+            if not temp_pdf_path:
+                os.unlink(temp_doc_path)
+                return False
+            
+            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            
+            # PDFから画像に変換
+            self.vector_image_counter += 1
+            ext = self.output_format
+            image_filename = f"{self.base_name}_shape_{self.vector_image_counter:03d}.{ext}"
+            image_path = os.path.join(self.images_dir, image_filename)
+            
+            # 出力形式に応じて変換
+            if self.output_format == 'svg':
+                convert_success = self._convert_pdf_to_svg(temp_pdf_path, image_path)
+            else:
+                convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
+            
+            if convert_success:
+                # Markdownに追加
+                encoded_filename = urllib.parse.quote(image_filename)
+                self.markdown_lines.append(f"![](images/{encoded_filename})")
+                self.markdown_lines.append("")
+                
+                # メタデータを追加（オプション）
+                if self.shape_metadata:
+                    try:
+                        metadata = self._extract_shape_metadata_from_drawing(drawing_element)
+                        if metadata.get('shapes'):
+                            text_metadata = self._format_shape_metadata_as_text(metadata)
+                            if text_metadata:
+                                self.markdown_lines.append("")
+                                self.markdown_lines.append(text_metadata)
+                                self.markdown_lines.append("")
+                    except Exception as e:
+                        print(f"[WARNING] 図形メタデータ追加失敗: {e}")
+                
+                print(f"[SUCCESS] 個別図形を処理: {image_filename}")
+                
+                # 一時ファイルを削除
+                os.unlink(temp_doc_path)
+                os.unlink(temp_pdf_path)
+                return True
+            
+            # 一時ファイルを削除
+            os.unlink(temp_doc_path)
+            if os.path.exists(temp_pdf_path):
+                os.unlink(temp_pdf_path)
+            return False
+            
+        except Exception as e:
+            print(f"[ERROR] 個別図形処理エラー: {e}")
+            return False
+    
+    def _create_shape_document(self, drawing_element):
+        """個別図形を含む一時Word文書を作成"""
+        try:
+            debug_print("[DEBUG] 個別図形用Word文書作成開始...")
+            
+            # 元の文書からリレーション情報を取得
+            original_rels = {}
+            try:
+                for rel in self.doc.part.rels.values():
+                    if "image" in rel.reltype:
+                        original_rels[rel.rId] = rel.target_part.blob
+            except Exception as rel_error:
+                debug_print(f"[DEBUG] リレーション取得エラー: {rel_error}")
+            
+            # XMLを文字列として取得
+            drawing_xml = ET.tostring(drawing_element, encoding='unicode')
+            
+            # Word文書XMLを作成
+            doc_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" 
+            xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+            xmlns:w10="urn:schemas-microsoft-com:office:word"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+            xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas"
+            xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"
+            xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+    <w:body>
+        <w:p>
+            <w:r>
+                {drawing_xml}
+            </w:r>
+        </w:p>
+        <w:sectPr>
+            <w:pgSz w:w="11906" w:h="16838"/>
+            <w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720"/>
+        </w:sectPr>
+    </w:body>
+</w:document>'''
+
+            # 一時ファイルに保存
+            temp_docx_path = tempfile.mktemp(suffix='.docx')
+            
+            # Word文書ZIPファイルを作成
+            with zipfile.ZipFile(temp_docx_path, 'w', zipfile.ZIP_DEFLATED) as docx:
+                # Content_Types.xml
+                docx.writestr('[Content_Types].xml', '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+    <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+    <Default Extension="xml" ContentType="application/xml"/>
+    <Default Extension="png" ContentType="image/png"/>
+    <Default Extension="jpeg" ContentType="image/jpeg"/>
+    <Default Extension="jpg" ContentType="image/jpeg"/>
+    <Default Extension="emf" ContentType="image/x-emf"/>
+    <Default Extension="wmf" ContentType="image/x-wmf"/>
+    <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>''')
+                
+                # メインリレーション
+                docx.writestr('_rels/.rels', '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>''')
+                
+                # 文書リレーション
+                doc_rels_xml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'''
+                
+                # 画像リレーションを追加
+                for i, (rel_id, image_data) in enumerate(original_rels.items(), 1):
+                    extension = self._detect_image_format(image_data, '')
+                    target = f"media/image{i}{extension}"
+                    doc_rels_xml += f'''
+    <Relationship Id="{rel_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="{target}"/>'''
+                    docx.writestr(f"word/{target}", image_data)
+                
+                doc_rels_xml += '''
+</Relationships>'''
+                
+                docx.writestr('word/_rels/document.xml.rels', doc_rels_xml)
+                docx.writestr('word/document.xml', doc_xml)
+            
+            print(f"[INFO] 一時Word文書作成完了: {temp_docx_path}")
+            return temp_docx_path
+            
+        except Exception as e:
+            print(f"[ERROR] 一時文書作成エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def _process_canvas_as_vector(self, canvas_element, drawing_element):
         """Word図形キャンバス全体をベクター画像として処理"""

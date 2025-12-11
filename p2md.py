@@ -443,31 +443,12 @@ class PowerPointToMarkdownConverter:
                     if shape.width <= small_size_emu and shape.height <= small_size_emu:
                         continue
                 
-                # 視覚的な装飾があるかチェック
-                has_visual_decoration = False
-                
-                # PICTURE, GROUP, CHART, FREEFORMは常に装飾図形として扱う
-                if shape.shape_type in [MSO_SHAPE_TYPE.PICTURE, MSO_SHAPE_TYPE.GROUP, 
-                                        MSO_SHAPE_TYPE.CHART, MSO_SHAPE_TYPE.FREEFORM]:
-                    has_visual_decoration = True
-                else:
-                    # AUTO_SHAPEとLINEは塗りつぶし/枠線をチェック
-                    if hasattr(shape, 'fill'):
-                        fill = shape.fill
-                        if hasattr(fill, 'type') and fill.type is not None:
-                            # SOLID(1)塗りつぶしがあれば装飾図形
-                            if fill.type == 1:
-                                has_visual_decoration = True
-                    
-                    if hasattr(shape, 'line'):
-                        line = shape.line
-                        if hasattr(line, 'width') and line.width is not None:
-                            # 枠線があれば装飾図形
-                            if line.width > 0:
-                                has_visual_decoration = True
-                
-                if has_visual_decoration:
-                    info['has_shapes'] = True
+                # 図形として扱うかどうかを判定
+                # PICTURE, GROUP, CHART, FREEFORM, AUTO_SHAPE, LINEは
+                # テキストボックスやプレースホルダとは明確に異なるため、
+                # 塗りつぶしや枠線の有無に関わらず図形として扱う
+                # （テキストボックスはshape_type=TEXT_BOXで既に除外されている）
+                info['has_shapes'] = True
         
         return info
     
