@@ -1113,7 +1113,12 @@ class WordToMarkdownConverter:
             return False
     
     def _process_composite_figure(self, paragraph):
-        """Word図形キャンバス/グループ/個別図形から複合図形を処理"""
+        """Word図形キャンバス/グループ/個別図形から複合図形を処理
+        
+        段落単位で図形を分類し、以下のルールで処理:
+        1. wpg/wpcがある段落では、グループのみを処理（個別wspは無視）
+        2. wspのみの段落では、すべてのdrawingを1つの画像にまとめる
+        """
         try:
             print("[INFO] 複合図形を処理中...")
             
@@ -1122,38 +1127,54 @@ class WordToMarkdownConverter:
             if not drawings:
                 return
             
-            # 各Drawing要素を処理（グループ優先、次に個別図形）
+            # Drawing要素を分類
+            canvas_drawings = []  # wpc/wpgを含むdrawing
+            shape_only_drawings = []  # wspのみを含むdrawing
+            
             for drawing in drawings:
-                # Word Processing Canvas (wpc) を処理
+                # Word Processing Canvas (wpc) をチェック
                 canvas_elements = drawing.xpath('.//*[local-name()="wpc"]')
                 if canvas_elements:
-                    print("[INFO] Word Processing Canvas として処理")
-                    if self._process_canvas_as_vector(canvas_elements[0], drawing):
-                        print("[SUCCESS] ベクター処理成功")
-                    else:
-                        print("[ERROR] ベクター処理失敗")
+                    canvas_drawings.append((drawing, canvas_elements[0], 'wpc'))
                     continue
                 
-                # Word Processing Group (wpg) を処理
+                # Word Processing Group (wpg) をチェック
                 group_elements = drawing.xpath('.//*[local-name()="wgp"]')
                 if group_elements:
-                    print("[INFO] Word Processing Group として処理")
-                    if self._process_canvas_as_vector(group_elements[0], drawing):
+                    canvas_drawings.append((drawing, group_elements[0], 'wpg'))
+                    continue
+                
+                # 個別のWord図形 (wps:wsp) をチェック
+                shape_elements = drawing.xpath('.//*[local-name()="wsp"]')
+                if shape_elements:
+                    shape_only_drawings.append(drawing)
+            
+            # wpc/wpgがある場合は、それらのみを処理（個別wspは無視）
+            if canvas_drawings:
+                for drawing, element, element_type in canvas_drawings:
+                    print(f"[INFO] Word Processing {element_type.upper()} として処理")
+                    if self._process_canvas_as_vector(element, drawing):
                         print("[SUCCESS] ベクター処理成功")
                     else:
                         print("[ERROR] ベクター処理失敗")
-                    continue
-                
-                # 個別のWord図形 (wps:wsp) を処理（グループに含まれないもの）
-                shape_elements = drawing.xpath('.//*[local-name()="wsp"]')
-                if shape_elements:
-                    print("[INFO] Word Processing Shape として処理")
-                    # drawing要素全体をベクター画像として処理
-                    if self._process_shape_as_vector(shape_elements[0], drawing):
+                return
+            
+            # wspのみの段落では、すべてのdrawingを1つの画像にまとめる
+            if shape_only_drawings:
+                if len(shape_only_drawings) == 1:
+                    # 1つだけの場合は従来通り処理
+                    print("[INFO] 単一のWord Processing Shape として処理")
+                    if self._process_shape_as_vector(None, shape_only_drawings[0]):
                         print("[SUCCESS] 個別図形ベクター処理成功")
                     else:
                         print("[ERROR] 個別図形ベクター処理失敗")
-                    continue
+                else:
+                    # 複数の場合は1つの画像にまとめる
+                    print(f"[INFO] {len(shape_only_drawings)}個の個別図形を1つの画像にまとめて処理")
+                    if self._process_shape_cluster_as_vector(shape_only_drawings):
+                        print("[SUCCESS] 図形クラスターベクター処理成功")
+                    else:
+                        print("[ERROR] 図形クラスターベクター処理失敗")
             
         except Exception as e:
             print(f"[ERROR] 複合図形処理エラー: {e}")
@@ -1172,7 +1193,7 @@ class WordToMarkdownConverter:
             
             # LibreOfficeでPDFに変換
             temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
-            if not temp_pdf_path:
+            if not temp_doc_path:
                 os.unlink(temp_doc_path)
                 return False
             
@@ -1211,6 +1232,64 @@ class WordToMarkdownConverter:
             
         except Exception as e:
             print(f"[ERROR] 個別図形処理エラー: {e}")
+            return False
+    
+    def _process_shape_cluster_as_vector(self, drawing_elements):
+        """複数の個別図形を1つのベクター画像として処理
+        
+        同じ段落内の複数のdrawing要素を1つの画像にまとめる
+        """
+        try:
+            debug_print(f"[INFO] {len(drawing_elements)}個の図形を1つの画像にまとめて処理中...")
+            
+            # 一時的なWord文書を作成して複数の図形を含める
+            temp_doc_path = self._create_canvas_document(None, drawing_elements)
+            if not temp_doc_path:
+                return False
+            
+            debug_print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
+            
+            # LibreOfficeでPDFに変換
+            temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
+            if not temp_pdf_path:
+                os.unlink(temp_doc_path)
+                return False
+            
+            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            
+            # PDFから画像に変換（図形クラスター用カウンターを使用）
+            self.shape_image_counter += 1
+            ext = self.output_format
+            image_filename = f"{self.base_name}_shape_{self.shape_image_counter:03d}.{ext}"
+            image_path = os.path.join(self.images_dir, image_filename)
+            
+            # 出力形式に応じて変換
+            if self.output_format == 'svg':
+                convert_success = self._convert_pdf_to_svg(temp_pdf_path, image_path)
+            else:
+                convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
+            
+            if convert_success:
+                # Markdownに追加（ファイル名をURLエンコード）
+                encoded_filename = urllib.parse.quote(image_filename)
+                self.markdown_lines.append(f"![](images/{encoded_filename})")
+                self.markdown_lines.append("")
+                
+                debug_print(f"[SUCCESS] 図形クラスターを処理: {image_filename}")
+                
+                # 一時ファイルを削除
+                os.unlink(temp_doc_path)
+                os.unlink(temp_pdf_path)
+                return True
+            
+            # 一時ファイルを削除
+            os.unlink(temp_doc_path)
+            if os.path.exists(temp_pdf_path):
+                os.unlink(temp_pdf_path)
+            return False
+            
+        except Exception as e:
+            print(f"[ERROR] 図形クラスター処理エラー: {e}")
             return False
     
     def _process_canvas_as_vector(self, canvas_element, drawing_element):
@@ -1307,10 +1386,19 @@ class WordToMarkdownConverter:
             print(f"[ERROR] ベクター画像処理エラー: {e}")
             return False
     
-    def _create_canvas_document(self, canvas_element, drawing_element):
-        """キャンバス要素のみを含む一時Word文書を作成"""
+    def _create_canvas_document(self, canvas_element, drawing_elements):
+        """キャンバス要素のみを含む一時Word文書を作成
+        
+        Args:
+            canvas_element: キャンバス要素（互換性のため維持、現在は使用しない）
+            drawing_elements: drawing要素（単一またはリスト）
+        """
         try:
             debug_print("[DEBUG] Word文書作成開始...")
+            
+            # drawing_elementsがリストでない場合は単一要素として扱う
+            if not isinstance(drawing_elements, (list, tuple)):
+                drawing_elements = [drawing_elements]
             
             # 元の文書からリレーション情報を取得
             original_rels = {}
@@ -1332,9 +1420,11 @@ class WordToMarkdownConverter:
             except Exception as rel_error:
                 debug_print(f"[DEBUG] リレーション取得エラー: {rel_error}")
             
-            # XMLを文字列として取得
-            drawing_xml = ET.tostring(drawing_element, encoding='unicode')
-            debug_print(f"[DEBUG] Drawing XML長: {len(drawing_xml)}")
+            # 複数のdrawing XMLを連結
+            drawings_xml = "".join(
+                ET.tostring(d, encoding='unicode') for d in drawing_elements
+            )
+            debug_print(f"[DEBUG] Drawing XML長: {len(drawings_xml)}")
             
             # より適切なWord文書XMLを作成
             doc_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -1350,7 +1440,7 @@ class WordToMarkdownConverter:
     <w:body>
         <w:p>
             <w:r>
-                {drawing_xml}
+                {drawings_xml}
             </w:r>
         </w:p>
         <w:sectPr>
