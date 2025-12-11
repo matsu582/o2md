@@ -432,6 +432,14 @@ class WordToMarkdownConverter:
                         previous_element_type = 'list'
                     else:
                         previous_element_type = 'paragraph'
+                else:
+                    # python-docx の paragraphs に含まれない段落（数式前処理で追加された段落など）
+                    # XML要素から直接テキストを抽出
+                    text = self._extract_text_from_xml_element(element)
+                    if text and text.strip():
+                        self.markdown_lines.append(text)
+                        self.markdown_lines.append("")
+                        previous_element_type = 'paragraph'
             elif element.tag.endswith('}tbl'):  # 表
                 table = self._find_table_by_element(element)
                 if table:
@@ -457,6 +465,25 @@ class WordToMarkdownConverter:
             if table._element == element:
                 return table
         return None
+    
+    def _extract_text_from_xml_element(self, element) -> str:
+        """XML要素から直接テキストを抽出
+        
+        python-docx の paragraphs に含まれない段落（数式前処理で追加された段落など）
+        からテキストを抽出するために使用します。
+        
+        Args:
+            element: XML要素（w:p）
+        
+        Returns:
+            str: 抽出されたテキスト
+        """
+        W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        texts = []
+        for t_elem in element.iter(W_NS + "t"):
+            if t_elem.text:
+                texts.append(t_elem.text)
+        return "".join(texts)
     
     def _get_paragraph_text_without_hidden(self, paragraph, preserve_format: bool = True) -> str:
         """段落から隠しテキスト（vanish属性を持つrun）を除外してテキストを取得
@@ -534,6 +561,12 @@ class WordToMarkdownConverter:
     def _convert_paragraph(self, paragraph):
         """段落を変換"""
         text = self._get_paragraph_text_without_hidden(paragraph).strip()
+        
+        # paragraph.runs が空の場合（数式前処理で追加された段落など）は
+        # XML要素から直接テキストを抽出
+        if not text and hasattr(paragraph, '_element'):
+            text = self._extract_text_from_xml_element(paragraph._element).strip()
+        
         style_name = paragraph.style.name.lower()
         
         if not text:
@@ -1126,21 +1159,37 @@ class WordToMarkdownConverter:
         """
         print("[INFO] テキストボックス内テキストを抽出中...")
         
-        # python-docx のモジュールレベル nsmap には v, wps, mc プレフィックスが含まれていないため
-        # lxml の xpath を直接呼び出し、要素の nsmap を使用する
+        # python-docx の BaseOxmlElement.xpath() は namespaces キーワードをサポートしていないため
+        # XML を文字列に変換して lxml で再パースする
         from lxml import etree
         
         textbox_texts = []
         processed_ids = set()
         
-        # 文書の XML を取得
+        # 文書の XML を取得して再パース
         doc_element = self.doc.element
-        # 要素の nsmap を取得 (v, wps, mc などが含まれている)
-        elem_nsmap = doc_element.nsmap
+        
+        # XML を文字列に変換して lxml で再パース
+        xml_str = etree.tostring(doc_element, encoding='unicode')
+        root = etree.fromstring(xml_str.encode('utf-8'))
+        
+        # 再パース後の nsmap を使用（None キーを除外）
+        nsmap = {k: v for k, v in root.nsmap.items() if k is not None}
+        
+        # 数式前処理後に名前空間が失われる場合があるため、必要な名前空間を追加
+        # Office Open XML の標準名前空間を定義
+        required_namespaces = {
+            'v': 'urn:schemas-microsoft-com:vml',
+            'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+            'wps': 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape',
+            'mc': 'http://schemas.openxmlformats.org/markup-compatibility/2006',
+        }
+        for prefix, uri in required_namespaces.items():
+            if prefix not in nsmap:
+                nsmap[prefix] = uri
         
         # VML テキストボックス (<v:textbox>) を検索
-        # lxml の xpath を直接呼び出し、要素の nsmap を使用
-        vml_textboxes = etree.ElementBase.xpath(doc_element, './/v:textbox', namespaces=elem_nsmap)
+        vml_textboxes = root.xpath('.//v:textbox', namespaces=nsmap)
         
         for textbox in vml_textboxes:
             textbox_id = id(textbox)
@@ -1149,15 +1198,13 @@ class WordToMarkdownConverter:
             processed_ids.add(textbox_id)
             
             # テキストボックス内の段落を取得
-            paragraphs = etree.ElementBase.xpath(textbox, './/w:p', namespaces=elem_nsmap)
-            texts = self._extract_texts_from_xml_paragraphs_lxml(paragraphs, elem_nsmap)
+            paragraphs = textbox.xpath('.//w:p', namespaces=nsmap)
+            texts = self._extract_texts_from_lxml_paragraphs(paragraphs, nsmap)
             if texts:
                 textbox_texts.append(texts)
         
         # DrawingML テキストボックス (txbxContent) を検索
-        txbx_contents = etree.ElementBase.xpath(
-            doc_element, './/wps:txbx//w:txbxContent', namespaces=elem_nsmap
-        )
+        txbx_contents = root.xpath('.//wps:txbx//w:txbxContent', namespaces=nsmap)
         for txbx in txbx_contents:
             txbx_id = id(txbx)
             if txbx_id in processed_ids:
@@ -1165,23 +1212,21 @@ class WordToMarkdownConverter:
             processed_ids.add(txbx_id)
             
             # テキストボックス内の段落を取得
-            paragraphs = etree.ElementBase.xpath(txbx, './/w:p', namespaces=elem_nsmap)
-            texts = self._extract_texts_from_xml_paragraphs_lxml(paragraphs, elem_nsmap)
+            paragraphs = txbx.xpath('.//w:p', namespaces=nsmap)
+            texts = self._extract_texts_from_lxml_paragraphs(paragraphs, nsmap)
             if texts:
                 textbox_texts.append(texts)
         
         # mc:AlternateContent 内のテキストボックスも検索
-        alt_txbx = etree.ElementBase.xpath(
-            doc_element, './/mc:AlternateContent//wps:txbx//w:txbxContent', namespaces=elem_nsmap
-        )
+        alt_txbx = root.xpath('.//mc:AlternateContent//wps:txbx//w:txbxContent', namespaces=nsmap)
         for txbx in alt_txbx:
             txbx_id = id(txbx)
             if txbx_id in processed_ids:
                 continue
             processed_ids.add(txbx_id)
             
-            paragraphs = etree.ElementBase.xpath(txbx, './/w:p', namespaces=elem_nsmap)
-            texts = self._extract_texts_from_xml_paragraphs_lxml(paragraphs, elem_nsmap)
+            paragraphs = txbx.xpath('.//w:p', namespaces=nsmap)
+            texts = self._extract_texts_from_lxml_paragraphs(paragraphs, nsmap)
             if texts:
                 textbox_texts.append(texts)
         
@@ -1310,6 +1355,27 @@ class WordToMarkdownConverter:
         for p in paragraphs:
             # 段落内のテキスト要素を取得
             text_elements = etree.ElementBase.xpath(p, './/w:t', namespaces=nsmap)
+            paragraph_text = ''.join(t.text or '' for t in text_elements)
+            if paragraph_text.strip():
+                texts.append(paragraph_text)
+        return texts
+    
+    def _extract_texts_from_lxml_paragraphs(self, paragraphs, nsmap: dict) -> list:
+        """lxml で再パースした XML 段落要素からテキストを抽出
+        
+        lxml.etree.fromstring() で再パースした要素に対して使用する
+        
+        Args:
+            paragraphs: lxml の Element オブジェクトのリスト
+            nsmap: 名前空間マップ
+        
+        Returns:
+            list: 抽出されたテキストのリスト
+        """
+        texts = []
+        for p in paragraphs:
+            # 段落内のテキスト要素を取得
+            text_elements = p.xpath('.//w:t', namespaces=nsmap)
             paragraph_text = ''.join(t.text or '' for t in text_elements)
             if paragraph_text.strip():
                 texts.append(paragraph_text)

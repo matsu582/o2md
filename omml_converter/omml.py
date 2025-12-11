@@ -244,9 +244,15 @@ class oMath2Latex(Tag2Method):
     def do_f(self, elm):
         """分数オブジェクトを処理"""
         c_dict = self.process_children_dict(elm)
-        pr = c_dict["fPr"]
-        latex_s = get_val(pr.type, default=F_DEFAULT, store=F)
-        return pr.text + latex_s.format(num=c_dict.get("num"), den=c_dict.get("den"))
+        pr = c_dict.get("fPr")
+        if pr:
+            latex_s = get_val(pr.type, default=F_DEFAULT, store=F)
+            prefix = pr.text
+        else:
+            # fPr が存在しない場合はデフォルトの分数形式を使用
+            latex_s = F_DEFAULT
+            prefix = ""
+        return prefix + latex_s.format(num=c_dict.get("num"), den=c_dict.get("den"))
 
     def do_func(self, elm):
         """関数適用オブジェクトを処理 (sin, cos など)"""
