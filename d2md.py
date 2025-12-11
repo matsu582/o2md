@@ -122,6 +122,7 @@ class WordToMarkdownConverter:
         self.heading_titles_map = {}  # 章番号と見出しタイトルのマッピング
         self.use_heading_text = use_heading_text  # 章番号の代わりに見出しテキストを使用するオプション
         self.processed_images = {}  # ハッシュベース重複検出用辞書
+        self._emitted_plain_paragraphs = set()  # 本文として出力したテキスト（重複チェック用）
         self.referenced_images = set()  # 実際に文書内で参照されている画像のrId
         self.vector_image_counter = 0  # ベクター画像専用カウンター
         self.regular_image_counter = 0  # 通常画像専用カウンター
@@ -567,12 +568,21 @@ class WordToMarkdownConverter:
         if not text and hasattr(paragraph, '_element'):
             text = self._extract_text_from_xml_element(paragraph._element).strip()
         
+        # プレーンテキストを取得（フォーマットなし、重複チェック用）
+        plain_text = self._get_paragraph_text_without_hidden(paragraph, preserve_format=False).strip()
+        if not plain_text and hasattr(paragraph, '_element'):
+            plain_text = self._extract_text_from_xml_element(paragraph._element).strip()
+        
         style_name = paragraph.style.name.lower()
         
         if not text:
             # 空の段落は空行として処理
             self.markdown_lines.append("")
             return
+        
+        # 本文として出力したテキストを記録（テキストボックス重複チェック用）
+        if plain_text:
+            self._emitted_plain_paragraphs.add(plain_text)
         
         # Word文書内の目次を検出して展開
         if self._is_toc_placeholder(paragraph):
@@ -1153,9 +1163,10 @@ class WordToMarkdownConverter:
                     self._extract_and_convert_image(rel)
     
     def _extract_textbox_content(self):
-        """テキストボックス内のテキストを抽出して details タグで出力
+        """テキストボックスと図形内のテキストを抽出して details タグで出力
         
         VML (<v:textbox>) と DrawingML (txbxContent) の両方からテキストを抽出します。
+        既に本文として出力されたテキストは重複を避けるため出力しません。
         """
         print("[INFO] テキストボックス内テキストを抽出中...")
         
@@ -1230,18 +1241,42 @@ class WordToMarkdownConverter:
             if texts:
                 textbox_texts.append(texts)
         
-        # テキストボックスが見つかった場合、details タグで出力
-        if textbox_texts:
-            print(f"[INFO] {len(textbox_texts)} 個のテキストボックスを検出しました")
+        # 既に本文として出力されたテキストを除外
+        # テキストボックス内のテキストが本文に含まれている場合は details に出力しない
+        filtered_textbox_texts = []
+        for texts in textbox_texts:
+            # テキストボックス内の全テキストを結合してチェック
+            combined_text = "".join(t.strip() for t in texts if t.strip())
+            
+            # 本文に既に出力されているかチェック
+            is_already_emitted = False
+            for emitted_text in self._emitted_plain_paragraphs:
+                # テキストボックスの内容が本文に含まれているかチェック
+                if combined_text and combined_text in emitted_text:
+                    is_already_emitted = True
+                    debug_print(f"[DEBUG] テキストボックス内容が本文に含まれているためスキップ: {combined_text[:50]}...")
+                    break
+                # 本文の内容がテキストボックスに含まれているかチェック
+                if emitted_text and emitted_text in combined_text:
+                    is_already_emitted = True
+                    debug_print(f"[DEBUG] 本文内容がテキストボックスに含まれているためスキップ: {emitted_text[:50]}...")
+                    break
+            
+            if not is_already_emitted:
+                filtered_textbox_texts.append(texts)
+        
+        # フィルタリング後のテキストボックスが見つかった場合、details タグで出力
+        if filtered_textbox_texts:
+            print(f"[INFO] {len(filtered_textbox_texts)} 個のテキストボックス/図形テキストを details に出力します")
             self.markdown_lines.append("")
             self.markdown_lines.append("---")
             self.markdown_lines.append("")
             self.markdown_lines.append("<details>")
-            self.markdown_lines.append("<summary>テキストボックス内テキスト</summary>")
+            self.markdown_lines.append("<summary>図形内テキスト</summary>")
             self.markdown_lines.append("")
             
-            for i, texts in enumerate(textbox_texts, 1):
-                self.markdown_lines.append(f"### テキストボックス {i}")
+            for i, texts in enumerate(filtered_textbox_texts, 1):
+                self.markdown_lines.append(f"### 図形 {i}")
                 self.markdown_lines.append("")
                 for text in texts:
                     if text.strip():
@@ -1251,7 +1286,10 @@ class WordToMarkdownConverter:
             self.markdown_lines.append("</details>")
             self.markdown_lines.append("")
         else:
-            debug_print("[DEBUG] テキストボックスは見つかりませんでした")
+            if textbox_texts:
+                debug_print(f"[DEBUG] {len(textbox_texts)} 個のテキストボックスは既に本文に出力されているためスキップ")
+            else:
+                debug_print("[DEBUG] テキストボックスは見つかりませんでした")
     
     def _xpath_with_ns(self, element, xpath_expr: str, namespaces: dict) -> list:
         """名前空間を考慮した XPath クエリを実行
