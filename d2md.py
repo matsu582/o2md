@@ -1245,11 +1245,21 @@ class WordToMarkdownConverter:
             
             # 元の文書からリレーション情報を取得
             original_rels = {}
+            theme_data = None
+            theme_rel_id = None
             try:
                 for rel in self.doc.part.rels.values():
                     if "image" in rel.reltype:
                         original_rels[rel.rId] = rel.target_part.blob
-                debug_print(f"[DEBUG] 取得したリレーション数: {len(original_rels)}")
+                    # テーマリレーションを取得（schemeClr参照の解決に必要）
+                    elif "theme" in rel.reltype:
+                        try:
+                            theme_data = rel.target_part.blob
+                            theme_rel_id = rel.rId
+                            debug_print(f"[DEBUG] テーマ取得: {rel.rId}")
+                        except Exception as theme_error:
+                            debug_print(f"[DEBUG] テーマ取得エラー: {theme_error}")
+                debug_print(f"[DEBUG] 取得したリレーション数: {len(original_rels)}, テーマ: {theme_rel_id is not None}")
             except Exception as rel_error:
                 debug_print(f"[DEBUG] リレーション取得エラー: {rel_error}")
             
@@ -1286,8 +1296,8 @@ class WordToMarkdownConverter:
             
             # Word文書ZIPファイルを作成
             with zipfile.ZipFile(temp_docx_path, 'w', zipfile.ZIP_DEFLATED) as docx:
-                # Content_Types.xml
-                docx.writestr('[Content_Types].xml', '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                # Content_Types.xml（テーマがある場合はOverrideを追加）
+                content_types_base = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
     <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
     <Default Extension="xml" ContentType="application/xml"/>
@@ -1296,8 +1306,16 @@ class WordToMarkdownConverter:
     <Default Extension="jpg" ContentType="image/jpeg"/>
     <Default Extension="emf" ContentType="image/x-emf"/>
     <Default Extension="wmf" ContentType="image/x-wmf"/>
-    <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-</Types>''')
+    <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'''
+                
+                # テーマがある場合はOverrideを追加
+                if theme_data:
+                    content_types_base += '''
+    <Override PartName="/word/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>'''
+                
+                content_types_base += '''
+</Types>'''
+                docx.writestr('[Content_Types].xml', content_types_base)
                 
                 # メインリレーション
                 docx.writestr('_rels/.rels', '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -1318,6 +1336,14 @@ class WordToMarkdownConverter:
                     
                     # 画像ファイルを追加
                     docx.writestr(f"word/{target}", image_data)
+                
+                # テーマリレーションを追加（schemeClr参照の解決に必要）
+                if theme_data and theme_rel_id:
+                    doc_rels_xml += f'''
+    <Relationship Id="{theme_rel_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>'''
+                    # テーマファイルを追加
+                    docx.writestr('word/theme/theme1.xml', theme_data)
+                    debug_print(f"[DEBUG] テーマファイル追加: word/theme/theme1.xml")
                 
                 doc_rels_xml += '''
 </Relationships>'''
