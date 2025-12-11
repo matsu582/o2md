@@ -1138,30 +1138,32 @@ class WordToMarkdownConverter:
             has_picture = False  # pic（通常の画像）があるかどうか
             
             for drawing in drawings:
-                # pic（通常の画像）をチェック - blip参照を持つ画像
-                pic_elements = drawing.xpath('.//*[local-name()="pic"]')
-                blip_elements = drawing.xpath('.//*[local-name()="blip"]')
-                if pic_elements or blip_elements:
-                    has_picture = True
-                    debug_print("[DEBUG] 段落内にpic（通常の画像）を検出")
-                    continue
-                
-                # Word Processing Canvas (wpc) をチェック
+                # 1. Word Processing Canvas (wpc) をチェック（最優先）
+                # wpg/wpcは内部にpicを含む場合があるため、picより先にチェック
                 canvas_elements = drawing.xpath('.//*[local-name()="wpc"]')
                 if canvas_elements:
                     canvas_drawings.append((drawing, canvas_elements[0], 'wpc'))
                     continue
                 
-                # Word Processing Group (wpg) をチェック
+                # 2. Word Processing Group (wpg) をチェック
                 group_elements = drawing.xpath('.//*[local-name()="wgp"]')
                 if group_elements:
                     canvas_drawings.append((drawing, group_elements[0], 'wpg'))
                     continue
                 
-                # 個別のWord図形 (wps:wsp) をチェック
+                # 3. 個別のWord図形 (wps:wsp) をチェック
                 shape_elements = drawing.xpath('.//*[local-name()="wsp"]')
                 if shape_elements:
                     shape_only_drawings.append(drawing)
+                    continue
+                
+                # 4. pic（通常の画像）をチェック - blip参照を持つ画像
+                # wpg/wpc/wspに含まれないdrawingのみがここに到達
+                pic_elements = drawing.xpath('.//*[local-name()="pic"]')
+                blip_elements = drawing.xpath('.//*[local-name()="blip"]')
+                if pic_elements or blip_elements:
+                    has_picture = True
+                    debug_print("[DEBUG] 段落内にpic（通常の画像）を検出")
             
             # wpc/wpgがある場合は、それらのみを処理（個別wspは無視）
             if canvas_drawings:
