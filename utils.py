@@ -96,7 +96,7 @@ def get_xml_from_zip(z: zipfile.ZipFile, path: str) -> Optional[ET.Element]:
         xml_bytes = z.read(path)
         return ET.fromstring(xml_bytes)
     except Exception as e:
-        logging.debug(f"Failed to get XML from zip: {path}, error: {e}")
+        logging.debug(f"ZIPからXMLの取得に失敗: {path}, エラー: {e}")
         return None
 
 
