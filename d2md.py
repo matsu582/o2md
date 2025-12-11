@@ -1101,6 +1101,7 @@ class WordToMarkdownConverter:
                     return True
                 
                 # 個別のWord図形 (wps:wsp) をチェック
+                # 注意: wpc/wpgがない場合のみ、wspを検出対象とする
                 shape_elements = drawing.xpath('.//*[local-name()="wsp"]')
                 if shape_elements:
                     debug_print("[DEBUG] 個別Word図形検出")
@@ -1121,7 +1122,7 @@ class WordToMarkdownConverter:
             if not drawings:
                 return
             
-            # Word図形キャンバス/グループを探す
+            # 優先度1: まず全drawingを走査してwpc/wpgを探す（グループ図形を優先）
             for drawing in drawings:
                 # Word Processing Canvas (wpc) を処理
                 canvas_elements = drawing.xpath('.//*[local-name()="wpc"]')
@@ -1144,8 +1145,9 @@ class WordToMarkdownConverter:
                     else:
                         print("[ERROR] ベクター処理失敗 - 複合図形処理をスキップ")
                         return
-                
-                # 個別のWord図形 (wps:wsp) を処理
+            
+            # 優先度2: wpc/wpgが見つからなかった場合のみ、個別図形を処理
+            for drawing in drawings:
                 shape_elements = drawing.xpath('.//*[local-name()="wsp"]')
                 if shape_elements:
                     print("[INFO] 個別Word図形として処理")
@@ -1155,7 +1157,7 @@ class WordToMarkdownConverter:
                     else:
                         print("[ERROR] 個別図形処理失敗")
                         return
-            
+        
         except Exception as e:
             print(f"[ERROR] 複合図形処理エラー: {e}")
     

@@ -389,30 +389,17 @@ class PowerPointToMarkdownConverter:
                         text_was_processed = True
                 
                 # テキストとして処理された図形をマーク
-                # PLACEHOLDERまたは視覚的装飾のない図形のみマーク
+                # PLACEHOLDERまたはTEXT_BOXのみテキストとしてマーク
+                # AUTO_SHAPEはテキストがあっても図形として扱う（ユーザー要件）
                 should_mark_as_text = False
                 
                 if shape.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER:
+                    # プレースホルダは常にテキストとして扱う
                     should_mark_as_text = True
-                elif text_was_processed:
-                    # 視覚的な装飾があるかチェック
-                    has_visual_decoration = False
-                    
-                    # 塗りつぶしのチェック
-                    if hasattr(shape, 'fill'):
-                        fill = shape.fill
-                        if hasattr(fill, 'type') and fill.type == 1:  # SOLID
-                            has_visual_decoration = True
-                    
-                    # 枠線のチェック
-                    if hasattr(shape, 'line'):
-                        line = shape.line
-                        if hasattr(line, 'width') and line.width is not None and line.width > 0:
-                            has_visual_decoration = True
-                    
-                    # 装飾がない場合のみテキストボックスとしてマーク
-                    if not has_visual_decoration:
-                        should_mark_as_text = True
+                elif shape.shape_type == MSO_SHAPE_TYPE.TEXT_BOX:
+                    # テキストボックスはテキストとして扱う
+                    should_mark_as_text = True
+                # AUTO_SHAPE、LINE等はテキストがあっても図形として扱う
                 
                 if should_mark_as_text:
                     processed_text_shapes.add(id(shape))
