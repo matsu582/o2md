@@ -11,6 +11,7 @@ o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）を**それっぽ
 - **統合インターフェース**: 1つのコマンドで全てのOffice文書を変換
 - **自動ファイル判定**: ファイル拡張子に基づいて自動的に適切な変換方法を選択
 - **新旧両形式対応**: `.xlsx`/`.xls`、`.docx`/`.doc`、`.pptx`/`.ppt`に対応
+- **SVG/PNG出力対応**: 図形やグラフをSVG（デフォルト）またはPNG形式で出力
 - **Excel変換** (x2md.py): 表、グラフ、図形を含むワークシートを変換
 - **Word変換** (d2md.py): 見出し、表、画像、リストを含む文書を変換
 - **PowerPoint変換** (p2md.py): スライド、図形、表、テキストを変換
@@ -68,6 +69,9 @@ python o2md.py input_files/data.xlsx -o custom_output
 
 # Word文書で見出しテキストをリンクに使用
 python o2md.py input_files/document.docx --use-heading-text
+
+# PNG形式で画像を出力（デフォルトはSVG）
+python o2md.py input_files/data.xlsx --format png
 ```
 
 ### 古い形式のファイル
@@ -85,6 +89,7 @@ python o2md.py input_files/old_presentation.ppt
 | -------------------- | ------------------------------------------------------- |
 | `file`               | 変換するOfficeファイル（必須）                          |
 | `-o, --output-dir`   | 出力ディレクトリを指定（デフォルト: `./output`）        |
+| `--format`           | 画像出力形式を指定（`svg`または`png`、デフォルト: `svg`）|
 | `--use-heading-text` | [Word専用] 章番号の代わりに見出しテキストをリンクに使用 |
 | `-h, --help`         | ヘルプメッセージを表示                                  |
 
@@ -104,10 +109,12 @@ python o2md.py input_files/old_presentation.ppt
 output/
 ├── [元のファイル名].md    # Markdownファイル
 └── images/               # 画像フォルダ
-    ├── [ファイル名]_image_001.png
-    ├── [ファイル名]_image_002.png
+    ├── [ファイル名]_image_001.svg  # デフォルトはSVG形式
+    ├── [ファイル名]_image_002.svg
     └── ...
 ```
+
+SVG形式はベクター形式のため、拡大しても品質が劣化しません。PNG形式が必要な場合は`--format png`オプションを使用してください。
 
 ## 変換機能の詳細
 
