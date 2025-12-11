@@ -28,7 +28,7 @@ class TestWordToMarkdownConverter:
     def sample_word_file(self):
         """テスト用のサンプルWordファイルのパスを返す"""
         input_dir = Path(__file__).parent.parent / "input_files"
-        word_file = input_dir / "SurportManager.docx"
+        word_file = input_dir / "sample_document.docx"
         if word_file.exists():
             return str(word_file)
         else:
@@ -217,7 +217,7 @@ class TestEdgeCases:
     def test_anchor_id_with_special_characters(self, temp_output_dir):
         """特殊文字を含むアンカーID生成のテスト"""
         input_dir = Path(__file__).parent.parent / "input_files"
-        word_file = input_dir / "SurportManager.docx"
+        word_file = input_dir / "sample_document.docx"
         
         if not word_file.exists():
             pytest.skip("テスト用ファイルが存在しません")

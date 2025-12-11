@@ -110,6 +110,7 @@ class WordToMarkdownConverter:
         self.referenced_images = set()  # 実際に文書内で参照されている画像のrId
         self.vector_image_counter = 0  # ベクター画像専用カウンター
         self.regular_image_counter = 0  # 通常画像専用カウンター
+        self.shape_image_counter = 0  # 個別図形専用カウンター
         self.shape_metadata = shape_metadata  # 図形メタデータ出力フラグ
         self.output_format = output_format.lower() if output_format else 'png'
         
@@ -914,9 +915,10 @@ class WordToMarkdownConverter:
         """段落内の画像を処理"""
         
         # Word図形キャンバスがある場合は複合図形として処理
+        # 処理が行われた場合のみ早期終了、そうでなければ通常の画像処理にフォールバック
         if self._has_word_processing_canvas(paragraph):
-            self._process_composite_figure(paragraph)
-            return
+            if self._process_composite_figure(paragraph):
+                return
         
         # 段落内のRunを調べて画像があるかチェック
         for run in paragraph.runs:
@@ -1084,7 +1086,7 @@ class WordToMarkdownConverter:
             print(f"[ERROR] 画像処理エラー: {e}")
     
     def _has_word_processing_canvas(self, paragraph):
-        """段落にWord図形キャンバス（またはグループ）があるかチェック"""
+        """段落にWord図形キャンバス（またはグループ、または個別図形）があるかチェック"""
         try:
             drawings = paragraph._element.xpath('.//w:drawing')
             for drawing in drawings:
@@ -1099,6 +1101,12 @@ class WordToMarkdownConverter:
                 if group_elements:
                     debug_print("[DEBUG] Word Processing Group検出")
                     return True
+                
+                # 個別のWord図形 (wps:wsp) をチェック（グループに含まれないもの）
+                shape_elements = drawing.xpath('.//*[local-name()="wsp"]')
+                if shape_elements:
+                    debug_print("[DEBUG] Word Processing Shape検出")
+                    return True
                     
             return False
         except Exception as e:
@@ -1106,43 +1114,214 @@ class WordToMarkdownConverter:
             return False
     
     def _process_composite_figure(self, paragraph):
-        """Word図形キャンバス/グループから複合図形を処理"""
+        """Word図形キャンバス/グループ/個別図形から複合図形を処理
+        
+        段落単位で図形を分類し、以下のルールで処理:
+        1. wpg/wpcがある段落では、グループのみを処理（個別wspは無視）
+        2. wspのみの段落では、すべてのdrawingを1つの画像にまとめる
+        3. pic（通常の画像）がある段落では、段落グループ化をスキップ
+        
+        Returns:
+            bool: 処理が行われた場合はTrue、スキップした場合はFalse
+        """
         try:
             print("[INFO] 複合図形を処理中...")
             
             # Drawing要素を取得
             drawings = paragraph._element.xpath('.//w:drawing')
             if not drawings:
-                return
+                return False
             
-            # Word図形キャンバス/グループを探す
+            # Drawing要素を分類
+            canvas_drawings = []  # wpc/wpgを含むdrawing
+            shape_only_drawings = []  # wspのみを含むdrawing
+            has_picture = False  # pic（通常の画像）があるかどうか
+            
             for drawing in drawings:
-                # Word Processing Canvas (wpc) を処理
+                # 1. Word Processing Canvas (wpc) をチェック（最優先）
+                # wpg/wpcは内部にpicを含む場合があるため、picより先にチェック
                 canvas_elements = drawing.xpath('.//*[local-name()="wpc"]')
                 if canvas_elements:
-                    print("[INFO] Word Processing Canvas として処理")
-                    # キャンバス全体をベクター画像として処理
-                    if self._process_canvas_as_vector(canvas_elements[0], drawing):
-                        print("[SUCCESS] ベクター処理成功")
-                        return
-                    else:
-                        print("[ERROR] ベクター処理失敗 - 複合図形処理をスキップ")
-                        return
+                    canvas_drawings.append((drawing, canvas_elements[0], 'wpc'))
+                    continue
                 
-                # Word Processing Group (wpg) を処理
+                # 2. Word Processing Group (wpg) をチェック
                 group_elements = drawing.xpath('.//*[local-name()="wgp"]')
                 if group_elements:
-                    print("[INFO] Word Processing Group として処理")
-                    # ベクター処理を試行
-                    if self._process_canvas_as_vector(group_elements[0], drawing):
+                    canvas_drawings.append((drawing, group_elements[0], 'wpg'))
+                    continue
+                
+                # 3. 個別のWord図形 (wps:wsp) をチェック
+                shape_elements = drawing.xpath('.//*[local-name()="wsp"]')
+                if shape_elements:
+                    shape_only_drawings.append(drawing)
+                    continue
+                
+                # 4. pic（通常の画像）をチェック - blip参照を持つ画像
+                # wpg/wpc/wspに含まれないdrawingのみがここに到達
+                pic_elements = drawing.xpath('.//*[local-name()="pic"]')
+                blip_elements = drawing.xpath('.//*[local-name()="blip"]')
+                if pic_elements or blip_elements:
+                    has_picture = True
+                    debug_print("[DEBUG] 段落内にpic（通常の画像）を検出")
+            
+            # wpc/wpgがある場合は、それらのみを処理（個別wspは無視）
+            if canvas_drawings:
+                processed = False
+                for drawing, element, element_type in canvas_drawings:
+                    print(f"[INFO] Word Processing {element_type.upper()} として処理")
+                    if self._process_canvas_as_vector(element, drawing):
                         print("[SUCCESS] ベクター処理成功")
-                        return
+                        processed = True
                     else:
-                        print("[ERROR] ベクター処理失敗 - 複合図形処理をスキップ")
-                        return
+                        print("[ERROR] ベクター処理失敗")
+                return processed
+            
+            # pic（通常の画像）がある段落では、段落グループ化をスキップ
+            # 通常の画像処理ロジックに任せる
+            if has_picture:
+                debug_print("[INFO] 段落内にpic（通常の画像）があるため、段落グループ化をスキップ")
+                return False
+            
+            # wspのみの段落では、すべてのdrawingを1つの画像にまとめる
+            if shape_only_drawings:
+                if len(shape_only_drawings) == 1:
+                    # 1つだけの場合は従来通り処理
+                    print("[INFO] 単一のWord Processing Shape として処理")
+                    if self._process_shape_as_vector(None, shape_only_drawings[0]):
+                        print("[SUCCESS] 個別図形ベクター処理成功")
+                        return True
+                    else:
+                        print("[ERROR] 個別図形ベクター処理失敗")
+                        return False
+                else:
+                    # 複数の場合は1つの画像にまとめる
+                    print(f"[INFO] {len(shape_only_drawings)}個の個別図形を1つの画像にまとめて処理")
+                    if self._process_shape_cluster_as_vector(shape_only_drawings):
+                        print("[SUCCESS] 図形クラスターベクター処理成功")
+                        return True
+                    else:
+                        print("[ERROR] 図形クラスターベクター処理失敗")
+                        return False
+            
+            return False
             
         except Exception as e:
             print(f"[ERROR] 複合図形処理エラー: {e}")
+            return False
+    
+    def _process_shape_as_vector(self, shape_element, drawing_element):
+        """個別のWord図形をベクター画像として処理"""
+        try:
+            debug_print("[INFO] 個別図形をベクター画像として処理中...")
+            
+            # 一時的なWord文書を作成して図形のみを含める
+            temp_doc_path = self._create_canvas_document(shape_element, drawing_element)
+            if not temp_doc_path:
+                return False
+            
+            debug_print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
+            
+            # LibreOfficeでPDFに変換
+            temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
+            if not temp_doc_path:
+                os.unlink(temp_doc_path)
+                return False
+            
+            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            
+            # PDFから画像に変換（個別図形用カウンターを使用）
+            self.shape_image_counter += 1
+            ext = self.output_format
+            image_filename = f"{self.base_name}_shape_{self.shape_image_counter:03d}.{ext}"
+            image_path = os.path.join(self.images_dir, image_filename)
+            
+            # 出力形式に応じて変換
+            if self.output_format == 'svg':
+                convert_success = self._convert_pdf_to_svg(temp_pdf_path, image_path)
+            else:
+                convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
+            
+            if convert_success:
+                # Markdownに追加（ファイル名をURLエンコード）
+                encoded_filename = urllib.parse.quote(image_filename)
+                self.markdown_lines.append(f"![](images/{encoded_filename})")
+                self.markdown_lines.append("")
+                
+                debug_print(f"[SUCCESS] 個別図形を処理: {image_filename}")
+                
+                # 一時ファイルを削除
+                os.unlink(temp_doc_path)
+                os.unlink(temp_pdf_path)
+                return True
+            
+            # 一時ファイルを削除
+            os.unlink(temp_doc_path)
+            if os.path.exists(temp_pdf_path):
+                os.unlink(temp_pdf_path)
+            return False
+            
+        except Exception as e:
+            print(f"[ERROR] 個別図形処理エラー: {e}")
+            return False
+    
+    def _process_shape_cluster_as_vector(self, drawing_elements):
+        """複数の個別図形を1つのベクター画像として処理
+        
+        同じ段落内の複数のdrawing要素を1つの画像にまとめる
+        """
+        try:
+            debug_print(f"[INFO] {len(drawing_elements)}個の図形を1つの画像にまとめて処理中...")
+            
+            # 一時的なWord文書を作成して複数の図形を含める
+            temp_doc_path = self._create_canvas_document(None, drawing_elements)
+            if not temp_doc_path:
+                return False
+            
+            debug_print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
+            
+            # LibreOfficeでPDFに変換
+            temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
+            if not temp_pdf_path:
+                os.unlink(temp_doc_path)
+                return False
+            
+            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            
+            # PDFから画像に変換（図形クラスター用カウンターを使用）
+            self.shape_image_counter += 1
+            ext = self.output_format
+            image_filename = f"{self.base_name}_shape_{self.shape_image_counter:03d}.{ext}"
+            image_path = os.path.join(self.images_dir, image_filename)
+            
+            # 出力形式に応じて変換
+            if self.output_format == 'svg':
+                convert_success = self._convert_pdf_to_svg(temp_pdf_path, image_path)
+            else:
+                convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
+            
+            if convert_success:
+                # Markdownに追加（ファイル名をURLエンコード）
+                encoded_filename = urllib.parse.quote(image_filename)
+                self.markdown_lines.append(f"![](images/{encoded_filename})")
+                self.markdown_lines.append("")
+                
+                debug_print(f"[SUCCESS] 図形クラスターを処理: {image_filename}")
+                
+                # 一時ファイルを削除
+                os.unlink(temp_doc_path)
+                os.unlink(temp_pdf_path)
+                return True
+            
+            # 一時ファイルを削除
+            os.unlink(temp_doc_path)
+            if os.path.exists(temp_pdf_path):
+                os.unlink(temp_pdf_path)
+            return False
+            
+        except Exception as e:
+            print(f"[ERROR] 図形クラスター処理エラー: {e}")
+            return False
     
     def _process_canvas_as_vector(self, canvas_element, drawing_element):
         """Word図形キャンバス全体をベクター画像として処理"""
@@ -1238,24 +1417,151 @@ class WordToMarkdownConverter:
             print(f"[ERROR] ベクター画像処理エラー: {e}")
             return False
     
-    def _create_canvas_document(self, canvas_element, drawing_element):
-        """キャンバス要素のみを含む一時Word文書を作成"""
+    def _build_theme_color_map(self, theme_data):
+        """テーマデータからカラーマップを構築
+        
+        Args:
+            theme_data: テーマXMLのバイナリデータ
+            
+        Returns:
+            dict: テーマ色名からRGB値へのマッピング（例: {'lt1': 'FFFFFF', 'dk1': '000000'}）
+        """
+        color_map = {}
+        if not theme_data:
+            return color_map
+        
+        try:
+            from lxml import etree
+            theme_tree = etree.fromstring(theme_data)
+            
+            # カラースキームを探す
+            clr_scheme = theme_tree.xpath('.//*[local-name()="clrScheme"]')
+            if not clr_scheme:
+                return color_map
+            
+            for child in clr_scheme[0]:
+                # タグ名からテーマ色名を取得（例: dk1, lt1, accent1）
+                tag_name = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                
+                # srgbClrを探す
+                srgb_elems = child.xpath('.//*[local-name()="srgbClr"]/@val')
+                if srgb_elems:
+                    color_map[tag_name] = srgb_elems[0]
+                    continue
+                
+                # sysClrを探す（lastClr属性にRGB値がある）
+                sys_clr_elems = child.xpath('.//*[local-name()="sysClr"]')
+                if sys_clr_elems:
+                    last_clr = sys_clr_elems[0].get('lastClr')
+                    if last_clr:
+                        color_map[tag_name] = last_clr
+            
+            debug_print(f"[DEBUG] テーマカラーマップ構築: {len(color_map)}色")
+        except Exception as e:
+            debug_print(f"[DEBUG] テーマカラーマップ構築エラー: {e}")
+        
+        return color_map
+    
+    def _convert_text_scheme_colors(self, drawing_element, theme_color_map):
+        """drawing要素内のテキスト色のschemeClrをsrgbClrに変換
+        
+        fontRef内のschemeClrを変換する（テキストのフォント色を定義）
+        
+        Args:
+            drawing_element: drawing要素
+            theme_color_map: テーマ色名からRGB値へのマッピング
+            
+        Returns:
+            str: 変換後のXML文字列
+        """
+        if not theme_color_map:
+            return ET.tostring(drawing_element, encoding='unicode')
+        
+        try:
+            from lxml import etree
+            xml_str = ET.tostring(drawing_element, encoding='unicode')
+            tree = etree.fromstring(xml_str.encode('utf-8'))
+            
+            ns_a = "http://schemas.openxmlformats.org/drawingml/2006/main"
+            converted_count = 0
+            
+            # fontRef内のschemeClrを変換（テキスト色）
+            font_ref_schemes = tree.xpath(
+                './/*[local-name()="fontRef"]/*[local-name()="schemeClr"]'
+            )
+            
+            for scheme_clr in font_ref_schemes:
+                val = scheme_clr.get('val')
+                if val and val in theme_color_map:
+                    rgb_val = theme_color_map[val]
+                    font_ref = scheme_clr.getparent()
+                    
+                    # srgbClr要素を作成
+                    new_srgb = etree.Element(f"{{{ns_a}}}srgbClr", val=rgb_val)
+                    
+                    # 子要素をコピー
+                    for child in list(scheme_clr):
+                        new_srgb.append(child)
+                    
+                    # 置換
+                    font_ref.remove(scheme_clr)
+                    font_ref.append(new_srgb)
+                    converted_count += 1
+            
+            if converted_count > 0:
+                debug_print(f"[DEBUG] テキスト色変換: {converted_count}箇所")
+            
+            return etree.tostring(tree, encoding='unicode')
+            
+        except Exception as e:
+            debug_print(f"[DEBUG] テキスト色変換エラー: {e}")
+            return ET.tostring(drawing_element, encoding='unicode')
+    
+    def _create_canvas_document(self, canvas_element, drawing_elements):
+        """キャンバス要素のみを含む一時Word文書を作成
+        
+        Args:
+            canvas_element: キャンバス要素（互換性のため維持、現在は使用しない）
+            drawing_elements: drawing要素（単一またはリスト）
+        """
         try:
             debug_print("[DEBUG] Word文書作成開始...")
+            debug_print("[DEBUG] SCHEMECLR_PATCH_V3_20251211")
+            
+            # drawing_elementsがリストでない場合は単一要素として扱う
+            if not isinstance(drawing_elements, (list, tuple)):
+                drawing_elements = [drawing_elements]
             
             # 元の文書からリレーション情報を取得
             original_rels = {}
+            theme_data = None
+            theme_rel_id = None
             try:
                 for rel in self.doc.part.rels.values():
                     if "image" in rel.reltype:
                         original_rels[rel.rId] = rel.target_part.blob
-                debug_print(f"[DEBUG] 取得したリレーション数: {len(original_rels)}")
+                    # テーマリレーションを取得（schemeClr参照の解決に必要）
+                    elif "theme" in rel.reltype:
+                        try:
+                            theme_data = rel.target_part.blob
+                            theme_rel_id = rel.rId
+                            debug_print(f"[DEBUG] テーマ取得: {rel.rId}")
+                        except Exception as theme_error:
+                            debug_print(f"[DEBUG] テーマ取得エラー: {theme_error}")
+                debug_print(f"[DEBUG] 取得したリレーション数: {len(original_rels)}, テーマ: {theme_rel_id is not None}")
             except Exception as rel_error:
                 debug_print(f"[DEBUG] リレーション取得エラー: {rel_error}")
             
-            # XMLを文字列として取得
-            drawing_xml = ET.tostring(drawing_element, encoding='unicode')
-            debug_print(f"[DEBUG] Drawing XML長: {len(drawing_xml)}")
+            # テーマからカラーマップを作成（schemeClr→srgbClr変換用）
+            theme_color_map = self._build_theme_color_map(theme_data)
+            
+            # 複数のdrawing XMLを連結し、テキスト色のschemeClrをsrgbClrに変換
+            converted_drawings = []
+            for d in drawing_elements:
+                converted_xml = self._convert_text_scheme_colors(d, theme_color_map)
+                converted_drawings.append(converted_xml)
+            drawings_xml = "".join(converted_drawings)
+            debug_print(f"[DEBUG] Drawing XML長: {len(drawings_xml)}")
             
             # より適切なWord文書XMLを作成
             doc_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -1271,7 +1577,7 @@ class WordToMarkdownConverter:
     <w:body>
         <w:p>
             <w:r>
-                {drawing_xml}
+                {drawings_xml}
             </w:r>
         </w:p>
         <w:sectPr>
@@ -1286,8 +1592,8 @@ class WordToMarkdownConverter:
             
             # Word文書ZIPファイルを作成
             with zipfile.ZipFile(temp_docx_path, 'w', zipfile.ZIP_DEFLATED) as docx:
-                # Content_Types.xml
-                docx.writestr('[Content_Types].xml', '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                # Content_Types.xml（テーマがある場合はOverrideを追加）
+                content_types_base = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
     <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
     <Default Extension="xml" ContentType="application/xml"/>
@@ -1296,8 +1602,16 @@ class WordToMarkdownConverter:
     <Default Extension="jpg" ContentType="image/jpeg"/>
     <Default Extension="emf" ContentType="image/x-emf"/>
     <Default Extension="wmf" ContentType="image/x-wmf"/>
-    <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-</Types>''')
+    <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'''
+                
+                # テーマがある場合はOverrideを追加
+                if theme_data:
+                    content_types_base += '''
+    <Override PartName="/word/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>'''
+                
+                content_types_base += '''
+</Types>'''
+                docx.writestr('[Content_Types].xml', content_types_base)
                 
                 # メインリレーション
                 docx.writestr('_rels/.rels', '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -1319,6 +1633,14 @@ class WordToMarkdownConverter:
                     # 画像ファイルを追加
                     docx.writestr(f"word/{target}", image_data)
                 
+                # テーマリレーションを追加（schemeClr参照の解決に必要）
+                if theme_data and theme_rel_id:
+                    doc_rels_xml += f'''
+    <Relationship Id="{theme_rel_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>'''
+                    # テーマファイルを追加
+                    docx.writestr('word/theme/theme1.xml', theme_data)
+                    debug_print(f"[DEBUG] テーマファイル追加: word/theme/theme1.xml")
+                
                 doc_rels_xml += '''
 </Relationships>'''
                 
@@ -1328,6 +1650,14 @@ class WordToMarkdownConverter:
                 docx.writestr('word/document.xml', doc_xml)
             
             print(f"[INFO] 一時Word文書作成完了: {temp_docx_path}")
+            
+            # デバッグ用に一時Word文書を保存
+            debug_docx_dir = os.path.join('output', 'debug')
+            os.makedirs(debug_docx_dir, exist_ok=True)
+            debug_docx_path = os.path.join(debug_docx_dir, f"temp_docx_{os.path.basename(temp_docx_path)}")
+            shutil.copy2(temp_docx_path, debug_docx_path)
+            debug_print(f"[DEBUG] 一時Word文書デバッグコピー: {debug_docx_path}")
+            
             return temp_docx_path
             
         except Exception as e:
