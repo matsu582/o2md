@@ -217,12 +217,18 @@ class PowerPointToMarkdownConverter:
         # 表を出力
         if slide_info['tables']:
             for table_md in slide_info['tables']:
+                # テーブル前に空行を確保（Markdownビューワでの正しい表示のため）
+                if self.markdown_lines and self.markdown_lines[-1] != "":
+                    self.markdown_lines.append("")
                 self.markdown_lines.append(table_md)
                 self.markdown_lines.append("")
         
         # チャートを出力（チャートデータをテーブルとして抽出）
         if slide_info['charts']:
             for chart_md in slide_info['charts']:
+                # チャートテーブル前に空行を確保（Markdownビューワでの正しい表示のため）
+                if self.markdown_lines and self.markdown_lines[-1] != "":
+                    self.markdown_lines.append("")
                 self.markdown_lines.append(chart_md)
                 self.markdown_lines.append("")
         
