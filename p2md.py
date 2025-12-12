@@ -9,6 +9,10 @@ PowerPointファイルをスライドごとに詳細なMarkdown形式に変換�
 - 表がある場合はMarkdownテーブルに変換
 - 図形がある場合は、そのスライドにある図形群を一つの画像として出力
 - 表と図形またはテキストと図形が複合している場合は、スライドごと画像化
+- グループシェイプ内のシェイプを再帰的に処理
+- スライドノートを出力
+- チャートデータをテーブルとして出力
+- 文字の書式設定（太字、斜体、下線、取り消し線、上付き/下付き）に対応
 """
 
 import os
@@ -212,6 +216,12 @@ class PowerPointToMarkdownConverter:
                 self.markdown_lines.append(table_md)
                 self.markdown_lines.append("")
         
+        # チャートを出力
+        if slide_info['charts']:
+            for chart_md in slide_info['charts']:
+                self.markdown_lines.append(chart_md)
+                self.markdown_lines.append("")
+        
         # 図形の処理
         if has_shapes:
             if is_complex:
@@ -222,6 +232,17 @@ class PowerPointToMarkdownConverter:
                 # 図形のみ：図形群を画像化
                 print(f"[INFO] スライド {slide_idx}: 図形のみ - 図形群を画像化")
                 self._render_shapes_as_image(slide, slide_idx)
+        
+        # スライドノートを出力
+        if slide.has_notes_slide:
+            notes_slide = slide.notes_slide
+            if notes_slide.notes_text_frame is not None:
+                notes_text = notes_slide.notes_text_frame.text.strip()
+                if notes_text:
+                    self.markdown_lines.append("")
+                    self.markdown_lines.append("### ノート:")
+                    self.markdown_lines.append(notes_text)
+                    self.markdown_lines.append("")
         
         # スライド間の区切り
         self.markdown_lines.append("---")
@@ -286,19 +307,30 @@ class PowerPointToMarkdownConverter:
                 - has_shapes: 図形の有無
                 - content_items: 順序を保持したコンテンツアイテムのリスト（各アイテムはタイプと内容を持つ）
                 - tables: 表のMarkdownリスト
+                - charts: チャートのMarkdownリスト
         """
         info = {
             'has_text': False,
             'has_table': False,
             'has_shapes': False,
             'content_items': [],  # 順序を保持するための統一リスト
-            'tables': []
+            'tables': [],
+            'charts': []
         }
         
         # テキストとして処理された図形を追跡
         processed_text_shapes = set()
         
-        for shape in slide.shapes:
+        # シェイプを座標順にソート（視覚的な読み順に近づける）
+        sorted_shapes = sorted(
+            slide.shapes,
+            key=lambda x: (
+                float('inf') if x.top is None else x.top,
+                float('inf') if x.left is None else x.left,
+            ),
+        )
+        
+        for shape in sorted_shapes:
             # プレースホルダーのチェック（タイトル、フッター、スライド番号などを除外）
             if hasattr(shape, 'is_placeholder') and shape.is_placeholder:
                 if hasattr(shape, 'placeholder_format'):
@@ -319,63 +351,66 @@ class PowerPointToMarkdownConverter:
                 text_was_processed = False
                 
                 if list_type == 'bullet':
-                    # 箇条書きリスト
+                    # 箇条書きリスト（書式付き）
                     for paragraph in text_frame.paragraphs:
-                        text = paragraph.text.strip()
-                        if text:
+                        formatted_text = self._get_formatted_paragraph_text(paragraph)
+                        if formatted_text.strip():
                             level = paragraph.level
                             indent = "  " * level
-                            info['content_items'].append(f"{indent}- {text}")
+                            info['content_items'].append(f"{indent}- {formatted_text.strip()}")
                             text_was_processed = True
                     info['has_text'] = True
                 elif list_type == 'numbered':
-                    # 番号付きリスト
+                    # 番号付きリスト（書式付き）
                     for paragraph in text_frame.paragraphs:
-                        text = paragraph.text.strip()
-                        if text:
+                        formatted_text = self._get_formatted_paragraph_text(paragraph)
+                        if formatted_text.strip():
                             # 先頭の番号記号を削除
-                            cleaned_text = self._remove_number_prefix(text)
+                            cleaned_text = self._remove_number_prefix(formatted_text.strip())
                             level = paragraph.level
                             indent = "  " * level
                             info['content_items'].append(f"{indent}1. {cleaned_text}")
                             text_was_processed = True
                     info['has_text'] = True
                 else:
-                    # 通常のテキスト: 段落ごとに個別に判定
+                    # 通常のテキスト: 段落ごとに個別に判定（書式付き）
                     paragraphs = []
                     for paragraph in text_frame.paragraphs:
-                        text = paragraph.text.strip()
-                        if not text:
+                        plain_text = paragraph.text.strip()
+                        if not plain_text:
                             continue
+                        
+                        # 書式付きテキストを取得
+                        formatted_text = self._get_formatted_paragraph_text(paragraph)
                         
                         # 元のテキスト（インデント情報を保持）
                         original_text = paragraph.text
                         
-                        # 各段落のテキストパターンを個別に判定
-                        if self._is_numbered_text([text]):
+                        # 各段落のテキストパターンを個別に判定（プレーンテキストでパターン判定）
+                        if self._is_numbered_text([plain_text]):
                             # 番号付きリスト項目
-                            cleaned_text = self._remove_number_prefix(text)
+                            cleaned_text = self._remove_number_prefix(formatted_text.strip())
                             info['content_items'].append(f"1. {cleaned_text}")
                             info['has_text'] = True
                             text_was_processed = True
-                        elif text.startswith('・') or text.startswith('•'):
+                        elif plain_text.startswith('・') or plain_text.startswith('•'):
                             # 箇条書き項目（・や•で始まる）
-                            bullet_text = text.lstrip('・•').strip()
+                            bullet_text = formatted_text.strip().lstrip('・•').strip()
                             info['content_items'].append(f"- {bullet_text}")
                             info['has_text'] = True
                             text_was_processed = True
-                        elif text.startswith('-') or text.startswith('−'):
+                        elif plain_text.startswith('-') or plain_text.startswith('−'):
                             # ハイフンやマイナスで始まる箇条書き項目、インデント検出
                             indent_match = len(original_text) - len(original_text.lstrip('　 '))
                             indent_level = indent_match // 2  # 2文字で1レベルとする
                             indent = "  " * indent_level
-                            bullet_text = text.lstrip('-−').strip()
+                            bullet_text = formatted_text.strip().lstrip('-−').strip()
                             info['content_items'].append(f"{indent}- {bullet_text}")
                             info['has_text'] = True
                             text_was_processed = True
                         else:
                             # 通常のテキスト: 一時的にリストに追加
-                            paragraphs.append(text)
+                            paragraphs.append(formatted_text.strip() if formatted_text.strip() else plain_text)
                     
                     # 通常のテキストをまとめて処理（改行を<br>で表現）
                     if paragraphs:
@@ -411,14 +446,31 @@ class PowerPointToMarkdownConverter:
                     info['tables'].append(table_md)
                 info['has_table'] = True
             
-            # 図形（AutoShape, Picture, Group など）
+            # チャートの処理
+            if shape.has_chart:
+                chart_md = self._convert_chart_to_markdown(shape.chart)
+                if chart_md:
+                    info['charts'].append(chart_md)
+                # チャートはデータを抽出したので図形としては扱わない
+                continue
+            
+            # グループシェイプの再帰処理
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                group_info = self._process_group_shape(shape, processed_text_shapes)
+                info['has_text'] = info['has_text'] or group_info['has_text']
+                info['has_table'] = info['has_table'] or group_info['has_table']
+                info['has_shapes'] = info['has_shapes'] or group_info['has_shapes']
+                info['content_items'].extend(group_info['content_items'])
+                info['tables'].extend(group_info['tables'])
+                info['charts'].extend(group_info['charts'])
+                continue
+            
+            # 図形（AutoShape, Picture など）
             if shape.shape_type in [
                 MSO_SHAPE_TYPE.AUTO_SHAPE,
                 MSO_SHAPE_TYPE.PICTURE,
-                MSO_SHAPE_TYPE.GROUP,
                 MSO_SHAPE_TYPE.FREEFORM,
                 MSO_SHAPE_TYPE.LINE,
-                MSO_SHAPE_TYPE.CHART
             ]:
                 # テキストとして既に処理された図形は除外
                 if id(shape) in processed_text_shapes:
@@ -431,13 +483,242 @@ class PowerPointToMarkdownConverter:
                         continue
                 
                 # 図形として扱うかどうかを判定
-                # PICTURE, GROUP, CHART, FREEFORM, AUTO_SHAPE, LINEは
+                # PICTURE, FREEFORM, AUTO_SHAPE, LINEは
                 # テキストボックスやプレースホルダとは明確に異なるため、
                 # 塗りつぶしや枠線の有無に関わらず図形として扱う
                 # （テキストボックスはshape_type=TEXT_BOXで既に除外されている）
                 info['has_shapes'] = True
         
         return info
+    
+    def _process_group_shape(self, group_shape, processed_text_shapes: set) -> Dict[str, Any]:
+        """グループシェイプ内のシェイプを再帰的に処理
+        
+        Args:
+            group_shape: グループシェイプオブジェクト
+            processed_text_shapes: テキストとして処理済みのシェイプIDセット
+            
+        Returns:
+            dict: グループ内のコンテンツ情報
+        """
+        info = {
+            'has_text': False,
+            'has_table': False,
+            'has_shapes': False,
+            'content_items': [],
+            'tables': [],
+            'charts': []
+        }
+        
+        # グループ内のシェイプを座標順にソート
+        sorted_shapes = sorted(
+            group_shape.shapes,
+            key=lambda x: (
+                float('inf') if x.top is None else x.top,
+                float('inf') if x.left is None else x.left,
+            ),
+        )
+        
+        for shape in sorted_shapes:
+            # テキストフレームを持つシェイプ
+            if shape.has_text_frame:
+                text = shape.text_frame.text.strip()
+                if text:
+                    # 書式付きテキストを取得
+                    formatted_text = self._get_formatted_text_from_text_frame(shape.text_frame)
+                    if formatted_text:
+                        info['content_items'].append(formatted_text)
+                        info['has_text'] = True
+                        processed_text_shapes.add(id(shape))
+            
+            # 表
+            if shape.shape_type == MSO_SHAPE_TYPE.TABLE:
+                table_md = self._convert_table_shape(shape)
+                if table_md:
+                    info['tables'].append(table_md)
+                info['has_table'] = True
+            
+            # チャート
+            if hasattr(shape, 'has_chart') and shape.has_chart:
+                chart_md = self._convert_chart_to_markdown(shape.chart)
+                if chart_md:
+                    info['charts'].append(chart_md)
+                continue
+            
+            # ネストされたグループシェイプ（再帰処理）
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                nested_info = self._process_group_shape(shape, processed_text_shapes)
+                info['has_text'] = info['has_text'] or nested_info['has_text']
+                info['has_table'] = info['has_table'] or nested_info['has_table']
+                info['has_shapes'] = info['has_shapes'] or nested_info['has_shapes']
+                info['content_items'].extend(nested_info['content_items'])
+                info['tables'].extend(nested_info['tables'])
+                info['charts'].extend(nested_info['charts'])
+                continue
+            
+            # その他の図形
+            if shape.shape_type in [
+                MSO_SHAPE_TYPE.AUTO_SHAPE,
+                MSO_SHAPE_TYPE.PICTURE,
+                MSO_SHAPE_TYPE.FREEFORM,
+                MSO_SHAPE_TYPE.LINE,
+            ]:
+                if id(shape) not in processed_text_shapes:
+                    info['has_shapes'] = True
+        
+        return info
+    
+    def _convert_chart_to_markdown(self, chart) -> Optional[str]:
+        """チャートデータをMarkdownテーブルに変換
+        
+        Args:
+            chart: チャートオブジェクト
+            
+        Returns:
+            str: Markdownテーブル文字列、変換できない場合はNone
+        """
+        try:
+            md_lines = []
+            
+            # チャートタイトル
+            md_lines.append("### チャート")
+            if chart.has_title:
+                try:
+                    title_text = chart.chart_title.text_frame.text
+                    if title_text:
+                        md_lines[-1] = f"### チャート: {title_text}"
+                except Exception:
+                    pass
+            md_lines.append("")
+            
+            # カテゴリと系列データを取得
+            try:
+                category_names = [c.label for c in chart.plots[0].categories]
+                series_names = [s.name for s in chart.series]
+                
+                # ヘッダー行
+                header = ["カテゴリ"] + series_names
+                md_lines.append("| " + " | ".join(str(h) if h else "" for h in header) + " |")
+                md_lines.append("|" + "|".join(["---"] * len(header)) + "|")
+                
+                # データ行
+                for idx, category in enumerate(category_names):
+                    row = [str(category) if category else ""]
+                    for series in chart.series:
+                        try:
+                            value = series.values[idx]
+                            row.append(str(value) if value is not None else "")
+                        except (IndexError, TypeError):
+                            row.append("")
+                    md_lines.append("| " + " | ".join(row) + " |")
+                
+                return "\n".join(md_lines)
+                
+            except (ValueError, AttributeError) as e:
+                # サポートされていないチャートタイプ
+                if "unsupported plot type" in str(e):
+                    return "### チャート\n\n[サポートされていないチャートタイプ]"
+                return None
+                
+        except Exception as e:
+            debug_print(f"[DEBUG] チャート変換エラー: {e}")
+            return None
+    
+    def _get_formatted_text_from_text_frame(self, text_frame) -> str:
+        """テキストフレームから書式付きテキストを取得
+        
+        Args:
+            text_frame: テキストフレームオブジェクト
+            
+        Returns:
+            str: 書式付きテキスト
+        """
+        result_parts = []
+        
+        for paragraph in text_frame.paragraphs:
+            para_text = self._get_formatted_paragraph_text(paragraph)
+            if para_text.strip():
+                result_parts.append(para_text)
+        
+        return "<br>".join(result_parts) if result_parts else ""
+    
+    def _get_formatted_paragraph_text(self, paragraph) -> str:
+        """段落から書式付きテキストを取得
+        
+        Args:
+            paragraph: 段落オブジェクト
+            
+        Returns:
+            str: 書式付きテキスト
+        """
+        para_parts = []
+        for run in paragraph.runs:
+            text = run.text
+            if text:
+                formatted_text = self._apply_run_formatting(run, text)
+                para_parts.append(formatted_text)
+        
+        return "".join(para_parts)
+    
+    def _apply_run_formatting(self, run, text: str) -> str:
+        """Runのフォーマット情報をMarkdown記法に変換
+        
+        python-pptxのFontオブジェクトで利用可能な属性:
+        - bold: 太字
+        - italic: 斜体
+        - underline: 下線
+        
+        注: superscript, subscript, strikethroughはpython-pptxでは
+        直接サポートされていないため、XMLから取得する必要がある
+        
+        Args:
+            run: python-pptxのRunオブジェクト
+            text: 元のテキスト
+            
+        Returns:
+            str: フォーマット適用後のテキスト
+        """
+        if not text or not text.strip():
+            return text
+        
+        # XMLから追加の書式情報を取得
+        try:
+            rPr = run._r.get_or_add_rPr()
+            
+            # 上付き文字（baseline属性で判定）
+            baseline = rPr.attrib.get(
+                '{http://schemas.openxmlformats.org/drawingml/2006/main}baseline'
+            )
+            if baseline and int(baseline) > 0:
+                text = f"<sup>{text}</sup>"
+            elif baseline and int(baseline) < 0:
+                # 下付き文字
+                text = f"<sub>{text}</sub>"
+            
+            # 取り消し線
+            strike_elem = rPr.find(
+                '{http://schemas.openxmlformats.org/drawingml/2006/main}strike'
+            )
+            if strike_elem is not None:
+                strike_val = strike_elem.attrib.get('val', 'sngStrike')
+                if strike_val != 'noStrike':
+                    text = f"~~{text}~~"
+        except Exception:
+            pass
+        
+        # 下線（MarkdownではHTMLタグを使用）
+        if run.font.underline and run.font.underline is not False:
+            text = f"<u>{text}</u>"
+        
+        # 斜体
+        if run.font.italic:
+            text = f"*{text}*"
+        
+        # 太字
+        if run.font.bold:
+            text = f"**{text}**"
+        
+        return text
     
     def _get_list_type(self, text_frame) -> Optional[str]:
         """テキストフレームのリストタイプを判定
@@ -555,6 +836,29 @@ class PowerPointToMarkdownConverter:
         
         return text
     
+    def _get_slide_alt_text(self, slide, slide_idx: int) -> str:
+        """スライドのaltテキストを取得
+        
+        スライドのタイトルまたは説明を取得してaltテキストとして返す。
+        タイトルがない場合は「スライド N」を返す。
+        
+        Args:
+            slide: スライドオブジェクト
+            slide_idx: スライド番号
+            
+        Returns:
+            str: altテキスト
+        """
+        # スライドタイトルを取得
+        title = self._get_slide_title(slide)
+        if title:
+            # HTMLタグを除去してaltテキストに使用
+            clean_title = title.replace('<br>', ' ').strip()
+            if clean_title:
+                return f"スライド {slide_idx}: {clean_title}"
+        
+        return f"スライド {slide_idx}"
+    
     def _convert_table_shape(self, shape) -> Optional[str]:
         """表シェイプをMarkdownテーブルに変換
         
@@ -619,7 +923,7 @@ class PowerPointToMarkdownConverter:
         """スライド全体を画像として出力（元のPowerPointファイルから直接変換）
         
         Args:
-            slide: スライドオブジェクト（使用しないが互換性のため保持）
+            slide: スライドオブジェクト
             slide_idx: スライド番号
         """
         try:
@@ -637,10 +941,11 @@ class PowerPointToMarkdownConverter:
             # PDFの該当ページ（スライドインデックスは0から始まる）を画像に変換
             success, actual_path = self._convert_pdf_page_to_image(pdf_path, slide_idx - 1, image_path)
             if success:
-                # Markdownに追加
+                # Markdownに追加（altテキストを改善）
                 actual_filename = os.path.basename(actual_path)
                 encoded_filename = urllib.parse.quote(actual_filename)
-                self.markdown_lines.append(f"![スライド {slide_idx}](images/{encoded_filename})")
+                alt_text = self._get_slide_alt_text(slide, slide_idx)
+                self.markdown_lines.append(f"![{alt_text}](images/{encoded_filename})")
                 self.markdown_lines.append("")
                 print(f"[SUCCESS] スライド全体画像化: {actual_filename}")
             
