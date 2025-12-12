@@ -123,6 +123,9 @@ class WordToMarkdownConverter:
         self.use_heading_text = use_heading_text  # 章番号の代わりに見出しテキストを使用するオプション
         self.processed_images = {}  # ハッシュベース重複検出用辞書
         self._emitted_plain_paragraphs = set()  # 本文として出力したテキスト（重複チェック用）
+        self._shape_processed_paragraphs = set()  # 図形として処理済みの段落（テキスト出力スキップ用）
+        self._shape_texts_by_image = {}  # 画像ファイル名 -> 図形内テキストのマップ
+        self._emitted_shape_texts = set()  # 図形処理時に出力したテキスト（重複チェック用）
         self.referenced_images = set()  # 実際に文書内で参照されている画像のrId
         self.vector_image_counter = 0  # ベクター画像専用カウンター
         self.regular_image_counter = 0  # 通常画像専用カウンター
@@ -423,9 +426,13 @@ class WordToMarkdownConverter:
             if element.tag.endswith('}p'):  # 段落
                 paragraph = self._find_paragraph_by_element(element)
                 if paragraph:
-                    self._convert_paragraph(paragraph)
-                    # 段落に画像が含まれている場合は、その場で画像を処理
-                    self._process_paragraph_images(paragraph)
+                    # 図形処理を先に行う（図形が画像化された場合、段落を記録）
+                    shape_processed = self._process_paragraph_images(paragraph)
+                    
+                    # 図形として処理された段落はテキスト出力をスキップ
+                    if not shape_processed:
+                        self._convert_paragraph(paragraph)
+                    
                     # 見出しかどうかを記録
                     if self._is_heading(paragraph):
                         previous_element_type = 'heading'
@@ -1030,14 +1037,18 @@ class WordToMarkdownConverter:
         
         return escaped_text
     
-    def _process_paragraph_images(self, paragraph):
-        """段落内の画像を処理"""
+    def _process_paragraph_images(self, paragraph) -> bool:
+        """段落内の画像を処理
+        
+        Returns:
+            bool: 図形として処理された場合はTrue（テキスト出力をスキップすべき）
+        """
         
         # Word図形キャンバスがある場合は複合図形として処理
         # 処理が行われた場合のみ早期終了、そうでなければ通常の画像処理にフォールバック
         if self._has_word_processing_canvas(paragraph):
             if self._process_composite_figure(paragraph):
-                return
+                return True  # 図形として処理された
         
         # 段落内のRunを調べて画像があるかチェック
         for run in paragraph.runs:
@@ -1053,7 +1064,9 @@ class WordToMarkdownConverter:
                             if rel.rId == embed_id and "image" in rel.reltype:
                                 # その場で画像を処理（drawing要素も渡す）
                                 self._extract_and_convert_image_inline(rel, drawing)
-                                return  # 1つの段落につき1つの画像のみ処理
+                                return False  # 通常の画像は本文テキストと共存可能
+        
+        return False  # 画像処理なし
     
     def _extract_and_convert_image_inline(self, rel, drawing_element=None):
         """インライン画像を抽出・変換"""
@@ -1241,15 +1254,24 @@ class WordToMarkdownConverter:
             if texts:
                 textbox_texts.append(texts)
         
-        # 既に本文として出力されたテキストを除外
-        # テキストボックス内のテキストが本文に含まれている場合は details に出力しない
+        # 既に本文または図形処理で出力されたテキストを除外
         filtered_textbox_texts = []
         for texts in textbox_texts:
             # テキストボックス内の全テキストを結合してチェック
             combined_text = "".join(t.strip() for t in texts if t.strip())
             
-            # 本文に既に出力されているかチェック
+            # 図形処理で既に出力されているかチェック
             is_already_emitted = False
+            for shape_text in self._emitted_shape_texts:
+                if shape_text in combined_text or combined_text in shape_text:
+                    is_already_emitted = True
+                    debug_print(f"[DEBUG] 図形処理で出力済みのためスキップ: {combined_text[:50]}...")
+                    break
+            
+            if is_already_emitted:
+                continue
+            
+            # 本文に既に出力されているかチェック
             for emitted_text in self._emitted_plain_paragraphs:
                 # テキストボックスの内容が本文に含まれているかチェック
                 if combined_text and combined_text in emitted_text:
@@ -1418,6 +1440,82 @@ class WordToMarkdownConverter:
             if paragraph_text.strip():
                 texts.append(paragraph_text)
         return texts
+    
+    def _extract_shape_texts_from_drawing(self, drawing_elements) -> list:
+        """drawing要素から図形内のテキストを抽出
+        
+        Args:
+            drawing_elements: drawing要素またはdrawing要素のリスト
+        
+        Returns:
+            list: 抽出されたテキストのリスト
+        """
+        from lxml import etree
+        
+        texts = []
+        
+        # 単一要素の場合はリストに変換
+        if not isinstance(drawing_elements, list):
+            drawing_elements = [drawing_elements]
+        
+        W_NS = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+        
+        for drawing in drawing_elements:
+            try:
+                # drawing要素をlxmlで再パース
+                xml_str = etree.tostring(drawing, encoding='unicode')
+                root = etree.fromstring(xml_str.encode())
+                
+                # txbxContent内のテキストを抽出（テキストボックス）
+                for txbx in root.iter('{http://schemas.microsoft.com/office/word/2010/wordprocessingShape}txbx'):
+                    for txbx_content in txbx.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}txbxContent'):
+                        for t_elem in txbx_content.iter(W_NS + 't'):
+                            if t_elem.text and t_elem.text.strip():
+                                texts.append(t_elem.text.strip())
+                
+                # VMLテキストボックス内のテキストも抽出
+                for textbox in root.iter('{urn:schemas-microsoft-com:vml}textbox'):
+                    for t_elem in textbox.iter(W_NS + 't'):
+                        if t_elem.text and t_elem.text.strip():
+                            texts.append(t_elem.text.strip())
+                
+            except Exception as e:
+                debug_print(f"[DEBUG] 図形テキスト抽出エラー: {e}")
+        
+        return texts
+    
+    def _output_shape_texts_as_details(self, texts: list):
+        """図形内テキストをdetailsタグで出力
+        
+        Args:
+            texts: 出力するテキストのリスト
+        """
+        if not texts:
+            return
+        
+        # 重複を除去しつつ順序を保持
+        seen = set()
+        unique_texts = []
+        for t in texts:
+            if t not in seen:
+                seen.add(t)
+                unique_texts.append(t)
+        
+        if not unique_texts:
+            return
+        
+        self.markdown_lines.append("<details>")
+        self.markdown_lines.append("<summary>図形内テキスト</summary>")
+        self.markdown_lines.append("")
+        for text in unique_texts:
+            self.markdown_lines.append(text)
+            self.markdown_lines.append("")
+            # 出力したテキストを追跡（後で_extract_textbox_contentで除外するため）
+            self._emitted_shape_texts.add(text)
+        self.markdown_lines.append("</details>")
+        self.markdown_lines.append("")
+        
+        debug_print(f"[DEBUG] 図形内テキスト {len(unique_texts)} 件を details で出力")
     
     def _extract_and_convert_image(self, rel):
         """画像を抽出・変換（重複防止強化）"""
@@ -1624,6 +1722,10 @@ class WordToMarkdownConverter:
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
                 self.markdown_lines.append("")
                 
+                # 図形内テキストを抽出してdetailsで出力
+                shape_texts = self._extract_shape_texts_from_drawing(drawing_element)
+                self._output_shape_texts_as_details(shape_texts)
+                
                 debug_print(f"[SUCCESS] 個別図形を処理: {image_filename}")
                 
                 # 一時ファイルを削除
@@ -1681,6 +1783,10 @@ class WordToMarkdownConverter:
                 encoded_filename = urllib.parse.quote(image_filename)
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
                 self.markdown_lines.append("")
+                
+                # 図形内テキストを抽出してdetailsで出力
+                shape_texts = self._extract_shape_texts_from_drawing(drawing_elements)
+                self._output_shape_texts_as_details(shape_texts)
                 
                 debug_print(f"[SUCCESS] 図形クラスターを処理: {image_filename}")
                 
@@ -1742,6 +1848,10 @@ class WordToMarkdownConverter:
                 encoded_filename = urllib.parse.quote(image_filename)
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
                 self.markdown_lines.append("")
+                
+                # 図形内テキストを抽出してdetailsで出力
+                shape_texts = self._extract_shape_texts_from_drawing(drawing_element)
+                self._output_shape_texts_as_details(shape_texts)
                 
                 if self.shape_metadata:
                     try:
