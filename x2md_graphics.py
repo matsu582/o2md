@@ -2511,6 +2511,9 @@ class _GraphicsMixin:
     def _format_shape_metadata_as_text(self, shapes_metadata: List[Dict[str, Any]]) -> str:
         """図形メタデータを人間が読みやすいテキスト形式に整形
         
+        図形内のテキストを<details>タグで折りたたみ表示する。
+        抽出したテキストは""で括り、カンマ区切りで表示。
+        
         Args:
             shapes_metadata: 図形メタデータのリスト
             
@@ -2520,54 +2523,25 @@ class _GraphicsMixin:
         if not shapes_metadata:
             return ""
         
-        lines = []
-        lines.append("### 図形情報")
-        lines.append("")
-        
-        for idx, meta in enumerate(shapes_metadata, 1):
-            shape_type = meta.get('type', 'unknown')
-            shape_name = meta.get('name', f'図形{idx}')
-            
-            type_map = {
-                'picture': '画像',
-                'shape': '図形',
-                'connector': 'コネクタ',
-                'group': 'グループ',
-                'graphic_frame': 'グラフィックフレーム',
-                'unknown': '不明'
-            }
-            type_ja = type_map.get(shape_type, shape_type)
-            
-            lines.append(f"**{shape_name}** ({type_ja})")
-            
-            pos = meta.get('position', {})
-            if 'from_col' in pos and 'from_row' in pos:
-                from_cell = f"{col_letter(pos['from_col'])}{pos['from_row']}"
-                if 'to_col' in pos and 'to_row' in pos:
-                    to_cell = f"{col_letter(pos['to_col'])}{pos['to_row']}"
-                    lines.append(f"- 位置: {from_cell} ～ {to_cell}")
-                else:
-                    lines.append(f"- 位置: {from_cell} から")
-            
-            if shape_type == 'shape':
-                preset = meta.get('shape_properties', {}).get('preset', '')
-                if preset:
-                    lines.append(f"- 図形タイプ: {preset}")
-            
-            if shape_type == 'connector':
-                conn_type = meta.get('connector_type', '')
-                if conn_type:
-                    lines.append(f"- コネクタタイプ: {conn_type}")
-            
+        all_texts = []
+        for meta in shapes_metadata:
             text_content = meta.get('text_content', [])
             if text_content:
-                lines.append(f"- テキスト: {' / '.join(text_content)}")
-            
-            description = meta.get('description', '')
-            if description:
-                lines.append(f"- 説明: {description}")
-            
-            lines.append("")
+                all_texts.extend(text_content)
+        
+        if not all_texts:
+            return ""
+        
+        quoted_texts = [f'"{t}"' for t in all_texts]
+        texts_line = ', '.join(quoted_texts)
+        
+        lines = []
+        lines.append("<details>")
+        lines.append("<summary>図形内テキスト</summary>")
+        lines.append("")
+        lines.append(texts_line)
+        lines.append("")
+        lines.append("</details>")
         
         return '\n'.join(lines)
 
