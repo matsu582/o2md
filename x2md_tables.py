@@ -4452,17 +4452,45 @@ class _TablesMixin:
             return parts
     
     def _apply_cell_formatting(self, cell, text: str) -> str:
-        """セルの書式設定をMarkdownに適用"""
+        """セルの書式設定をMarkdownに適用
+        
+        対応する書式:
+        - 太字: **text**
+        - 斜体: *text*
+        - 下線: <u>text</u>
+        - 取り消し線: ~~text~~
+        - 上付き: <sup>text</sup>
+        - 下付き: <sub>text</sub>
+        """
         try:
             if not text:
                 return text
             
             # フォントスタイル
             if cell.font:
-                if cell.font.bold:
-                    text = f"**{text}**"
+                # 上付き/下付き（最も内側に適用）
+                vert_align = getattr(cell.font, 'vertAlign', None)
+                if vert_align == 'superscript':
+                    text = f"<sup>{text}</sup>"
+                elif vert_align == 'subscript':
+                    text = f"<sub>{text}</sub>"
+                
+                # 取り消し線
+                if getattr(cell.font, 'strike', False) or getattr(cell.font, 'strikethrough', False):
+                    text = f"~~{text}~~"
+                
+                # 下線
+                underline = getattr(cell.font, 'underline', None)
+                if underline and underline != 'none':
+                    text = f"<u>{text}</u>"
+                
+                # 斜体
                 if cell.font.italic:
                     text = f"*{text}*"
+                
+                # 太字（最も外側に適用）
+                if cell.font.bold:
+                    text = f"**{text}**"
             
             return text
             
@@ -4483,21 +4511,26 @@ class _TablesMixin:
                 return ''
             t = str(text)
 
-            # プログラムで挿入された<br>（および一般的なバリアント）を保持し、
-            # エスケープされないようにする。Excel由来の'<' '>'は引き続きエスケープする。
+            # プログラムで挿入されたHTMLタグを保持し、エスケープされないようにする。
+            # 許可されたタグ: <br>, <u>, </u>, <sup>, </sup>, <sub>, </sub>
+            # Excel由来の'<' '>'は引き続きエスケープする。
             # 許可されたタグをプレースホルダーに置き換え、汎用エスケープを実行し、
             # プレースホルダーをリテラルタグに戻す。
             allowed_tags = []
-            # 保持したいタグのバリアントを正規化（小文字）
+            # 保持したいタグのバリアントを正規化
+            # <br>タグ
             for m in re.finditer(r'(?i)<br\s*/?>', t):
-                allowed_tags.append(m.group(0))
+                allowed_tags.append((m.group(0), '<br>'))
+            # 書式用HTMLタグ（<u>, </u>, <sup>, </sup>, <sub>, </sub>）
+            for m in re.finditer(r'</?(?:u|sup|sub)>', t):
+                allowed_tags.append((m.group(0), m.group(0)))
 
             placeholders = {}
-            for i, tag in enumerate(allowed_tags):
-                ph = f'___BR_TAG_PLACEHOLDER_{i}___'
+            for i, (tag, normalized) in enumerate(allowed_tags):
+                ph = f'___HTML_TAG_PLACEHOLDER_{i}___'
                 # マッピングを維持するため毎回最初の出現のみを置換
                 t = t.replace(tag, ph, 1)
-                placeholders[ph] = tag
+                placeholders[ph] = normalized
 
             # 既存のHTMLエンティティを保護: エンティティの一部でない'&'を変換
             t = re.sub(r'&(?![A-Za-z]+;|#\d+;)', '&amp;', t)
@@ -4509,9 +4542,8 @@ class _TablesMixin:
             t = t.replace('|', '\\|')
 
             # 許可されたタグ（プレースホルダー）をリテラル形式に戻す
-            for ph, tag in placeholders.items():
-                # 正規化された'<br>'形式を使用
-                t = t.replace(ph, '<br>')
+            for ph, normalized_tag in placeholders.items():
+                t = t.replace(ph, normalized_tag)
 
             return t
         except Exception:
