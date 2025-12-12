@@ -272,7 +272,15 @@ class _GraphicsMixin:
                                                                 cluster_row = 1
                                                             
                                                             isolated_produced = True
-                                                            isolated_images.append((cluster_row, img_name))
+                                                            
+                                                            # 各クラスタのレンダリング直後に図形IDを保存
+                                                            # これにより、複数クラスタがある場合でも各画像に正しい図形IDが関連付けられる
+                                                            cluster_shape_ids = None
+                                                            if hasattr(self, '_last_iso_preserved_ids') and self._last_iso_preserved_ids:
+                                                                cluster_shape_ids = set(self._last_iso_preserved_ids)
+                                                                debug_print(f"[DEBUG] クラスタ {idx+1} の図形ID: {len(cluster_shape_ids)} shapes")
+                                                            
+                                                            isolated_images.append((cluster_row, img_name, cluster_shape_ids))
                                                             print(f"[INFO] シート '{sheet.title}' のクラスタ {idx+1} をisolated groupとして出力: {img_name} (row={cluster_row})")
                                                 
                                                 if isolated_produced:
@@ -280,8 +288,8 @@ class _GraphicsMixin:
                                                     debug_print(f"[DEBUG] isolated_images count: {len(isolated_images)}")
                                                     # isolated group画像をMarkdownに追加するため、images_foundをTrueに設定
                                                     images_found = True
-                                                    # 各画像を登録（row情報を使用）
-                                                    for cluster_row, img_name in isolated_images:
+                                                    # 各画像を登録（row情報と図形IDを使用）
+                                                    for cluster_row, img_name, cluster_shape_ids in isolated_images:
                                                         debug_print(f"[DEBUG] Processing isolated group image: {img_name} at row={cluster_row}")
                                                         try:
                                                             self._mark_image_emitted(img_name)
@@ -298,9 +306,10 @@ class _GraphicsMixin:
                                                             self._sheet_shape_images[sheet.title].append((cluster_row, img_name))
                                                             debug_print(f"[DEBUG] isolated group画像を_sheet_shape_imagesに追加: {img_name} at row={cluster_row}")
                                                             
-                                                            if hasattr(self, '_last_iso_preserved_ids') and self._last_iso_preserved_ids:
-                                                                self._image_shape_ids[img_name] = set(self._last_iso_preserved_ids)
-                                                                debug_print(f"[DEBUG] 図形IDマッピングを保存: {img_name} -> {len(self._last_iso_preserved_ids)} shapes")
+                                                            # 各クラスタの図形IDを使用（レンダリング時に保存したもの）
+                                                            if cluster_shape_ids:
+                                                                self._image_shape_ids[img_name] = cluster_shape_ids
+                                                                debug_print(f"[DEBUG] 図形IDマッピングを保存: {img_name} -> {len(cluster_shape_ids)} shapes")
                                                         except Exception as e:
                                                             print(f"[WARNING] Failed to add to _sheet_shape_images: {e}")
                                                             import traceback
