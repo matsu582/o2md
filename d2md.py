@@ -1050,23 +1050,38 @@ class WordToMarkdownConverter:
             if self._process_composite_figure(paragraph):
                 return True  # 図形として処理された
         
-        # 段落内のRunを調べて画像があるかチェック
+        # 段落内のすべてのdrawing要素を収集
+        all_drawings = []
         for run in paragraph.runs:
-            # drawing要素を取得
             drawings = run._element.xpath('.//w:drawing')
-            for drawing in drawings:
-                for inline_shape in drawing.xpath('.//a:blip'):
-                    # 画像の参照IDを取得
-                    embed_id = inline_shape.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
-                    if embed_id:
-                        # 対応するリレーションを探す
-                        for rel in paragraph.part.rels.values():
-                            if rel.rId == embed_id and "image" in rel.reltype:
-                                # その場で画像を処理（drawing要素も渡す）
-                                self._extract_and_convert_image_inline(rel, drawing)
-                                return False  # 通常の画像は本文テキストと共存可能
+            all_drawings.extend(drawings)
         
-        return False  # 画像処理なし
+        # 画像とテキストボックスのテキストを収集
+        processed_images = []
+        all_shape_texts = []
+        
+        for drawing in all_drawings:
+            # テキストボックスのテキストを抽出
+            shape_texts = self._extract_shape_texts_from_drawing(drawing)
+            if shape_texts:
+                all_shape_texts.extend(shape_texts)
+            
+            # 画像を処理
+            for inline_shape in drawing.xpath('.//a:blip'):
+                embed_id = inline_shape.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+                if embed_id:
+                    for rel in paragraph.part.rels.values():
+                        if rel.rId == embed_id and "image" in rel.reltype:
+                            self._extract_and_convert_image_inline(rel, drawing)
+                            processed_images.append(rel.rId)
+        
+        # 画像が処理され、かつテキストボックスのテキストがある場合
+        # テキストをdetailsタグで出力し、本文テキストをスキップ
+        if processed_images and all_shape_texts:
+            self._output_shape_texts_as_details(all_shape_texts)
+            return True  # 本文テキストをスキップ
+        
+        return False  # 画像処理なし、または通常の画像のみ
     
     def _extract_and_convert_image_inline(self, rel, drawing_element=None):
         """インライン画像を抽出・変換"""
