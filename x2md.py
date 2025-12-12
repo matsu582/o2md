@@ -110,7 +110,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
 
             return super().append(item)
 
-    def __init__(self, excel_file_path: str, output_dir=None, debug_mode=False, shape_metadata=False, output_format='png'):
+    def __init__(self, excel_file_path: str, output_dir=None, shape_metadata=False, output_format='png'):
         """コンバータインスタンスの初期化
 
         CLIから使用できるように、最小限で安全なコンストラクタを提供します。
@@ -120,7 +120,6 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         Args:
             excel_file_path: 変換するExcelファイルのパス
             output_dir: 出力ディレクトリ（省略時はデフォルト）
-            debug_mode: デバッグモード
             shape_metadata: 図形メタデータ出力フラグ
             output_format: 出力画像形式 ('png' または 'svg')
         """
@@ -132,7 +131,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             self.output_dir = os.path.join(os.getcwd(), "output")
         self.images_dir = os.path.join(self.output_dir, "images")
         
-        self.debug_mode = debug_mode
+        self.debug_mode = is_verbose()
         self.shape_metadata = shape_metadata
         self.output_format = output_format.lower() if output_format else 'png'
         
@@ -2367,14 +2366,12 @@ def main():
     parser.add_argument('excel_file', help='変換するExcelファイル（.xlsx/.xls）')
     parser.add_argument('-o', '--output-dir', type=str, 
                        help='出力ディレクトリを指定（デフォルト: ./output）')
-    parser.add_argument('--debug', action='store_true',
-                       help='デバッグモード：debug_workbooks、pdfs、diagnosticsフォルダを出力')
     parser.add_argument('--shape-metadata', action='store_true',
                        help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
     parser.add_argument('--format', choices=['png', 'svg'], default='svg',
                        help='出力画像形式を指定（デフォルト: png）')
     parser.add_argument('-v', '--verbose', action='store_true',
-                       help='デバッグ情報を出力')
+                       help='デバッグ情報を出力し、debug_workbooks/pdfs/diagnosticsフォルダを保存')
     
     args = parser.parse_args()
     
@@ -2407,7 +2404,6 @@ def main():
         converter = ExcelToMarkdownConverter(
             processing_file, 
             output_dir=args.output_dir, 
-            debug_mode=args.debug, 
             shape_metadata=args.shape_metadata,
             output_format=args.format
         )

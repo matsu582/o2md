@@ -273,7 +273,7 @@ def main():
     parser.add_argument('--format', choices=['png', 'svg'], default='svg',
                        help='出力画像形式を指定（デフォルト: png）')
     parser.add_argument('-v', '--verbose', action='store_true',
-                       help='デバッグ情報を出力')
+                       help='デバッグ情報を出力し、debug_workbooks/pdfs/diagnosticsフォルダを保存')
     
     args = parser.parse_args()
     
