@@ -2791,6 +2791,29 @@ class _TablesMixin:
                     debug_print(f"[DEBUG] ヘッダー候補除外(注記っぽい列): '{combined}' at 列{col} (col_nonempty={col_ratio:.2f})")
                     continue
 
+                # ヘッダーセルに書式を適用
+                # 代表セル（ヘッダー行の該当列セル）を使用して書式を取得
+                try:
+                    repr_cell = sheet.cell(header_row, col)
+                    # 結合セルの場合はマスターセルを使用
+                    key_repr = f"{header_row}_{col}"
+                    if key_repr in merged_info:
+                        mi_repr = merged_info[key_repr]
+                        repr_cell = sheet.cell(mi_repr['master_row'], mi_repr['master_col'])
+                    
+                    # <br>で分割して各パーツに書式を適用し、再結合
+                    if combined:
+                        fmt_parts = []
+                        for part in combined.split('<br>'):
+                            if part.strip():
+                                fmt_part = self._apply_cell_formatting(repr_cell, part.strip())
+                                fmt_parts.append(fmt_part)
+                            else:
+                                fmt_parts.append(part)
+                        combined = '<br>'.join(fmt_parts)
+                except Exception as e:
+                    debug_print(f"[DEBUG] ヘッダー書式適用エラー（無視）: {e}")
+
                 headers.append(combined)
                 header_positions.append(col)
                 if is_master_col:
@@ -3522,8 +3545,16 @@ class _TablesMixin:
             best_row_relation = best_title[5]
             
             # タイトルがテーブルの開始行と同じ行にある場合（row_relation == 1）は、
-            # 書式を適用しない（ヘッダー行と同じテキストにして重複検出を可能にする）
-            skip_formatting = (best_row_relation == 1)
+            # タイトルを返さない（ヘッダー行として出力されるため、重複を避ける）
+            # ただし、1行のテーブルの場合は、タイトルのみを含む可能性があるため、
+            # タイトルを返して、_convert_table_regionでスキップ判定を行う
+            is_single_row_table = (start_row == end_row)
+            if best_row_relation == 1 and not is_single_row_table:
+                debug_print(f"[DEBUG] タイトルがテーブル開始行と同じ行のため、タイトルなしとして扱う: '{best_title[0]}' at 行{best_row}")
+                self._last_table_title_row = None
+                return None
+            
+            skip_formatting = False
             
             same_row_candidates = [c for c in title_candidates if c[2] == best_row]
             if len(same_row_candidates) > 1:
