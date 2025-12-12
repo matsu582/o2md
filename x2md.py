@@ -1938,8 +1938,9 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 # table_indexを使用して、ファイル名/IDが実行間で
                 # 決定論的になるようにする。
                 # 離散データ領域の場合は列範囲の拡張を制限
+                # all_table_regionsを渡して、他テーブル領域内の行をタイトル候補から除外
                 is_discrete = region in discrete_region_set
-                self._convert_table_region(sheet, region, table_number=table_index, strict_column_bounds=is_discrete)
+                self._convert_table_region(sheet, region, table_number=table_index, strict_column_bounds=is_discrete, all_table_regions=table_regions)
                 table_index += 1
             except Exception as _e:
                 debug_print(f"[DEBUG] _convert_table_region failed for region={region}: {_e}")
@@ -2069,22 +2070,21 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             if cur_run:
                 runs.append((cur_run[0], cur_run[-1]))
 
-            # 十分に長い実行をテーブルとして出力（閾値=3行）
+            # 第1パス: 暗黙テーブル領域を収集（変換はまだ行わない）
+            implicit_table_regions = []
             for (srow, erow) in runs:
                 if (erow - srow + 1) >= 3:
-                    # 実行全体の最小/最大列を計算
                     cols_used = [c for r in range(srow, erow + 1) for c in row_cols.get(r, [])]
                     if cols_used:
                         smin = min(cols_used)
                         smax = max(cols_used)
-                        debug_print(f"[DEBUG] implicit table detected rows={srow}-{erow} cols={smin}-{smax}")
                         
                         if self._is_colon_separated_list(sheet, srow, erow, smin, smax):
                             debug_print(f"[DEBUG] implicit table is colon-separated list; skipping rows={srow}-{erow}")
                             continue
-                        # 強力なガード: 実行が2列の番号付き/リストスタイルの場合
-                        # （左列が①、1.、a)などの列挙マーカーで、右列が
-                        # 説明テキストの場合、暗黙のテーブルへの変換をスキップ
+                        
+                        # 番号付きリストのチェック
+                        skip_run = False
                         try:
                             content_cols_set = set(cols_used)
                             if len(content_cols_set) == 2:
@@ -2122,19 +2122,26 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                     ratio = num_matches / len(l_texts) if l_texts else 0.0
                                     r_avg = sum(len(x) for x in r_texts) / len(r_texts) if r_texts else 0
                                     if ratio >= 0.8 and r_avg >= 8:
-                                        debug_print(f"[DEBUG] implicit run looks like enumerated list; skipping table conversion rows={srow}-{erow} cols={lcol}-{rcol} left_ratio={ratio:.2f} right_avg={r_avg:.1f}")
-                                        continue
+                                        debug_print(f"[DEBUG] implicit run looks like enumerated list; skipping rows={srow}-{erow}")
+                                        skip_run = True
                         except (ValueError, TypeError) as e:
                             debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
-
-                        # 領域をテーブルとして変換（これはmarkdown_linesに追加される）
-                        try:
-                            self._convert_table_region(sheet, (srow, erow, smin, smax), table_number=0)
-                            # これらの行を処理済みとしてマークし、プレーンテキストとして出力されないようにする
-                            for rr in range(srow, erow + 1):
-                                processed_rows.add(rr)
-                        except Exception:
-                            pass  # データ構造操作失敗は無視
+                        
+                        if not skip_run:
+                            implicit_table_regions.append((srow, erow, smin, smax))
+                            debug_print(f"[DEBUG] implicit table detected rows={srow}-{erow} cols={smin}-{smax}")
+            
+            # 暗黙テーブル領域をtable_regionsに追加（タイトル検出用）
+            all_implicit_regions = table_regions + implicit_table_regions if table_regions else implicit_table_regions
+            
+            # 第2パス: 収集した領域を変換（all_table_regionsとして全領域を渡す）
+            for (srow, erow, smin, smax) in implicit_table_regions:
+                try:
+                    self._convert_table_region(sheet, (srow, erow, smin, smax), table_number=0, all_table_regions=all_implicit_regions)
+                    for rr in range(srow, erow + 1):
+                        processed_rows.add(rr)
+                except Exception:
+                    pass  # データ構造操作失敗は無視
         except Exception:
             pass  # データ構造操作失敗は無視
 

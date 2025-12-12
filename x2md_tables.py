@@ -1871,11 +1871,13 @@ class _TablesMixin:
                     self._output_markdown_table(table_data, source_rows=source_rows, sheet_title=sheet.title)
     
     def _convert_table_region(self, sheet, region: Tuple[int, int, int, int], table_number: int,
-                              strict_column_bounds: bool = False):
+                              strict_column_bounds: bool = False,
+                              all_table_regions: Optional[List[Tuple[int, int, int, int]]] = None):
         """指定された領域をテーブルとして変換（結合セル対応、ヘッダー行検出）
         
         Args:
             strict_column_bounds: Trueの場合、列範囲の拡張を制限（離散データ領域検出用）
+            all_table_regions: シート内の全テーブル領域（タイトル検出時に他テーブル領域を除外するため）
         """
         start_row, end_row, start_col, end_col = region
         # 診断エントリログ: 領域と生セル値の小さなサンプルを出力
@@ -1898,7 +1900,7 @@ class _TablesMixin:
         # 小さすぎるテーブル（1-2行のみ）で、タイトルのみを含む場合はスキップ
         if end_row - start_row <= 1:
             # この領域がタイトルのみかチェック
-            title_text = self._find_table_title_in_region(sheet, region, strict_column_bounds)
+            title_text = self._find_table_title_in_region(sheet, region, strict_column_bounds, all_table_regions)
             if title_text:
                 # タイトルのみの小さなテーブルはスキップ
                 debug_print(f"[DEBUG] タイトルのみの小さなテーブルをスキップ: '{title_text}' at 行{start_row}-{end_row}")
@@ -1919,7 +1921,8 @@ class _TablesMixin:
         
         # テーブルタイトルを常に検出（OnlineQC、StartupReportなど）
         # strict_column_boundsがTrueの場合は列範囲を制限
-        title_text = self._find_table_title_in_region(sheet, region, strict_column_bounds)
+        # all_table_regionsを渡して、他テーブル領域内の行をタイトル候補から除外
+        title_text = self._find_table_title_in_region(sheet, region, strict_column_bounds, all_table_regions)
         
         # この領域のタイトルテキストを検出した場合、ローカルに保持し、
         # table_data構築後に遅延テーブルメタデータに添付
@@ -3405,17 +3408,25 @@ class _TablesMixin:
 
     
     def _find_table_title_in_region(self, sheet, region: Tuple[int, int, int, int], 
-                                     strict_column_bounds: bool = False) -> Optional[str]:
+                                     strict_column_bounds: bool = False,
+                                     all_table_regions: Optional[List[Tuple[int, int, int, int]]] = None) -> Optional[str]:
         """テーブル領域内からタイトルを検出（汎用版: 特定キーワードには依存しない）
         
         Args:
             strict_column_bounds: Trueの場合、列範囲の拡張を制限（離散データ領域検出用）
+            all_table_regions: シート内の全テーブル領域（他テーブル領域内の行をタイトル候補から除外するため）
         """
         start_row, end_row, start_col, end_col = region
 
         # テーブル領域の前後でタイトルを探す（より広い範囲）
         search_start = max(1, start_row - 10)
-        search_end = min(start_row + 5, end_row + 1)
+        # all_table_regionsが提供されている場合は、テーブル領域内も検索可能
+        # 提供されていない場合は、テーブル領域の前のみを検索（データ行がタイトルとして検出されるのを防ぐ）
+        if all_table_regions:
+            search_end = min(start_row + 5, end_row + 1)
+        else:
+            # all_table_regionsがない場合は、テーブル領域の前のみを検索
+            search_end = start_row
 
         # 最適なタイトル候補を探す
         title_candidates = []
@@ -3427,8 +3438,27 @@ class _TablesMixin:
         else:
             col_search_start = max(1, start_col - 5)
             col_search_end = min(start_col + 15, end_col + 5)
+        
+        # 他のテーブル領域に含まれる行かどうかをチェックするヘルパー関数
+        def _is_row_in_other_table(check_row: int) -> bool:
+            """指定された行が他のテーブル領域（現在の領域以外）に含まれているかチェック"""
+            if not all_table_regions:
+                return False
+            for tr in all_table_regions:
+                tr_r1, tr_r2, tr_c1, tr_c2 = tr
+                # 現在の領域自身はスキップ
+                if tr == region:
+                    continue
+                # 行が他のテーブル領域に含まれているかチェック
+                if tr_r1 <= check_row <= tr_r2:
+                    return True
+            return False
 
         for row in range(search_start, search_end):
+            # 他のテーブル領域に含まれる行はタイトル候補から除外
+            if _is_row_in_other_table(row):
+                debug_print(f"[DEBUG] タイトル候補除外(他テーブル領域内): 行{row}")
+                continue
             for col in range(col_search_start, col_search_end):
                 cell = sheet.cell(row, col)
                 if cell.value:
