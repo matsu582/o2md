@@ -1490,32 +1490,27 @@ class WordToMarkdownConverter:
         Args:
             texts: 出力するテキストのリスト
         """
-        if not texts:
-            return
-        
-        # 重複を除去しつつ順序を保持
-        seen = set()
-        unique_texts = []
-        for t in texts:
-            if t not in seen:
-                seen.add(t)
-                unique_texts.append(t)
-        
-        if not unique_texts:
+        # 空文字列を除去（重複は除去しない）
+        items = [t.strip() for t in texts if t and t.strip()]
+        if not items:
             return
         
         self.markdown_lines.append("<details>")
         self.markdown_lines.append("<summary>図形内テキスト</summary>")
         self.markdown_lines.append("")
-        for text in unique_texts:
-            self.markdown_lines.append(text)
-            self.markdown_lines.append("")
-            # 出力したテキストを追跡（後で_extract_textbox_contentで除外するため）
-            self._emitted_shape_texts.add(text)
+        # カンマ区切り、""で括る形式で出力
+        line = ", ".join(f'"{t}"' for t in items)
+        self.markdown_lines.append(line)
+        self.markdown_lines.append("")
         self.markdown_lines.append("</details>")
         self.markdown_lines.append("")
         
-        debug_print(f"[DEBUG] 図形内テキスト {len(unique_texts)} 件を details で出力")
+        # 出力したテキストを追跡（後で_extract_textbox_contentで除外するため）
+        # 追跡用はユニークなテキストのみ
+        for t in set(items):
+            self._emitted_shape_texts.add(t)
+        
+        debug_print(f"[DEBUG] 図形内テキスト {len(items)} 件を details で出力")
     
     def _extract_and_convert_image(self, rel):
         """画像を抽出・変換（重複防止強化）"""
