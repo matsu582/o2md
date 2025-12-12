@@ -25,20 +25,39 @@ o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）を**それっぽ
 
 ## インストール
 
-### 1. Pythonライブラリ
+### 前提条件
+
+- Python 3.9 以上
+- [uv](https://docs.astral.sh/uv/) (推奨) または pip
+- LibreOffice (図形の画像処理と古い形式の変換に必要)
+
+### 1. uv のインストール（未インストールの場合）
 
 ```bash
-# pip を使用する場合
-pip install openpyxl python-docx python-pptx Pillow PyMuPDF
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# uv を使用する場合
-uv pip install openpyxl python-docx python-pptx Pillow PyMuPDF
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-### 2. 外部ツール
+### 2. プロジェクトのセットアップ
 
-#### LibreOffice
-古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換に必要
+```bash
+# リポジトリをクローン
+git clone https://github.com/matsu582/o2md.git
+cd o2md
+
+# 依存関係をインストール（uv sync で pyproject.toml から自動インストール）
+uv sync
+
+# 開発用依存関係も含める場合
+uv sync --all-extras
+```
+
+### 3. LibreOffice のインストール
+
+古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換に必要です。
 
 ```bash
 # macOS
@@ -57,35 +76,35 @@ sudo apt-get install libreoffice
 
 ```bash
 # Excelファイルを変換
-python o2md.py input_files/data.xlsx
+uv run python o2md.py input_files/data.xlsx
 
 # Wordファイルを変換
-python o2md.py input_files/document.docx
+uv run python o2md.py input_files/document.docx
 
 # PowerPointファイルを変換
-python o2md.py input_files/presentation.pptx
+uv run python o2md.py input_files/presentation.pptx
 ```
 
 ### オプション
 
 ```bash
 # 出力ディレクトリを指定
-python o2md.py input_files/data.xlsx -o custom_output
+uv run python o2md.py input_files/data.xlsx -o custom_output
 
 # Word文書で見出しテキストをリンクに使用
-python o2md.py input_files/document.docx --use-heading-text
+uv run python o2md.py input_files/document.docx --use-heading-text
 
 # PNG形式で画像を出力（デフォルトはSVG）
-python o2md.py input_files/data.xlsx --format png
+uv run python o2md.py input_files/data.xlsx --format png
 ```
 
 ### 古い形式のファイル
 
 ```bash
 # 古い形式も自動的に新形式に変換してから処理
-python o2md.py input_files/old_file.xls
-python o2md.py input_files/old_doc.doc
-python o2md.py input_files/old_presentation.ppt
+uv run python o2md.py input_files/old_file.xls
+uv run python o2md.py input_files/old_doc.doc
+uv run python o2md.py input_files/old_presentation.ppt
 ```
 
 ## コマンドラインオプション
@@ -96,6 +115,8 @@ python o2md.py input_files/old_presentation.ppt
 | `-o, --output-dir`   | 出力ディレクトリを指定（デフォルト: `./output`）        |
 | `--format`           | 画像出力形式を指定（`svg`または`png`、デフォルト: `svg`）|
 | `--use-heading-text` | [Word専用] 章番号の代わりに見出しテキストをリンクに使用 |
+| `--shape-metadata`   | [Word/Excel専用] 図形のメタデータを出力                 |
+| `-v, --verbose`      | 詳細なデバッグ出力を表示                                |
 | `-h, --help`         | ヘルプメッセージを表示                                  |
 
 ## 対応ファイル形式
@@ -130,15 +151,21 @@ SVG形式はベクター形式のため、拡大しても品質が劣化しま�
 - 図形（オートシェイプ、画像など）を画像化
 - 数式の値を出力
 - 複数シートの処理
+- 図形クラスタリングによる分離レンダリング
+- 罫線ベースのテーブル検出
 
 ### Word変換 (d2md.py)
 
 - 見出しレベルを維持（`#`, `##`, `###` など）
-- 段落とテキスト装飾
+- 段落とテキスト装飾（太字、斜体、下線、取り消し線、上付き/下付き文字）
 - 箇条書きと番号付きリスト
 - 表を Markdownテーブルに変換
 - 埋め込み画像の抽出
 - ハイパーリンクの保持
+- 目次の自動生成
+- 章参照のリンク変換（「第1章」→ `[第1章](#anchor)`）
+- 数式変換（OMML → LaTeX）
+- 図形・キャンバスの画像化
 
 ### PowerPoint変換 (p2md.py)
 
@@ -146,6 +173,7 @@ SVG形式はベクター形式のため、拡大しても品質が劣化しま�
 - テキストボックスの段落とリスト
 - 表を Markdownテーブルに変換
 - 図形群を1つの画像として出力
+- 発表者ノートの抽出
 - **複合スライド対応**: 表や図形が混在する場合、スライド全体を画像化してテキストを併記
 - .pptファイル対応: LibreOfficeで自動変換
 
@@ -167,13 +195,13 @@ SVG形式はベクター形式のため、拡大しても品質が劣化しま�
 
 ```bash
 # Excelファイルを変換
-python o2md.py input_files/sales_data.xlsx
+uv run python o2md.py input_files/sales_data.xlsx
 
 # Wordファイルを変換
-python o2md.py input_files/manual.docx
+uv run python o2md.py input_files/manual.docx
 
 # PowerPointファイルを変換
-python o2md.py input_files/presentation.pptx
+uv run python o2md.py input_files/presentation.pptx
 ```
 
 ## 制限事項
@@ -191,6 +219,5 @@ python o2md.py input_files/presentation.pptx
 ### PowerPoint (p2md.py)
 - アニメーションは変換されません
 - 埋め込み動画は変換されません（静止画のみ）
-- 発表者ノートは変換されません
 - スライドマスターのデザイン要素は反映されません
 
