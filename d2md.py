@@ -968,6 +968,10 @@ class WordToMarkdownConverter:
         """表を変換"""
         print("[INFO] 表を変換中...")
         
+        # テーブル前に空行を確保（Markdownビューワでの正しい表示のため）
+        if self.markdown_lines and self.markdown_lines[-1] != "":
+            self.markdown_lines.append("")
+        
         if not table.rows:
             self.markdown_lines.append("*空の表*")
             self.markdown_lines.append("")
