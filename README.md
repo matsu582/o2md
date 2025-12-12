@@ -191,19 +191,6 @@ SVG形式はベクター形式のため、拡大しても品質が劣化しま�
 
 これにより、吹き出しやカラフルな矩形などの装飾要素が適切に画像化されます。
 
-## 使用例
-
-```bash
-# Excelファイルを変換
-uv run python o2md.py input_files/sales_data.xlsx
-
-# Wordファイルを変換
-uv run python o2md.py input_files/manual.docx
-
-# PowerPointファイルを変換
-uv run python o2md.py input_files/presentation.pptx
-```
-
 ## 制限事項
 
 ### Excel (x2md.py)
