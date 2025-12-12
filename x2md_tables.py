@@ -68,6 +68,191 @@ class _TablesMixin:
         
         debug_print(f"[DEBUG] _detect_bordered_tables found {len(tables)} tables")
         return tables
+
+    def _find_discrete_data_regions(self, sheet, min_row: int, max_row: int, min_col: int, max_col: int, occupied_cells: Optional[Set[Tuple[int, int]]] = None) -> List[Tuple[int, int, int, int]]:
+        """空白行/列で区切られた離散データ領域を検出する
+        
+        doclingの実装を参考に、シート内の非空セルをスキャンし、
+        空白行/列で区切られた独立したデータ領域を個別のテーブルとして検出します。
+        
+        Args:
+            sheet: ワークシートオブジェクト
+            min_row: スキャン開始行
+            max_row: スキャン終了行
+            min_col: スキャン開始列
+            max_col: スキャン終了列
+            occupied_cells: 既に罫線テーブルで占有されているセルのセット（除外対象）
+            
+        Returns:
+            検出された離散データ領域のリスト [(start_row, end_row, start_col, end_col), ...]
+        """
+        debug_print(f"[DEBUG][_find_discrete_data_regions] sheet={sheet.title} range=({min_row}-{max_row}, {min_col}-{max_col}) occupied_cells_count={len(occupied_cells) if occupied_cells else 0}")
+        
+        tables: List[Tuple[int, int, int, int]] = []
+        visited: Set[Tuple[int, int]] = set()
+        
+        # 占有セルがある場合は訪問済みとしてマーク
+        if occupied_cells:
+            visited.update(occupied_cells)
+        
+        # シート内の非空セルをスキャン
+        for row in range(min_row, max_row + 1):
+            for col in range(min_col, max_col + 1):
+                if (row, col) in visited:
+                    continue
+                
+                cell = sheet.cell(row=row, column=col)
+                if cell.value is None or str(cell.value).strip() == '':
+                    continue
+                
+                # 新しいテーブル領域の開始点を発見
+                table_bounds, visited_cells = self._find_discrete_table_bounds(
+                    sheet, row, col, max_row, max_col
+                )
+                
+                if table_bounds:
+                    # 1列だけの領域はテーブルとして認識しない（テキストとして扱う）
+                    r1, r2, c1, c2 = table_bounds
+                    if c2 - c1 >= 1:  # 2列以上の場合のみテーブルとして追加
+                        # さらに、行のほとんどが1列しか使っていない場合もスキップ
+                        multi_col_rows = 0
+                        total_rows = r2 - r1 + 1
+                        for check_row in range(r1, r2 + 1):
+                            cols_with_data = 0
+                            for check_col in range(c1, c2 + 1):
+                                check_cell = sheet.cell(row=check_row, column=check_col)
+                                if check_cell.value is not None and str(check_cell.value).strip():
+                                    cols_with_data += 1
+                            if cols_with_data >= 2:
+                                multi_col_rows += 1
+                        
+                        # 30%以上の行が2列以上使っている場合のみテーブルとして認識
+                        if total_rows > 0 and multi_col_rows / total_rows >= 0.3:
+                            tables.append(table_bounds)
+                            debug_print(f"[DEBUG][_find_discrete_data_regions] accepted region {table_bounds}: {multi_col_rows}/{total_rows} rows have 2+ cols")
+                        else:
+                            debug_print(f"[DEBUG][_find_discrete_data_regions] rejected region {table_bounds}: only {multi_col_rows}/{total_rows} rows have 2+ cols")
+                    else:
+                        debug_print(f"[DEBUG][_find_discrete_data_regions] rejected single-column region {table_bounds}")
+                    visited.update(visited_cells)
+        
+        debug_print(f"[DEBUG][_find_discrete_data_regions] found {len(tables)} discrete regions: {tables[:5]}")
+        return tables
+
+    def _find_discrete_table_bounds(
+        self, sheet, start_row: int, start_col: int, max_row: int, max_col: int
+    ) -> Tuple[Optional[Tuple[int, int, int, int]], Set[Tuple[int, int]]]:
+        """離散テーブルの境界を検出する
+        
+        開始セルから空白行/列で区切られるまで領域を拡張し、
+        テーブルの境界と訪問済みセルのセットを返します。
+        
+        Args:
+            sheet: ワークシートオブジェクト
+            start_row: 開始行
+            start_col: 開始列
+            max_row: 最大行
+            max_col: 最大列
+            
+        Returns:
+            (テーブル境界タプル, 訪問済みセルのセット)
+        """
+        # 下方向に拡張（空白行で停止）
+        table_max_row = self._find_discrete_table_bottom(sheet, start_row, start_col, max_row)
+        
+        # 右方向に拡張（空白列で停止）
+        table_max_col = self._find_discrete_table_right(sheet, start_row, start_col, max_col)
+        
+        # 訪問済みセルを収集
+        visited_cells: Set[Tuple[int, int]] = set()
+        for row in range(start_row, table_max_row + 1):
+            for col in range(start_col, table_max_col + 1):
+                visited_cells.add((row, col))
+        
+        # 結合セルを考慮して境界を拡張
+        for merged_range in sheet.merged_cells.ranges:
+            if (merged_range.min_row <= table_max_row and merged_range.max_row >= start_row and
+                merged_range.min_col <= table_max_col and merged_range.max_col >= start_col):
+                table_max_row = max(table_max_row, merged_range.max_row)
+                table_max_col = max(table_max_col, merged_range.max_col)
+                # 結合セル内のセルも訪問済みとしてマーク
+                for r in range(merged_range.min_row, merged_range.max_row + 1):
+                    for c in range(merged_range.min_col, merged_range.max_col + 1):
+                        visited_cells.add((r, c))
+        
+        return (start_row, table_max_row, start_col, table_max_col), visited_cells
+
+    def _find_discrete_table_bottom(self, sheet, start_row: int, start_col: int, max_row: int) -> int:
+        """離散テーブルの下端を検出する（空白行で停止）
+        
+        Args:
+            sheet: ワークシートオブジェクト
+            start_row: 開始行
+            start_col: 開始列
+            max_row: 最大行
+            
+        Returns:
+            テーブルの下端行番号
+        """
+        table_max_row = start_row
+        
+        for row in range(start_row + 1, max_row + 1):
+            cell = sheet.cell(row=row, column=start_col)
+            
+            # 結合セルの一部かどうかをチェック
+            merged_range = None
+            for mr in sheet.merged_cells.ranges:
+                if mr.min_row <= row <= mr.max_row and mr.min_col <= start_col <= mr.max_col:
+                    merged_range = mr
+                    break
+            
+            if cell.value is None and not merged_range:
+                # 空白セルで結合セルでもない場合、停止
+                break
+            
+            # 結合セルの場合、その範囲の最大行まで拡張
+            if merged_range:
+                table_max_row = max(table_max_row, merged_range.max_row)
+            else:
+                table_max_row = row
+        
+        return table_max_row
+
+    def _find_discrete_table_right(self, sheet, start_row: int, start_col: int, max_col: int) -> int:
+        """離散テーブルの右端を検出する（空白列で停止）
+        
+        Args:
+            sheet: ワークシートオブジェクト
+            start_row: 開始行
+            start_col: 開始列
+            max_col: 最大列
+            
+        Returns:
+            テーブルの右端列番号
+        """
+        table_max_col = start_col
+        
+        for col in range(start_col + 1, max_col + 1):
+            cell = sheet.cell(row=start_row, column=col)
+            
+            # 結合セルの一部かどうかをチェック
+            merged_range = None
+            for mr in sheet.merged_cells.ranges:
+                if mr.min_row <= start_row <= mr.max_row and mr.min_col <= col <= mr.max_col:
+                    merged_range = mr
+                    break
+            
+            if cell.value is None and not merged_range:
+                # 空白セルで結合セルでもない場合、停止
+                break
+            
+            # 結合セルの場合、その範囲の最大列まで拡張
+            if merged_range:
+                table_max_col = max(table_max_col, merged_range.max_col)
+            else:
+                table_max_col = col
+        
+        return table_max_col
     
     def _is_valid_bordered_table(self, sheet, region):
         """罫線テーブルが有効かどうかをチェック（空行・空列が多すぎる場合は無効）"""
@@ -1707,8 +1892,15 @@ class _TablesMixin:
                     # 失敗時はデータ損失を避けるため即時出力にフォールバック
                     self._output_markdown_table(table_data, source_rows=source_rows, sheet_title=sheet.title)
     
-    def _convert_table_region(self, sheet, region: Tuple[int, int, int, int], table_number: int):
-        """指定された領域をテーブルとして変換（結合セル対応、ヘッダー行検出）"""
+    def _convert_table_region(self, sheet, region: Tuple[int, int, int, int], table_number: int,
+                              strict_column_bounds: bool = False,
+                              all_table_regions: Optional[List[Tuple[int, int, int, int]]] = None):
+        """指定された領域をテーブルとして変換（結合セル対応、ヘッダー行検出）
+        
+        Args:
+            strict_column_bounds: Trueの場合、列範囲の拡張を制限（離散データ領域検出用）
+            all_table_regions: シート内の全テーブル領域（タイトル検出時に他テーブル領域を除外するため）
+        """
         start_row, end_row, start_col, end_col = region
         # 診断エントリログ: 領域と生セル値の小さなサンプルを出力
         try:
@@ -1730,7 +1922,7 @@ class _TablesMixin:
         # 小さすぎるテーブル（1-2行のみ）で、タイトルのみを含む場合はスキップ
         if end_row - start_row <= 1:
             # この領域がタイトルのみかチェック
-            title_text = self._find_table_title_in_region(sheet, region)
+            title_text = self._find_table_title_in_region(sheet, region, strict_column_bounds, all_table_regions)
             if title_text:
                 # タイトルのみの小さなテーブルはスキップ
                 debug_print(f"[DEBUG] タイトルのみの小さなテーブルをスキップ: '{title_text}' at 行{start_row}-{end_row}")
@@ -1750,7 +1942,9 @@ class _TablesMixin:
             header_row, header_height = header_info
         
         # テーブルタイトルを常に検出（OnlineQC、StartupReportなど）
-        title_text = self._find_table_title_in_region(sheet, region)
+        # strict_column_boundsがTrueの場合は列範囲を制限
+        # all_table_regionsを渡して、他テーブル領域内の行をタイトル候補から除外
+        title_text = self._find_table_title_in_region(sheet, region, strict_column_bounds, all_table_regions)
         
         # この領域のタイトルテキストを検出した場合、ローカルに保持し、
         # table_data構築後に遅延テーブルメタデータに添付
@@ -2003,12 +2197,12 @@ class _TablesMixin:
         # テーブルデータを結合セル考慮で構築
         if header_row:
             # ヘッダー行を考慮した構築
-            table_data = self._build_table_with_header_row(sheet, region, header_row, merged_cells, header_height=header_height)
+            table_data = self._build_table_with_header_row(sheet, region, header_row, merged_cells, header_height=header_height, strict_column_bounds=strict_column_bounds)
             # ヘッダー行から開始するため、approx_rowsもheader_rowから計算
             actual_start_row = header_row
         else:
             # 従来の方法
-            table_data = self._build_table_data_with_merges(sheet, region, merged_cells)
+            table_data = self._build_table_data_with_merges(sheet, region, merged_cells, strict_column_bounds=strict_column_bounds)
             actual_start_row = start_row
         
         if table_data:
@@ -2372,11 +2566,13 @@ class _TablesMixin:
             self.markdown_lines.append("")  # セクション区切りの空行を追加
     
     def _build_table_with_header_row(self, sheet, region: Tuple[int, int, int, int], 
-                                   header_row: int, merged_info: Dict[str, Any], header_height: int = 1) -> List[List[str]]:
+                                   header_row: int, merged_info: Dict[str, Any], header_height: int = 1,
+                                   strict_column_bounds: bool = False) -> List[List[str]]:
         """ヘッダー行を基にテーブルを正しく構築
         
         Args:
             header_height: ヘッダーの高さ（行数）。_find_table_header_rowから渡される
+            strict_column_bounds: Trueの場合、列範囲の拡張を制限（離散データ領域検出用）
         """
         start_row, end_row, start_col, end_col = region
         
@@ -2384,16 +2580,19 @@ class _TablesMixin:
         
         # ヘッダー行の実際の行・列範囲を確認し、regionを拡張
         # (header_rowがregion外の場合や、「名前」など範囲外のヘッダーを含めるため)
+        # strict_column_boundsがTrueの場合は列範囲の拡張を制限
         actual_start_row = min(start_row, header_row)
         actual_end_row = max(end_row, header_row + header_height - 1)
         
         header_min_col = start_col
         header_max_col = end_col
-        for col_num in range(1, sheet.max_column + 1):
-            cell = sheet.cell(header_row, col_num)
-            if cell.value is not None and str(cell.value).strip():
-                header_min_col = min(header_min_col, col_num)
-                header_max_col = max(header_max_col, col_num)
+        if not strict_column_bounds:
+            # 列範囲の拡張を許可（従来の動作）
+            for col_num in range(1, sheet.max_column + 1):
+                cell = sheet.cell(header_row, col_num)
+                if cell.value is not None and str(cell.value).strip():
+                    header_min_col = min(header_min_col, col_num)
+                    header_max_col = max(header_max_col, col_num)
         
         if header_min_col < start_col or header_max_col > end_col or actual_start_row < start_row:
             debug_print(f"[DEBUG] ヘッダー行により範囲を拡張: 行{start_row}-{end_row} → {actual_start_row}-{actual_end_row}, 列{start_col}-{end_col} → {header_min_col}-{header_max_col}")
@@ -2613,6 +2812,29 @@ class _TablesMixin:
                     # 注記っぽい列としてスキップ
                     debug_print(f"[DEBUG] ヘッダー候補除外(注記っぽい列): '{combined}' at 列{col} (col_nonempty={col_ratio:.2f})")
                     continue
+
+                # ヘッダーセルに書式を適用
+                # 代表セル（ヘッダー行の該当列セル）を使用して書式を取得
+                try:
+                    repr_cell = sheet.cell(header_row, col)
+                    # 結合セルの場合はマスターセルを使用
+                    key_repr = f"{header_row}_{col}"
+                    if key_repr in merged_info:
+                        mi_repr = merged_info[key_repr]
+                        repr_cell = sheet.cell(mi_repr['master_row'], mi_repr['master_col'])
+                    
+                    # <br>で分割して各パーツに書式を適用し、再結合
+                    if combined:
+                        fmt_parts = []
+                        for part in combined.split('<br>'):
+                            if part.strip():
+                                fmt_part = self._apply_cell_formatting(repr_cell, part.strip())
+                                fmt_parts.append(fmt_part)
+                            else:
+                                fmt_parts.append(part)
+                        combined = '<br>'.join(fmt_parts)
+                except Exception as e:
+                    debug_print(f"[DEBUG] ヘッダー書式適用エラー（無視）: {e}")
 
                 headers.append(combined)
                 header_positions.append(col)
@@ -3081,14 +3303,10 @@ class _TablesMixin:
             if len(table_data) > 2:
                 debug_print(f"[DEBUG] table_data[2] (2番目のデータ行): {table_data[2]}")
         
-        # 2列最適化チェック（正規化後のヘッダーとgroup_positionsを使用）
-        debug_print(f"[DEBUG] 2列最適化チェック開始: headers={compressed_headers}, positions={group_positions}")
-        optimized_structure = self._optimize_table_for_two_columns(sheet, region, compressed_headers, group_positions)
-        if optimized_structure:
-            debug_print(f"[DEBUG] 2列最適化成功、テーブルサイズ: {len(optimized_structure)}行")
-            return self._trim_edge_empty_columns(optimized_structure)
-        else:
-            debug_print(f"[DEBUG] 2列最適化スキップ")
+        # 2列最適化は無効化（3列テーブルは3列のまま出力する）
+        # ユーザー要望: 「3列のものは3列で表示すべき」
+        # 将来の拡張のため関数本体は残しておく
+        debug_print(f"[DEBUG] 2列最適化は無効化されています（3列テーブルは3列のまま出力）")
         
         # 先頭/末尾の空列を削除して返す
         # --- ヒューリスティック：任意の列内で結合されている設定行を分割 ---
@@ -3234,19 +3452,62 @@ class _TablesMixin:
         return self._trim_edge_empty_columns(table_data)
 
     
-    def _find_table_title_in_region(self, sheet, region: Tuple[int, int, int, int]) -> Optional[str]:
-        """テーブル領域内からタイトルを検出（汎用版: 特定キーワードには依存しない）"""
+    def _find_table_title_in_region(self, sheet, region: Tuple[int, int, int, int], 
+                                     strict_column_bounds: bool = False,
+                                     all_table_regions: Optional[List[Tuple[int, int, int, int]]] = None) -> Optional[str]:
+        """テーブル領域内からタイトルを検出（汎用版: 特定キーワードには依存しない）
+        
+        Args:
+            strict_column_bounds: Trueの場合、列範囲の拡張を制限（離散データ領域検出用）
+            all_table_regions: シート内の全テーブル領域（他テーブル領域内の行をタイトル候補から除外するため）
+        
+        Returns:
+            タイトルテキスト（書式適用済み）またはNone
+        """
         start_row, end_row, start_col, end_col = region
 
         # テーブル領域の前後でタイトルを探す（より広い範囲）
         search_start = max(1, start_row - 10)
-        search_end = min(start_row + 5, end_row + 1)
+        # all_table_regionsが提供されている場合は、テーブル領域内も検索可能
+        # 提供されていない場合は、テーブル領域の前のみを検索（データ行がタイトルとして検出されるのを防ぐ）
+        if all_table_regions:
+            search_end = min(start_row + 5, end_row + 1)
+        else:
+            # all_table_regionsがない場合は、テーブル領域の前のみを検索
+            search_end = start_row
 
         # 最適なタイトル候補を探す
         title_candidates = []
 
+        # strict_column_boundsがTrueの場合は列範囲を制限
+        if strict_column_bounds:
+            col_search_start = start_col
+            col_search_end = end_col + 1
+        else:
+            col_search_start = max(1, start_col - 5)
+            col_search_end = min(start_col + 15, end_col + 5)
+        
+        # 他のテーブル領域に含まれる行かどうかをチェックするヘルパー関数
+        def _is_row_in_other_table(check_row: int) -> bool:
+            """指定された行が他のテーブル領域（現在の領域以外）に含まれているかチェック"""
+            if not all_table_regions:
+                return False
+            for tr in all_table_regions:
+                tr_r1, tr_r2, tr_c1, tr_c2 = tr
+                # 現在の領域自身はスキップ
+                if tr == region:
+                    continue
+                # 行が他のテーブル領域に含まれているかチェック
+                if tr_r1 <= check_row <= tr_r2:
+                    return True
+            return False
+
         for row in range(search_start, search_end):
-            for col in range(max(1, start_col - 5), min(start_col + 15, end_col + 5)):
+            # 他のテーブル領域に含まれる行はタイトル候補から除外
+            if _is_row_in_other_table(row):
+                debug_print(f"[DEBUG] タイトル候補除外(他テーブル領域内): 行{row}")
+                continue
+            for col in range(col_search_start, col_search_end):
                 cell = sheet.cell(row, col)
                 if cell.value:
                     text = str(cell.value).strip()
@@ -3303,15 +3564,41 @@ class _TablesMixin:
                 self._last_table_title_row = None
             
             best_row = best_title[2]
+            best_row_relation = best_title[5]
+            
+            # タイトルがテーブルの開始行と同じ行にある場合（row_relation == 1）は、
+            # タイトルを返さない（ヘッダー行として出力されるため、重複を避ける）
+            # ただし、1行のテーブルの場合は、タイトルのみを含む可能性があるため、
+            # タイトルを返して、_convert_table_regionでスキップ判定を行う
+            is_single_row_table = (start_row == end_row)
+            if best_row_relation == 1 and not is_single_row_table:
+                debug_print(f"[DEBUG] タイトルがテーブル開始行と同じ行のため、タイトルなしとして扱う: '{best_title[0]}' at 行{best_row}")
+                self._last_table_title_row = None
+                return None
+            
+            skip_formatting = False
+            
             same_row_candidates = [c for c in title_candidates if c[2] == best_row]
             if len(same_row_candidates) > 1:
                 same_row_candidates.sort(key=lambda x: x[3])
-                combined_title = ' '.join([c[0] for c in same_row_candidates])
-                debug_print("[DEBUG] タイトル選択（結合）: '{}' (type={}, row={})".format(combined_title, best_title[4], best_title[2]))
+                # 各候補に書式を適用して結合（ただしテーブル開始行の場合は書式を適用しない）
+                formatted_parts = []
+                for c in same_row_candidates:
+                    c_text, _, c_row, c_col, c_kind, _ = c
+                    if c_kind == 'bold' and not skip_formatting:
+                        formatted_parts.append(f"**{c_text}**")
+                    else:
+                        formatted_parts.append(c_text)
+                combined_title = ' '.join(formatted_parts)
+                debug_print("[DEBUG] タイトル選択（結合）: '{}' (type={}, row={}, skip_formatting={})".format(combined_title, best_title[4], best_title[2], skip_formatting))
                 return combined_title
             
-            debug_print("[DEBUG] タイトル選択: '{}' (type={}, row={})".format(best_title[0], best_title[4], best_title[2]))
-            return best_title[0]
+            # 太字の場合は書式を適用（ただしテーブル開始行の場合は書式を適用しない）
+            title_text = best_title[0]
+            if best_title[4] == 'bold' and not skip_formatting:
+                title_text = f"**{title_text}**"
+            debug_print("[DEBUG] タイトル選択: '{}' (type={}, row={}, skip_formatting={})".format(title_text, best_title[4], best_title[2], skip_formatting))
+            return title_text
 
         # タイトルが見つからない場合は以前のタイトル行をクリア
         self._last_table_title_row = None
@@ -3840,8 +4127,13 @@ class _TablesMixin:
         return rows_to_keep
     
     def _build_table_data_with_merges(self, sheet, region: Tuple[int, int, int, int], 
-                                     merged_info: Dict[str, Any]) -> List[List[str]]:
-        """結合セルを考慮してテーブルデータを構築（ヘッダー行の検出とテーブル構造改善）"""
+                                     merged_info: Dict[str, Any],
+                                     strict_column_bounds: bool = False) -> List[List[str]]:
+        """結合セルを考慮してテーブルデータを構築（ヘッダー行の検出とテーブル構造改善）
+        
+        Args:
+            strict_column_bounds: Trueの場合、列範囲の拡張を制限（離散データ領域検出用）
+        """
         start_row, end_row, start_col, end_col = region
         debug_print(f"[DEBUG] _build_table_data_with_merges実行: region={region}")
         
@@ -3855,13 +4147,15 @@ class _TablesMixin:
             
             # ヘッダー行の実際の列範囲を確認し、start_col/end_colを拡張
             # (「名前」など、テーブル範囲外のヘッダーを含めるため)
+            # strict_column_boundsがTrueの場合は列範囲の拡張を制限
             header_min_col = start_col
             header_max_col = end_col
-            for col_num in range(1, sheet.max_column + 1):
-                cell = sheet.cell(header_row, col_num)
-                if cell.value is not None and str(cell.value).strip():
-                    header_min_col = min(header_min_col, col_num)
-                    header_max_col = max(header_max_col, col_num)
+            if not strict_column_bounds:
+                for col_num in range(1, sheet.max_column + 1):
+                    cell = sheet.cell(header_row, col_num)
+                    if cell.value is not None and str(cell.value).strip():
+                        header_min_col = min(header_min_col, col_num)
+                        header_max_col = max(header_max_col, col_num)
             
             if header_min_col < start_col or header_max_col > end_col:
                 debug_print(f"[DEBUG] ヘッダー行により列範囲を拡張: {start_col}-{end_col} → {header_min_col}-{header_max_col}")
@@ -4232,17 +4526,45 @@ class _TablesMixin:
             return parts
     
     def _apply_cell_formatting(self, cell, text: str) -> str:
-        """セルの書式設定をMarkdownに適用"""
+        """セルの書式設定をMarkdownに適用
+        
+        対応する書式:
+        - 太字: **text**
+        - 斜体: *text*
+        - 下線: <u>text</u>
+        - 取り消し線: ~~text~~
+        - 上付き: <sup>text</sup>
+        - 下付き: <sub>text</sub>
+        """
         try:
             if not text:
                 return text
             
             # フォントスタイル
             if cell.font:
-                if cell.font.bold:
-                    text = f"**{text}**"
+                # 上付き/下付き（最も内側に適用）
+                vert_align = getattr(cell.font, 'vertAlign', None)
+                if vert_align == 'superscript':
+                    text = f"<sup>{text}</sup>"
+                elif vert_align == 'subscript':
+                    text = f"<sub>{text}</sub>"
+                
+                # 取り消し線
+                if getattr(cell.font, 'strike', False) or getattr(cell.font, 'strikethrough', False):
+                    text = f"~~{text}~~"
+                
+                # 下線
+                underline = getattr(cell.font, 'underline', None)
+                if underline and underline != 'none':
+                    text = f"<u>{text}</u>"
+                
+                # 斜体
                 if cell.font.italic:
                     text = f"*{text}*"
+                
+                # 太字（最も外側に適用）
+                if cell.font.bold:
+                    text = f"**{text}**"
             
             return text
             
@@ -4263,21 +4585,26 @@ class _TablesMixin:
                 return ''
             t = str(text)
 
-            # プログラムで挿入された<br>（および一般的なバリアント）を保持し、
-            # エスケープされないようにする。Excel由来の'<' '>'は引き続きエスケープする。
+            # プログラムで挿入されたHTMLタグを保持し、エスケープされないようにする。
+            # 許可されたタグ: <br>, <u>, </u>, <sup>, </sup>, <sub>, </sub>
+            # Excel由来の'<' '>'は引き続きエスケープする。
             # 許可されたタグをプレースホルダーに置き換え、汎用エスケープを実行し、
             # プレースホルダーをリテラルタグに戻す。
             allowed_tags = []
-            # 保持したいタグのバリアントを正規化（小文字）
+            # 保持したいタグのバリアントを正規化
+            # <br>タグ
             for m in re.finditer(r'(?i)<br\s*/?>', t):
-                allowed_tags.append(m.group(0))
+                allowed_tags.append((m.group(0), '<br>'))
+            # 書式用HTMLタグ（<u>, </u>, <sup>, </sup>, <sub>, </sub>）
+            for m in re.finditer(r'</?(?:u|sup|sub)>', t):
+                allowed_tags.append((m.group(0), m.group(0)))
 
             placeholders = {}
-            for i, tag in enumerate(allowed_tags):
-                ph = f'___BR_TAG_PLACEHOLDER_{i}___'
+            for i, (tag, normalized) in enumerate(allowed_tags):
+                ph = f'___HTML_TAG_PLACEHOLDER_{i}___'
                 # マッピングを維持するため毎回最初の出現のみを置換
                 t = t.replace(tag, ph, 1)
-                placeholders[ph] = tag
+                placeholders[ph] = normalized
 
             # 既存のHTMLエンティティを保護: エンティティの一部でない'&'を変換
             t = re.sub(r'&(?![A-Za-z]+;|#\d+;)', '&amp;', t)
@@ -4289,9 +4616,8 @@ class _TablesMixin:
             t = t.replace('|', '\\|')
 
             # 許可されたタグ（プレースホルダー）をリテラル形式に戻す
-            for ph, tag in placeholders.items():
-                # 正規化された'<br>'形式を使用
-                t = t.replace(ph, '<br>')
+            for ph, normalized_tag in placeholders.items():
+                t = t.replace(ph, normalized_tag)
 
             return t
         except Exception:

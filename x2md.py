@@ -676,12 +676,17 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 row_texts = []
                 for c in range(1, min(20, sheet.max_column) + 1):
                     try:
-                        v = sheet.cell(r, c).value
+                        cell = sheet.cell(r, c)
+                        v = cell.value
                     except Exception:
+                        cell = None
                         v = None
                     if v is not None:
                         s = str(v).strip()
                         if s:
+                            # セルの書式を適用
+                            if cell is not None:
+                                s = self._apply_cell_formatting(cell, s)
                             row_texts.append(s)
                 # この行のセル値を結合; 空行にはNoneを保持
                 if row_texts:
@@ -1018,6 +1023,9 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
             for r in range(1, max_row + 1):
                 if r in emitted:
+                    continue
+                # deferred_textsから来たテキストがある行はスキップ（書式が適用済み）
+                if r in texts_by_row:
                     continue
                 row_texts = []
                 for c in range(1, min(60, sheet.max_column) + 1):
@@ -1465,16 +1473,12 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                         md = f"![{sheet.title}](images/{img_fn})"
                         # ヘルパーメソッドを使用してメタデータ付き画像を挿入
                         try:
-                            if self.shape_metadata:
-                                filter_ids = self._image_shape_ids.get(img_fn)
-                                shapes_metadata = self._extract_all_shapes_metadata(sheet, filter_ids=filter_ids)
-                            else:
-                                shapes_metadata = []
+                            filter_ids = self._image_shape_ids.get(img_fn)
+                            shapes_metadata = self._extract_all_shapes_metadata(sheet, filter_ids=filter_ids)
                             
                             if shapes_metadata:
                                 debug_print(f"[DEBUG] 図形メタデータ抽出成功: {img_fn} -> {len(shapes_metadata)} shapes")
                                 text_metadata = self._format_shape_metadata_as_text(shapes_metadata)
-                                json_metadata = self._format_shape_metadata_as_json(shapes_metadata)
                                 
                                 self.markdown_lines.append(md)
                                 self.markdown_lines.append("")
@@ -1485,17 +1489,19 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                         self.markdown_lines.append(line)
                                     self.markdown_lines.append("")
                                 
-                                if json_metadata and json_metadata != "{}":
-                                    self.markdown_lines.append("<details>")
-                                    self.markdown_lines.append("<summary>JSON形式の図形情報</summary>")
-                                    self.markdown_lines.append("")
-                                    self.markdown_lines.append("```json")
-                                    for line in json_metadata.split('\n'):
-                                        self.markdown_lines.append(line)
-                                    self.markdown_lines.append("```")
-                                    self.markdown_lines.append("")
-                                    self.markdown_lines.append("</details>")
-                                    self.markdown_lines.append("")
+                                if self.shape_metadata:
+                                    json_metadata = self._format_shape_metadata_as_json(shapes_metadata)
+                                    if json_metadata and json_metadata != "{}":
+                                        self.markdown_lines.append("<details>")
+                                        self.markdown_lines.append("<summary>JSON形式の図形情報</summary>")
+                                        self.markdown_lines.append("")
+                                        self.markdown_lines.append("```json")
+                                        for line in json_metadata.split('\n'):
+                                            self.markdown_lines.append(line)
+                                        self.markdown_lines.append("```")
+                                        self.markdown_lines.append("")
+                                        self.markdown_lines.append("</details>")
+                                        self.markdown_lines.append("")
                             else:
                                 self.markdown_lines.append(md)
                                 self.markdown_lines.append("")
@@ -1704,6 +1710,51 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         table_regions = self._detect_bordered_tables(sheet, min_row, max_row, min_col, max_col)
         debug_print(f"[DEBUG][_convert_sheet_data] bordered_table_regions_count={len(table_regions)} sample={table_regions[:5]}")
 
+        # 離散データ領域を追跡するセット（strict_column_bounds=Trueで処理するため）
+        # 罫線テーブルも含める（罫線テーブルも列範囲の拡張を制限する）
+        discrete_region_set = set()
+        
+        # 罫線テーブルが占有するセルのマスクを作成（離散領域検出で除外するため）
+        occupied_cells = set()
+        for tr in table_regions:
+            tr_r1, tr_r2, tr_c1, tr_c2 = tr
+            for r in range(tr_r1, tr_r2 + 1):
+                for c in range(tr_c1, tr_c2 + 1):
+                    occupied_cells.add((r, c))
+            # 罫線テーブルも列範囲の拡張を制限するためセットに追加
+            discrete_region_set.add(tr)
+
+        # 罫線テーブルがある場合、その外側の領域に対してのみ離散領域検出を実行
+        # これにより、罫線なしテーブルが罫線テーブルの横に配置されている場合も検出可能
+        # five_sheet_.xlsxのように罫線テーブルがないシートでは離散領域検出は実行されない
+        if table_regions:
+            debug_print(f"[DEBUG] bordered tables found; trying discrete region detection for non-occupied areas")
+            try:
+                # 離散データ領域検出を実行（罫線テーブルの占有セルを除外）
+                discrete_regions = self._find_discrete_data_regions(
+                    sheet, min_row, max_row, min_col, max_col, occupied_cells
+                )
+                if discrete_regions:
+                    # 既存の罫線テーブルと重複しない離散領域のみを追加
+                    new_discrete_regions = []
+                    for dr in discrete_regions:
+                        dr_r1, dr_r2, dr_c1, dr_c2 = dr
+                        is_overlapping = False
+                        for tr in table_regions:
+                            tr_r1, tr_r2, tr_c1, tr_c2 = tr
+                            # 重複チェック（行と列の両方が重複している場合）
+                            if not (dr_r2 < tr_r1 or dr_r1 > tr_r2 or dr_c2 < tr_c1 or dr_c1 > tr_c2):
+                                is_overlapping = True
+                                break
+                        if not is_overlapping:
+                            new_discrete_regions.append(dr)
+                            discrete_region_set.add(dr)
+                    if new_discrete_regions:
+                        debug_print(f"[DEBUG] adding {len(new_discrete_regions)} non-overlapping discrete regions")
+                        table_regions = table_regions + new_discrete_regions
+            except Exception as _e:
+                debug_print(f"[DEBUG] discrete region detection failed: {_e}")
+
         # 罫線テーブルが見つからない場合、または罫線テーブルが上部の行（1-4）を含まない場合、
         # ヒューリスティック（結合セル、注釈、列分離）を使用するより広範なテーブル領域検出を試行。
         # これにより、シート上部のヘッダー行が適切に検出されることを保証
@@ -1711,29 +1762,33 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         if not table_regions or not top_region_in_bordered:
             try:
                 if not table_regions:
-                    debug_print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
-                else:
-                    debug_print(f"[DEBUG] bordered tables found but no top region (rows 1-4); trying heuristic _detect_table_regions to find header rows")
-                heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
-                try:
-                    debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
+                    debug_print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions first")
+                    # まずヒューリスティック検出を試行（mainブランチとの互換性維持）
+                    heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
                     if heur_tables:
-                        debug_print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
-                    if heur_annotations:
-                        debug_print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
-                except (ValueError, TypeError) as e:
-                    debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                if heur_tables:
-                    if not table_regions:
                         debug_print(f"[DEBUG] heuristic detection found {len(heur_tables)} table regions")
                         table_regions = heur_tables
                     else:
+                        # 離散領域検出は一時的に無効化（テキストがテーブルとして検出される問題を回避）
+                        debug_print("[DEBUG] heuristic detection failed; discrete region detection is disabled")
+                else:
+                    debug_print(f"[DEBUG] bordered tables found but no top region (rows 1-4); trying heuristic _detect_table_regions to find header rows")
+                    heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
+                    try:
+                        debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
+                        if heur_tables:
+                            debug_print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
+                        if heur_annotations:
+                            debug_print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
+                    except (ValueError, TypeError) as e:
+                        debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
+                    if heur_tables:
                         top_heur_tables = [r for r in heur_tables if r[0] == 1 and r[1] <= 4]
                         if top_heur_tables:
                             debug_print(f"[DEBUG] adding {len(top_heur_tables)} top regions from heuristic detection to bordered tables")
                             table_regions = top_heur_tables + table_regions
             except Exception as _e:
-                debug_print(f"[DEBUG] heuristic table detection failed: {_e}")
+                debug_print(f"[DEBUG] table detection failed: {_e}")
 
         # 変更: 描画（図形/画像）が占有するセル領域を検出し、重複する表領域は
         # テーブルとして出力せずプレーンテキスト扱いで出力する（ユーザ要望）。
@@ -1888,7 +1943,10 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 # 検出された領域をマークダウンテーブルに変換。単調増加する
                 # table_indexを使用して、ファイル名/IDが実行間で
                 # 決定論的になるようにする。
-                self._convert_table_region(sheet, region, table_number=table_index)
+                # 離散データ領域の場合は列範囲の拡張を制限
+                # all_table_regionsを渡して、他テーブル領域内の行をタイトル候補から除外
+                is_discrete = region in discrete_region_set
+                self._convert_table_region(sheet, region, table_number=table_index, strict_column_bounds=is_discrete, all_table_regions=table_regions)
                 table_index += 1
             except Exception as _e:
                 debug_print(f"[DEBUG] _convert_table_region failed for region={region}: {_e}")
@@ -1913,10 +1971,13 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                         row_texts = []
                         for col_num in range(sc, ec + 1):
                             if rr <= sheet.max_row and col_num <= sheet.max_column:
-                                cell_value = sheet.cell(row=rr, column=col_num).value
+                                cell = sheet.cell(row=rr, column=col_num)
+                                cell_value = cell.value
                                 if cell_value is not None:
                                     text = str(cell_value).strip()
                                     if text:
+                                        # セルの書式を適用
+                                        text = self._apply_cell_formatting(cell, text)
                                         row_texts.append(text)
                         if row_texts:
                             lines.append((rr, " ".join(row_texts)))
@@ -1944,10 +2005,13 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             row_texts = []
             for col_num in range(min_col, max_col + 1):
                 if row_num <= sheet.max_row and col_num <= sheet.max_column:
-                    v = sheet.cell(row=row_num, column=col_num).value
+                    cell = sheet.cell(row=row_num, column=col_num)
+                    v = cell.value
                     if v is not None:
                         s = str(v).strip()
                         if s:
+                            # セルの書式を適用
+                            s = self._apply_cell_formatting(cell, s)
                             row_texts.append(s)
             if not row_texts:
                 continue
@@ -2018,22 +2082,21 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             if cur_run:
                 runs.append((cur_run[0], cur_run[-1]))
 
-            # 十分に長い実行をテーブルとして出力（閾値=3行）
+            # 第1パス: 暗黙テーブル領域を収集（変換はまだ行わない）
+            implicit_table_regions = []
             for (srow, erow) in runs:
                 if (erow - srow + 1) >= 3:
-                    # 実行全体の最小/最大列を計算
                     cols_used = [c for r in range(srow, erow + 1) for c in row_cols.get(r, [])]
                     if cols_used:
                         smin = min(cols_used)
                         smax = max(cols_used)
-                        debug_print(f"[DEBUG] implicit table detected rows={srow}-{erow} cols={smin}-{smax}")
                         
                         if self._is_colon_separated_list(sheet, srow, erow, smin, smax):
                             debug_print(f"[DEBUG] implicit table is colon-separated list; skipping rows={srow}-{erow}")
                             continue
-                        # 強力なガード: 実行が2列の番号付き/リストスタイルの場合
-                        # （左列が①、1.、a)などの列挙マーカーで、右列が
-                        # 説明テキストの場合、暗黙のテーブルへの変換をスキップ
+                        
+                        # 番号付きリストのチェック
+                        skip_run = False
                         try:
                             content_cols_set = set(cols_used)
                             if len(content_cols_set) == 2:
@@ -2071,19 +2134,26 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                     ratio = num_matches / len(l_texts) if l_texts else 0.0
                                     r_avg = sum(len(x) for x in r_texts) / len(r_texts) if r_texts else 0
                                     if ratio >= 0.8 and r_avg >= 8:
-                                        debug_print(f"[DEBUG] implicit run looks like enumerated list; skipping table conversion rows={srow}-{erow} cols={lcol}-{rcol} left_ratio={ratio:.2f} right_avg={r_avg:.1f}")
-                                        continue
+                                        debug_print(f"[DEBUG] implicit run looks like enumerated list; skipping rows={srow}-{erow}")
+                                        skip_run = True
                         except (ValueError, TypeError) as e:
                             debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
-
-                        # 領域をテーブルとして変換（これはmarkdown_linesに追加される）
-                        try:
-                            self._convert_table_region(sheet, (srow, erow, smin, smax), table_number=0)
-                            # これらの行を処理済みとしてマークし、プレーンテキストとして出力されないようにする
-                            for rr in range(srow, erow + 1):
-                                processed_rows.add(rr)
-                        except Exception:
-                            pass  # データ構造操作失敗は無視
+                        
+                        if not skip_run:
+                            implicit_table_regions.append((srow, erow, smin, smax))
+                            debug_print(f"[DEBUG] implicit table detected rows={srow}-{erow} cols={smin}-{smax}")
+            
+            # 暗黙テーブル領域をtable_regionsに追加（タイトル検出用）
+            all_implicit_regions = table_regions + implicit_table_regions if table_regions else implicit_table_regions
+            
+            # 第2パス: 収集した領域を変換（all_table_regionsとして全領域を渡す）
+            for (srow, erow, smin, smax) in implicit_table_regions:
+                try:
+                    self._convert_table_region(sheet, (srow, erow, smin, smax), table_number=0, all_table_regions=all_implicit_regions)
+                    for rr in range(srow, erow + 1):
+                        processed_rows.add(rr)
+                except Exception:
+                    pass  # データ構造操作失敗は無視
         except Exception:
             pass  # データ構造操作失敗は無視
 
@@ -2164,10 +2234,13 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             row_texts = []
             for col_num in range(min_col, max_col + 1):
                 if row_num <= sheet.max_row and col_num <= sheet.max_column:
-                    cell_value = sheet.cell(row=row_num, column=col_num).value
+                    cell = sheet.cell(row=row_num, column=col_num)
+                    cell_value = cell.value
                     if cell_value is not None:
                         text = str(cell_value).strip()
                         if text:
+                            # セルの書式を適用
+                            text = self._apply_cell_formatting(cell, text)
                             row_texts.append(text)
             
             # 行にテキストがある場合は出力
@@ -2202,8 +2275,10 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 cell = sheet.cell(row=row_num, column=col_num)
                 if cell.value is not None:
                     text = str(cell.value).strip()
-            if text:
-                row_text.append(text)
+                    if text:
+                        # セルの書式を適用
+                        text = self._apply_cell_formatting(cell, text)
+                        row_text.append(text)
 
             if row_text:
                 text_content.append(" ".join(row_text))

@@ -272,7 +272,15 @@ class _GraphicsMixin:
                                                                 cluster_row = 1
                                                             
                                                             isolated_produced = True
-                                                            isolated_images.append((cluster_row, img_name))
+                                                            
+                                                            # 各クラスタのレンダリング直後に図形IDを保存
+                                                            # これにより、複数クラスタがある場合でも各画像に正しい図形IDが関連付けられる
+                                                            cluster_shape_ids = None
+                                                            if hasattr(self, '_last_iso_preserved_ids') and self._last_iso_preserved_ids:
+                                                                cluster_shape_ids = set(self._last_iso_preserved_ids)
+                                                                debug_print(f"[DEBUG] クラスタ {idx+1} の図形ID: {len(cluster_shape_ids)} shapes")
+                                                            
+                                                            isolated_images.append((cluster_row, img_name, cluster_shape_ids))
                                                             print(f"[INFO] シート '{sheet.title}' のクラスタ {idx+1} をisolated groupとして出力: {img_name} (row={cluster_row})")
                                                 
                                                 if isolated_produced:
@@ -280,8 +288,8 @@ class _GraphicsMixin:
                                                     debug_print(f"[DEBUG] isolated_images count: {len(isolated_images)}")
                                                     # isolated group画像をMarkdownに追加するため、images_foundをTrueに設定
                                                     images_found = True
-                                                    # 各画像を登録（row情報を使用）
-                                                    for cluster_row, img_name in isolated_images:
+                                                    # 各画像を登録（row情報と図形IDを使用）
+                                                    for cluster_row, img_name, cluster_shape_ids in isolated_images:
                                                         debug_print(f"[DEBUG] Processing isolated group image: {img_name} at row={cluster_row}")
                                                         try:
                                                             self._mark_image_emitted(img_name)
@@ -298,9 +306,10 @@ class _GraphicsMixin:
                                                             self._sheet_shape_images[sheet.title].append((cluster_row, img_name))
                                                             debug_print(f"[DEBUG] isolated group画像を_sheet_shape_imagesに追加: {img_name} at row={cluster_row}")
                                                             
-                                                            if hasattr(self, '_last_iso_preserved_ids') and self._last_iso_preserved_ids:
-                                                                self._image_shape_ids[img_name] = set(self._last_iso_preserved_ids)
-                                                                debug_print(f"[DEBUG] 図形IDマッピングを保存: {img_name} -> {len(self._last_iso_preserved_ids)} shapes")
+                                                            # 各クラスタの図形IDを使用（レンダリング時に保存したもの）
+                                                            if cluster_shape_ids:
+                                                                self._image_shape_ids[img_name] = cluster_shape_ids
+                                                                debug_print(f"[DEBUG] 図形IDマッピングを保存: {img_name} -> {len(cluster_shape_ids)} shapes")
                                                         except Exception as e:
                                                             print(f"[WARNING] Failed to add to _sheet_shape_images: {e}")
                                                             import traceback
@@ -2511,6 +2520,9 @@ class _GraphicsMixin:
     def _format_shape_metadata_as_text(self, shapes_metadata: List[Dict[str, Any]]) -> str:
         """図形メタデータを人間が読みやすいテキスト形式に整形
         
+        図形内のテキストを<details>タグで折りたたみ表示する。
+        抽出したテキストは""で括り、カンマ区切りで表示。
+        
         Args:
             shapes_metadata: 図形メタデータのリスト
             
@@ -2520,54 +2532,25 @@ class _GraphicsMixin:
         if not shapes_metadata:
             return ""
         
-        lines = []
-        lines.append("### 図形情報")
-        lines.append("")
-        
-        for idx, meta in enumerate(shapes_metadata, 1):
-            shape_type = meta.get('type', 'unknown')
-            shape_name = meta.get('name', f'図形{idx}')
-            
-            type_map = {
-                'picture': '画像',
-                'shape': '図形',
-                'connector': 'コネクタ',
-                'group': 'グループ',
-                'graphic_frame': 'グラフィックフレーム',
-                'unknown': '不明'
-            }
-            type_ja = type_map.get(shape_type, shape_type)
-            
-            lines.append(f"**{shape_name}** ({type_ja})")
-            
-            pos = meta.get('position', {})
-            if 'from_col' in pos and 'from_row' in pos:
-                from_cell = f"{col_letter(pos['from_col'])}{pos['from_row']}"
-                if 'to_col' in pos and 'to_row' in pos:
-                    to_cell = f"{col_letter(pos['to_col'])}{pos['to_row']}"
-                    lines.append(f"- 位置: {from_cell} ～ {to_cell}")
-                else:
-                    lines.append(f"- 位置: {from_cell} から")
-            
-            if shape_type == 'shape':
-                preset = meta.get('shape_properties', {}).get('preset', '')
-                if preset:
-                    lines.append(f"- 図形タイプ: {preset}")
-            
-            if shape_type == 'connector':
-                conn_type = meta.get('connector_type', '')
-                if conn_type:
-                    lines.append(f"- コネクタタイプ: {conn_type}")
-            
+        all_texts = []
+        for meta in shapes_metadata:
             text_content = meta.get('text_content', [])
             if text_content:
-                lines.append(f"- テキスト: {' / '.join(text_content)}")
-            
-            description = meta.get('description', '')
-            if description:
-                lines.append(f"- 説明: {description}")
-            
-            lines.append("")
+                all_texts.extend(text_content)
+        
+        if not all_texts:
+            return ""
+        
+        quoted_texts = [f'"{t}"' for t in all_texts]
+        texts_line = ', '.join(quoted_texts)
+        
+        lines = []
+        lines.append("<details>")
+        lines.append("<summary>図形内テキスト</summary>")
+        lines.append("")
+        lines.append(texts_line)
+        lines.append("")
+        lines.append("</details>")
         
         return '\n'.join(lines)
 
