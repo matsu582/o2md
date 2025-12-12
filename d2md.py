@@ -29,6 +29,13 @@ import io
 
 from utils import get_libreoffice_path
 
+# 数式変換モジュール (オプション)
+try:
+    from omml_converter.pre_process import pre_process_docx, has_math_content
+    MATH_SUPPORT = True
+except ImportError:
+    MATH_SUPPORT = False
+
 try:
     from docx import Document
     from docx.shared import Inches
@@ -86,7 +93,15 @@ class WordToMarkdownConverter:
             output_format: 出力画像形式 ('png' または 'svg')
         """
         self.word_file = word_file_path
-        self.doc = Document(word_file_path)
+        
+        # 数式前処理: OMML を LaTeX に変換
+        if MATH_SUPPORT and has_math_content(word_file_path):
+            print("[INFO] 数式を検出しました。LaTeX 形式に変換します...")
+            with open(word_file_path, 'rb') as f:
+                processed_docx = pre_process_docx(f)
+            self.doc = Document(processed_docx)
+        else:
+            self.doc = Document(word_file_path)
         self.base_name = Path(word_file_path).stem
         
         # 出力ディレクトリの設定
@@ -107,6 +122,10 @@ class WordToMarkdownConverter:
         self.heading_titles_map = {}  # 章番号と見出しタイトルのマッピング
         self.use_heading_text = use_heading_text  # 章番号の代わりに見出しテキストを使用するオプション
         self.processed_images = {}  # ハッシュベース重複検出用辞書
+        self._emitted_plain_paragraphs = set()  # 本文として出力したテキスト（重複チェック用）
+        self._shape_processed_paragraphs = set()  # 図形として処理済みの段落（テキスト出力スキップ用）
+        self._shape_texts_by_image = {}  # 画像ファイル名 -> 図形内テキストのマップ
+        self._emitted_shape_texts = set()  # 図形処理時に出力したテキスト（重複チェック用）
         self.referenced_images = set()  # 実際に文書内で参照されている画像のrId
         self.vector_image_counter = 0  # ベクター画像専用カウンター
         self.regular_image_counter = 0  # 通常画像専用カウンター
@@ -134,6 +153,9 @@ class WordToMarkdownConverter:
         # 2. 文書本体を変換（Word文書の構造をそのまま再現）
         # 目次は文書内の適切な位置で挿入される
         self._convert_document_body()
+        
+        # 2.5. テキストボックス内テキストを抽出
+        self._extract_textbox_content()
         
         # 3. Markdownファイルを保存
         markdown_content = "\n".join(self.markdown_lines)
@@ -404,15 +426,27 @@ class WordToMarkdownConverter:
             if element.tag.endswith('}p'):  # 段落
                 paragraph = self._find_paragraph_by_element(element)
                 if paragraph:
-                    self._convert_paragraph(paragraph)
-                    # 段落に画像が含まれている場合は、その場で画像を処理
-                    self._process_paragraph_images(paragraph)
+                    # 図形処理を先に行う（図形が画像化された場合、段落を記録）
+                    shape_processed = self._process_paragraph_images(paragraph)
+                    
+                    # 図形として処理された段落はテキスト出力をスキップ
+                    if not shape_processed:
+                        self._convert_paragraph(paragraph)
+                    
                     # 見出しかどうかを記録
                     if self._is_heading(paragraph):
                         previous_element_type = 'heading'
                     elif self._is_list_item(paragraph):
                         previous_element_type = 'list'
                     else:
+                        previous_element_type = 'paragraph'
+                else:
+                    # python-docx の paragraphs に含まれない段落（数式前処理で追加された段落など）
+                    # XML要素から直接テキストを抽出
+                    text = self._extract_text_from_xml_element(element)
+                    if text and text.strip():
+                        self.markdown_lines.append(text)
+                        self.markdown_lines.append("")
                         previous_element_type = 'paragraph'
             elif element.tag.endswith('}tbl'):  # 表
                 table = self._find_table_by_element(element)
@@ -440,30 +474,122 @@ class WordToMarkdownConverter:
                 return table
         return None
     
-    def _get_paragraph_text_without_hidden(self, paragraph) -> str:
-        """段落から隠しテキスト（vanish属性を持つrun）を除外してテキストを取得"""
+    def _extract_text_from_xml_element(self, element) -> str:
+        """XML要素から直接テキストを抽出
+        
+        python-docx の paragraphs に含まれない段落（数式前処理で追加された段落など）
+        からテキストを抽出するために使用します。
+        
+        Args:
+            element: XML要素（w:p）
+        
+        Returns:
+            str: 抽出されたテキスト
+        """
+        W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        texts = []
+        for t_elem in element.iter(W_NS + "t"):
+            if t_elem.text:
+                texts.append(t_elem.text)
+        return "".join(texts)
+    
+    def _get_paragraph_text_without_hidden(self, paragraph, preserve_format: bool = True) -> str:
+        """段落から隠しテキスト（vanish属性を持つrun）を除外してテキストを取得
+        
+        Args:
+            paragraph: 段落オブジェクト
+            preserve_format: フォーマット情報を保持するかどうか（デフォルト: True）
+        
+        Returns:
+            str: テキスト（フォーマット情報付き）
+        """
         text_parts = []
         for run in paragraph.runs:
             try:
                 vanish_elem = run._element.xpath('.//w:vanish')
                 if not vanish_elem:
                     if run.text:
-                        text_parts.append(run.text)
+                        text = run.text
+                        if preserve_format:
+                            text = self._apply_run_formatting(run, text)
+                        text_parts.append(text)
             except Exception:
                 if run.text:
                     text_parts.append(run.text)
         
         return ''.join(text_parts)
     
+    def _apply_run_formatting(self, run, text: str) -> str:
+        """Run のフォーマット情報を Markdown 記法に変換
+        
+        Args:
+            run: python-docx の Run オブジェクト
+            text: 元のテキスト
+        
+        Returns:
+            str: フォーマット適用後のテキスト
+        """
+        if not text or not text.strip():
+            return text
+        
+        # 上付き文字
+        if run.font.superscript:
+            text = f"<sup>{text}</sup>"
+        
+        # 下付き文字
+        if run.font.subscript:
+            text = f"<sub>{text}</sub>"
+        
+        # 取り消し線 (strike または dstrike)
+        if run.font.strike or self._has_double_strike(run):
+            text = f"~~{text}~~"
+        
+        # 下線 (Markdown では直接サポートされないため HTML タグを使用)
+        if run.font.underline and run.font.underline is not False:
+            text = f"<u>{text}</u>"
+        
+        # 斜体
+        if run.font.italic:
+            text = f"*{text}*"
+        
+        # 太字
+        if run.font.bold:
+            text = f"**{text}**"
+        
+        return text
+    
+    def _has_double_strike(self, run) -> bool:
+        """Run に二重取り消し線があるかチェック"""
+        try:
+            dstrike_elem = run._element.xpath('.//w:dstrike')
+            return bool(dstrike_elem)
+        except Exception:
+            return False
+    
     def _convert_paragraph(self, paragraph):
         """段落を変換"""
         text = self._get_paragraph_text_without_hidden(paragraph).strip()
+        
+        # paragraph.runs が空の場合（数式前処理で追加された段落など）は
+        # XML要素から直接テキストを抽出
+        if not text and hasattr(paragraph, '_element'):
+            text = self._extract_text_from_xml_element(paragraph._element).strip()
+        
+        # プレーンテキストを取得（フォーマットなし、重複チェック用）
+        plain_text = self._get_paragraph_text_without_hidden(paragraph, preserve_format=False).strip()
+        if not plain_text and hasattr(paragraph, '_element'):
+            plain_text = self._extract_text_from_xml_element(paragraph._element).strip()
+        
         style_name = paragraph.style.name.lower()
         
         if not text:
             # 空の段落は空行として処理
             self.markdown_lines.append("")
             return
+        
+        # 本文として出力したテキストを記録（テキストボックス重複チェック用）
+        if plain_text:
+            self._emitted_plain_paragraphs.add(plain_text)
         
         # Word文書内の目次を検出して展開
         if self._is_toc_placeholder(paragraph):
@@ -911,30 +1037,126 @@ class WordToMarkdownConverter:
         
         return escaped_text
     
-    def _process_paragraph_images(self, paragraph):
-        """段落内の画像を処理"""
+    def _process_paragraph_images(self, paragraph) -> bool:
+        """段落内の画像を処理
+        
+        Returns:
+            bool: 図形として処理された場合はTrue（テキスト出力をスキップすべき）
+        """
         
         # Word図形キャンバスがある場合は複合図形として処理
         # 処理が行われた場合のみ早期終了、そうでなければ通常の画像処理にフォールバック
         if self._has_word_processing_canvas(paragraph):
             if self._process_composite_figure(paragraph):
-                return
+                return True  # 図形として処理された
         
-        # 段落内のRunを調べて画像があるかチェック
+        # 段落内のすべてのdrawing要素を収集
+        all_drawings = []
         for run in paragraph.runs:
-            # drawing要素を取得
             drawings = run._element.xpath('.//w:drawing')
-            for drawing in drawings:
-                for inline_shape in drawing.xpath('.//a:blip'):
-                    # 画像の参照IDを取得
-                    embed_id = inline_shape.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
-                    if embed_id:
-                        # 対応するリレーションを探す
-                        for rel in paragraph.part.rels.values():
-                            if rel.rId == embed_id and "image" in rel.reltype:
-                                # その場で画像を処理（drawing要素も渡す）
-                                self._extract_and_convert_image_inline(rel, drawing)
-                                return  # 1つの段落につき1つの画像のみ処理
+            all_drawings.extend(drawings)
+        
+        # 画像（blip）を含むdrawingとテキストボックス（wsp）を含むdrawingを分類
+        has_bitmap_image = False
+        has_textbox = False
+        all_shape_texts = []
+        
+        for drawing in all_drawings:
+            # テキストボックスのテキストを抽出
+            shape_texts = self._extract_shape_texts_from_drawing(drawing)
+            if shape_texts:
+                all_shape_texts.extend(shape_texts)
+                has_textbox = True
+            
+            # 画像（blip）があるかチェック
+            blips = drawing.xpath('.//a:blip')
+            if blips:
+                has_bitmap_image = True
+        
+        # 画像とテキストボックスが両方ある場合、vector_compositeとして処理
+        if has_bitmap_image and has_textbox:
+            debug_print(f"[DEBUG] 画像+テキストボックス混在段落を検出、vector_compositeとして処理")
+            if self._process_mixed_drawings_as_vector(all_drawings, all_shape_texts):
+                return True  # vector_compositeとして処理された
+        
+        # 通常の画像処理（テキストボックスがない場合）
+        for drawing in all_drawings:
+            for inline_shape in drawing.xpath('.//a:blip'):
+                embed_id = inline_shape.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+                if embed_id:
+                    for rel in paragraph.part.rels.values():
+                        if rel.rId == embed_id and "image" in rel.reltype:
+                            self._extract_and_convert_image_inline(rel, drawing)
+        
+        return False  # 画像処理なし、または通常の画像のみ
+    
+    def _process_mixed_drawings_as_vector(self, drawing_elements, shape_texts):
+        """画像とテキストボックスが混在するdrawing要素をvector_compositeとして処理
+        
+        Args:
+            drawing_elements: drawing要素のリスト
+            shape_texts: 抽出済みのテキストボックステキスト
+            
+        Returns:
+            bool: 処理成功時True
+        """
+        try:
+            print(f"[INFO] 画像+テキストボックス混在図形を処理中...")
+            
+            # 一時的なWord文書を作成して複数のdrawing要素を含める
+            temp_doc_path = self._create_canvas_document(None, drawing_elements)
+            if not temp_doc_path:
+                return False
+            
+            debug_print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
+            
+            # LibreOfficeでPDFに変換
+            temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
+            if not temp_pdf_path:
+                os.unlink(temp_doc_path)
+                return False
+            
+            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            
+            # PDFから画像に変換（vector_composite用カウンターを使用）
+            self.vector_image_counter += 1
+            ext = self.output_format
+            image_filename = f"{self.base_name}_vector_composite_{self.vector_image_counter:03d}.{ext}"
+            image_path = os.path.join(self.images_dir, image_filename)
+            
+            # 出力形式に応じて変換
+            if self.output_format == 'svg':
+                convert_success = self._convert_pdf_to_svg(temp_pdf_path, image_path)
+            else:
+                convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
+            
+            if convert_success:
+                # Markdownに追加（ファイル名をURLエンコード）
+                encoded_filename = urllib.parse.quote(image_filename)
+                self.markdown_lines.append(f"![](images/{encoded_filename})")
+                self.markdown_lines.append("")
+                
+                # 図形内テキストをdetailsで出力
+                self._output_shape_texts_as_details(shape_texts)
+                
+                print(f"[SUCCESS] 混在図形をvector_compositeとして処理: {image_filename}")
+                
+                # 一時ファイルを削除
+                os.unlink(temp_doc_path)
+                os.unlink(temp_pdf_path)
+                return True
+            
+            # 一時ファイルを削除
+            os.unlink(temp_doc_path)
+            if os.path.exists(temp_pdf_path):
+                os.unlink(temp_pdf_path)
+            return False
+            
+        except Exception as e:
+            print(f"[ERROR] 混在図形処理エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def _extract_and_convert_image_inline(self, rel, drawing_element=None):
         """インライン画像を抽出・変換"""
@@ -1042,6 +1264,343 @@ class WordToMarkdownConverter:
                 
                 if not already_processed:
                     self._extract_and_convert_image(rel)
+    
+    def _extract_textbox_content(self):
+        """テキストボックスと図形内のテキストを抽出して details タグで出力
+        
+        VML (<v:textbox>) と DrawingML (txbxContent) の両方からテキストを抽出します。
+        既に本文として出力されたテキストは重複を避けるため出力しません。
+        """
+        print("[INFO] テキストボックス内テキストを抽出中...")
+        
+        # python-docx の BaseOxmlElement.xpath() は namespaces キーワードをサポートしていないため
+        # XML を文字列に変換して lxml で再パースする
+        from lxml import etree
+        
+        textbox_texts = []
+        processed_ids = set()
+        
+        # 文書の XML を取得して再パース
+        doc_element = self.doc.element
+        
+        # XML を文字列に変換して lxml で再パース
+        xml_str = etree.tostring(doc_element, encoding='unicode')
+        root = etree.fromstring(xml_str.encode('utf-8'))
+        
+        # 再パース後の nsmap を使用（None キーを除外）
+        nsmap = {k: v for k, v in root.nsmap.items() if k is not None}
+        
+        # 数式前処理後に名前空間が失われる場合があるため、必要な名前空間を追加
+        # Office Open XML の標準名前空間を定義
+        required_namespaces = {
+            'v': 'urn:schemas-microsoft-com:vml',
+            'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+            'wps': 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape',
+            'mc': 'http://schemas.openxmlformats.org/markup-compatibility/2006',
+        }
+        for prefix, uri in required_namespaces.items():
+            if prefix not in nsmap:
+                nsmap[prefix] = uri
+        
+        # VML テキストボックス (<v:textbox>) を検索
+        vml_textboxes = root.xpath('.//v:textbox', namespaces=nsmap)
+        
+        for textbox in vml_textboxes:
+            textbox_id = id(textbox)
+            if textbox_id in processed_ids:
+                continue
+            processed_ids.add(textbox_id)
+            
+            # テキストボックス内の段落を取得
+            paragraphs = textbox.xpath('.//w:p', namespaces=nsmap)
+            texts = self._extract_texts_from_lxml_paragraphs(paragraphs, nsmap)
+            if texts:
+                textbox_texts.append(texts)
+        
+        # DrawingML テキストボックス (txbxContent) を検索
+        txbx_contents = root.xpath('.//wps:txbx//w:txbxContent', namespaces=nsmap)
+        for txbx in txbx_contents:
+            txbx_id = id(txbx)
+            if txbx_id in processed_ids:
+                continue
+            processed_ids.add(txbx_id)
+            
+            # テキストボックス内の段落を取得
+            paragraphs = txbx.xpath('.//w:p', namespaces=nsmap)
+            texts = self._extract_texts_from_lxml_paragraphs(paragraphs, nsmap)
+            if texts:
+                textbox_texts.append(texts)
+        
+        # mc:AlternateContent 内のテキストボックスも検索
+        alt_txbx = root.xpath('.//mc:AlternateContent//wps:txbx//w:txbxContent', namespaces=nsmap)
+        for txbx in alt_txbx:
+            txbx_id = id(txbx)
+            if txbx_id in processed_ids:
+                continue
+            processed_ids.add(txbx_id)
+            
+            paragraphs = txbx.xpath('.//w:p', namespaces=nsmap)
+            texts = self._extract_texts_from_lxml_paragraphs(paragraphs, nsmap)
+            if texts:
+                textbox_texts.append(texts)
+        
+        # 既に本文または図形処理で出力されたテキストを除外
+        filtered_textbox_texts = []
+        for texts in textbox_texts:
+            # テキストボックス内の全テキストを結合してチェック
+            combined_text = "".join(t.strip() for t in texts if t.strip())
+            
+            # 図形処理で既に出力されているかチェック
+            is_already_emitted = False
+            for shape_text in self._emitted_shape_texts:
+                if shape_text in combined_text or combined_text in shape_text:
+                    is_already_emitted = True
+                    debug_print(f"[DEBUG] 図形処理で出力済みのためスキップ: {combined_text[:50]}...")
+                    break
+            
+            if is_already_emitted:
+                continue
+            
+            # 本文に既に出力されているかチェック
+            for emitted_text in self._emitted_plain_paragraphs:
+                # テキストボックスの内容が本文に含まれているかチェック
+                if combined_text and combined_text in emitted_text:
+                    is_already_emitted = True
+                    debug_print(f"[DEBUG] テキストボックス内容が本文に含まれているためスキップ: {combined_text[:50]}...")
+                    break
+                # 本文の内容がテキストボックスに含まれているかチェック
+                if emitted_text and emitted_text in combined_text:
+                    is_already_emitted = True
+                    debug_print(f"[DEBUG] 本文内容がテキストボックスに含まれているためスキップ: {emitted_text[:50]}...")
+                    break
+            
+            if not is_already_emitted:
+                filtered_textbox_texts.append(texts)
+        
+        # フィルタリング後のテキストボックスが見つかった場合、details タグで出力
+        if filtered_textbox_texts:
+            print(f"[INFO] {len(filtered_textbox_texts)} 個のテキストボックス/図形テキストを details に出力します")
+            self.markdown_lines.append("")
+            self.markdown_lines.append("---")
+            self.markdown_lines.append("")
+            self.markdown_lines.append("<details>")
+            self.markdown_lines.append("<summary>図形内テキスト</summary>")
+            self.markdown_lines.append("")
+            
+            for i, texts in enumerate(filtered_textbox_texts, 1):
+                self.markdown_lines.append(f"### 図形 {i}")
+                self.markdown_lines.append("")
+                for text in texts:
+                    if text.strip():
+                        self.markdown_lines.append(text)
+                        self.markdown_lines.append("")
+            
+            self.markdown_lines.append("</details>")
+            self.markdown_lines.append("")
+        else:
+            if textbox_texts:
+                debug_print(f"[DEBUG] {len(textbox_texts)} 個のテキストボックスは既に本文に出力されているためスキップ")
+            else:
+                debug_print("[DEBUG] テキストボックスは見つかりませんでした")
+    
+    def _xpath_with_ns(self, element, xpath_expr: str, namespaces: dict) -> list:
+        """名前空間を考慮した XPath クエリを実行
+        
+        lxml の xpath メソッドは namespaces キーワード引数をサポートしていますが、
+        python-docx の BaseOxmlElement では動作が異なる場合があります。
+        この関数は両方のケースに対応します。
+        
+        Args:
+            element: XML 要素
+            xpath_expr: XPath 式 (名前空間プレフィックス付き)
+            namespaces: 名前空間の辞書
+        
+        Returns:
+            list: マッチした要素のリスト
+        """
+        try:
+            return element.xpath(xpath_expr, namespaces=namespaces)
+        except TypeError:
+            # namespaces キーワードがサポートされていない場合
+            # XPath 式を Clark 記法に変換
+            clark_xpath = xpath_expr
+            for prefix, uri in namespaces.items():
+                clark_xpath = clark_xpath.replace(f'{prefix}:', f'{{{uri}}}')
+            return element.xpath(clark_xpath)
+    
+    def _extract_texts_from_xml_paragraphs(self, paragraphs, namespaces) -> list:
+        """XML 段落要素からテキストを抽出
+        
+        Args:
+            paragraphs: XML 段落要素のリスト
+            namespaces: XML 名前空間の辞書
+        
+        Returns:
+            list: 抽出されたテキストのリスト
+        """
+        texts = []
+        for p in paragraphs:
+            # 段落内のテキスト要素を取得
+            text_elements = self._xpath_with_ns(p, './/w:t', namespaces)
+            paragraph_text = ''.join(t.text or '' for t in text_elements)
+            if paragraph_text.strip():
+                texts.append(paragraph_text)
+        return texts
+    
+    def _extract_texts_from_xml_paragraphs_clark(self, paragraphs, ns_w: str) -> list:
+        """XML 段落要素からテキストを抽出 (Clark 記法版)
+        
+        Args:
+            paragraphs: XML 段落要素のリスト
+            ns_w: WordprocessingML 名前空間 (Clark 記法、例: '{http://...}')
+        
+        Returns:
+            list: 抽出されたテキストのリスト
+        """
+        texts = []
+        for p in paragraphs:
+            # 段落内のテキスト要素を取得 (Clark 記法)
+            # ns_w は既に '{namespace}' 形式なのでそのまま連結
+            text_elements = p.xpath('.//' + ns_w + 't')
+            paragraph_text = ''.join(t.text or '' for t in text_elements)
+            if paragraph_text.strip():
+                texts.append(paragraph_text)
+        return texts
+    
+    def _extract_texts_from_xml_paragraphs_prefix(self, paragraphs) -> list:
+        """XML 段落要素からテキストを抽出 (名前空間プレフィックス版)
+        
+        python-docx の BaseOxmlElement.xpath() は内部で nsmap を使用するため
+        名前空間プレフィックス (w:t など) を直接使用可能
+        
+        Args:
+            paragraphs: XML 段落要素のリスト
+        
+        Returns:
+            list: 抽出されたテキストのリスト
+        """
+        texts = []
+        for p in paragraphs:
+            # 段落内のテキスト要素を取得 (名前空間プレフィックス)
+            text_elements = p.xpath('.//w:t')
+            paragraph_text = ''.join(t.text or '' for t in text_elements)
+            if paragraph_text.strip():
+                texts.append(paragraph_text)
+        return texts
+    
+    def _extract_texts_from_xml_paragraphs_lxml(self, paragraphs, nsmap: dict) -> list:
+        """XML 段落要素からテキストを抽出 (lxml 直接使用版)
+        
+        lxml の xpath を直接呼び出し、要素の nsmap を使用する
+        
+        Args:
+            paragraphs: XML 段落要素のリスト
+            nsmap: 名前空間マップ
+        
+        Returns:
+            list: 抽出されたテキストのリスト
+        """
+        from lxml import etree
+        texts = []
+        for p in paragraphs:
+            # 段落内のテキスト要素を取得
+            text_elements = etree.ElementBase.xpath(p, './/w:t', namespaces=nsmap)
+            paragraph_text = ''.join(t.text or '' for t in text_elements)
+            if paragraph_text.strip():
+                texts.append(paragraph_text)
+        return texts
+    
+    def _extract_texts_from_lxml_paragraphs(self, paragraphs, nsmap: dict) -> list:
+        """lxml で再パースした XML 段落要素からテキストを抽出
+        
+        lxml.etree.fromstring() で再パースした要素に対して使用する
+        
+        Args:
+            paragraphs: lxml の Element オブジェクトのリスト
+            nsmap: 名前空間マップ
+        
+        Returns:
+            list: 抽出されたテキストのリスト
+        """
+        texts = []
+        for p in paragraphs:
+            # 段落内のテキスト要素を取得
+            text_elements = p.xpath('.//w:t', namespaces=nsmap)
+            paragraph_text = ''.join(t.text or '' for t in text_elements)
+            if paragraph_text.strip():
+                texts.append(paragraph_text)
+        return texts
+    
+    def _extract_shape_texts_from_drawing(self, drawing_elements) -> list:
+        """drawing要素から図形内のテキストを抽出
+        
+        Args:
+            drawing_elements: drawing要素またはdrawing要素のリスト
+        
+        Returns:
+            list: 抽出されたテキストのリスト
+        """
+        from lxml import etree
+        
+        texts = []
+        
+        # 単一要素の場合はリストに変換
+        if not isinstance(drawing_elements, list):
+            drawing_elements = [drawing_elements]
+        
+        W_NS = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+        
+        for drawing in drawing_elements:
+            try:
+                # drawing要素をlxmlで再パース
+                xml_str = etree.tostring(drawing, encoding='unicode')
+                root = etree.fromstring(xml_str.encode())
+                
+                # txbxContent内のテキストを抽出（テキストボックス）
+                for txbx in root.iter('{http://schemas.microsoft.com/office/word/2010/wordprocessingShape}txbx'):
+                    for txbx_content in txbx.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}txbxContent'):
+                        for t_elem in txbx_content.iter(W_NS + 't'):
+                            if t_elem.text and t_elem.text.strip():
+                                texts.append(t_elem.text.strip())
+                
+                # VMLテキストボックス内のテキストも抽出
+                for textbox in root.iter('{urn:schemas-microsoft-com:vml}textbox'):
+                    for t_elem in textbox.iter(W_NS + 't'):
+                        if t_elem.text and t_elem.text.strip():
+                            texts.append(t_elem.text.strip())
+                
+            except Exception as e:
+                debug_print(f"[DEBUG] 図形テキスト抽出エラー: {e}")
+        
+        return texts
+    
+    def _output_shape_texts_as_details(self, texts: list):
+        """図形内テキストをdetailsタグで出力
+        
+        Args:
+            texts: 出力するテキストのリスト
+        """
+        # 空文字列を除去（重複は除去しない）
+        items = [t.strip() for t in texts if t and t.strip()]
+        if not items:
+            return
+        
+        self.markdown_lines.append("<details>")
+        self.markdown_lines.append("<summary>図形内テキスト</summary>")
+        self.markdown_lines.append("")
+        # カンマ区切り、""で括る形式で出力
+        line = ", ".join(f'"{t}"' for t in items)
+        self.markdown_lines.append(line)
+        self.markdown_lines.append("")
+        self.markdown_lines.append("</details>")
+        self.markdown_lines.append("")
+        
+        # 出力したテキストを追跡（後で_extract_textbox_contentで除外するため）
+        # 追跡用はユニークなテキストのみ
+        for t in set(items):
+            self._emitted_shape_texts.add(t)
+        
+        debug_print(f"[DEBUG] 図形内テキスト {len(items)} 件を details で出力")
     
     def _extract_and_convert_image(self, rel):
         """画像を抽出・変換（重複防止強化）"""
@@ -1248,6 +1807,10 @@ class WordToMarkdownConverter:
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
                 self.markdown_lines.append("")
                 
+                # 図形内テキストを抽出してdetailsで出力
+                shape_texts = self._extract_shape_texts_from_drawing(drawing_element)
+                self._output_shape_texts_as_details(shape_texts)
+                
                 debug_print(f"[SUCCESS] 個別図形を処理: {image_filename}")
                 
                 # 一時ファイルを削除
@@ -1305,6 +1868,10 @@ class WordToMarkdownConverter:
                 encoded_filename = urllib.parse.quote(image_filename)
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
                 self.markdown_lines.append("")
+                
+                # 図形内テキストを抽出してdetailsで出力
+                shape_texts = self._extract_shape_texts_from_drawing(drawing_elements)
+                self._output_shape_texts_as_details(shape_texts)
                 
                 debug_print(f"[SUCCESS] 図形クラスターを処理: {image_filename}")
                 
@@ -1366,6 +1933,10 @@ class WordToMarkdownConverter:
                 encoded_filename = urllib.parse.quote(image_filename)
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
                 self.markdown_lines.append("")
+                
+                # 図形内テキストを抽出してdetailsで出力
+                shape_texts = self._extract_shape_texts_from_drawing(drawing_element)
+                self._output_shape_texts_as_details(shape_texts)
                 
                 if self.shape_metadata:
                     try:
