@@ -1473,16 +1473,12 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                         md = f"![{sheet.title}](images/{img_fn})"
                         # ヘルパーメソッドを使用してメタデータ付き画像を挿入
                         try:
-                            if self.shape_metadata:
-                                filter_ids = self._image_shape_ids.get(img_fn)
-                                shapes_metadata = self._extract_all_shapes_metadata(sheet, filter_ids=filter_ids)
-                            else:
-                                shapes_metadata = []
+                            filter_ids = self._image_shape_ids.get(img_fn)
+                            shapes_metadata = self._extract_all_shapes_metadata(sheet, filter_ids=filter_ids)
                             
                             if shapes_metadata:
                                 debug_print(f"[DEBUG] 図形メタデータ抽出成功: {img_fn} -> {len(shapes_metadata)} shapes")
                                 text_metadata = self._format_shape_metadata_as_text(shapes_metadata)
-                                json_metadata = self._format_shape_metadata_as_json(shapes_metadata)
                                 
                                 self.markdown_lines.append(md)
                                 self.markdown_lines.append("")
@@ -1493,17 +1489,19 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                         self.markdown_lines.append(line)
                                     self.markdown_lines.append("")
                                 
-                                if json_metadata and json_metadata != "{}":
-                                    self.markdown_lines.append("<details>")
-                                    self.markdown_lines.append("<summary>JSON形式の図形情報</summary>")
-                                    self.markdown_lines.append("")
-                                    self.markdown_lines.append("```json")
-                                    for line in json_metadata.split('\n'):
-                                        self.markdown_lines.append(line)
-                                    self.markdown_lines.append("```")
-                                    self.markdown_lines.append("")
-                                    self.markdown_lines.append("</details>")
-                                    self.markdown_lines.append("")
+                                if self.shape_metadata:
+                                    json_metadata = self._format_shape_metadata_as_json(shapes_metadata)
+                                    if json_metadata and json_metadata != "{}":
+                                        self.markdown_lines.append("<details>")
+                                        self.markdown_lines.append("<summary>JSON形式の図形情報</summary>")
+                                        self.markdown_lines.append("")
+                                        self.markdown_lines.append("```json")
+                                        for line in json_metadata.split('\n'):
+                                            self.markdown_lines.append(line)
+                                        self.markdown_lines.append("```")
+                                        self.markdown_lines.append("")
+                                        self.markdown_lines.append("</details>")
+                                        self.markdown_lines.append("")
                             else:
                                 self.markdown_lines.append(md)
                                 self.markdown_lines.append("")
