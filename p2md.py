@@ -181,12 +181,16 @@ class PowerPointToMarkdownConverter:
         has_text = slide_info['has_text']
         has_table = slide_info['has_table']
         has_shapes = slide_info['has_shapes']
+        has_charts = slide_info.get('has_charts', False)
         
-        # 複合スライド（テキスト/表 + 図形）の判定
+        # 複合スライド（テキスト/表 + 図形）またはチャートがある場合の判定
         is_complex = (has_text or has_table) and has_shapes
+        needs_image = is_complex or has_charts
         
         if is_complex:
             print(f"[INFO] スライド {slide_idx}: 複合スライド検出 - テキスト/表を展開後、スライド全体を画像化")
+        elif has_charts:
+            print(f"[INFO] スライド {slide_idx}: チャート検出 - スライド全体を画像化（チャートデータは画像内に含まれます）")
         
         # コンテンツアイテムを順序通りに出力
         if slide_info['content_items']:
@@ -216,19 +220,20 @@ class PowerPointToMarkdownConverter:
                 self.markdown_lines.append(table_md)
                 self.markdown_lines.append("")
         
-        # チャートを出力
-        if slide_info['charts']:
+        # チャートを出力（チャートがある場合はスライド全体を画像化するため、チャートデータは出力しない）
+        # has_chartsがTrueの場合、スライド全体を画像化するのでチャートデータテーブルは不要
+        if slide_info['charts'] and not has_charts:
             for chart_md in slide_info['charts']:
                 self.markdown_lines.append(chart_md)
                 self.markdown_lines.append("")
         
-        # 図形の処理
-        if has_shapes:
-            if is_complex:
-                # 複合スライド：スライド全体を画像化してテキストの最後に挿入
+        # 図形またはチャートの処理
+        if has_shapes or has_charts:
+            if needs_image:
+                # 複合スライドまたはチャートあり：スライド全体を画像化してテキストの最後に挿入
                 print(f"[INFO] スライド {slide_idx}: スライド全体を画像化")
                 self._render_slide_as_image(slide, slide_idx)
-            else:
+            elif has_shapes:
                 # 図形のみ：図形群を画像化
                 print(f"[INFO] スライド {slide_idx}: 図形のみ - 図形群を画像化")
                 self._render_shapes_as_image(slide, slide_idx)
@@ -313,6 +318,7 @@ class PowerPointToMarkdownConverter:
             'has_text': False,
             'has_table': False,
             'has_shapes': False,
+            'has_charts': False,
             'content_items': [],  # 順序を保持するための統一リスト
             'tables': [],
             'charts': []
@@ -451,6 +457,7 @@ class PowerPointToMarkdownConverter:
                 chart_md = self._convert_chart_to_markdown(shape.chart)
                 if chart_md:
                     info['charts'].append(chart_md)
+                info['has_charts'] = True
                 # チャートはデータを抽出したので図形としては扱わない
                 continue
             
@@ -460,6 +467,7 @@ class PowerPointToMarkdownConverter:
                 info['has_text'] = info['has_text'] or group_info['has_text']
                 info['has_table'] = info['has_table'] or group_info['has_table']
                 info['has_shapes'] = info['has_shapes'] or group_info['has_shapes']
+                info['has_charts'] = info['has_charts'] or group_info.get('has_charts', False)
                 info['content_items'].extend(group_info['content_items'])
                 info['tables'].extend(group_info['tables'])
                 info['charts'].extend(group_info['charts'])
@@ -505,6 +513,7 @@ class PowerPointToMarkdownConverter:
             'has_text': False,
             'has_table': False,
             'has_shapes': False,
+            'has_charts': False,
             'content_items': [],
             'tables': [],
             'charts': []
@@ -543,6 +552,7 @@ class PowerPointToMarkdownConverter:
                 chart_md = self._convert_chart_to_markdown(shape.chart)
                 if chart_md:
                     info['charts'].append(chart_md)
+                info['has_charts'] = True
                 continue
             
             # ネストされたグループシェイプ（再帰処理）
@@ -551,6 +561,7 @@ class PowerPointToMarkdownConverter:
                 info['has_text'] = info['has_text'] or nested_info['has_text']
                 info['has_table'] = info['has_table'] or nested_info['has_table']
                 info['has_shapes'] = info['has_shapes'] or nested_info['has_shapes']
+                info['has_charts'] = info['has_charts'] or nested_info.get('has_charts', False)
                 info['content_items'].extend(nested_info['content_items'])
                 info['tables'].extend(nested_info['tables'])
                 info['charts'].extend(nested_info['charts'])
