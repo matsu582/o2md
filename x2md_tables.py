@@ -111,7 +111,29 @@ class _TablesMixin:
                 )
                 
                 if table_bounds:
-                    tables.append(table_bounds)
+                    # 1列だけの領域はテーブルとして認識しない（テキストとして扱う）
+                    r1, r2, c1, c2 = table_bounds
+                    if c2 - c1 >= 1:  # 2列以上の場合のみテーブルとして追加
+                        # さらに、行のほとんどが1列しか使っていない場合もスキップ
+                        multi_col_rows = 0
+                        total_rows = r2 - r1 + 1
+                        for check_row in range(r1, r2 + 1):
+                            cols_with_data = 0
+                            for check_col in range(c1, c2 + 1):
+                                check_cell = sheet.cell(row=check_row, column=check_col)
+                                if check_cell.value is not None and str(check_cell.value).strip():
+                                    cols_with_data += 1
+                            if cols_with_data >= 2:
+                                multi_col_rows += 1
+                        
+                        # 30%以上の行が2列以上使っている場合のみテーブルとして認識
+                        if total_rows > 0 and multi_col_rows / total_rows >= 0.3:
+                            tables.append(table_bounds)
+                            debug_print(f"[DEBUG][_find_discrete_data_regions] accepted region {table_bounds}: {multi_col_rows}/{total_rows} rows have 2+ cols")
+                        else:
+                            debug_print(f"[DEBUG][_find_discrete_data_regions] rejected region {table_bounds}: only {multi_col_rows}/{total_rows} rows have 2+ cols")
+                    else:
+                        debug_print(f"[DEBUG][_find_discrete_data_regions] rejected single-column region {table_bounds}")
                     visited.update(visited_cells)
         
         debug_print(f"[DEBUG][_find_discrete_data_regions] found {len(tables)} discrete regions: {tables[:5]}")
