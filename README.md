@@ -23,20 +23,39 @@ o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）を**それっぽ
 
 ## インストール
 
-### 1. Pythonライブラリ
+### 前提条件
+
+- Python 3.9 以上
+- [uv](https://docs.astral.sh/uv/) (推奨) または pip
+- LibreOffice (図形の画像処理と古い形式の変換に必要)
+
+### 1. uv のインストール（未インストールの場合）
 
 ```bash
-# pip を使用する場合
-pip install openpyxl python-docx python-pptx Pillow PyMuPDF
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# uv を使用する場合
-uv pip install openpyxl python-docx python-pptx Pillow PyMuPDF
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-### 2. 外部ツール
+### 2. プロジェクトのセットアップ
 
-#### LibreOffice
-古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換に必要
+```bash
+# リポジトリをクローン
+git clone https://github.com/matsu582/o2md.git
+cd o2md
+
+# 依存関係をインストール（uv sync で pyproject.toml から自動インストール）
+uv sync
+
+# 開発用依存関係も含める場合
+uv sync --all-extras
+```
+
+### 3. LibreOffice のインストール
+
+古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換に必要です。
 
 ```bash
 # macOS
@@ -55,35 +74,35 @@ sudo apt-get install libreoffice
 
 ```bash
 # Excelファイルを変換
-python o2md.py input_files/data.xlsx
+uv run python o2md.py input_files/data.xlsx
 
 # Wordファイルを変換
-python o2md.py input_files/document.docx
+uv run python o2md.py input_files/document.docx
 
 # PowerPointファイルを変換
-python o2md.py input_files/presentation.pptx
+uv run python o2md.py input_files/presentation.pptx
 ```
 
 ### オプション
 
 ```bash
 # 出力ディレクトリを指定
-python o2md.py input_files/data.xlsx -o custom_output
+uv run python o2md.py input_files/data.xlsx -o custom_output
 
 # Word文書で見出しテキストをリンクに使用
-python o2md.py input_files/document.docx --use-heading-text
+uv run python o2md.py input_files/document.docx --use-heading-text
 
 # PNG形式で画像を出力（デフォルトはSVG）
-python o2md.py input_files/data.xlsx --format png
+uv run python o2md.py input_files/data.xlsx --format png
 ```
 
 ### 古い形式のファイル
 
 ```bash
 # 古い形式も自動的に新形式に変換してから処理
-python o2md.py input_files/old_file.xls
-python o2md.py input_files/old_doc.doc
-python o2md.py input_files/old_presentation.ppt
+uv run python o2md.py input_files/old_file.xls
+uv run python o2md.py input_files/old_doc.doc
+uv run python o2md.py input_files/old_presentation.ppt
 ```
 
 ## コマンドラインオプション
@@ -165,13 +184,23 @@ SVG形式はベクター形式のため、拡大しても品質が劣化しま�
 
 ```bash
 # Excelファイルを変換
-python o2md.py input_files/sales_data.xlsx
+uv run python o2md.py input_files/sales_data.xlsx
 
 # Wordファイルを変換
-python o2md.py input_files/manual.docx
+uv run python o2md.py input_files/manual.docx
 
 # PowerPointファイルを変換
-python o2md.py input_files/presentation.pptx
+uv run python o2md.py input_files/presentation.pptx
+```
+
+## テスト
+
+```bash
+# テストを実行
+uv run pytest
+
+# カバレッジ付きでテストを実行
+uv run pytest --cov
 ```
 
 ## 制限事項
