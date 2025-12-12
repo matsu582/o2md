@@ -1865,8 +1865,13 @@ class _TablesMixin:
                     # 失敗時はデータ損失を避けるため即時出力にフォールバック
                     self._output_markdown_table(table_data, source_rows=source_rows, sheet_title=sheet.title)
     
-    def _convert_table_region(self, sheet, region: Tuple[int, int, int, int], table_number: int):
-        """指定された領域をテーブルとして変換（結合セル対応、ヘッダー行検出）"""
+    def _convert_table_region(self, sheet, region: Tuple[int, int, int, int], table_number: int,
+                              strict_column_bounds: bool = False):
+        """指定された領域をテーブルとして変換（結合セル対応、ヘッダー行検出）
+        
+        Args:
+            strict_column_bounds: Trueの場合、列範囲の拡張を制限（離散データ領域検出用）
+        """
         start_row, end_row, start_col, end_col = region
         # 診断エントリログ: 領域と生セル値の小さなサンプルを出力
         try:
@@ -2161,12 +2166,12 @@ class _TablesMixin:
         # テーブルデータを結合セル考慮で構築
         if header_row:
             # ヘッダー行を考慮した構築
-            table_data = self._build_table_with_header_row(sheet, region, header_row, merged_cells, header_height=header_height)
+            table_data = self._build_table_with_header_row(sheet, region, header_row, merged_cells, header_height=header_height, strict_column_bounds=strict_column_bounds)
             # ヘッダー行から開始するため、approx_rowsもheader_rowから計算
             actual_start_row = header_row
         else:
             # 従来の方法
-            table_data = self._build_table_data_with_merges(sheet, region, merged_cells)
+            table_data = self._build_table_data_with_merges(sheet, region, merged_cells, strict_column_bounds=strict_column_bounds)
             actual_start_row = start_row
         
         if table_data:
@@ -2530,11 +2535,13 @@ class _TablesMixin:
             self.markdown_lines.append("")  # セクション区切りの空行を追加
     
     def _build_table_with_header_row(self, sheet, region: Tuple[int, int, int, int], 
-                                   header_row: int, merged_info: Dict[str, Any], header_height: int = 1) -> List[List[str]]:
+                                   header_row: int, merged_info: Dict[str, Any], header_height: int = 1,
+                                   strict_column_bounds: bool = False) -> List[List[str]]:
         """ヘッダー行を基にテーブルを正しく構築
         
         Args:
             header_height: ヘッダーの高さ（行数）。_find_table_header_rowから渡される
+            strict_column_bounds: Trueの場合、列範囲の拡張を制限（離散データ領域検出用）
         """
         start_row, end_row, start_col, end_col = region
         
@@ -2542,16 +2549,19 @@ class _TablesMixin:
         
         # ヘッダー行の実際の行・列範囲を確認し、regionを拡張
         # (header_rowがregion外の場合や、「名前」など範囲外のヘッダーを含めるため)
+        # strict_column_boundsがTrueの場合は列範囲の拡張を制限
         actual_start_row = min(start_row, header_row)
         actual_end_row = max(end_row, header_row + header_height - 1)
         
         header_min_col = start_col
         header_max_col = end_col
-        for col_num in range(1, sheet.max_column + 1):
-            cell = sheet.cell(header_row, col_num)
-            if cell.value is not None and str(cell.value).strip():
-                header_min_col = min(header_min_col, col_num)
-                header_max_col = max(header_max_col, col_num)
+        if not strict_column_bounds:
+            # 列範囲の拡張を許可（従来の動作）
+            for col_num in range(1, sheet.max_column + 1):
+                cell = sheet.cell(header_row, col_num)
+                if cell.value is not None and str(cell.value).strip():
+                    header_min_col = min(header_min_col, col_num)
+                    header_max_col = max(header_max_col, col_num)
         
         if header_min_col < start_col or header_max_col > end_col or actual_start_row < start_row:
             debug_print(f"[DEBUG] ヘッダー行により範囲を拡張: 行{start_row}-{end_row} → {actual_start_row}-{actual_end_row}, 列{start_col}-{end_col} → {header_min_col}-{header_max_col}")
@@ -3998,8 +4008,13 @@ class _TablesMixin:
         return rows_to_keep
     
     def _build_table_data_with_merges(self, sheet, region: Tuple[int, int, int, int], 
-                                     merged_info: Dict[str, Any]) -> List[List[str]]:
-        """結合セルを考慮してテーブルデータを構築（ヘッダー行の検出とテーブル構造改善）"""
+                                     merged_info: Dict[str, Any],
+                                     strict_column_bounds: bool = False) -> List[List[str]]:
+        """結合セルを考慮してテーブルデータを構築（ヘッダー行の検出とテーブル構造改善）
+        
+        Args:
+            strict_column_bounds: Trueの場合、列範囲の拡張を制限（離散データ領域検出用）
+        """
         start_row, end_row, start_col, end_col = region
         debug_print(f"[DEBUG] _build_table_data_with_merges実行: region={region}")
         
@@ -4013,13 +4028,15 @@ class _TablesMixin:
             
             # ヘッダー行の実際の列範囲を確認し、start_col/end_colを拡張
             # (「名前」など、テーブル範囲外のヘッダーを含めるため)
+            # strict_column_boundsがTrueの場合は列範囲の拡張を制限
             header_min_col = start_col
             header_max_col = end_col
-            for col_num in range(1, sheet.max_column + 1):
-                cell = sheet.cell(header_row, col_num)
-                if cell.value is not None and str(cell.value).strip():
-                    header_min_col = min(header_min_col, col_num)
-                    header_max_col = max(header_max_col, col_num)
+            if not strict_column_bounds:
+                for col_num in range(1, sheet.max_column + 1):
+                    cell = sheet.cell(header_row, col_num)
+                    if cell.value is not None and str(cell.value).strip():
+                        header_min_col = min(header_min_col, col_num)
+                        header_max_col = max(header_max_col, col_num)
             
             if header_min_col < start_col or header_max_col > end_col:
                 debug_print(f"[DEBUG] ヘッダー行により列範囲を拡張: {start_col}-{end_col} → {header_min_col}-{header_max_col}")

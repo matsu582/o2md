@@ -1704,6 +1704,12 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         table_regions = self._detect_bordered_tables(sheet, min_row, max_row, min_col, max_col)
         debug_print(f"[DEBUG][_convert_sheet_data] bordered_table_regions_count={len(table_regions)} sample={table_regions[:5]}")
 
+        # 離散データ領域を追跡するセット（strict_column_bounds=Trueで処理するため）
+        # 罫線テーブルも含める（横に並んだテーブルがマージされないようにするため）
+        discrete_region_set = set()
+        for tr in table_regions:
+            discrete_region_set.add(tr)
+
         # 罫線テーブルが見つかった場合でも、未処理の領域に対して離散データ領域検出を追加で実行
         # これにより、罫線なしテーブルが罫線テーブルの横に配置されている場合も検出可能
         if table_regions:
@@ -1724,6 +1730,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                 break
                         if not is_overlapping:
                             new_discrete_regions.append(dr)
+                            discrete_region_set.add(dr)
                     if new_discrete_regions:
                         debug_print(f"[DEBUG] adding {len(new_discrete_regions)} non-overlapping discrete regions to bordered tables")
                         table_regions = table_regions + new_discrete_regions
@@ -1743,6 +1750,9 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                     if discrete_regions:
                         debug_print(f"[DEBUG] discrete data regions found: {len(discrete_regions)} regions")
                         table_regions = discrete_regions
+                        # 離散データ領域として追跡
+                        for dr in discrete_regions:
+                            discrete_region_set.add(dr)
                     else:
                         debug_print("[DEBUG] no discrete regions found; trying heuristic _detect_table_regions fallback")
                         heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
@@ -1921,7 +1931,9 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 # 検出された領域をマークダウンテーブルに変換。単調増加する
                 # table_indexを使用して、ファイル名/IDが実行間で
                 # 決定論的になるようにする。
-                self._convert_table_region(sheet, region, table_number=table_index)
+                # 離散データ領域の場合は列範囲の拡張を制限
+                is_discrete = region in discrete_region_set
+                self._convert_table_region(sheet, region, table_number=table_index, strict_column_bounds=is_discrete)
                 table_index += 1
             except Exception as _e:
                 debug_print(f"[DEBUG] _convert_table_region failed for region={region}: {_e}")
