@@ -1705,17 +1705,23 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         debug_print(f"[DEBUG][_convert_sheet_data] bordered_table_regions_count={len(table_regions)} sample={table_regions[:5]}")
 
         # 離散データ領域を追跡するセット（strict_column_bounds=Trueで処理するため）
-        # 罫線テーブルも含める（横に並んだテーブルがマージされないようにするため）
+        # 罫線テーブルは含めない（罫線テーブルは従来通りstrict_column_bounds=Falseで処理）
         discrete_region_set = set()
+        
+        # 罫線テーブルが占有するセルのマスクを作成（離散領域検出で除外するため）
+        occupied_cells = set()
         for tr in table_regions:
-            discrete_region_set.add(tr)
+            tr_r1, tr_r2, tr_c1, tr_c2 = tr
+            for r in range(tr_r1, tr_r2 + 1):
+                for c in range(tr_c1, tr_c2 + 1):
+                    occupied_cells.add((r, c))
 
         # 罫線テーブルが見つかった場合でも、未処理の領域に対して離散データ領域検出を追加で実行
         # これにより、罫線なしテーブルが罫線テーブルの横に配置されている場合も検出可能
         if table_regions:
             try:
-                # 離散データ領域検出を実行
-                discrete_regions = self._find_discrete_data_regions(sheet, min_row, max_row, min_col, max_col)
+                # 離散データ領域検出を実行（罫線テーブルの占有セルを除外）
+                discrete_regions = self._find_discrete_data_regions(sheet, min_row, max_row, min_col, max_col, occupied_cells)
                 if discrete_regions:
                     # 既存の罫線テーブルと重複しない離散領域のみを追加
                     new_discrete_regions = []
@@ -1744,21 +1750,22 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         if not table_regions or not top_region_in_bordered:
             try:
                 if not table_regions:
-                    debug_print("[DEBUG] no bordered tables found; trying discrete data regions detection")
-                    # 離散データ領域検出を試行（doclingスタイル）
-                    discrete_regions = self._find_discrete_data_regions(sheet, min_row, max_row, min_col, max_col)
-                    if discrete_regions:
-                        debug_print(f"[DEBUG] discrete data regions found: {len(discrete_regions)} regions")
-                        table_regions = discrete_regions
-                        # 離散データ領域として追跡
-                        for dr in discrete_regions:
-                            discrete_region_set.add(dr)
+                    debug_print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions first")
+                    # まずヒューリスティック検出を試行（mainブランチとの互換性維持）
+                    heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
+                    if heur_tables:
+                        debug_print(f"[DEBUG] heuristic detection found {len(heur_tables)} table regions")
+                        table_regions = heur_tables
                     else:
-                        debug_print("[DEBUG] no discrete regions found; trying heuristic _detect_table_regions fallback")
-                        heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
-                        if heur_tables:
-                            debug_print(f"[DEBUG] heuristic detection found {len(heur_tables)} table regions")
-                            table_regions = heur_tables
+                        # ヒューリスティック検出も失敗した場合のみ離散領域検出を試行
+                        debug_print("[DEBUG] heuristic detection failed; trying discrete data regions detection")
+                        discrete_regions = self._find_discrete_data_regions(sheet, min_row, max_row, min_col, max_col)
+                        if discrete_regions:
+                            debug_print(f"[DEBUG] discrete data regions found: {len(discrete_regions)} regions")
+                            table_regions = discrete_regions
+                            # 離散データ領域として追跡
+                            for dr in discrete_regions:
+                                discrete_region_set.add(dr)
                 else:
                     debug_print(f"[DEBUG] bordered tables found but no top region (rows 1-4); trying heuristic _detect_table_regions to find header rows")
                     heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)

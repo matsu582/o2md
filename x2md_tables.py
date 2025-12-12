@@ -69,7 +69,7 @@ class _TablesMixin:
         debug_print(f"[DEBUG] _detect_bordered_tables found {len(tables)} tables")
         return tables
 
-    def _find_discrete_data_regions(self, sheet, min_row: int, max_row: int, min_col: int, max_col: int) -> List[Tuple[int, int, int, int]]:
+    def _find_discrete_data_regions(self, sheet, min_row: int, max_row: int, min_col: int, max_col: int, occupied_cells: Optional[Set[Tuple[int, int]]] = None) -> List[Tuple[int, int, int, int]]:
         """空白行/列で区切られた離散データ領域を検出する
         
         doclingの実装を参考に、シート内の非空セルをスキャンし、
@@ -81,14 +81,19 @@ class _TablesMixin:
             max_row: スキャン終了行
             min_col: スキャン開始列
             max_col: スキャン終了列
+            occupied_cells: 既に罫線テーブルで占有されているセルのセット（除外対象）
             
         Returns:
             検出された離散データ領域のリスト [(start_row, end_row, start_col, end_col), ...]
         """
-        debug_print(f"[DEBUG][_find_discrete_data_regions] sheet={sheet.title} range=({min_row}-{max_row}, {min_col}-{max_col})")
+        debug_print(f"[DEBUG][_find_discrete_data_regions] sheet={sheet.title} range=({min_row}-{max_row}, {min_col}-{max_col}) occupied_cells_count={len(occupied_cells) if occupied_cells else 0}")
         
         tables: List[Tuple[int, int, int, int]] = []
         visited: Set[Tuple[int, int]] = set()
+        
+        # 占有セルがある場合は訪問済みとしてマーク
+        if occupied_cells:
+            visited.update(occupied_cells)
         
         # シート内の非空セルをスキャン
         for row in range(min_row, max_row + 1):
@@ -3249,14 +3254,10 @@ class _TablesMixin:
             if len(table_data) > 2:
                 debug_print(f"[DEBUG] table_data[2] (2番目のデータ行): {table_data[2]}")
         
-        # 2列最適化チェック（正規化後のヘッダーとgroup_positionsを使用）
-        debug_print(f"[DEBUG] 2列最適化チェック開始: headers={compressed_headers}, positions={group_positions}")
-        optimized_structure = self._optimize_table_for_two_columns(sheet, region, compressed_headers, group_positions)
-        if optimized_structure:
-            debug_print(f"[DEBUG] 2列最適化成功、テーブルサイズ: {len(optimized_structure)}行")
-            return self._trim_edge_empty_columns(optimized_structure)
-        else:
-            debug_print(f"[DEBUG] 2列最適化スキップ")
+        # 2列最適化は無効化（3列テーブルは3列のまま出力する）
+        # ユーザー要望: 「3列のものは3列で表示すべき」
+        # 将来の拡張のため関数本体は残しておく
+        debug_print(f"[DEBUG] 2列最適化は無効化されています（3列テーブルは3列のまま出力）")
         
         # 先頭/末尾の空列を削除して返す
         # --- ヒューリスティック：任意の列内で結合されている設定行を分割 ---
