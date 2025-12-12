@@ -1,6 +1,7 @@
 # Office to Markdown Converter (o2md)
 
 Excel、Word、PowerPointファイルを自動判定して**それっぽい**Markdownに変換するツール
+本ツールは[Devin](https://app.devin.ai)を利用して作成しています。
 
 ちゃんとしたきゃ、[markitdown](https://github.com/microsoft/markitdown)や[docling](https://github.com/docling-project/docling)を使いましょう。
 
