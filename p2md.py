@@ -220,9 +220,8 @@ class PowerPointToMarkdownConverter:
                 self.markdown_lines.append(table_md)
                 self.markdown_lines.append("")
         
-        # チャートを出力（チャートがある場合はスライド全体を画像化するため、チャートデータは出力しない）
-        # has_chartsがTrueの場合、スライド全体を画像化するのでチャートデータテーブルは不要
-        if slide_info['charts'] and not has_charts:
+        # チャートを出力（チャートデータをテーブルとして抽出）
+        if slide_info['charts']:
             for chart_md in slide_info['charts']:
                 self.markdown_lines.append(chart_md)
                 self.markdown_lines.append("")
