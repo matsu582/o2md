@@ -68,6 +68,164 @@ class _TablesMixin:
         
         debug_print(f"[DEBUG] _detect_bordered_tables found {len(tables)} tables")
         return tables
+
+    def _find_discrete_data_regions(self, sheet, min_row: int, max_row: int, min_col: int, max_col: int) -> List[Tuple[int, int, int, int]]:
+        """空白行/列で区切られた離散データ領域を検出する
+        
+        doclingの実装を参考に、シート内の非空セルをスキャンし、
+        空白行/列で区切られた独立したデータ領域を個別のテーブルとして検出します。
+        
+        Args:
+            sheet: ワークシートオブジェクト
+            min_row: スキャン開始行
+            max_row: スキャン終了行
+            min_col: スキャン開始列
+            max_col: スキャン終了列
+            
+        Returns:
+            検出された離散データ領域のリスト [(start_row, end_row, start_col, end_col), ...]
+        """
+        debug_print(f"[DEBUG][_find_discrete_data_regions] sheet={sheet.title} range=({min_row}-{max_row}, {min_col}-{max_col})")
+        
+        tables: List[Tuple[int, int, int, int]] = []
+        visited: Set[Tuple[int, int]] = set()
+        
+        # シート内の非空セルをスキャン
+        for row in range(min_row, max_row + 1):
+            for col in range(min_col, max_col + 1):
+                if (row, col) in visited:
+                    continue
+                
+                cell = sheet.cell(row=row, column=col)
+                if cell.value is None or str(cell.value).strip() == '':
+                    continue
+                
+                # 新しいテーブル領域の開始点を発見
+                table_bounds, visited_cells = self._find_discrete_table_bounds(
+                    sheet, row, col, max_row, max_col
+                )
+                
+                if table_bounds:
+                    tables.append(table_bounds)
+                    visited.update(visited_cells)
+        
+        debug_print(f"[DEBUG][_find_discrete_data_regions] found {len(tables)} discrete regions: {tables[:5]}")
+        return tables
+
+    def _find_discrete_table_bounds(
+        self, sheet, start_row: int, start_col: int, max_row: int, max_col: int
+    ) -> Tuple[Optional[Tuple[int, int, int, int]], Set[Tuple[int, int]]]:
+        """離散テーブルの境界を検出する
+        
+        開始セルから空白行/列で区切られるまで領域を拡張し、
+        テーブルの境界と訪問済みセルのセットを返します。
+        
+        Args:
+            sheet: ワークシートオブジェクト
+            start_row: 開始行
+            start_col: 開始列
+            max_row: 最大行
+            max_col: 最大列
+            
+        Returns:
+            (テーブル境界タプル, 訪問済みセルのセット)
+        """
+        # 下方向に拡張（空白行で停止）
+        table_max_row = self._find_discrete_table_bottom(sheet, start_row, start_col, max_row)
+        
+        # 右方向に拡張（空白列で停止）
+        table_max_col = self._find_discrete_table_right(sheet, start_row, start_col, max_col)
+        
+        # 訪問済みセルを収集
+        visited_cells: Set[Tuple[int, int]] = set()
+        for row in range(start_row, table_max_row + 1):
+            for col in range(start_col, table_max_col + 1):
+                visited_cells.add((row, col))
+        
+        # 結合セルを考慮して境界を拡張
+        for merged_range in sheet.merged_cells.ranges:
+            if (merged_range.min_row <= table_max_row and merged_range.max_row >= start_row and
+                merged_range.min_col <= table_max_col and merged_range.max_col >= start_col):
+                table_max_row = max(table_max_row, merged_range.max_row)
+                table_max_col = max(table_max_col, merged_range.max_col)
+                # 結合セル内のセルも訪問済みとしてマーク
+                for r in range(merged_range.min_row, merged_range.max_row + 1):
+                    for c in range(merged_range.min_col, merged_range.max_col + 1):
+                        visited_cells.add((r, c))
+        
+        return (start_row, table_max_row, start_col, table_max_col), visited_cells
+
+    def _find_discrete_table_bottom(self, sheet, start_row: int, start_col: int, max_row: int) -> int:
+        """離散テーブルの下端を検出する（空白行で停止）
+        
+        Args:
+            sheet: ワークシートオブジェクト
+            start_row: 開始行
+            start_col: 開始列
+            max_row: 最大行
+            
+        Returns:
+            テーブルの下端行番号
+        """
+        table_max_row = start_row
+        
+        for row in range(start_row + 1, max_row + 1):
+            cell = sheet.cell(row=row, column=start_col)
+            
+            # 結合セルの一部かどうかをチェック
+            merged_range = None
+            for mr in sheet.merged_cells.ranges:
+                if mr.min_row <= row <= mr.max_row and mr.min_col <= start_col <= mr.max_col:
+                    merged_range = mr
+                    break
+            
+            if cell.value is None and not merged_range:
+                # 空白セルで結合セルでもない場合、停止
+                break
+            
+            # 結合セルの場合、その範囲の最大行まで拡張
+            if merged_range:
+                table_max_row = max(table_max_row, merged_range.max_row)
+            else:
+                table_max_row = row
+        
+        return table_max_row
+
+    def _find_discrete_table_right(self, sheet, start_row: int, start_col: int, max_col: int) -> int:
+        """離散テーブルの右端を検出する（空白列で停止）
+        
+        Args:
+            sheet: ワークシートオブジェクト
+            start_row: 開始行
+            start_col: 開始列
+            max_col: 最大列
+            
+        Returns:
+            テーブルの右端列番号
+        """
+        table_max_col = start_col
+        
+        for col in range(start_col + 1, max_col + 1):
+            cell = sheet.cell(row=start_row, column=col)
+            
+            # 結合セルの一部かどうかをチェック
+            merged_range = None
+            for mr in sheet.merged_cells.ranges:
+                if mr.min_row <= start_row <= mr.max_row and mr.min_col <= col <= mr.max_col:
+                    merged_range = mr
+                    break
+            
+            if cell.value is None and not merged_range:
+                # 空白セルで結合セルでもない場合、停止
+                break
+            
+            # 結合セルの場合、その範囲の最大列まで拡張
+            if merged_range:
+                table_max_col = max(table_max_col, merged_range.max_col)
+            else:
+                table_max_col = col
+        
+        return table_max_col
     
     def _is_valid_bordered_table(self, sheet, region):
         """罫線テーブルが有効かどうかをチェック（空行・空列が多すぎる場合は無効）"""

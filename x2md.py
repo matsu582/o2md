@@ -1704,6 +1704,32 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         table_regions = self._detect_bordered_tables(sheet, min_row, max_row, min_col, max_col)
         debug_print(f"[DEBUG][_convert_sheet_data] bordered_table_regions_count={len(table_regions)} sample={table_regions[:5]}")
 
+        # 罫線テーブルが見つかった場合でも、未処理の領域に対して離散データ領域検出を追加で実行
+        # これにより、罫線なしテーブルが罫線テーブルの横に配置されている場合も検出可能
+        if table_regions:
+            try:
+                # 離散データ領域検出を実行
+                discrete_regions = self._find_discrete_data_regions(sheet, min_row, max_row, min_col, max_col)
+                if discrete_regions:
+                    # 既存の罫線テーブルと重複しない離散領域のみを追加
+                    new_discrete_regions = []
+                    for dr in discrete_regions:
+                        dr_r1, dr_r2, dr_c1, dr_c2 = dr
+                        is_overlapping = False
+                        for tr in table_regions:
+                            tr_r1, tr_r2, tr_c1, tr_c2 = tr
+                            # 重複チェック（行と列の両方が重複している場合）
+                            if not (dr_r2 < tr_r1 or dr_r1 > tr_r2 or dr_c2 < tr_c1 or dr_c1 > tr_c2):
+                                is_overlapping = True
+                                break
+                        if not is_overlapping:
+                            new_discrete_regions.append(dr)
+                    if new_discrete_regions:
+                        debug_print(f"[DEBUG] adding {len(new_discrete_regions)} non-overlapping discrete regions to bordered tables")
+                        table_regions = table_regions + new_discrete_regions
+            except Exception as _e:
+                debug_print(f"[DEBUG] discrete region detection after bordered tables failed: {_e}")
+
         # 罫線テーブルが見つからない場合、または罫線テーブルが上部の行（1-4）を含まない場合、
         # ヒューリスティック（結合セル、注釈、列分離）を使用するより広範なテーブル領域検出を試行。
         # これにより、シート上部のヘッダー行が適切に検出されることを保証
@@ -1711,29 +1737,36 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         if not table_regions or not top_region_in_bordered:
             try:
                 if not table_regions:
-                    debug_print("[DEBUG] no bordered tables found; trying heuristic _detect_table_regions fallback")
+                    debug_print("[DEBUG] no bordered tables found; trying discrete data regions detection")
+                    # 離散データ領域検出を試行（doclingスタイル）
+                    discrete_regions = self._find_discrete_data_regions(sheet, min_row, max_row, min_col, max_col)
+                    if discrete_regions:
+                        debug_print(f"[DEBUG] discrete data regions found: {len(discrete_regions)} regions")
+                        table_regions = discrete_regions
+                    else:
+                        debug_print("[DEBUG] no discrete regions found; trying heuristic _detect_table_regions fallback")
+                        heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
+                        if heur_tables:
+                            debug_print(f"[DEBUG] heuristic detection found {len(heur_tables)} table regions")
+                            table_regions = heur_tables
                 else:
                     debug_print(f"[DEBUG] bordered tables found but no top region (rows 1-4); trying heuristic _detect_table_regions to find header rows")
-                heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
-                try:
-                    debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
+                    heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)
+                    try:
+                        debug_print(f"[TRACE][_detect_table_regions_result] sheet={sheet.title} heur_tables_count={len(heur_tables) if heur_tables else 0} heur_annotations_count={len(heur_annotations) if heur_annotations else 0}")
+                        if heur_tables:
+                            debug_print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
+                        if heur_annotations:
+                            debug_print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
+                    except (ValueError, TypeError) as e:
+                        debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
                     if heur_tables:
-                        debug_print(f"[TRACE][_detect_table_regions_result_sample] {heur_tables[:10]}")
-                    if heur_annotations:
-                        debug_print(f"[TRACE][_detect_table_regions_annotations_sample] {heur_annotations[:10]}")
-                except (ValueError, TypeError) as e:
-                    debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
-                if heur_tables:
-                    if not table_regions:
-                        debug_print(f"[DEBUG] heuristic detection found {len(heur_tables)} table regions")
-                        table_regions = heur_tables
-                    else:
                         top_heur_tables = [r for r in heur_tables if r[0] == 1 and r[1] <= 4]
                         if top_heur_tables:
                             debug_print(f"[DEBUG] adding {len(top_heur_tables)} top regions from heuristic detection to bordered tables")
                             table_regions = top_heur_tables + table_regions
             except Exception as _e:
-                debug_print(f"[DEBUG] heuristic table detection failed: {_e}")
+                debug_print(f"[DEBUG] table detection failed: {_e}")
 
         # 変更: 描画（図形/画像）が占有するセル領域を検出し、重複する表領域は
         # テーブルとして出力せずプレーンテキスト扱いで出力する（ユーザ要望）。
