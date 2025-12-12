@@ -1705,7 +1705,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         debug_print(f"[DEBUG][_convert_sheet_data] bordered_table_regions_count={len(table_regions)} sample={table_regions[:5]}")
 
         # 離散データ領域を追跡するセット（strict_column_bounds=Trueで処理するため）
-        # 罫線テーブルは含めない（罫線テーブルは従来通りstrict_column_bounds=Falseで処理）
+        # 罫線テーブルも含める（罫線テーブルも列範囲の拡張を制限する）
         discrete_region_set = set()
         
         # 罫線テーブルが占有するセルのマスクを作成（離散領域検出で除外するため）
@@ -1715,13 +1715,19 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             for r in range(tr_r1, tr_r2 + 1):
                 for c in range(tr_c1, tr_c2 + 1):
                     occupied_cells.add((r, c))
+            # 罫線テーブルも列範囲の拡張を制限するためセットに追加
+            discrete_region_set.add(tr)
 
-        # 罫線テーブルが見つかった場合でも、未処理の領域に対して離散データ領域検出を追加で実行
+        # 罫線テーブルがある場合、その外側の領域に対してのみ離散領域検出を実行
         # これにより、罫線なしテーブルが罫線テーブルの横に配置されている場合も検出可能
+        # five_sheet_.xlsxのように罫線テーブルがないシートでは離散領域検出は実行されない
         if table_regions:
+            debug_print(f"[DEBUG] bordered tables found; trying discrete region detection for non-occupied areas")
             try:
                 # 離散データ領域検出を実行（罫線テーブルの占有セルを除外）
-                discrete_regions = self._find_discrete_data_regions(sheet, min_row, max_row, min_col, max_col, occupied_cells)
+                discrete_regions = self._find_discrete_data_regions(
+                    sheet, min_row, max_row, min_col, max_col, occupied_cells
+                )
                 if discrete_regions:
                     # 既存の罫線テーブルと重複しない離散領域のみを追加
                     new_discrete_regions = []
@@ -1738,10 +1744,10 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                             new_discrete_regions.append(dr)
                             discrete_region_set.add(dr)
                     if new_discrete_regions:
-                        debug_print(f"[DEBUG] adding {len(new_discrete_regions)} non-overlapping discrete regions to bordered tables")
+                        debug_print(f"[DEBUG] adding {len(new_discrete_regions)} non-overlapping discrete regions")
                         table_regions = table_regions + new_discrete_regions
             except Exception as _e:
-                debug_print(f"[DEBUG] discrete region detection after bordered tables failed: {_e}")
+                debug_print(f"[DEBUG] discrete region detection failed: {_e}")
 
         # 罫線テーブルが見つからない場合、または罫線テーブルが上部の行（1-4）を含まない場合、
         # ヒューリスティック（結合セル、注釈、列分離）を使用するより広範なテーブル領域検出を試行。
@@ -1757,15 +1763,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                         debug_print(f"[DEBUG] heuristic detection found {len(heur_tables)} table regions")
                         table_regions = heur_tables
                     else:
-                        # ヒューリスティック検出も失敗した場合のみ離散領域検出を試行
-                        debug_print("[DEBUG] heuristic detection failed; trying discrete data regions detection")
-                        discrete_regions = self._find_discrete_data_regions(sheet, min_row, max_row, min_col, max_col)
-                        if discrete_regions:
-                            debug_print(f"[DEBUG] discrete data regions found: {len(discrete_regions)} regions")
-                            table_regions = discrete_regions
-                            # 離散データ領域として追跡
-                            for dr in discrete_regions:
-                                discrete_region_set.add(dr)
+                        # 離散領域検出は一時的に無効化（テキストがテーブルとして検出される問題を回避）
+                        debug_print("[DEBUG] heuristic detection failed; discrete region detection is disabled")
                 else:
                     debug_print(f"[DEBUG] bordered tables found but no top region (rows 1-4); trying heuristic _detect_table_regions to find header rows")
                     heur_tables, heur_annotations = self._detect_table_regions(sheet, min_row, max_row, min_col, max_col)

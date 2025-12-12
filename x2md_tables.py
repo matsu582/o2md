@@ -1898,7 +1898,7 @@ class _TablesMixin:
         # 小さすぎるテーブル（1-2行のみ）で、タイトルのみを含む場合はスキップ
         if end_row - start_row <= 1:
             # この領域がタイトルのみかチェック
-            title_text = self._find_table_title_in_region(sheet, region)
+            title_text = self._find_table_title_in_region(sheet, region, strict_column_bounds)
             if title_text:
                 # タイトルのみの小さなテーブルはスキップ
                 debug_print(f"[DEBUG] タイトルのみの小さなテーブルをスキップ: '{title_text}' at 行{start_row}-{end_row}")
@@ -1918,7 +1918,8 @@ class _TablesMixin:
             header_row, header_height = header_info
         
         # テーブルタイトルを常に検出（OnlineQC、StartupReportなど）
-        title_text = self._find_table_title_in_region(sheet, region)
+        # strict_column_boundsがTrueの場合は列範囲を制限
+        title_text = self._find_table_title_in_region(sheet, region, strict_column_bounds)
         
         # この領域のタイトルテキストを検出した場合、ローカルに保持し、
         # table_data構築後に遅延テーブルメタデータに添付
@@ -3403,8 +3404,13 @@ class _TablesMixin:
         return self._trim_edge_empty_columns(table_data)
 
     
-    def _find_table_title_in_region(self, sheet, region: Tuple[int, int, int, int]) -> Optional[str]:
-        """テーブル領域内からタイトルを検出（汎用版: 特定キーワードには依存しない）"""
+    def _find_table_title_in_region(self, sheet, region: Tuple[int, int, int, int], 
+                                     strict_column_bounds: bool = False) -> Optional[str]:
+        """テーブル領域内からタイトルを検出（汎用版: 特定キーワードには依存しない）
+        
+        Args:
+            strict_column_bounds: Trueの場合、列範囲の拡張を制限（離散データ領域検出用）
+        """
         start_row, end_row, start_col, end_col = region
 
         # テーブル領域の前後でタイトルを探す（より広い範囲）
@@ -3414,8 +3420,16 @@ class _TablesMixin:
         # 最適なタイトル候補を探す
         title_candidates = []
 
+        # strict_column_boundsがTrueの場合は列範囲を制限
+        if strict_column_bounds:
+            col_search_start = start_col
+            col_search_end = end_col + 1
+        else:
+            col_search_start = max(1, start_col - 5)
+            col_search_end = min(start_col + 15, end_col + 5)
+
         for row in range(search_start, search_end):
-            for col in range(max(1, start_col - 5), min(start_col + 15, end_col + 5)):
+            for col in range(col_search_start, col_search_end):
                 cell = sheet.cell(row, col)
                 if cell.value:
                     text = str(cell.value).strip()
