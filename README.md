@@ -193,16 +193,6 @@ uv run python o2md.py input_files/manual.docx
 uv run python o2md.py input_files/presentation.pptx
 ```
 
-## テスト
-
-```bash
-# テストを実行
-uv run pytest
-
-# カバレッジ付きでテストを実行
-uv run pytest --cov
-```
-
 ## 制限事項
 
 ### Excel (x2md.py)
