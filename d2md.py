@@ -1967,11 +1967,12 @@ class WordToMarkdownConverter:
                 
                 print(f"[SUCCESS] ベクター複合図形を処理: {image_filename}")
                 
-                # デバッグ用にPDFも保存
-                debug_pdf_path = os.path.join('output/debug', f"{os.path.splitext(os.path.basename(image_filename))[0]}.pdf")
-                os.makedirs('output/debug', exist_ok=True)
-                shutil.copy2(temp_pdf_path, debug_pdf_path)
-                debug_print(f"[DEBUG] PDFデバッグファイル保存: {debug_pdf_path}")
+                # デバッグ用にPDFも保存（-v指定時のみ）
+                if is_verbose():
+                    debug_pdf_path = os.path.join('output/debug', f"{os.path.splitext(os.path.basename(image_filename))[0]}.pdf")
+                    os.makedirs('output/debug', exist_ok=True)
+                    shutil.copy2(temp_pdf_path, debug_pdf_path)
+                    debug_print(f"[DEBUG] PDFデバッグファイル保存: {debug_pdf_path}")
                 
                 # 一時ファイルを削除
                 os.unlink(temp_doc_path)
@@ -2222,12 +2223,13 @@ class WordToMarkdownConverter:
             
             print(f"[INFO] 一時Word文書作成完了: {temp_docx_path}")
             
-            # デバッグ用に一時Word文書を保存
-            debug_docx_dir = os.path.join('output', 'debug')
-            os.makedirs(debug_docx_dir, exist_ok=True)
-            debug_docx_path = os.path.join(debug_docx_dir, f"temp_docx_{os.path.basename(temp_docx_path)}")
-            shutil.copy2(temp_docx_path, debug_docx_path)
-            debug_print(f"[DEBUG] 一時Word文書デバッグコピー: {debug_docx_path}")
+            # デバッグ用に一時Word文書を保存（-v指定時のみ）
+            if is_verbose():
+                debug_docx_dir = os.path.join('output', 'debug')
+                os.makedirs(debug_docx_dir, exist_ok=True)
+                debug_docx_path = os.path.join(debug_docx_dir, f"temp_docx_{os.path.basename(temp_docx_path)}")
+                shutil.copy2(temp_docx_path, debug_docx_path)
+                debug_print(f"[DEBUG] 一時Word文書デバッグコピー: {debug_docx_path}")
             
             return temp_docx_path
             
