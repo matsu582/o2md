@@ -3415,6 +3415,9 @@ class _TablesMixin:
         Args:
             strict_column_bounds: Trueの場合、列範囲の拡張を制限（離散データ領域検出用）
             all_table_regions: シート内の全テーブル領域（他テーブル領域内の行をタイトル候補から除外するため）
+        
+        Returns:
+            タイトルテキスト（書式適用済み）またはNone
         """
         start_row, end_row, start_col, end_col = region
 
@@ -3519,12 +3522,24 @@ class _TablesMixin:
             same_row_candidates = [c for c in title_candidates if c[2] == best_row]
             if len(same_row_candidates) > 1:
                 same_row_candidates.sort(key=lambda x: x[3])
-                combined_title = ' '.join([c[0] for c in same_row_candidates])
+                # 各候補に書式を適用して結合
+                formatted_parts = []
+                for c in same_row_candidates:
+                    c_text, _, c_row, c_col, c_kind, _ = c
+                    if c_kind == 'bold':
+                        formatted_parts.append(f"**{c_text}**")
+                    else:
+                        formatted_parts.append(c_text)
+                combined_title = ' '.join(formatted_parts)
                 debug_print("[DEBUG] タイトル選択（結合）: '{}' (type={}, row={})".format(combined_title, best_title[4], best_title[2]))
                 return combined_title
             
-            debug_print("[DEBUG] タイトル選択: '{}' (type={}, row={})".format(best_title[0], best_title[4], best_title[2]))
-            return best_title[0]
+            # 太字の場合は書式を適用
+            title_text = best_title[0]
+            if best_title[4] == 'bold':
+                title_text = f"**{title_text}**"
+            debug_print("[DEBUG] タイトル選択: '{}' (type={}, row={})".format(title_text, best_title[4], best_title[2]))
+            return title_text
 
         # タイトルが見つからない場合は以前のタイトル行をクリア
         self._last_table_title_row = None
