@@ -676,12 +676,17 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 row_texts = []
                 for c in range(1, min(20, sheet.max_column) + 1):
                     try:
-                        v = sheet.cell(r, c).value
+                        cell = sheet.cell(r, c)
+                        v = cell.value
                     except Exception:
+                        cell = None
                         v = None
                     if v is not None:
                         s = str(v).strip()
                         if s:
+                            # セルの書式を適用
+                            if cell is not None:
+                                s = self._apply_cell_formatting(cell, s)
                             row_texts.append(s)
                 # この行のセル値を結合; 空行にはNoneを保持
                 if row_texts:
@@ -1018,6 +1023,9 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 debug_print(f"[DEBUG] 型変換エラー（無視）: {e}")
             for r in range(1, max_row + 1):
                 if r in emitted:
+                    continue
+                # deferred_textsから来たテキストがある行はスキップ（書式が適用済み）
+                if r in texts_by_row:
                     continue
                 row_texts = []
                 for c in range(1, min(60, sheet.max_column) + 1):
@@ -1965,10 +1973,13 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                         row_texts = []
                         for col_num in range(sc, ec + 1):
                             if rr <= sheet.max_row and col_num <= sheet.max_column:
-                                cell_value = sheet.cell(row=rr, column=col_num).value
+                                cell = sheet.cell(row=rr, column=col_num)
+                                cell_value = cell.value
                                 if cell_value is not None:
                                     text = str(cell_value).strip()
                                     if text:
+                                        # セルの書式を適用
+                                        text = self._apply_cell_formatting(cell, text)
                                         row_texts.append(text)
                         if row_texts:
                             lines.append((rr, " ".join(row_texts)))
@@ -1996,10 +2007,13 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             row_texts = []
             for col_num in range(min_col, max_col + 1):
                 if row_num <= sheet.max_row and col_num <= sheet.max_column:
-                    v = sheet.cell(row=row_num, column=col_num).value
+                    cell = sheet.cell(row=row_num, column=col_num)
+                    v = cell.value
                     if v is not None:
                         s = str(v).strip()
                         if s:
+                            # セルの書式を適用
+                            s = self._apply_cell_formatting(cell, s)
                             row_texts.append(s)
             if not row_texts:
                 continue
@@ -2222,10 +2236,13 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             row_texts = []
             for col_num in range(min_col, max_col + 1):
                 if row_num <= sheet.max_row and col_num <= sheet.max_column:
-                    cell_value = sheet.cell(row=row_num, column=col_num).value
+                    cell = sheet.cell(row=row_num, column=col_num)
+                    cell_value = cell.value
                     if cell_value is not None:
                         text = str(cell_value).strip()
                         if text:
+                            # セルの書式を適用
+                            text = self._apply_cell_formatting(cell, text)
                             row_texts.append(text)
             
             # 行にテキストがある場合は出力
@@ -2260,8 +2277,10 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 cell = sheet.cell(row=row_num, column=col_num)
                 if cell.value is not None:
                     text = str(cell.value).strip()
-            if text:
-                row_text.append(text)
+                    if text:
+                        # セルの書式を適用
+                        text = self._apply_cell_formatting(cell, text)
+                        row_text.append(text)
 
             if row_text:
                 text_content.append(" ".join(row_text))

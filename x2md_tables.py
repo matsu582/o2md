@@ -3519,26 +3519,32 @@ class _TablesMixin:
                 self._last_table_title_row = None
             
             best_row = best_title[2]
+            best_row_relation = best_title[5]
+            
+            # タイトルがテーブルの開始行と同じ行にある場合（row_relation == 1）は、
+            # 書式を適用しない（ヘッダー行と同じテキストにして重複検出を可能にする）
+            skip_formatting = (best_row_relation == 1)
+            
             same_row_candidates = [c for c in title_candidates if c[2] == best_row]
             if len(same_row_candidates) > 1:
                 same_row_candidates.sort(key=lambda x: x[3])
-                # 各候補に書式を適用して結合
+                # 各候補に書式を適用して結合（ただしテーブル開始行の場合は書式を適用しない）
                 formatted_parts = []
                 for c in same_row_candidates:
                     c_text, _, c_row, c_col, c_kind, _ = c
-                    if c_kind == 'bold':
+                    if c_kind == 'bold' and not skip_formatting:
                         formatted_parts.append(f"**{c_text}**")
                     else:
                         formatted_parts.append(c_text)
                 combined_title = ' '.join(formatted_parts)
-                debug_print("[DEBUG] タイトル選択（結合）: '{}' (type={}, row={})".format(combined_title, best_title[4], best_title[2]))
+                debug_print("[DEBUG] タイトル選択（結合）: '{}' (type={}, row={}, skip_formatting={})".format(combined_title, best_title[4], best_title[2], skip_formatting))
                 return combined_title
             
-            # 太字の場合は書式を適用
+            # 太字の場合は書式を適用（ただしテーブル開始行の場合は書式を適用しない）
             title_text = best_title[0]
-            if best_title[4] == 'bold':
+            if best_title[4] == 'bold' and not skip_formatting:
                 title_text = f"**{title_text}**"
-            debug_print("[DEBUG] タイトル選択: '{}' (type={}, row={})".format(title_text, best_title[4], best_title[2]))
+            debug_print("[DEBUG] タイトル選択: '{}' (type={}, row={}, skip_formatting={})".format(title_text, best_title[4], best_title[2], skip_formatting))
             return title_text
 
         # タイトルが見つからない場合は以前のタイトル行をクリア
