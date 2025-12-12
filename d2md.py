@@ -1056,8 +1056,9 @@ class WordToMarkdownConverter:
             drawings = run._element.xpath('.//w:drawing')
             all_drawings.extend(drawings)
         
-        # 画像とテキストボックスのテキストを収集
-        processed_images = []
+        # 画像（blip）を含むdrawingとテキストボックス（wsp）を含むdrawingを分類
+        has_bitmap_image = False
+        has_textbox = False
         all_shape_texts = []
         
         for drawing in all_drawings:
@@ -1065,23 +1066,97 @@ class WordToMarkdownConverter:
             shape_texts = self._extract_shape_texts_from_drawing(drawing)
             if shape_texts:
                 all_shape_texts.extend(shape_texts)
+                has_textbox = True
             
-            # 画像を処理
+            # 画像（blip）があるかチェック
+            blips = drawing.xpath('.//a:blip')
+            if blips:
+                has_bitmap_image = True
+        
+        # 画像とテキストボックスが両方ある場合、vector_compositeとして処理
+        if has_bitmap_image and has_textbox:
+            debug_print(f"[DEBUG] 画像+テキストボックス混在段落を検出、vector_compositeとして処理")
+            if self._process_mixed_drawings_as_vector(all_drawings, all_shape_texts):
+                return True  # vector_compositeとして処理された
+        
+        # 通常の画像処理（テキストボックスがない場合）
+        for drawing in all_drawings:
             for inline_shape in drawing.xpath('.//a:blip'):
                 embed_id = inline_shape.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
                 if embed_id:
                     for rel in paragraph.part.rels.values():
                         if rel.rId == embed_id and "image" in rel.reltype:
                             self._extract_and_convert_image_inline(rel, drawing)
-                            processed_images.append(rel.rId)
-        
-        # 画像が処理され、かつテキストボックスのテキストがある場合
-        # テキストをdetailsタグで出力し、本文テキストをスキップ
-        if processed_images and all_shape_texts:
-            self._output_shape_texts_as_details(all_shape_texts)
-            return True  # 本文テキストをスキップ
         
         return False  # 画像処理なし、または通常の画像のみ
+    
+    def _process_mixed_drawings_as_vector(self, drawing_elements, shape_texts):
+        """画像とテキストボックスが混在するdrawing要素をvector_compositeとして処理
+        
+        Args:
+            drawing_elements: drawing要素のリスト
+            shape_texts: 抽出済みのテキストボックステキスト
+            
+        Returns:
+            bool: 処理成功時True
+        """
+        try:
+            print(f"[INFO] 画像+テキストボックス混在図形を処理中...")
+            
+            # 一時的なWord文書を作成して複数のdrawing要素を含める
+            temp_doc_path = self._create_canvas_document(None, drawing_elements)
+            if not temp_doc_path:
+                return False
+            
+            debug_print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
+            
+            # LibreOfficeでPDFに変換
+            temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
+            if not temp_pdf_path:
+                os.unlink(temp_doc_path)
+                return False
+            
+            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            
+            # PDFから画像に変換（vector_composite用カウンターを使用）
+            self.vector_image_counter += 1
+            ext = self.output_format
+            image_filename = f"{self.base_name}_vector_composite_{self.vector_image_counter:03d}.{ext}"
+            image_path = os.path.join(self.images_dir, image_filename)
+            
+            # 出力形式に応じて変換
+            if self.output_format == 'svg':
+                convert_success = self._convert_pdf_to_svg(temp_pdf_path, image_path)
+            else:
+                convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
+            
+            if convert_success:
+                # Markdownに追加（ファイル名をURLエンコード）
+                encoded_filename = urllib.parse.quote(image_filename)
+                self.markdown_lines.append(f"![](images/{encoded_filename})")
+                self.markdown_lines.append("")
+                
+                # 図形内テキストをdetailsで出力
+                self._output_shape_texts_as_details(shape_texts)
+                
+                print(f"[SUCCESS] 混在図形をvector_compositeとして処理: {image_filename}")
+                
+                # 一時ファイルを削除
+                os.unlink(temp_doc_path)
+                os.unlink(temp_pdf_path)
+                return True
+            
+            # 一時ファイルを削除
+            os.unlink(temp_doc_path)
+            if os.path.exists(temp_pdf_path):
+                os.unlink(temp_pdf_path)
+            return False
+            
+        except Exception as e:
+            print(f"[ERROR] 混在図形処理エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def _extract_and_convert_image_inline(self, rel, drawing_element=None):
         """インライン画像を抽出・変換"""
