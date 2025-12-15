@@ -4628,6 +4628,10 @@ class _TablesMixin:
         if not table_data:
             return
         
+        # テーブル前に空行を確保（Markdownビューワでの正しい表示のため）
+        if self.markdown_lines and self.markdown_lines[-1] != "":
+            self.markdown_lines.append("")
+        
         if source_rows and len(source_rows) >= 2 and source_rows[0] <= 4:
             import traceback
             stack = traceback.extract_stack()
