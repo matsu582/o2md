@@ -175,28 +175,11 @@ class WordToMarkdownConverter:
     def _process_document_charts(self):
         """Word文書内のチャートデータを抽出してMarkdownテーブルとして出力する
         
-        既存の図形処理とは独立して動作し、チャートのデータを
-        テーブル形式で追加出力する。
+        注意: チャート画像の下にデータを出力するようになったため、
+        このメソッドは現在何もしない。チャートデータは_process_chart_as_imageで
+        画像の直後に出力される。
         """
-        try:
-            charts = extract_charts_from_docx(self.word_file)
-            
-            if not charts:
-                return
-            
-            print(f"[INFO] Word文書から {len(charts)} 個のチャートデータを抽出")
-            
-            self.markdown_lines.append("")
-            self.markdown_lines.append("## チャートデータ")
-            self.markdown_lines.append("")
-            
-            for chart_data in charts:
-                md_content = chart_data_to_markdown(chart_data)
-                for line in md_content.split('\n'):
-                    self.markdown_lines.append(line)
-                    
-        except Exception as e:
-            print(f"[WARNING] チャートデータ抽出中にエラー: {e}")
+        pass
     
     def _analyze_headings(self):
         """見出し構造を解析"""
@@ -1186,6 +1169,13 @@ class WordToMarkdownConverter:
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
                 self.markdown_lines.append("")
                 
+                # チャート画像の下にチャートデータを出力
+                chart_data = self._extract_chart_data_from_drawings(drawing_elements)
+                if chart_data:
+                    md_content = chart_data_to_markdown(chart_data)
+                    for line in md_content.split('\n'):
+                        self.markdown_lines.append(line)
+                
                 print(f"[SUCCESS] チャートを画像として処理: {image_filename}")
                 
                 # 一時ファイルを削除
@@ -1204,6 +1194,102 @@ class WordToMarkdownConverter:
             import traceback
             traceback.print_exc()
             return False
+    
+    def _extract_chart_data_from_drawings(self, drawing_elements):
+        """drawing要素からチャートデータを抽出する
+        
+        Args:
+            drawing_elements: drawing要素のリスト
+            
+        Returns:
+            ChartDataオブジェクト、または抽出できない場合はNone
+        """
+        try:
+            from d2md_charts import _parse_chart_xml, CHART_NS
+            
+            if not isinstance(drawing_elements, (list, tuple)):
+                drawing_elements = [drawing_elements]
+            
+            for drawing in drawing_elements:
+                chart_elems = drawing.xpath('.//*[local-name()="chart"]')
+                for chart_elem in chart_elems:
+                    r_id = chart_elem.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+                    if not r_id:
+                        continue
+                    
+                    chart_path = self._get_chart_path_from_rid(r_id)
+                    if not chart_path:
+                        continue
+                    
+                    chart_data = self._parse_chart_file(chart_path)
+                    if chart_data:
+                        return chart_data
+            
+            return None
+            
+        except Exception as e:
+            debug_print(f"[DEBUG] チャートデータ抽出エラー: {e}")
+            return None
+    
+    def _get_chart_path_from_rid(self, r_id: str):
+        """rIdからチャートファイルのパスを取得する
+        
+        Args:
+            r_id: リレーションシップID
+            
+        Returns:
+            チャートファイルのパス、または見つからない場合はNone
+        """
+        try:
+            with zipfile.ZipFile(self.word_file, 'r') as zf:
+                rels_path = 'word/_rels/document.xml.rels'
+                if rels_path not in zf.namelist():
+                    return None
+                
+                with zf.open(rels_path) as f:
+                    tree = ET.parse(f)
+                    root = tree.getroot()
+                    
+                    ns = {'r': 'http://schemas.openxmlformats.org/package/2006/relationships'}
+                    for rel in root.findall('.//r:Relationship', ns):
+                        if rel.get('Id') == r_id:
+                            target = rel.get('Target')
+                            if target and 'chart' in target.lower():
+                                if target.startswith('/'):
+                                    return target[1:]
+                                else:
+                                    return f"word/{target}"
+            
+            return None
+            
+        except Exception as e:
+            debug_print(f"[DEBUG] rIdからチャートパス取得エラー: {e}")
+            return None
+    
+    def _parse_chart_file(self, chart_path: str):
+        """チャートファイルを解析してChartDataを返す
+        
+        Args:
+            chart_path: チャートファイルのパス
+            
+        Returns:
+            ChartDataオブジェクト、または解析できない場合はNone
+        """
+        try:
+            from d2md_charts import _parse_chart_xml
+            
+            with zipfile.ZipFile(self.word_file, 'r') as zf:
+                if chart_path not in zf.namelist():
+                    return None
+                
+                with zf.open(chart_path) as f:
+                    tree = ET.parse(f)
+                    root = tree.getroot()
+                    return _parse_chart_xml(root)
+            
+        except Exception as e:
+            debug_print(f"[DEBUG] チャートファイル解析エラー: {e}")
+            return None
     
     def _create_chart_document(self, drawing_elements):
         """チャートを含む一時Word文書を作成

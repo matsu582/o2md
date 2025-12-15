@@ -835,30 +835,337 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             self._add_separator()
 
     def _process_sheet_charts(self, sheet):
-        """シート内のチャートデータを抽出してMarkdownテーブルとして出力する
+        """シート内のチャートを個別に画像化し、画像の下にデータを配置する
         
-        既存の画像ベース処理とは独立して動作し、チャートのデータを
-        テーブル形式で追加出力する。
+        各チャートを個別にレンダリングし、画像とデータテーブルを出力する。
         
         Args:
             sheet: openpyxlのワークシートオブジェクト
         """
         try:
-            charts = extract_charts_from_worksheet(sheet, self.workbook)
+            ws_charts = getattr(sheet, "_charts", [])
+            chart_data_list = extract_charts_from_worksheet(sheet, self.workbook)
             
-            if not charts:
+            if not ws_charts:
                 return
             
-            print(f"[INFO] シート '{sheet.title}' から {len(charts)} 個のチャートデータを抽出")
+            print(f"[INFO] シート '{sheet.title}' から {len(ws_charts)} 個のチャートを画像化")
             
-            for chart_data in charts:
-                md_content = chart_data_to_markdown(chart_data)
-                for line in md_content.split('\n'):
-                    self.markdown_lines.append(line)
+            for i, chart in enumerate(ws_charts):
+                image_filename = self._render_chart_as_image(sheet, chart, i)
+                
+                if image_filename:
+                    self.markdown_lines.append(f"![](images/{image_filename})")
+                    self.markdown_lines.append("")
+                
+                if i < len(chart_data_list):
+                    md_content = chart_data_to_markdown(chart_data_list[i])
+                    for line in md_content.split('\n'):
+                        self.markdown_lines.append(line)
                     
         except Exception as e:
-            print(f"[WARNING] チャートデータ抽出中にエラー: {e}")
-
+            print(f"[WARNING] チャート処理中にエラー: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _render_chart_as_image(self, sheet, chart, chart_index: int):
+        """チャートを個別に画像としてレンダリングする
+        
+        Args:
+            sheet: ワークシートオブジェクト
+            chart: openpyxlのチャートオブジェクト
+            chart_index: チャートのインデックス
+            
+        Returns:
+            str: 画像ファイル名、失敗時はNone
+        """
+        try:
+            from copy import deepcopy
+            
+            temp_wb = openpyxl.Workbook()
+            temp_ws = temp_wb.active
+            temp_ws.title = "Chart"
+            
+            chart_copy = deepcopy(chart)
+            chart_copy.anchor = "A1"
+            temp_ws.add_chart(chart_copy)
+            
+            temp_xlsx = tempfile.mktemp(suffix='.xlsx')
+            temp_wb.save(temp_xlsx)
+            temp_wb.close()
+            
+            temp_pdf = self._convert_excel_to_pdf(temp_xlsx)
+            if not temp_pdf:
+                os.unlink(temp_xlsx)
+                return None
+            
+            self.image_counter += 1
+            ext = self.output_format
+            image_filename = f"{self.base_name}_{sheet.title}_chart_{chart_index + 1:03d}.{ext}"
+            image_path = os.path.join(self.images_dir, image_filename)
+            
+            if self.output_format == 'svg':
+                success = self._convert_chart_pdf_to_svg(temp_pdf, image_path)
+            else:
+                success = self._convert_chart_pdf_to_png(temp_pdf, image_path)
+            
+            os.unlink(temp_xlsx)
+            os.unlink(temp_pdf)
+            
+            if success:
+                print(f"[SUCCESS] チャート画像生成: {image_filename}")
+                return image_filename
+            
+            return None
+            
+        except Exception as e:
+            print(f"[WARNING] チャート画像レンダリングエラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _convert_excel_to_pdf(self, xlsx_path: str):
+        """ExcelファイルをPDFに変換する
+        
+        Args:
+            xlsx_path: Excelファイルのパス
+            
+        Returns:
+            str: PDFファイルのパス、失敗時はNone
+        """
+        try:
+            from utils import get_libreoffice_path
+            
+            lo_path = get_libreoffice_path()
+            temp_dir = tempfile.mkdtemp()
+            
+            cmd = [
+                lo_path,
+                '--headless',
+                '--convert-to', 'pdf',
+                '--outdir', temp_dir,
+                xlsx_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            
+            if result.returncode != 0:
+                debug_print(f"[DEBUG] LibreOffice変換エラー: {result.stderr}")
+                shutil.rmtree(temp_dir)
+                return None
+            
+            pdf_name = os.path.splitext(os.path.basename(xlsx_path))[0] + '.pdf'
+            pdf_path = os.path.join(temp_dir, pdf_name)
+            
+            if os.path.exists(pdf_path):
+                final_pdf = tempfile.mktemp(suffix='.pdf')
+                shutil.move(pdf_path, final_pdf)
+                shutil.rmtree(temp_dir)
+                print(f"[INFO] Excel→PDF変換完了: {final_pdf}")
+                return final_pdf
+            
+            shutil.rmtree(temp_dir)
+            return None
+            
+        except Exception as e:
+            print(f"[WARNING] Excel→PDF変換エラー: {e}")
+            return None
+    
+    def _convert_chart_pdf_to_svg(self, pdf_path: str, output_path: str) -> bool:
+        """チャートPDFをSVGに変換する（PyMuPDF使用）
+        
+        Args:
+            pdf_path: PDFファイルのパス
+            output_path: 出力SVGファイルのパス
+            
+        Returns:
+            bool: 成功時True
+        """
+        try:
+            import fitz
+            import numpy as np
+            from PIL import Image as PILImage
+            import re
+            
+            doc = fitz.open(pdf_path)
+            if len(doc) == 0:
+                print("[ERROR] PDFにページが含まれていません")
+                doc.close()
+                return False
+            
+            page = doc[0]
+            
+            dpi = 300
+            zoom = dpi / 72
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            
+            img = PILImage.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            img_array = np.array(img)
+            
+            if len(img_array.shape) == 3:
+                gray = np.mean(img_array, axis=2)
+            else:
+                gray = img_array
+            
+            threshold = 250
+            non_white_pixels = gray < threshold
+            
+            rows = np.any(non_white_pixels, axis=1)
+            cols = np.any(non_white_pixels, axis=0)
+            
+            svg_content = page.get_svg_image()
+            width_units = page.rect.width
+            height_units = page.rect.height
+            
+            if rows.any() and cols.any():
+                row_indices = np.where(rows)[0]
+                col_indices = np.where(cols)[0]
+                
+                top_px = row_indices[0]
+                bottom_px = row_indices[-1] + 1
+                left_px = col_indices[0]
+                right_px = col_indices[-1] + 1
+                
+                scale_x = width_units / pix.width
+                scale_y = height_units / pix.height
+                
+                left_u = left_px * scale_x
+                top_u = top_px * scale_y
+                width_u = (right_px - left_px) * scale_x
+                height_u = (bottom_px - top_px) * scale_y
+                
+                svg_content = self._update_chart_svg_content(
+                    svg_content, left_u, top_u, width_u, height_u
+                )
+            
+            doc.close()
+            
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(svg_content)
+            
+            print(f"[INFO] チャートSVG変換完了: {output_path}")
+            return True
+            
+        except Exception as e:
+            print(f"[WARNING] チャートSVG変換エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _update_chart_svg_content(self, svg_content, left, top, width, height, scale=2.0):
+        """チャートSVGのviewBoxとサイズを更新する
+        
+        Args:
+            svg_content: SVG文字列
+            left, top, width, height: 新しいviewBox座標
+            scale: 表示サイズの倍率
+            
+        Returns:
+            str: 更新されたSVG文字列
+        """
+        import re
+        
+        new_viewbox = f'viewBox="{left:.2f} {top:.2f} {width:.2f} {height:.2f}"'
+        svg_content = re.sub(
+            r'viewBox="[^"]*"',
+            new_viewbox,
+            svg_content,
+            count=1
+        )
+        
+        display_width = width * scale
+        svg_content = re.sub(
+            r'width="[^"]*"',
+            f'width="{display_width:.2f}"',
+            svg_content,
+            count=1
+        )
+        
+        display_height = height * scale
+        svg_content = re.sub(
+            r'height="[^"]*"',
+            f'height="{display_height:.2f}"',
+            svg_content,
+            count=1
+        )
+        
+        return svg_content
+    
+    def _convert_chart_pdf_to_png(self, pdf_path: str, output_path: str) -> bool:
+        """チャートPDFをPNGに変換する
+        
+        Args:
+            pdf_path: PDFファイルのパス
+            output_path: 出力PNGファイルのパス
+            
+        Returns:
+            bool: 成功時True
+        """
+        try:
+            from pdf2image import convert_from_path
+            
+            images = convert_from_path(pdf_path, dpi=300)
+            
+            if images:
+                img = images[0]
+                img = self._trim_chart_margins(img)
+                img.save(output_path, 'PNG')
+                print(f"[INFO] チャートPNG変換完了: {output_path}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"[WARNING] チャートPNG変換エラー: {e}")
+            return False
+    
+    def _trim_chart_margins(self, img):
+        """チャート画像の余白をトリムする
+        
+        Args:
+            img: PIL Imageオブジェクト
+            
+        Returns:
+            PIL Image: トリムされた画像
+        """
+        try:
+            import numpy as np
+            
+            img_array = np.array(img)
+            
+            if len(img_array.shape) == 3:
+                gray = np.mean(img_array, axis=2)
+            else:
+                gray = img_array
+            
+            threshold = 250
+            non_white = gray < threshold
+            
+            rows = np.any(non_white, axis=1)
+            cols = np.any(non_white, axis=0)
+            
+            if not np.any(rows) or not np.any(cols):
+                return img
+            
+            row_indices = np.where(rows)[0]
+            col_indices = np.where(cols)[0]
+            
+            top, bottom = row_indices[0], row_indices[-1]
+            left, right = col_indices[0], col_indices[-1]
+            
+            padding = 10
+            top = max(0, top - padding)
+            bottom = min(img_array.shape[0], bottom + padding)
+            left = max(0, left - padding)
+            right = min(img_array.shape[1], right + padding)
+            
+            return img.crop((left, top, right, bottom))
+            
+        except Exception as e:
+            debug_print(f"[DEBUG] 余白トリムエラー: {e}")
+            return img
+    
     def _reorder_sheet_output_by_row_order(self, sheet):
         """Emit sheet content (text and deferred images) strictly by source row order.
 
