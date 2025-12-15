@@ -838,6 +838,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         """シート内のチャートを個別に画像化し、画像の下にデータを配置する
         
         各チャートを個別にレンダリングし、画像とデータテーブルを出力する。
+        チャートがある場合、シート全体画像は出力から除外する。
         
         Args:
             sheet: openpyxlのワークシートオブジェクト
@@ -848,6 +849,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             
             if not ws_charts:
                 return
+            
+            self._remove_sheet_image_from_output(sheet.title)
             
             print(f"[INFO] シート '{sheet.title}' から {len(ws_charts)} 個のチャートを画像化")
             
@@ -868,6 +871,27 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             import traceback
             traceback.print_exc()
     
+    def _remove_sheet_image_from_output(self, sheet_title):
+        """シート全体画像をMarkdown出力から除外する
+        
+        チャートがあるシートでは、シート全体画像（*_sheet.png/svg）は
+        冗長なため除外する。
+        
+        Args:
+            sheet_title: シート名
+        """
+        pattern = f"_sheet."
+        lines_to_remove = []
+        
+        for i, line in enumerate(self.markdown_lines):
+            if f"![" in line and pattern in line and sheet_title in line:
+                lines_to_remove.append(i)
+        
+        for i in reversed(lines_to_remove):
+            del self.markdown_lines[i]
+            if i < len(self.markdown_lines) and self.markdown_lines[i] == "":
+                del self.markdown_lines[i]
+    
     def _render_chart_as_image(self, sheet, chart, chart_index: int):
         """チャートを個別に画像としてレンダリングする
         
@@ -881,10 +905,14 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         """
         try:
             from copy import deepcopy
+            import re
             
             temp_wb = openpyxl.Workbook()
             temp_ws = temp_wb.active
-            temp_ws.title = "Chart"
+            temp_ws.title = sheet.title
+            
+            cell_refs = self._extract_chart_cell_references(chart)
+            self._copy_chart_data_cells(sheet, temp_ws, cell_refs)
             
             chart_copy = deepcopy(chart)
             chart_copy.anchor = "A1"
@@ -923,6 +951,74 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             import traceback
             traceback.print_exc()
             return None
+    
+    def _extract_chart_cell_references(self, chart):
+        """チャートが参照しているセル範囲を抽出する
+        
+        Args:
+            chart: openpyxlのチャートオブジェクト
+            
+        Returns:
+            set: セル参照の集合（例: {('A', 2), ('A', 3), ('B', 2), ('B', 3)}）
+        """
+        import re
+        cell_refs = set()
+        
+        def parse_range_ref(ref_str):
+            """セル範囲参照を解析してセル座標のリストを返す"""
+            if not ref_str:
+                return []
+            
+            match = re.match(r"'?[^'!]+'?\!\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)", ref_str)
+            if match:
+                col_start, row_start, col_end, row_end = match.groups()
+                row_start, row_end = int(row_start), int(row_end)
+                
+                from openpyxl.utils import column_index_from_string
+                col_start_idx = column_index_from_string(col_start)
+                col_end_idx = column_index_from_string(col_end)
+                
+                for row in range(row_start, row_end + 1):
+                    for col_idx in range(col_start_idx, col_end_idx + 1):
+                        cell_refs.add((col_idx, row))
+            return []
+        
+        for series in chart.series:
+            if hasattr(series, 'val') and series.val:
+                if hasattr(series.val, 'numRef') and series.val.numRef:
+                    parse_range_ref(series.val.numRef.f)
+            
+            if hasattr(series, 'cat') and series.cat:
+                if hasattr(series.cat, 'numRef') and series.cat.numRef:
+                    parse_range_ref(series.cat.numRef.f)
+                if hasattr(series.cat, 'strRef') and series.cat.strRef:
+                    parse_range_ref(series.cat.strRef.f)
+            
+            if hasattr(series, 'xVal') and series.xVal:
+                if hasattr(series.xVal, 'numRef') and series.xVal.numRef:
+                    parse_range_ref(series.xVal.numRef.f)
+            
+            if hasattr(series, 'yVal') and series.yVal:
+                if hasattr(series.yVal, 'numRef') and series.yVal.numRef:
+                    parse_range_ref(series.yVal.numRef.f)
+        
+        return cell_refs
+    
+    def _copy_chart_data_cells(self, src_sheet, dst_sheet, cell_refs):
+        """チャートが参照しているセルのデータをコピーする
+        
+        Args:
+            src_sheet: コピー元のワークシート
+            dst_sheet: コピー先のワークシート
+            cell_refs: セル参照の集合（(col_idx, row)のタプル）
+        """
+        from openpyxl.utils import get_column_letter
+        
+        for col_idx, row in cell_refs:
+            col_letter = get_column_letter(col_idx)
+            src_cell = src_sheet[f"{col_letter}{row}"]
+            dst_cell = dst_sheet[f"{col_letter}{row}"]
+            dst_cell.value = src_cell.value
     
     def _convert_chart_excel_to_pdf(self, xlsx_path: str):
         """チャート用ExcelファイルをPDFに変換する
