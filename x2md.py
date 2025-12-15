@@ -27,6 +27,8 @@ from utils import get_libreoffice_path, col_letter, normalize_excel_path, get_xm
 from isolated_group_renderer import IsolatedGroupRenderer
 from x2md_tables import _TablesMixin
 from x2md_graphics import _GraphicsMixin
+from x2md_charts import extract_charts_from_worksheet
+from chart_utils import chart_data_to_markdown
 
 try:
     import openpyxl
@@ -827,8 +829,35 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             # エミッタが配置と重複抑制を制御するよう延期挿入を優先します。
             self._process_sheet_images(sheet, insert_index=len(self.markdown_lines), insert_images=False)
         finally:
+            # チャートデータを抽出してMarkdownテーブルとして出力
+            self._process_sheet_charts(sheet)
             # シート処理後の最終セパレータ
             self._add_separator()
+
+    def _process_sheet_charts(self, sheet):
+        """シート内のチャートデータを抽出してMarkdownテーブルとして出力する
+        
+        既存の画像ベース処理とは独立して動作し、チャートのデータを
+        テーブル形式で追加出力する。
+        
+        Args:
+            sheet: openpyxlのワークシートオブジェクト
+        """
+        try:
+            charts = extract_charts_from_worksheet(sheet, self.workbook)
+            
+            if not charts:
+                return
+            
+            print(f"[INFO] シート '{sheet.title}' から {len(charts)} 個のチャートデータを抽出")
+            
+            for chart_data in charts:
+                md_content = chart_data_to_markdown(chart_data)
+                for line in md_content.split('\n'):
+                    self.markdown_lines.append(line)
+                    
+        except Exception as e:
+            print(f"[WARNING] チャートデータ抽出中にエラー: {e}")
 
     def _reorder_sheet_output_by_row_order(self, sheet):
         """Emit sheet content (text and deferred images) strictly by source row order.

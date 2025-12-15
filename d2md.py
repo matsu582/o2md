@@ -28,6 +28,8 @@ from PIL import Image
 import io
 
 from utils import get_libreoffice_path
+from d2md_charts import extract_charts_from_docx
+from chart_utils import chart_data_to_markdown
 
 # 数式変換モジュール (オプション)
 try:
@@ -157,6 +159,9 @@ class WordToMarkdownConverter:
         # 2.5. テキストボックス内テキストを抽出
         self._extract_textbox_content()
         
+        # 2.6. チャートデータを抽出してMarkdownテーブルとして出力
+        self._process_document_charts()
+        
         # 3. Markdownファイルを保存
         markdown_content = "\n".join(self.markdown_lines)
         output_file = os.path.join(self.output_dir, f"{self.base_name}.md")
@@ -166,6 +171,32 @@ class WordToMarkdownConverter:
         
         print(f"[SUCCESS] 変換完了: {output_file}")
         return output_file
+    
+    def _process_document_charts(self):
+        """Word文書内のチャートデータを抽出してMarkdownテーブルとして出力する
+        
+        既存の図形処理とは独立して動作し、チャートのデータを
+        テーブル形式で追加出力する。
+        """
+        try:
+            charts = extract_charts_from_docx(self.word_file)
+            
+            if not charts:
+                return
+            
+            print(f"[INFO] Word文書から {len(charts)} 個のチャートデータを抽出")
+            
+            self.markdown_lines.append("")
+            self.markdown_lines.append("## チャートデータ")
+            self.markdown_lines.append("")
+            
+            for chart_data in charts:
+                md_content = chart_data_to_markdown(chart_data)
+                for line in md_content.split('\n'):
+                    self.markdown_lines.append(line)
+                    
+        except Exception as e:
+            print(f"[WARNING] チャートデータ抽出中にエラー: {e}")
     
     def _analyze_headings(self):
         """見出し構造を解析"""
