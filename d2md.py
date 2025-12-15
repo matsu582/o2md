@@ -1094,6 +1094,7 @@ class WordToMarkdownConverter:
         # 画像（blip）を含むdrawingとテキストボックス（wsp）を含むdrawingを分類
         has_bitmap_image = False
         has_textbox = False
+        has_chart = False
         all_shape_texts = []
         
         for drawing in all_drawings:
@@ -1107,6 +1108,17 @@ class WordToMarkdownConverter:
             blips = drawing.xpath('.//a:blip')
             if blips:
                 has_bitmap_image = True
+            
+            # チャート（c:chart）があるかチェック
+            charts = drawing.xpath('.//*[local-name()="chart"]')
+            if charts:
+                has_chart = True
+        
+        # チャートがある場合、チャート画像として処理
+        if has_chart:
+            debug_print(f"[DEBUG] チャートを含む段落を検出")
+            if self._process_chart_as_image(paragraph, all_drawings):
+                return True  # チャートとして処理された
         
         # 画像とテキストボックスが両方ある場合、vector_compositeとして処理
         if has_bitmap_image and has_textbox:
@@ -1124,6 +1136,143 @@ class WordToMarkdownConverter:
                             self._extract_and_convert_image_inline(rel, drawing)
         
         return False  # 画像処理なし、または通常の画像のみ
+    
+    def _process_chart_as_image(self, paragraph, drawing_elements) -> bool:
+        """チャートを含む段落を画像として処理
+        
+        元のdocxをコピーしてdocument.xmlだけ最小化する方式を採用。
+        これにより、chart.xmlやその依存ファイルを個別に追跡する必要がなくなる。
+        
+        Args:
+            paragraph: 段落オブジェクト
+            drawing_elements: drawing要素のリスト
+            
+        Returns:
+            bool: 処理成功時True
+        """
+        try:
+            print(f"[INFO] チャートを画像として処理中...")
+            
+            # 元のdocxをコピーしてdocument.xmlだけ最小化
+            temp_doc_path = self._create_chart_document(drawing_elements)
+            if not temp_doc_path:
+                return False
+            
+            debug_print(f"[DEBUG] チャート用一時Word文書作成: {temp_doc_path}")
+            
+            # LibreOfficeでPDFに変換
+            temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
+            if not temp_pdf_path:
+                os.unlink(temp_doc_path)
+                return False
+            
+            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            
+            # PDFから画像に変換（チャート用カウンターを使用）
+            self.vector_image_counter += 1
+            ext = self.output_format
+            image_filename = f"{self.base_name}_chart_{self.vector_image_counter:03d}.{ext}"
+            image_path = os.path.join(self.images_dir, image_filename)
+            
+            # 出力形式に応じて変換
+            if self.output_format == 'svg':
+                convert_success = self._convert_pdf_to_svg(temp_pdf_path, image_path)
+            else:
+                convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
+            
+            if convert_success:
+                # Markdownに追加（ファイル名をURLエンコード）
+                encoded_filename = urllib.parse.quote(image_filename)
+                self.markdown_lines.append(f"![](images/{encoded_filename})")
+                self.markdown_lines.append("")
+                
+                print(f"[SUCCESS] チャートを画像として処理: {image_filename}")
+                
+                # 一時ファイルを削除
+                os.unlink(temp_doc_path)
+                os.unlink(temp_pdf_path)
+                return True
+            
+            # 一時ファイルを削除
+            os.unlink(temp_doc_path)
+            if os.path.exists(temp_pdf_path):
+                os.unlink(temp_pdf_path)
+            return False
+            
+        except Exception as e:
+            print(f"[ERROR] チャート画像処理エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _create_chart_document(self, drawing_elements):
+        """チャートを含む一時Word文書を作成
+        
+        元のdocxをコピーしてdocument.xmlだけ最小化する方式。
+        これにより、chart.xmlやその依存ファイルを個別に追跡する必要がなくなる。
+        
+        Args:
+            drawing_elements: drawing要素のリスト
+            
+        Returns:
+            str: 一時docxファイルのパス、失敗時はNone
+        """
+        try:
+            debug_print("[DEBUG] チャート用Word文書作成開始...")
+            
+            # drawing_elementsがリストでない場合は単一要素として扱う
+            if not isinstance(drawing_elements, (list, tuple)):
+                drawing_elements = [drawing_elements]
+            
+            # drawing要素をXML文字列に変換
+            drawings_xml_parts = []
+            for d in drawing_elements:
+                d_xml = ET.tostring(d, encoding='unicode')
+                drawings_xml_parts.append(d_xml)
+            drawings_xml = "".join(drawings_xml_parts)
+            
+            # 最小化されたdocument.xmlを作成
+            doc_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" 
+            xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+    <w:body>
+        <w:p>
+            <w:r>
+                {drawings_xml}
+            </w:r>
+        </w:p>
+        <w:sectPr>
+            <w:pgSz w:w="11906" w:h="16838"/>
+            <w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720"/>
+        </w:sectPr>
+    </w:body>
+</w:document>'''
+            
+            # 一時ファイルに保存
+            temp_docx_path = tempfile.mktemp(suffix='.docx')
+            
+            # 元のdocxをコピーしてdocument.xmlだけ差し替え
+            with zipfile.ZipFile(self.word_file, 'r') as src_zip:
+                with zipfile.ZipFile(temp_docx_path, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
+                    for item in src_zip.namelist():
+                        if item == 'word/document.xml':
+                            # document.xmlだけ差し替え
+                            dst_zip.writestr(item, doc_xml)
+                        else:
+                            # その他のファイルはそのままコピー
+                            dst_zip.writestr(item, src_zip.read(item))
+            
+            print(f"[INFO] チャート用一時Word文書作成完了: {temp_docx_path}")
+            return temp_docx_path
+            
+        except Exception as e:
+            print(f"[ERROR] チャート用一時文書作成エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def _process_mixed_drawings_as_vector(self, drawing_elements, shape_texts):
         """画像とテキストボックスが混在するdrawing要素をvector_compositeとして処理
