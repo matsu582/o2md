@@ -6,6 +6,8 @@ Excel、Word、PowerPointファイルを自動判定して**それっぽい**Mar
 
 ちゃんとしたきゃ、[markitdown](https://github.com/microsoft/markitdown)や[docling](https://github.com/docling-project/docling)を使いましょう。
 
+docling、markitdown との機能比較は [o2md_comparison.md](o2md_comparison.md) を参照してください。
+
 ## 概要
 
 o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）を**それっぽい**Markdown形式に変換するPythonツールです。ファイルの種類を自動判定し、適切な変換エンジンを使用して処理します。
