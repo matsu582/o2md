@@ -28,6 +28,8 @@ from PIL import Image
 import io
 
 from utils import get_libreoffice_path
+from d2md_charts import extract_charts_from_docx
+from chart_utils import chart_data_to_markdown
 
 # 数式変換モジュール (オプション)
 try:
@@ -157,6 +159,9 @@ class WordToMarkdownConverter:
         # 2.5. テキストボックス内テキストを抽出
         self._extract_textbox_content()
         
+        # 2.6. チャートデータを抽出してMarkdownテーブルとして出力
+        self._process_document_charts()
+        
         # 3. Markdownファイルを保存
         markdown_content = "\n".join(self.markdown_lines)
         output_file = os.path.join(self.output_dir, f"{self.base_name}.md")
@@ -166,6 +171,15 @@ class WordToMarkdownConverter:
         
         print(f"[SUCCESS] 変換完了: {output_file}")
         return output_file
+    
+    def _process_document_charts(self):
+        """Word文書内のチャートデータを抽出してMarkdownテーブルとして出力する
+        
+        注意: チャート画像の下にデータを出力するようになったため、
+        このメソッドは現在何もしない。チャートデータは_process_chart_as_imageで
+        画像の直後に出力される。
+        """
+        pass
     
     def _analyze_headings(self):
         """見出し構造を解析"""
@@ -1063,6 +1077,7 @@ class WordToMarkdownConverter:
         # 画像（blip）を含むdrawingとテキストボックス（wsp）を含むdrawingを分類
         has_bitmap_image = False
         has_textbox = False
+        has_chart = False
         all_shape_texts = []
         
         for drawing in all_drawings:
@@ -1076,6 +1091,17 @@ class WordToMarkdownConverter:
             blips = drawing.xpath('.//a:blip')
             if blips:
                 has_bitmap_image = True
+            
+            # チャート（c:chart）があるかチェック
+            charts = drawing.xpath('.//*[local-name()="chart"]')
+            if charts:
+                has_chart = True
+        
+        # チャートがある場合、チャート画像として処理
+        if has_chart:
+            debug_print(f"[DEBUG] チャートを含む段落を検出")
+            if self._process_chart_as_image(paragraph, all_drawings):
+                return True  # チャートとして処理された
         
         # 画像とテキストボックスが両方ある場合、vector_compositeとして処理
         if has_bitmap_image and has_textbox:
@@ -1093,6 +1119,246 @@ class WordToMarkdownConverter:
                             self._extract_and_convert_image_inline(rel, drawing)
         
         return False  # 画像処理なし、または通常の画像のみ
+    
+    def _process_chart_as_image(self, paragraph, drawing_elements) -> bool:
+        """チャートを含む段落を画像として処理
+        
+        元のdocxをコピーしてdocument.xmlだけ最小化する方式を採用。
+        これにより、chart.xmlやその依存ファイルを個別に追跡する必要がなくなる。
+        
+        Args:
+            paragraph: 段落オブジェクト
+            drawing_elements: drawing要素のリスト
+            
+        Returns:
+            bool: 処理成功時True
+        """
+        try:
+            print(f"[INFO] チャートを画像として処理中...")
+            
+            # 元のdocxをコピーしてdocument.xmlだけ最小化
+            temp_doc_path = self._create_chart_document(drawing_elements)
+            if not temp_doc_path:
+                return False
+            
+            debug_print(f"[DEBUG] チャート用一時Word文書作成: {temp_doc_path}")
+            
+            # LibreOfficeでPDFに変換
+            temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
+            if not temp_pdf_path:
+                os.unlink(temp_doc_path)
+                return False
+            
+            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            
+            # PDFから画像に変換（チャート用カウンターを使用）
+            self.vector_image_counter += 1
+            ext = self.output_format
+            image_filename = f"{self.base_name}_chart_{self.vector_image_counter:03d}.{ext}"
+            image_path = os.path.join(self.images_dir, image_filename)
+            
+            # 出力形式に応じて変換
+            if self.output_format == 'svg':
+                convert_success = self._convert_pdf_to_svg(temp_pdf_path, image_path)
+            else:
+                convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
+            
+            if convert_success:
+                # Markdownに追加（ファイル名をURLエンコード）
+                encoded_filename = urllib.parse.quote(image_filename)
+                self.markdown_lines.append(f"![](images/{encoded_filename})")
+                self.markdown_lines.append("")
+                
+                # チャート画像の下にチャートデータを出力
+                chart_data = self._extract_chart_data_from_drawings(drawing_elements)
+                if chart_data:
+                    md_content = chart_data_to_markdown(chart_data)
+                    for line in md_content.split('\n'):
+                        self.markdown_lines.append(line)
+                
+                print(f"[SUCCESS] チャートを画像として処理: {image_filename}")
+                
+                # 一時ファイルを削除
+                os.unlink(temp_doc_path)
+                os.unlink(temp_pdf_path)
+                return True
+            
+            # 一時ファイルを削除
+            os.unlink(temp_doc_path)
+            if os.path.exists(temp_pdf_path):
+                os.unlink(temp_pdf_path)
+            return False
+            
+        except Exception as e:
+            print(f"[ERROR] チャート画像処理エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _extract_chart_data_from_drawings(self, drawing_elements):
+        """drawing要素からチャートデータを抽出する
+        
+        Args:
+            drawing_elements: drawing要素のリスト
+            
+        Returns:
+            ChartDataオブジェクト、または抽出できない場合はNone
+        """
+        try:
+            from d2md_charts import _parse_chart_xml, CHART_NS
+            
+            if not isinstance(drawing_elements, (list, tuple)):
+                drawing_elements = [drawing_elements]
+            
+            for drawing in drawing_elements:
+                chart_elems = drawing.xpath('.//*[local-name()="chart"]')
+                for chart_elem in chart_elems:
+                    r_id = chart_elem.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+                    if not r_id:
+                        continue
+                    
+                    chart_path = self._get_chart_path_from_rid(r_id)
+                    if not chart_path:
+                        continue
+                    
+                    chart_data = self._parse_chart_file(chart_path)
+                    if chart_data:
+                        return chart_data
+            
+            return None
+            
+        except Exception as e:
+            debug_print(f"[DEBUG] チャートデータ抽出エラー: {e}")
+            return None
+    
+    def _get_chart_path_from_rid(self, r_id: str):
+        """rIdからチャートファイルのパスを取得する
+        
+        Args:
+            r_id: リレーションシップID
+            
+        Returns:
+            チャートファイルのパス、または見つからない場合はNone
+        """
+        try:
+            with zipfile.ZipFile(self.word_file, 'r') as zf:
+                rels_path = 'word/_rels/document.xml.rels'
+                if rels_path not in zf.namelist():
+                    return None
+                
+                with zf.open(rels_path) as f:
+                    tree = ET.parse(f)
+                    root = tree.getroot()
+                    
+                    ns = {'r': 'http://schemas.openxmlformats.org/package/2006/relationships'}
+                    for rel in root.findall('.//r:Relationship', ns):
+                        if rel.get('Id') == r_id:
+                            target = rel.get('Target')
+                            if target and 'chart' in target.lower():
+                                if target.startswith('/'):
+                                    return target[1:]
+                                else:
+                                    return f"word/{target}"
+            
+            return None
+            
+        except Exception as e:
+            debug_print(f"[DEBUG] rIdからチャートパス取得エラー: {e}")
+            return None
+    
+    def _parse_chart_file(self, chart_path: str):
+        """チャートファイルを解析してChartDataを返す
+        
+        Args:
+            chart_path: チャートファイルのパス
+            
+        Returns:
+            ChartDataオブジェクト、または解析できない場合はNone
+        """
+        try:
+            from d2md_charts import _parse_chart_xml
+            
+            with zipfile.ZipFile(self.word_file, 'r') as zf:
+                if chart_path not in zf.namelist():
+                    return None
+                
+                with zf.open(chart_path) as f:
+                    tree = ET.parse(f)
+                    root = tree.getroot()
+                    return _parse_chart_xml(root)
+            
+        except Exception as e:
+            debug_print(f"[DEBUG] チャートファイル解析エラー: {e}")
+            return None
+    
+    def _create_chart_document(self, drawing_elements):
+        """チャートを含む一時Word文書を作成
+        
+        元のdocxをコピーしてdocument.xmlだけ最小化する方式。
+        これにより、chart.xmlやその依存ファイルを個別に追跡する必要がなくなる。
+        
+        Args:
+            drawing_elements: drawing要素のリスト
+            
+        Returns:
+            str: 一時docxファイルのパス、失敗時はNone
+        """
+        try:
+            debug_print("[DEBUG] チャート用Word文書作成開始...")
+            
+            # drawing_elementsがリストでない場合は単一要素として扱う
+            if not isinstance(drawing_elements, (list, tuple)):
+                drawing_elements = [drawing_elements]
+            
+            # drawing要素をXML文字列に変換
+            drawings_xml_parts = []
+            for d in drawing_elements:
+                d_xml = ET.tostring(d, encoding='unicode')
+                drawings_xml_parts.append(d_xml)
+            drawings_xml = "".join(drawings_xml_parts)
+            
+            # 最小化されたdocument.xmlを作成
+            doc_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" 
+            xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+    <w:body>
+        <w:p>
+            <w:r>
+                {drawings_xml}
+            </w:r>
+        </w:p>
+        <w:sectPr>
+            <w:pgSz w:w="11906" w:h="16838"/>
+            <w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720"/>
+        </w:sectPr>
+    </w:body>
+</w:document>'''
+            
+            # 一時ファイルに保存
+            temp_docx_path = tempfile.mktemp(suffix='.docx')
+            
+            # 元のdocxをコピーしてdocument.xmlだけ差し替え
+            with zipfile.ZipFile(self.word_file, 'r') as src_zip:
+                with zipfile.ZipFile(temp_docx_path, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
+                    for item in src_zip.namelist():
+                        if item == 'word/document.xml':
+                            # document.xmlだけ差し替え
+                            dst_zip.writestr(item, doc_xml)
+                        else:
+                            # その他のファイルはそのままコピー
+                            dst_zip.writestr(item, src_zip.read(item))
+            
+            print(f"[INFO] チャート用一時Word文書作成完了: {temp_docx_path}")
+            return temp_docx_path
+            
+        except Exception as e:
+            print(f"[ERROR] チャート用一時文書作成エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def _process_mixed_drawings_as_vector(self, drawing_elements, shape_texts):
         """画像とテキストボックスが混在するdrawing要素をvector_compositeとして処理
