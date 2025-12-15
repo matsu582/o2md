@@ -894,7 +894,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             temp_wb.save(temp_xlsx)
             temp_wb.close()
             
-            temp_pdf = self._convert_excel_to_pdf(temp_xlsx)
+            temp_pdf = self._convert_chart_excel_to_pdf(temp_xlsx)
             if not temp_pdf:
                 os.unlink(temp_xlsx)
                 return None
@@ -924,8 +924,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             traceback.print_exc()
             return None
     
-    def _convert_excel_to_pdf(self, xlsx_path: str):
-        """ExcelファイルをPDFに変換する
+    def _convert_chart_excel_to_pdf(self, xlsx_path: str):
+        """チャート用ExcelファイルをPDFに変換する
         
         Args:
             xlsx_path: Excelファイルのパス
@@ -1093,7 +1093,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         return svg_content
     
     def _convert_chart_pdf_to_png(self, pdf_path: str, output_path: str) -> bool:
-        """チャートPDFをPNGに変換する
+        """チャートPDFをPNGに変換する（PyMuPDF使用）
         
         Args:
             pdf_path: PDFファイルのパス
@@ -1103,21 +1103,50 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             bool: 成功時True
         """
         try:
-            from pdf2image import convert_from_path
+            import fitz
+            from PIL import Image as PILImage
+            import io
             
-            images = convert_from_path(pdf_path, dpi=300)
+            doc = fitz.open(pdf_path)
+            if len(doc) == 0:
+                print("[ERROR] PDFにページが含まれていません")
+                doc.close()
+                return False
             
-            if images:
-                img = images[0]
-                img = self._trim_chart_margins(img)
-                img.save(output_path, 'PNG')
-                print(f"[INFO] チャートPNG変換完了: {output_path}")
-                return True
+            page = doc[0]
             
-            return False
+            mat = fitz.Matrix(300/72, 300/72)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            
+            img_data = pix.tobytes("png")
+            pix = None
+            doc.close()
+            
+            img = PILImage.open(io.BytesIO(img_data))
+            
+            if img.mode == 'RGBA':
+                background = PILImage.new('RGB', img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[3] if len(img.split()) > 3 else None)
+                img = background
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            img = self._trim_chart_margins(img)
+            
+            width, height = img.size
+            new_width = int(width * 2)
+            new_height = int(height * 2)
+            img = img.resize((new_width, new_height), PILImage.Resampling.LANCZOS)
+            
+            img.save(output_path, 'PNG', quality=95)
+            
+            print(f"[INFO] チャートPNG変換完了: {output_path}")
+            return True
             
         except Exception as e:
             print(f"[WARNING] チャートPNG変換エラー: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def _trim_chart_margins(self, img):
