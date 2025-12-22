@@ -13,6 +13,7 @@ dependencies = [
     "Pillow>=10.0.0",
     "PyMuPDF>=1.23.0",
     "numpy>=1.24.0",
+    "manga-ocr>=0.1.8",
 ]
 
 [project.optional-dependencies]

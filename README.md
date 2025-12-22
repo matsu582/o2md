@@ -1,6 +1,6 @@
 # Office to Markdown Converter (o2md)
 
-Excel、Word、PowerPointファイルを自動判定して**それっぽい**Markdownに変換するツール。
+Excel、Word、PowerPoint、PDFファイルを自動判定して**それっぽい**Markdownに変換するツール。
 
 本ツールは[Devin](https://app.devin.ai)を利用して作成しています。
 
@@ -10,18 +10,19 @@ docling、markitdown との機能比較は [o2md_comparison.md](o2md_comparison.
 
 ## 概要
 
-o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）を**それっぽい**Markdown形式に変換するPythonツールです。ファイルの種類を自動判定し、適切な変換エンジンを使用して処理します。
+o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）およびPDFを**それっぽい**Markdown形式に変換するPythonツールです。ファイルの種類を自動判定し、適切な変換エンジンを使用して処理します。
 古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換は**LibreOffice**に依存しています。必ず**LibreOffice**をインストールしてください。
 
 ### 主な特徴
 
-- **統合インターフェース**: 1つのコマンドで全てのOffice文書を変換
+- **統合インターフェース**: 1つのコマンドで全てのOffice文書とPDFを変換
 - **自動ファイル判定**: ファイル拡張子に基づいて自動的に適切な変換方法を選択
 - **新旧両形式対応**: `.xlsx`/`.xls`、`.docx`/`.doc`、`.pptx`/`.ppt`に対応
 - **SVG/PNG出力対応**: 図形やグラフをSVG（デフォルト）またはPNG形式で出力
 - **Excel変換** (x2md.py): 表、グラフ、図形を含むワークシートを変換
 - **Word変換** (d2md.py): 見出し、表、画像、リストを含む文書を変換
 - **PowerPoint変換** (p2md.py): スライド、図形、表、テキストを変換
+- **PDF変換** (pdf2md.py): PDFを画像とテキストに変換（manga-ocrによるOCRフォールバック対応）
 - **画像処理**: 図形やグラフを自動的に画像として抽出・埋め込み
 - **複雑な要素の処理**: 表と図形が混在するスライドは全体を画像化
 
@@ -85,6 +86,9 @@ uv run python o2md.py input_files/document.docx
 
 # PowerPointファイルを変換
 uv run python o2md.py input_files/presentation.pptx
+
+# PDFファイルを変換
+uv run python o2md.py input_files/document.pdf
 ```
 
 ### オプション
@@ -128,6 +132,7 @@ uv run python o2md.py input_files/old_presentation.ppt
 | Excel        | `.xlsx`, `.xls` | x2md.py      | 表、グラフ、図形、数式       |
 | Word         | `.docx`, `.doc` | d2md.py      | 見出し、表、画像、リスト     |
 | PowerPoint   | `.pptx`, `.ppt` | p2md.py      | スライド、図形、表、テキスト |
+| PDF          | `.pdf`          | pdf2md.py    | 画像変換、テキスト抽出、OCR  |
 
 ## 出力形式
 
@@ -182,6 +187,24 @@ SVG形式はベクター形式のため、拡大しても品質が劣化しま�
 - **複合スライド対応**: 表や図形が混在する場合、スライド全体を画像化してテキストを併記
 - .pptファイル対応: LibreOfficeで自動変換
 
+### PDF変換 (pdf2md.py)
+
+- PDFの各ページを画像ファイル（PNG/SVG）に変換
+- 埋め込みテキストの抽出
+- **OCRフォールバック**: テキストが抽出できない場合はmanga-ocrで読み取り
+- 出力形式: ページごとの画像 + Markdownファイル
+
+#### PDF変換の出力構造
+
+```
+output/
+├── document.md
+└── images/
+    ├── document_page_001.png (または .svg)
+    ├── document_page_002.png
+    └── ...
+```
+
 #### PowerPoint複合スライドの処理
 
 スライドに以下の要素が混在する場合、スライド全体が画像化されます：
@@ -215,4 +238,9 @@ SVG形式はベクター形式のため、拡大しても品質が劣化しま�
 - 埋め込み動画は変換されません（静止画のみ）
 - スライドマスターのデザイン要素は反映されません
 - LibreOfficeの制限により図形の描画に差異が発生する場合があります。
+
+### PDF (pdf2md.py)
+- 暗号化されたPDFは処理できません
+- 複雑なレイアウトのPDFではテキスト抽出の精度が低下する場合があります
+- OCR機能を使用するにはmanga-ocrのインストールが必要です（pyproject.tomlに含まれています）
 
