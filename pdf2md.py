@@ -1724,7 +1724,8 @@ class PDFToMarkdownConverter:
         gutter_x = page_width / 2
         gutter_margin = 10.0  # ガター跨ぎ判定のマージン
         
-        all_bboxes = []
+        # 要素タイプ（drawing/image）を保持するリスト
+        all_elements = []
         
         try:
             drawings = page.get_drawings()
@@ -1734,7 +1735,7 @@ class PDFToMarkdownConverter:
                     bbox = (rect.x0, rect.y0, rect.x1, rect.y1)
                     area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
                     if area >= 200:
-                        all_bboxes.append(bbox)
+                        all_elements.append({"bbox": bbox, "type": "drawing"})
         except Exception as e:
             debug_print(f"[DEBUG] 描画取得エラー: {e}")
         
@@ -1746,10 +1747,13 @@ class PDFToMarkdownConverter:
                     bbox = (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1)
                     area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
                     if area >= 100:
-                        all_bboxes.append(bbox)
+                        all_elements.append({"bbox": bbox, "type": "image"})
                         break
         except Exception as e:
             debug_print(f"[DEBUG] 画像取得エラー: {e}")
+        
+        # 互換性のためにall_bboxesも作成
+        all_bboxes = [e["bbox"] for e in all_elements]
         
         if len(all_bboxes) < 2:
             return []
@@ -1850,25 +1854,41 @@ class PDFToMarkdownConverter:
                     continue
             
             cluster_bboxes = [all_bboxes[i] for i in cluster]
-            # パディングを20ptに増加（図の切れ問題対策）
-            padding = 20.0
-            x0 = min(b[0] for b in cluster_bboxes) - padding
-            y0 = min(b[1] for b in cluster_bboxes) - padding
-            x1 = max(b[2] for b in cluster_bboxes) + padding
-            y1 = max(b[3] for b in cluster_bboxes) + padding
+            cluster_types = [all_elements[i]["type"] for i in cluster]
+            
+            # raw_union_bbox（パディングなし）を計算
+            raw_x0 = min(b[0] for b in cluster_bboxes)
+            raw_y0 = min(b[1] for b in cluster_bboxes)
+            raw_x1 = max(b[2] for b in cluster_bboxes)
+            raw_y1 = max(b[3] for b in cluster_bboxes)
+            raw_union_bbox = (raw_x0, raw_y0, raw_x1, raw_y1)
+            raw_area = (raw_x1 - raw_x0) * (raw_y1 - raw_y0)
+            
+            # 埋め込み画像判定: クラスタがimageのみで構成され、小面積の場合
+            is_image_only = all(t == "image" for t in cluster_types)
+            is_embedded = is_image_only and len(cluster) <= 2 and raw_area < 10000
+            
+            # パディングを決定（埋め込み画像は0、通常図形は20pt）
+            padding = 0.0 if is_embedded else 20.0
+            x0 = raw_x0 - padding
+            y0 = raw_y0 - padding
+            x1 = raw_x1 + padding
+            y1 = raw_y1 + padding
             union_bbox = (max(0, x0), max(0, y0), min(page_width, x1), min(page.rect.height, y1))
             
             area = (union_bbox[2] - union_bbox[0]) * (union_bbox[3] - union_bbox[1])
             if area < 1000:
                 continue
             
-            # クラスタリング後にカラム判定
-            column = get_column_for_union_bbox(union_bbox)
+            # クラスタリング後にカラム判定（raw_union_bboxを使用）
+            column = get_column_for_union_bbox(raw_union_bbox)
             
             all_figure_candidates.append({
                 "union_bbox": union_bbox,
+                "raw_union_bbox": raw_union_bbox,
                 "cluster_size": len(cluster),
-                "column": column
+                "column": column,
+                "is_embedded": is_embedded
             })
         
         # 包含除去フィルタ: 大きいbboxが小さいbboxを包含している場合、小さい方を除去
@@ -2251,25 +2271,40 @@ class PDFToMarkdownConverter:
             
             return best_body
         
-        def compute_clip_bbox(graphics_bbox, text_lines, col_width, page_height):
+        def compute_clip_bbox(graphics_bbox, text_lines, col_width, page_height, column, is_embedded_image=False):
             """graphics_bboxからclip_bboxを計算（トリム処理）
             
             本文の下〜キャプションの上でトリムする。
             graphics_bboxを侵食してでも、境界を正しく設定する。
+            カラム境界でクランプして他段のテキストが混入しないようにする。
+            埋め込み画像の場合は最小限のpadding（1pt）を使用。
             """
-            padding = 20.0
+            # 埋め込み画像の場合は最小限のpadding（1pt）を使用
+            padding = 1.0 if is_embedded_image else 20.0
             clip_x0 = max(0, graphics_bbox[0] - padding)
             clip_y0 = max(0, graphics_bbox[1] - padding)
             clip_x1 = min(page_width, graphics_bbox[2] + padding)
             clip_y1 = min(page_height, graphics_bbox[3] + padding)
             
+            # カラム境界でクランプ（他段のテキスト混入防止）
+            if column == "left":
+                clip_x1 = min(clip_x1, gutter_x - 5)
+                debug_print(f"[DEBUG] 左カラム: clip_x1を{clip_x1:.1f}にクランプ (gutter_x={gutter_x:.1f})")
+            elif column == "right":
+                old_clip_x0 = clip_x0
+                clip_x0 = max(clip_x0, gutter_x + 5)
+                debug_print(f"[DEBUG] 右カラム: clip_x0を{old_clip_x0:.1f}→{clip_x0:.1f}にクランプ (gutter_x={gutter_x:.1f})")
+            
+            # 埋め込み画像の場合は上下トリムをスキップ
+            if is_embedded_image:
+                debug_print(f"[DEBUG] 埋め込み画像: 上下トリムをスキップ")
+                return (clip_x0, clip_y0, clip_x1, clip_y1)
+            
             # 下側: キャプションの上までトリム（常に適用）
             caption = find_caption_below(graphics_bbox, text_lines)
             if caption:
                 caption_y0 = caption["bbox"][1]
-                # キャプションの上までに制限（マージン5pt）
                 new_clip_y1 = caption_y0 - 5.0
-                # 常に適用（graphics_bboxを侵食してでも境界を正しく設定）
                 clip_y1 = min(clip_y1, new_clip_y1)
                 debug_print(f"[DEBUG] キャプション検出: clip_y1を{clip_y1:.1f}にトリム")
             
@@ -2277,15 +2312,12 @@ class PDFToMarkdownConverter:
             body_above = find_body_text_above(graphics_bbox, text_lines, col_width)
             if body_above:
                 body_y1 = body_above["bbox"][3]
-                # 本文の下までに制限（マージン5pt）
                 new_clip_y0 = body_y1 + 5.0
-                # 常に適用（graphics_bboxを侵食してでも境界を正しく設定）
                 clip_y0 = max(clip_y0, new_clip_y0)
                 debug_print(f"[DEBUG] 本文検出: clip_y0を{clip_y0:.1f}にトリム")
             
             # 健全性チェック: clip_y0 < clip_y1を保証（最小高さ50pt）
             if clip_y1 - clip_y0 < 50:
-                # 最小高さを確保
                 center_y = (clip_y0 + clip_y1) / 2
                 clip_y0 = center_y - 25
                 clip_y1 = center_y + 25
@@ -2295,11 +2327,20 @@ class PDFToMarkdownConverter:
         
         for fig_info in all_figure_candidates:
             try:
-                graphics_bbox = fig_info["union_bbox"]
+                # 埋め込み画像かどうかを判定（クラスタ構築時に判定済み）
+                is_embedded_image = fig_info.get("is_embedded", False)
+                
+                # 埋め込み画像の場合はraw_union_bbox（パディングなし）を使用
+                if is_embedded_image:
+                    graphics_bbox = fig_info.get("raw_union_bbox", fig_info["union_bbox"])
+                else:
+                    graphics_bbox = fig_info["union_bbox"]
+                
                 column = fig_info["column"]
+                union_bbox = graphics_bbox
                 
                 # clip_bboxを計算（トリム処理）
-                clip_bbox = compute_clip_bbox(graphics_bbox, page_text_lines, col_width, page.rect.height)
+                clip_bbox = compute_clip_bbox(graphics_bbox, page_text_lines, col_width, page.rect.height, column, is_embedded_image)
                 
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
