@@ -503,12 +503,24 @@ class PDFToMarkdownConverter:
                             (span_flags & (1 << 1)) != 0
                         )
                         
+                        # 上付き・下付きの検出
+                        # PyMuPDF flags bit 0 = superscript
+                        span_is_superscript = (span_flags & (1 << 0)) != 0
+                        # 下付きはflagsでは検出できないため、フォントサイズとY座標で推定
+                        span_is_subscript = False
+                        
+                        # 打消し線の検出（PDFでは直接検出困難、フォント名で推定）
+                        span_is_strikethrough = "strikeout" in font_name or "strike" in font_name
+                        
                         line_spans.append({
                             "text": text,
                             "size": span_size,
                             "bbox": span_bbox,
                             "is_bold": span_is_bold,
-                            "is_italic": span_is_italic
+                            "is_italic": span_is_italic,
+                            "is_superscript": span_is_superscript,
+                            "is_subscript": span_is_subscript,
+                            "is_strikethrough": span_is_strikethrough
                         })
                         line_text += text
                         line_font_size = max(line_font_size, span_size)
@@ -990,9 +1002,18 @@ class PDFToMarkdownConverter:
                 
                 is_bold = span.get("is_bold", False)
                 is_italic = span.get("is_italic", False)
+                is_superscript = span.get("is_superscript", False)
+                is_subscript = span.get("is_subscript", False)
+                is_strikethrough = span.get("is_strikethrough", False)
                 
-                # 書式を適用
-                if is_bold and is_italic:
+                # 書式を適用（優先順位: 上付き/下付き > 打消し線 > 太字/斜体）
+                if is_superscript:
+                    formatted = f"<sup>{text}</sup>"
+                elif is_subscript:
+                    formatted = f"<sub>{text}</sub>"
+                elif is_strikethrough:
+                    formatted = f"~~{text}~~"
+                elif is_bold and is_italic:
                     formatted = f"***{text}***"
                 elif is_bold:
                     formatted = f"**{text}**"
@@ -1717,7 +1738,7 @@ class PDFToMarkdownConverter:
         valid_clusters = []
         for cluster in clusters:
             if len(cluster) >= 3:
-                union_bbox = self._get_cluster_union_bbox(drawing_bboxes, cluster, margin=2.0)
+                union_bbox = self._get_cluster_union_bbox(drawing_bboxes, cluster, margin=15.0)
                 area = (union_bbox[2] - union_bbox[0]) * (union_bbox[3] - union_bbox[1])
                 if area >= 1000:
                     valid_clusters.append((cluster, union_bbox))
