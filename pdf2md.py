@@ -976,6 +976,52 @@ class PDFToMarkdownConverter:
         
         return result
     
+    def _is_footnote_reference(self, text: str) -> bool:
+        """テキストが注釈参照かどうかを判定
+        
+        用語1、[1]、[1][2]などの注釈参照パターンを検出する。
+        10^-9などの数式上付きは注釈ではない。
+        
+        Args:
+            text: 判定するテキスト
+            
+        Returns:
+            注釈参照の場合True
+        """
+        import re
+        text = text.strip()
+        # 用語N パターン（用語1、用語2など）
+        if re.match(r'^用語\d+$', text):
+            return True
+        # [N] パターン（[1]、[2]など、複数連続も可）
+        if re.match(r'^(\[\d+\])+$', text):
+            return True
+        return False
+    
+    def _format_footnote_ref(self, text: str) -> str:
+        """注釈参照をMarkdown形式に変換
+        
+        用語1 → [^用語1]
+        [1] → [^1]
+        [1][2] → [^1][^2]
+        
+        Args:
+            text: 注釈参照テキスト
+            
+        Returns:
+            Markdown形式の注釈参照
+        """
+        import re
+        text = text.strip()
+        # 用語N パターン
+        if re.match(r'^用語\d+$', text):
+            return f"[^{text}]"
+        # [N] パターン（複数連続対応）
+        if re.match(r'^(\[\d+\])+$', text):
+            refs = re.findall(r'\[(\d+)\]', text)
+            return ''.join(f"[^{r}]" for r in refs)
+        return text
+    
     def _apply_text_formatting(self, spans_list: List[List[Dict]]) -> str:
         """span情報を使って書式付きテキストを生成
         
@@ -1949,13 +1995,13 @@ class PDFToMarkdownConverter:
                         y_groups[y_key] = []
                     y_groups[y_key].append(line)
                 
-                # 複数セルがある行を検出（3セル以上で表として認識）
+                # 複数セルがある行を検出（2セル以上で表として認識）
                 # ただし、短いテキスト（3文字以下）だけで構成される行は除外（図内ラベルの誤検出防止）
                 multi_cell_rows = []
                 for y_key in sorted(y_groups.keys()):
                     cells = y_groups[y_key]
                     x_positions = sorted(set(round(c["bbox"][0] / 20) * 20 for c in cells))
-                    if len(x_positions) >= 3:
+                    if len(x_positions) >= 2:
                         # 短いテキストだけで構成される行は除外
                         texts = [c.get("text", "") for c in cells]
                         has_long_text = any(len(t) > 3 for t in texts)
@@ -1970,8 +2016,9 @@ class PDFToMarkdownConverter:
                         )
                         multi_cell_rows.append({"y": y_key, "bbox": row_bbox})
                 
-                # 連続する複数セル行を表領域としてグループ化（3行以上で表として認識）
-                if len(multi_cell_rows) < 3:
+                # 連続する複数セル行を表領域としてグループ化（5行以上で表として認識）
+                # 2列表（表2など）を検出しつつ、図内ラベルの誤検出を防ぐ
+                if len(multi_cell_rows) < 5:
                     continue
                 
                 current_region = {
@@ -1992,7 +2039,8 @@ class PDFToMarkdownConverter:
                         current_region["x0"] = min(current_region["x0"], row["bbox"][0])
                         current_region["x1"] = max(current_region["x1"], row["bbox"][2])
                     else:
-                        if len(current_region["rows"]) >= 3:
+                        # 連続する行が5行以上で表領域として確定
+                        if len(current_region["rows"]) >= 5:
                             table_bboxes.append((
                                 current_region["x0"] - 5,
                                 current_region["y_start"] - 10,
@@ -2007,7 +2055,8 @@ class PDFToMarkdownConverter:
                             "rows": [row]
                         }
                 
-                if len(current_region["rows"]) >= 3:
+                # 連続する行が5行以上で表領域として確定
+                if len(current_region["rows"]) >= 5:
                     table_bboxes.append((
                         current_region["x0"] - 5,
                         current_region["y_start"] - 10,
@@ -2053,23 +2102,26 @@ class PDFToMarkdownConverter:
         table_bboxes = detect_table_bboxes_from_text(page_text_lines, page_width)
         
         if table_bboxes:
-            debug_print(f"[DEBUG] 表領域を{len(table_bboxes)}個検出")
+            debug_print(f"[DEBUG] page={page_num+1}: 表領域を{len(table_bboxes)}個検出")
             for i, tb in enumerate(table_bboxes):
                 debug_print(f"[DEBUG]   表{i+1}: y={tb[1]:.1f}-{tb[3]:.1f}, x={tb[0]:.1f}-{tb[2]:.1f}")
         
         # 表領域と重なる図候補を除外
+        debug_print(f"[DEBUG] page={page_num+1}: 表フィルタ前の候補数={len(all_figure_candidates)}")
         table_filtered = []
         for cand in all_figure_candidates:
             is_table = False
+            cand_bbox = cand["union_bbox"]
             for table_bbox in table_bboxes:
-                overlap = bbox_overlap_ratio(cand["union_bbox"], table_bbox)
+                overlap = bbox_overlap_ratio(cand_bbox, table_bbox)
                 if overlap >= 0.7:
-                    debug_print(f"[DEBUG] 図候補を表として除外: overlap={overlap:.2f}")
+                    debug_print(f"[DEBUG] page={page_num+1}: 図候補を表として除外: overlap={overlap:.2f}, cand_bbox=({cand_bbox[0]:.1f}, {cand_bbox[1]:.1f}, {cand_bbox[2]:.1f}, {cand_bbox[3]:.1f})")
                     is_table = True
                     break
             if not is_table:
                 table_filtered.append(cand)
         
+        debug_print(f"[DEBUG] page={page_num+1}: 表フィルタ後の候補数={len(table_filtered)}")
         all_figure_candidates = table_filtered
         
         # 第2段: 同一カラム内のクラスタを安全にマージ
@@ -2344,6 +2396,9 @@ class PDFToMarkdownConverter:
                 
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
+                
+                # デバッグ: 候補のbbox情報を出力
+                debug_print(f"[DEBUG] 図候補出力: page={page_num+1}, union_bbox=({graphics_bbox[0]:.1f}, {graphics_bbox[1]:.1f}, {graphics_bbox[2]:.1f}, {graphics_bbox[3]:.1f}), clip_bbox=({clip_bbox[0]:.1f}, {clip_bbox[1]:.1f}, {clip_bbox[2]:.1f}, {clip_bbox[3]:.1f}), column={column}")
                 
                 clip_rect = fitz.Rect(clip_bbox)
                 matrix = fitz.Matrix(2.0, 2.0)
