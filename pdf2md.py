@@ -538,16 +538,20 @@ class PDFToMarkdownConverter:
                     continue
                 
                 # 図領域内のテキストを除外（中心点が図領域内にある場合）
+                # ただし、キャプションパターン（図X、表X）は除外しない
                 line_center_x = (line_bbox[0] + line_bbox[2]) / 2
                 line_center_y = (line_bbox[1] + line_bbox[3]) / 2
+                line_text_stripped = line_text.strip()
+                is_caption = re.match(r'^図\s*\d+', line_text_stripped) or re.match(r'^表\s*\d+', line_text_stripped)
                 in_figure = False
-                for fig_bbox in exclude_bboxes:
-                    if (fig_bbox[0] <= line_center_x <= fig_bbox[2] and
-                        fig_bbox[1] <= line_center_y <= fig_bbox[3]):
-                        in_figure = True
-                        break
+                if not is_caption:
+                    for fig_bbox in exclude_bboxes:
+                        if (fig_bbox[0] <= line_center_x <= fig_bbox[2] and
+                            fig_bbox[1] <= line_center_y <= fig_bbox[3]):
+                            in_figure = True
+                            break
                 if in_figure:
-                    debug_print(f"[DEBUG] 図領域内テキスト除外: {line_text.strip()[:30]}...")
+                    debug_print(f"[DEBUG] 図領域内テキスト除外: {line_text_stripped[:30]}...")
                     continue
                 
                 line_width = line_bbox[2] - line_bbox[0]
@@ -1758,8 +1762,24 @@ class PDFToMarkdownConverter:
             else:
                 return "right"
         
-        def cluster_with_anisotropic_threshold(bboxes, x_threshold=100.0, y_threshold=40.0):
-            """異方性閾値でクラスタリング（全要素を一度にクラスタリング）"""
+        def get_bbox_column(bbox):
+            """個々のbboxのカラムを判定"""
+            x0, y0, x1, y1 = bbox
+            center_x = (x0 + x1) / 2
+            # ガター跨ぎ判定
+            crosses = x0 < gutter_x - gutter_margin and x1 > gutter_x + gutter_margin
+            if crosses:
+                return "full"
+            elif center_x < gutter_x:
+                return "left"
+            else:
+                return "right"
+        
+        # 各bboxのカラムを事前計算
+        bbox_columns = [get_bbox_column(b) for b in all_bboxes]
+        
+        def cluster_with_gutter_constraint(bboxes, x_threshold=100.0, y_threshold=40.0):
+            """ガター制約付きクラスタリング（左右カラム同士は繋げない）"""
             if not bboxes:
                 return []
             
@@ -1767,7 +1787,14 @@ class PDFToMarkdownConverter:
             visited = [False] * n
             clusters = []
             
-            def boxes_close(b1, b2):
+            def boxes_close(idx1, idx2):
+                b1, b2 = bboxes[idx1], bboxes[idx2]
+                col1, col2 = bbox_columns[idx1], bbox_columns[idx2]
+                
+                # ガター制約: 左右カラム同士で、どちらもガター跨ぎでない場合は繋げない
+                if col1 != col2 and col1 != "full" and col2 != "full":
+                    return False
+                
                 x0_1, y0_1, x1_1, y1_1 = b1
                 x0_2, y0_2, x1_2, y1_2 = b2
                 
@@ -1786,13 +1813,12 @@ class PDFToMarkdownConverter:
                 
                 while queue:
                     current = queue.pop(0)
-                    current_bbox = bboxes[current]
                     
                     for j in range(n):
                         if visited[j]:
                             continue
                         
-                        if boxes_close(current_bbox, bboxes[j]):
+                        if boxes_close(current, j):
                             cluster.append(j)
                             visited[j] = True
                             queue.append(j)
@@ -1801,8 +1827,8 @@ class PDFToMarkdownConverter:
             
             return clusters
         
-        # 全要素を一度にクラスタリング
-        clusters = cluster_with_anisotropic_threshold(all_bboxes)
+        # ガター制約付きクラスタリング
+        clusters = cluster_with_gutter_constraint(all_bboxes)
         
         all_figure_candidates = []
         for cluster in clusters:
@@ -1813,11 +1839,13 @@ class PDFToMarkdownConverter:
                     continue
             
             cluster_bboxes = [all_bboxes[i] for i in cluster]
-            x0 = min(b[0] for b in cluster_bboxes) - 5.0
-            y0 = min(b[1] for b in cluster_bboxes) - 5.0
-            x1 = max(b[2] for b in cluster_bboxes) + 5.0
-            y1 = max(b[3] for b in cluster_bboxes) + 5.0
-            union_bbox = (max(0, x0), max(0, y0), x1, y1)
+            # パディングを20ptに増加（図の切れ問題対策）
+            padding = 20.0
+            x0 = min(b[0] for b in cluster_bboxes) - padding
+            y0 = min(b[1] for b in cluster_bboxes) - padding
+            x1 = max(b[2] for b in cluster_bboxes) + padding
+            y1 = max(b[3] for b in cluster_bboxes) + padding
+            union_bbox = (max(0, x0), max(0, y0), min(page_width, x1), min(page.rect.height, y1))
             
             area = (union_bbox[2] - union_bbox[0]) * (union_bbox[3] - union_bbox[1])
             if area < 1000:
@@ -2029,8 +2057,14 @@ class PDFToMarkdownConverter:
                         for span in line.get("spans", []):
                             line_text += span.get("text", "")
                         
-                        if line_text.strip():
-                            texts.append(line_text.strip())
+                        line_text_stripped = line_text.strip()
+                        
+                        # キャプションパターンをフィルタリング（図形内テキストから除外）
+                        if re.match(r'^図\s*\d+', line_text_stripped) or re.match(r'^表\s*\d+', line_text_stripped):
+                            continue
+                        
+                        if line_text_stripped:
+                            texts.append(line_text_stripped)
         
         except Exception as e:
             debug_print(f"[DEBUG] bbox内テキスト抽出エラー: {e}")
