@@ -1026,6 +1026,70 @@ class PDFToMarkdownConverter:
             return ''.join(f"[^{r}]" for r in refs)
         return text
     
+    def _format_footnote_definitions(self, text: str) -> str:
+        """参考文献ブロックを注釈定義形式に変換
+        
+        参考文献[1]	 説明...[2]	 説明...
+        ↓
+        ## 参考文献
+        
+        [^1]: 説明...
+        [^2]: 説明...
+        
+        Args:
+            text: 参考文献ブロックのテキスト
+            
+        Returns:
+            Markdown注釈定義形式のテキスト
+        """
+        import re
+        
+        # 参考文献ブロックかどうかを判定
+        if not re.match(r'^\s*参考文献\s*\[\d+\]', text):
+            return text
+        
+        # 「参考文献」を除去
+        text = re.sub(r'^\s*参考文献\s*', '', text)
+        
+        # [N] マーカーの位置を全て見つける
+        markers = list(re.finditer(r'\[(\d+)\]\s*', text))
+        if not markers:
+            return f"## 参考文献\n\n{text}"
+        
+        # 各マーカー間のテキストを切り出して注釈定義を生成
+        definitions = []
+        for i, match in enumerate(markers):
+            num = match.group(1)
+            start = match.end()
+            # 次のマーカーの開始位置、または文字列の終端まで
+            if i + 1 < len(markers):
+                end = markers[i + 1].start()
+            else:
+                end = len(text)
+            
+            content = text[start:end].strip()
+            # 末尾の不要な文字を除去
+            content = content.rstrip('.')
+            if content:
+                definitions.append(f"[^{num}]: {content}")
+        
+        if definitions:
+            return "## 参考文献\n\n" + "\n".join(definitions)
+        else:
+            return f"## 参考文献\n\n{text}"
+    
+    def _is_footnote_definition_block(self, text: str) -> bool:
+        """テキストが参考文献ブロックかどうかを判定
+        
+        Args:
+            text: 判定するテキスト
+            
+        Returns:
+            参考文献ブロックの場合True
+        """
+        import re
+        return bool(re.match(r'^\s*参考文献\s*\[\d+\]', text))
+    
     def _apply_text_formatting(self, spans_list: List[List[Dict]]) -> str:
         """span情報を使って書式付きテキストを生成
         
@@ -3484,7 +3548,12 @@ class PDFToMarkdownConverter:
                 else:  # paragraph
                     if prev_type and prev_type != "paragraph":
                         self.markdown_lines.append("")
-                    self.markdown_lines.append(text)
+                    # 参考文献ブロックの場合は注釈定義形式に変換
+                    if self._is_footnote_definition_block(text):
+                        formatted_refs = self._format_footnote_definitions(text)
+                        self.markdown_lines.append(formatted_refs)
+                    else:
+                        self.markdown_lines.append(text)
                     self.markdown_lines.append("")
                 
                 prev_type = block_type
@@ -3568,7 +3637,12 @@ class PDFToMarkdownConverter:
             else:  # paragraph
                 if prev_type and prev_type != "paragraph":
                     self.markdown_lines.append("")
-                self.markdown_lines.append(text)
+                # 参考文献ブロックの場合は注釈定義形式に変換
+                if self._is_footnote_definition_block(text):
+                    formatted_refs = self._format_footnote_definitions(text)
+                    self.markdown_lines.append(formatted_refs)
+                else:
+                    self.markdown_lines.append(text)
                 self.markdown_lines.append("")
             
             prev_type = block_type
