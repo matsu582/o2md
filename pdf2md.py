@@ -179,7 +179,12 @@ class PDFToMarkdownConverter:
         if text_blocks:
             # テキストベースのPDF: 構造化されたMarkdownを出力
             debug_print(f"[DEBUG] ページ {page_num + 1}: テキストベースPDFとして処理")
-            self._output_structured_markdown(text_blocks)
+            
+            # 埋め込み画像を抽出
+            embedded_images = self._extract_embedded_images(page, page_num)
+            
+            # 構造化テキストと画像を出力
+            self._output_structured_markdown_with_images(text_blocks, embedded_images)
         else:
             # 画像ベースのPDF: 従来の画像+OCR処理
             debug_print(f"[DEBUG] ページ {page_num + 1}: 画像ベースPDFとして処理")
@@ -445,6 +450,226 @@ class PDFToMarkdownConverter:
         
         return filtered_blocks
     
+    def _extract_embedded_images(self, page, page_num: int) -> List[Dict[str, Any]]:
+        """PDFページから埋め込み画像を抽出
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            page_num: ページ番号（0始まり）
+            
+        Returns:
+            抽出された画像情報のリスト
+        """
+        images = []
+        doc = page.parent
+        
+        try:
+            image_list = page.get_images(full=True)
+        except Exception as e:
+            debug_print(f"[DEBUG] 画像リスト取得エラー: {e}")
+            return []
+        
+        for img_index, img_info in enumerate(image_list):
+            try:
+                xref = img_info[0]
+                
+                # 画像データを取得
+                base_image = doc.extract_image(xref)
+                if not base_image:
+                    continue
+                
+                image_bytes = base_image.get("image")
+                image_ext = base_image.get("ext", "png")
+                
+                if not image_bytes:
+                    continue
+                
+                # 画像の位置情報を取得
+                bbox = None
+                for img_rect in page.get_image_rects(xref):
+                    bbox = (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1)
+                    break
+                
+                # 画像ファイル名を生成
+                self.image_counter += 1
+                image_filename = f"{self.base_name}_img_{page_num + 1:03d}_{self.image_counter:03d}"
+                
+                # 出力形式に応じて保存
+                if self.output_format == 'svg':
+                    image_path = os.path.join(
+                        self.images_dir, f"{image_filename}.svg"
+                    )
+                    # PNGとして一時保存してSVGに変換
+                    temp_png = os.path.join(self.images_dir, f"temp_{self.image_counter}.png")
+                    with open(temp_png, 'wb') as f:
+                        f.write(image_bytes)
+                    
+                    # PILで画像を開いてPNGに変換（元がJPEGなどの場合）
+                    try:
+                        with Image.open(temp_png) as img:
+                            png_path = temp_png
+                            if image_ext.lower() not in ('png',):
+                                png_path = temp_png.replace('.png', '_conv.png')
+                                img.save(png_path, 'PNG')
+                        
+                        self._convert_png_to_svg(png_path, image_path)
+                        
+                        # 一時ファイルを削除
+                        if os.path.exists(temp_png):
+                            os.remove(temp_png)
+                        if png_path != temp_png and os.path.exists(png_path):
+                            os.remove(png_path)
+                    except Exception as e:
+                        debug_print(f"[DEBUG] SVG変換エラー: {e}")
+                        # フォールバック: PNGとして保存
+                        image_path = os.path.join(
+                            self.images_dir, f"{image_filename}.png"
+                        )
+                        with open(image_path, 'wb') as f:
+                            f.write(image_bytes)
+                else:
+                    # PNG形式で保存
+                    image_path = os.path.join(
+                        self.images_dir, f"{image_filename}.png"
+                    )
+                    with open(image_path, 'wb') as f:
+                        f.write(image_bytes)
+                
+                images.append({
+                    "path": image_path,
+                    "filename": os.path.basename(image_path),
+                    "bbox": bbox,
+                    "y_position": bbox[1] if bbox else 0
+                })
+                
+                debug_print(f"[DEBUG] 埋め込み画像を抽出: {image_path}")
+                
+            except Exception as e:
+                debug_print(f"[DEBUG] 画像抽出エラー (index {img_index}): {e}")
+                continue
+        
+        # Y座標でソート（上から順に）
+        images.sort(key=lambda x: x["y_position"])
+        
+        return images
+    
+    def _output_structured_markdown_with_images(
+        self, blocks: List[Dict[str, Any]], images: List[Dict[str, Any]]
+    ):
+        """構造化されたテキストブロックと画像をMarkdownとして出力
+        
+        Args:
+            blocks: 構造化されたテキストブロックのリスト
+            images: 抽出された画像情報のリスト
+        """
+        # 画像がない場合は従来の処理
+        if not images:
+            self._output_structured_markdown(blocks)
+            return
+        
+        # ブロックと画像をY座標でマージしてソート
+        all_items = []
+        
+        for block in blocks:
+            bbox = block.get("bbox", (0, 0, 0, 0))
+            all_items.append({
+                "type": "block",
+                "data": block,
+                "y_position": bbox[1]
+            })
+        
+        for img in images:
+            all_items.append({
+                "type": "image",
+                "data": img,
+                "y_position": img["y_position"]
+            })
+        
+        # Y座標でソート
+        all_items.sort(key=lambda x: x["y_position"])
+        
+        prev_type = None
+        list_active = False
+        
+        for item in all_items:
+            if item["type"] == "image":
+                # 画像を出力
+                if list_active:
+                    self.markdown_lines.append("")
+                    list_active = False
+                
+                img_data = item["data"]
+                self.markdown_lines.append("")
+                self.markdown_lines.append(f"![図](images/{img_data['filename']})")
+                self.markdown_lines.append("")
+                prev_type = "image"
+                
+            else:
+                # テキストブロックを出力
+                block = item["data"]
+                block_type = block["type"]
+                text = block["text"].strip()
+                
+                if not text:
+                    continue
+                
+                # リストの終了処理
+                if list_active and block_type != "list_item":
+                    self.markdown_lines.append("")
+                    list_active = False
+                
+                if block_type == "heading1":
+                    if prev_type:
+                        self.markdown_lines.append("")
+                    self.markdown_lines.append(f"# {text}")
+                    self.markdown_lines.append("")
+                    
+                elif block_type == "heading2":
+                    if prev_type:
+                        self.markdown_lines.append("")
+                    self.markdown_lines.append(f"## {text}")
+                    self.markdown_lines.append("")
+                    
+                elif block_type == "heading3":
+                    if prev_type:
+                        self.markdown_lines.append("")
+                    self.markdown_lines.append(f"### {text}")
+                    self.markdown_lines.append("")
+                    
+                elif block_type == "list_item":
+                    if not list_active:
+                        if prev_type:
+                            self.markdown_lines.append("")
+                        list_active = True
+                    
+                    # 箇条書きマーカーを統一
+                    import re
+                    cleaned_text = re.sub(
+                        r'^[•・\-－―\*＊○●◆◇▪▫]\s*', '', text
+                    )
+                    cleaned_text = re.sub(
+                        r'^[\d０-９]+[\.．\)）]\s*', '', cleaned_text
+                    )
+                    self.markdown_lines.append(f"- {cleaned_text}")
+                    
+                elif block_type == "table":
+                    if prev_type:
+                        self.markdown_lines.append("")
+                    self.markdown_lines.append(text)
+                    self.markdown_lines.append("")
+                    
+                else:  # paragraph
+                    if prev_type and prev_type != "paragraph":
+                        self.markdown_lines.append("")
+                    self.markdown_lines.append(text)
+                    self.markdown_lines.append("")
+                
+                prev_type = block_type
+        
+        # 最後のリストの終了処理
+        if list_active:
+            self.markdown_lines.append("")
+
     def _output_structured_markdown(self, blocks: List[Dict[str, Any]]):
         """構造化されたテキストブロックをMarkdownとして出力
         
