@@ -1051,6 +1051,41 @@ class PDFToMarkdownConverter:
         pattern = r'https?://[^\s,、)\]>\"]+(?:\s+[^\s,、)\]>\"]+)+'
         return re.sub(pattern, fix_url, text)
     
+    def _convert_inline_footnote_refs(self, text: str) -> str:
+        """本文中のインライン参照[N]を[^N]に変換
+        
+        ...として[4]。読む確率を...
+        ↓
+        ...として[^4]。読む確率を...
+        
+        Args:
+            text: 処理対象のテキスト
+            
+        Returns:
+            インライン参照を変換したテキスト
+        """
+        import re
+        # [N]パターンを[^N]に変換（1-99の数字のみ対象）
+        # 既に[^N]形式になっているものは変換しない
+        # 図表番号（図[4]、表[4]など）は変換しない
+        def convert_ref(match):
+            prefix = match.group(1)
+            num = match.group(2)
+            # 図/表の直後の場合は変換しない
+            if prefix and re.search(r'[図表]$', prefix):
+                return match.group(0)
+            return f"{prefix}[^{num}]"
+        
+        # 前の文字を含めてマッチし、図/表の直後でないことを確認
+        pattern = r'(^|[^^\[図表])(\[(\d{1,2})\])'
+        
+        def replace_func(match):
+            prefix = match.group(1)
+            num = match.group(3)
+            return f"{prefix}[^{num}]"
+        
+        return re.sub(pattern, replace_func, text)
+    
     def _format_footnote_definitions(self, text: str) -> str:
         """参考文献または用語の説明ブロックを注釈定義形式に変換
         
@@ -3623,6 +3658,8 @@ class PDFToMarkdownConverter:
                         formatted_refs = self._format_footnote_definitions(text)
                         self.markdown_lines.append(formatted_refs)
                     else:
+                        # インライン参照[N]を[^N]に変換
+                        text = self._convert_inline_footnote_refs(text)
                         self.markdown_lines.append(text)
                     self.markdown_lines.append("")
                 
@@ -3712,6 +3749,8 @@ class PDFToMarkdownConverter:
                     formatted_refs = self._format_footnote_definitions(text)
                     self.markdown_lines.append(formatted_refs)
                 else:
+                    # インライン参照[N]を[^N]に変換
+                    text = self._convert_inline_footnote_refs(text)
                     self.markdown_lines.append(text)
                 self.markdown_lines.append("")
             
