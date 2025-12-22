@@ -545,29 +545,35 @@ class PDFToMarkdownConverter:
             sorted_lines, base_font_size, table_regions
         )
         
-        # ブロックタイプを判定
+        # ブロックタイプを判定（カラム情報を保持）
         blocks = []
         for block_data in reflowed_blocks:
-            # 見出しブロックはそのまま
+            # 見出しブロックはそのまま（カラム情報も保持）
             if block_data.get("is_heading"):
                 level = block_data.get("heading_level", 1)
                 block_type = f"heading{level}"
-                blocks.append({
+                block = {
                     "type": block_type,
                     "text": block_data["text"],
                     "font_size": block_data["font_size"],
                     "bbox": block_data["bbox"]
-                })
+                }
+                if "column" in block_data:
+                    block["column"] = block_data["column"]
+                blocks.append(block)
                 continue
             
-            # 表ブロックはそのまま
+            # 表ブロックはそのまま（カラム情報も保持）
             if block_data.get("is_table"):
-                blocks.append({
+                block = {
                     "type": "table",
                     "text": block_data["text"],
                     "font_size": block_data["font_size"],
                     "bbox": block_data["bbox"]
-                })
+                }
+                if "column" in block_data:
+                    block["column"] = block_data["column"]
+                blocks.append(block)
                 continue
             
             block_type = self._classify_block_type(
@@ -577,12 +583,16 @@ class PDFToMarkdownConverter:
                 block_data["is_bold"],
                 block_data["bbox"]
             )
-            blocks.append({
+            block = {
                 "type": block_type,
                 "text": block_data["text"],
                 "font_size": block_data["font_size"],
                 "bbox": block_data["bbox"]
-            })
+            }
+            # カラム情報を保持（2段組みの順序維持に必要）
+            if "column" in block_data:
+                block["column"] = block_data["column"]
+            blocks.append(block)
         
         return blocks
     
@@ -849,12 +859,18 @@ class PDFToMarkdownConverter:
         # 番号付き箇条書きの検出と変換
         text = self._convert_numbered_bullets(text)
         
-        return {
+        result = {
             "text": text,
             "bbox": tuple(block_data["bbox"]),
             "font_size": block_data["font_size"],
             "is_bold": block_data["is_bold"]
         }
+        
+        # カラム情報を保持（2段組みの順序維持に必要）
+        if "column" in block_data:
+            result["column"] = block_data["column"]
+        
+        return result
     
     def _convert_numbered_bullets(self, text: str) -> str:
         """番号付き箇条書きを検出してMarkdownリスト形式に変換
@@ -1097,7 +1113,7 @@ class PDFToMarkdownConverter:
                         blocks.append(self._finalize_block(current_block))
                         current_block = None
                     
-                    # 表をMarkdownテーブルとして出力
+                    # 表をMarkdownテーブルとして出力（カラム情報も保持）
                     table_md = self._format_table_region(table_region)
                     if table_md:
                         blocks.append({
@@ -1105,7 +1121,8 @@ class PDFToMarkdownConverter:
                             "bbox": (0, table_region["y_start"], 300, table_region["y_end"]),
                             "font_size": base_font_size,
                             "is_bold": False,
-                            "is_table": True
+                            "is_table": True,
+                            "column": table_region.get("column", "full")
                         })
                     processed_table_regions.add(region_id)
                 i += 1
@@ -1119,14 +1136,15 @@ class PDFToMarkdownConverter:
                     blocks.append(self._finalize_block(current_block))
                     current_block = None
                 
-                # 見出しを単独ブロックとして追加
+                # 見出しを単独ブロックとして追加（カラム情報も保持）
                 blocks.append({
                     "text": heading_text,
                     "bbox": tuple(line["bbox"]),
                     "font_size": line["font_size"],
                     "is_bold": True,
                     "is_heading": True,
-                    "heading_level": heading_level
+                    "heading_level": heading_level,
+                    "column": line["column"]
                 })
                 i += 1
                 continue
@@ -2043,26 +2061,40 @@ class PDFToMarkdownConverter:
             self._output_structured_markdown(blocks)
             return
         
-        # ブロックと画像をY座標でマージしてソート
+        # ブロックと画像をカラム・Y座標でマージしてソート
         all_items = []
         
         for block in blocks:
             bbox = block.get("bbox", (0, 0, 0, 0))
+            # カラム情報を取得（デフォルトは"full"）
+            column = block.get("column", "full")
+            # カラムを数値に変換（left=0, full=1, right=2）
+            column_order = {"left": 0, "full": 1, "right": 2}.get(column, 1)
             all_items.append({
                 "type": "block",
                 "data": block,
-                "y_position": bbox[1]
+                "y_position": bbox[1],
+                "column": column,
+                "column_order": column_order
             })
         
         for img in images:
+            bbox = img.get("bbox", (0, 0, 0, 0))
+            # 画像のカラムをX座標から判定（ページ中央より左なら左カラム）
+            img_center_x = (bbox[0] + bbox[2]) / 2 if bbox else 0
+            # ページ幅の半分を基準にカラムを判定（297.64は一般的なA4の半分）
+            column = "left" if img_center_x < 297.64 else "right"
+            column_order = {"left": 0, "full": 1, "right": 2}.get(column, 1)
             all_items.append({
                 "type": "image",
                 "data": img,
-                "y_position": img["y_position"]
+                "y_position": img["y_position"],
+                "column": column,
+                "column_order": column_order
             })
         
-        # Y座標でソート
-        all_items.sort(key=lambda x: x["y_position"])
+        # カラム順（左→フル→右）、次にY座標でソート
+        all_items.sort(key=lambda x: (x["column_order"], x["y_position"]))
         
         prev_type = None
         list_active = False
