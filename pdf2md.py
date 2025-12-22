@@ -2228,9 +2228,23 @@ class PDFToMarkdownConverter:
                                 break
                     
                     # 下端: union_bboxの下端を使用（表の罫線全体を含める）
+                    # ただし、下端付近にキャプションがある場合は除外
                     clip_x0 = union[0] - 2
                     clip_x1 = union[2] + 2
-                    clip_y1 = union[3] + 5  # 少しのマージン
+                    clip_y1 = union[3] + 5  # デフォルトは少しのマージン
+                    
+                    # 下端付近のキャプション行を検出（「図N」「表N」パターン）
+                    union_bottom = union[3]
+                    for line in page_text_lines:
+                        line_bbox = line["bbox"]
+                        line_text = line["text"]
+                        # union_bboxの下端付近（下端から20pt以内）にあるキャプション行を探す
+                        if line_bbox[1] >= union_bottom - 20 and line_bbox[1] <= union_bottom + 30:
+                            if re.match(r'^(図|表)\s*\d', line_text):
+                                # キャプション行の上端を下端にする
+                                clip_y1 = line_bbox[1] - 2
+                                debug_print(f"[DEBUG] 表画像: 下キャプション検出 '{line_text[:20]}' y={line_bbox[1]:.1f}")
+                                break
                     
                     debug_print(f"[DEBUG] 表画像: clip_bbox=({clip_x0:.1f}, {clip_y0:.1f}, {clip_x1:.1f}, {clip_y1:.1f})")
                     
@@ -2542,8 +2556,10 @@ class PDFToMarkdownConverter:
                     image_path = os.path.join(self.images_dir, f"{image_filename}.png")
                     pix.save(image_path)
                 
+                # 図形内テキスト抽出にはclip_bboxを使用（本文の巻き込みを防ぐ）
+                # clip_bboxは本文の下〜キャプションの上でトリムされている
                 figure_texts, expanded_bbox = self._extract_text_in_bbox(
-                    page, union_bbox, expand_for_labels=True, column=column, gutter_x=gutter_x
+                    page, clip_bbox, expand_for_labels=True, column=column, gutter_x=gutter_x
                 )
                 
                 figures.append({
@@ -3230,15 +3246,89 @@ class PDFToMarkdownConverter:
             blocks: 構造化されたテキストブロックのリスト
             images: 抽出された画像情報のリスト
         """
+        import re
+        
         # 画像がない場合は従来の処理
         if not images:
             self._output_structured_markdown(blocks)
             return
         
+        # キャプションパターン（図/表のキャプション）
+        caption_pattern = re.compile(r'^(図|表)\s*\d+')
+        
+        # キャプションと画像を関連付け
+        # キャプションブロックを検出し、対応する画像と紐付ける
+        caption_to_image = {}  # caption_block_id -> image_index
+        image_captions = {}  # image_index -> {"above": caption_block, "below": caption_block}
+        used_caption_ids = set()
+        
+        for img_idx, img in enumerate(images):
+            img_bbox = img.get("bbox", (0, 0, 0, 0))
+            img_y0 = img_bbox[1]  # 画像の上端
+            img_y1 = img_bbox[3]  # 画像の下端
+            img_x0 = img_bbox[0]
+            img_x1 = img_bbox[2]
+            
+            best_above_caption = None
+            best_above_distance = float('inf')
+            best_below_caption = None
+            best_below_distance = float('inf')
+            
+            for block_idx, block in enumerate(blocks):
+                if block.get("type") != "heading3":
+                    continue
+                
+                text = block.get("text", "").strip()
+                if not caption_pattern.match(text):
+                    continue
+                
+                block_bbox = block.get("bbox", (0, 0, 0, 0))
+                block_y0 = block_bbox[1]
+                block_y1 = block_bbox[3]
+                block_x0 = block_bbox[0]
+                block_x1 = block_bbox[2]
+                
+                # X方向の重なりを確認（少なくとも20pt以上の重なり）
+                x_overlap = max(0, min(img_x1, block_x1) - max(img_x0, block_x0))
+                if x_overlap < 20:
+                    continue
+                
+                # Y方向の距離を計算
+                # キャプションが画像の上にある場合
+                if block_y1 <= img_y0 + 30:  # 30ptの許容範囲
+                    distance = img_y0 - block_y1
+                    if distance < 50 and distance < best_above_distance:  # 50pt以内
+                        best_above_distance = distance
+                        best_above_caption = (block_idx, block)
+                
+                # キャプションが画像の下にある場合
+                if block_y0 >= img_y1 - 30:  # 30ptの許容範囲
+                    distance = block_y0 - img_y1
+                    if distance < 50 and distance < best_below_distance:  # 50pt以内
+                        best_below_distance = distance
+                        best_below_caption = (block_idx, block)
+            
+            # 画像にキャプションを関連付け
+            image_captions[img_idx] = {"above": None, "below": None}
+            if best_above_caption:
+                block_idx, block = best_above_caption
+                image_captions[img_idx]["above"] = block
+                used_caption_ids.add(block_idx)
+                debug_print(f"[DEBUG] 画像{img_idx}に上キャプションを関連付け: {block.get('text', '')[:30]}")
+            if best_below_caption:
+                block_idx, block = best_below_caption
+                image_captions[img_idx]["below"] = block
+                used_caption_ids.add(block_idx)
+                debug_print(f"[DEBUG] 画像{img_idx}に下キャプションを関連付け: {block.get('text', '')[:30]}")
+        
         # ブロックと画像をカラム・Y座標でマージしてソート
         all_items = []
         
-        for block in blocks:
+        for block_idx, block in enumerate(blocks):
+            # 関連付けられたキャプションはスキップ（画像出力時に出力する）
+            if block_idx in used_caption_ids:
+                continue
+            
             bbox = block.get("bbox", (0, 0, 0, 0))
             # カラム情報を取得（デフォルトは"full"）
             column = block.get("column", "full")
@@ -3252,17 +3342,30 @@ class PDFToMarkdownConverter:
                 "column_order": column_order
             })
         
-        for img in images:
+        for img_idx, img in enumerate(images):
             bbox = img.get("bbox", (0, 0, 0, 0))
-            # 画像のカラムをX座標から判定（ページ中央より左なら左カラム）
-            img_center_x = (bbox[0] + bbox[2]) / 2 if bbox else 0
-            # ページ幅の半分を基準にカラムを判定（297.64は一般的なA4の半分）
-            column = "left" if img_center_x < 297.64 else "right"
+            # 画像に関連付けられたキャプション情報を追加
+            img["_caption_above"] = image_captions.get(img_idx, {}).get("above")
+            img["_caption_below"] = image_captions.get(img_idx, {}).get("below")
+            
+            # 画像のカラムを画像自身のcolumn属性から取得（なければX座標から判定）
+            column = img.get("column")
+            if not column:
+                img_center_x = (bbox[0] + bbox[2]) / 2 if bbox else 0
+                column = "left" if img_center_x < 297.64 else "right"
             column_order = {"left": 0, "full": 1, "right": 2}.get(column, 1)
+            
+            # Y座標は上キャプションがあればそのY座標を使用（順序を正しくするため）
+            y_position = img["y_position"]
+            caption_above = img.get("_caption_above")
+            if caption_above:
+                caption_bbox = caption_above.get("bbox", (0, 0, 0, 0))
+                y_position = min(y_position, caption_bbox[1])
+            
             all_items.append({
                 "type": "image",
                 "data": img,
-                "y_position": img["y_position"],
+                "y_position": y_position,
                 "column": column,
                 "column_order": column_order
             })
@@ -3281,6 +3384,17 @@ class PDFToMarkdownConverter:
                     list_active = False
                 
                 img_data = item["data"]
+                
+                # 上キャプションがあれば先に出力
+                caption_above = img_data.get("_caption_above")
+                if caption_above:
+                    caption_text = caption_above.get("text", "").strip()
+                    if caption_text:
+                        if prev_type:
+                            self.markdown_lines.append("")
+                        self.markdown_lines.append(f"### {caption_text}")
+                        self.markdown_lines.append("")
+                
                 self.markdown_lines.append("")
                 self.markdown_lines.append(f"![図](images/{img_data['filename']})")
                 self.markdown_lines.append("")
@@ -3291,6 +3405,14 @@ class PDFToMarkdownConverter:
                     details_text = self._format_figure_texts_as_details(figure_texts)
                     self.markdown_lines.append(details_text)
                     self.markdown_lines.append("")
+                
+                # 下キャプションがあれば後に出力
+                caption_below = img_data.get("_caption_below")
+                if caption_below:
+                    caption_text = caption_below.get("text", "").strip()
+                    if caption_text:
+                        self.markdown_lines.append(f"### {caption_text}")
+                        self.markdown_lines.append("")
                 
                 prev_type = "image"
                 
