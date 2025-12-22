@@ -1881,20 +1881,384 @@ class PDFToMarkdownConverter:
         
         all_figure_candidates = filtered_candidates
         
+        # 表領域を検出して図候補から除外
+        # 表は罫線（ベクター描画）として認識されるため、図として出力されてしまう問題を防ぐ
+        def detect_table_bboxes_from_text(text_lines, page_width):
+            """テキスト行の配置パターンから表領域を検出"""
+            table_bboxes = []
+            gutter = page_width / 2
+            
+            # 左右カラムごとに処理
+            for is_left in [True, False]:
+                col_lines = []
+                for line in text_lines:
+                    line_bbox = line["bbox"]
+                    center_x = (line_bbox[0] + line_bbox[2]) / 2
+                    if is_left and center_x < gutter:
+                        col_lines.append(line)
+                    elif not is_left and center_x >= gutter:
+                        col_lines.append(line)
+                
+                if not col_lines:
+                    continue
+                
+                # Y座標でグループ化（同じ行にある要素を検出）
+                y_tolerance = 5
+                y_groups = {}
+                for line in col_lines:
+                    y_key = round(line["bbox"][1] / y_tolerance) * y_tolerance
+                    if y_key not in y_groups:
+                        y_groups[y_key] = []
+                    y_groups[y_key].append(line)
+                
+                # 複数セルがある行を検出（3セル以上で表として認識）
+                multi_cell_rows = []
+                for y_key in sorted(y_groups.keys()):
+                    cells = y_groups[y_key]
+                    x_positions = sorted(set(round(c["bbox"][0] / 20) * 20 for c in cells))
+                    if len(x_positions) >= 3:
+                        all_bboxes = [c["bbox"] for c in cells]
+                        row_bbox = (
+                            min(b[0] for b in all_bboxes),
+                            min(b[1] for b in all_bboxes),
+                            max(b[2] for b in all_bboxes),
+                            max(b[3] for b in all_bboxes)
+                        )
+                        multi_cell_rows.append({"y": y_key, "bbox": row_bbox})
+                
+                # 連続する複数セル行を表領域としてグループ化（3行以上で表として認識）
+                if len(multi_cell_rows) < 3:
+                    continue
+                
+                current_region = {
+                    "y_start": multi_cell_rows[0]["y"],
+                    "y_end": multi_cell_rows[0]["y"] + 20,
+                    "x0": multi_cell_rows[0]["bbox"][0],
+                    "x1": multi_cell_rows[0]["bbox"][2],
+                    "rows": [multi_cell_rows[0]]
+                }
+                
+                for i in range(1, len(multi_cell_rows)):
+                    row = multi_cell_rows[i]
+                    prev_row = multi_cell_rows[i - 1]
+                    
+                    if row["y"] - prev_row["y"] < 50:
+                        current_region["rows"].append(row)
+                        current_region["y_end"] = row["y"] + 20
+                        current_region["x0"] = min(current_region["x0"], row["bbox"][0])
+                        current_region["x1"] = max(current_region["x1"], row["bbox"][2])
+                    else:
+                        if len(current_region["rows"]) >= 3:
+                            table_bboxes.append((
+                                current_region["x0"] - 5,
+                                current_region["y_start"] - 10,
+                                current_region["x1"] + 5,
+                                current_region["y_end"] + 5
+                            ))
+                        current_region = {
+                            "y_start": row["y"],
+                            "y_end": row["y"] + 20,
+                            "x0": row["bbox"][0],
+                            "x1": row["bbox"][2],
+                            "rows": [row]
+                        }
+                
+                if len(current_region["rows"]) >= 3:
+                    table_bboxes.append((
+                        current_region["x0"] - 5,
+                        current_region["y_start"] - 10,
+                        current_region["x1"] + 5,
+                        current_region["y_end"] + 5
+                    ))
+            
+            return table_bboxes
+        
+        def bbox_overlap_ratio(bbox1, bbox2):
+            """2つのbboxの重なり率を計算（小さい方の面積に対する比率）"""
+            x0 = max(bbox1[0], bbox2[0])
+            y0 = max(bbox1[1], bbox2[1])
+            x1 = min(bbox1[2], bbox2[2])
+            y1 = min(bbox1[3], bbox2[3])
+            
+            if x0 >= x1 or y0 >= y1:
+                return 0.0
+            
+            inter_area = (x1 - x0) * (y1 - y0)
+            area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])
+            area2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])
+            min_area = min(area1, area2)
+            
+            if min_area <= 0:
+                return 0.0
+            return inter_area / min_area
+        
+        # テキスト行を取得（表検出用）
+        text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+        page_text_lines = []
+        for block in text_dict.get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                line_bbox = line.get("bbox", (0, 0, 0, 0))
+                line_text = ""
+                for span in line.get("spans", []):
+                    line_text += span.get("text", "")
+                page_text_lines.append({"text": line_text.strip(), "bbox": line_bbox})
+        
+        # 表領域を検出
+        table_bboxes = detect_table_bboxes_from_text(page_text_lines, page_width)
+        
+        if table_bboxes:
+            debug_print(f"[DEBUG] 表領域を{len(table_bboxes)}個検出")
+            for i, tb in enumerate(table_bboxes):
+                debug_print(f"[DEBUG]   表{i+1}: y={tb[1]:.1f}-{tb[3]:.1f}, x={tb[0]:.1f}-{tb[2]:.1f}")
+        
+        # 表領域と重なる図候補を除外
+        table_filtered = []
+        for cand in all_figure_candidates:
+            is_table = False
+            for table_bbox in table_bboxes:
+                overlap = bbox_overlap_ratio(cand["union_bbox"], table_bbox)
+                if overlap >= 0.7:
+                    debug_print(f"[DEBUG] 図候補を表として除外: overlap={overlap:.2f}")
+                    is_table = True
+                    break
+            if not is_table:
+                table_filtered.append(cand)
+        
+        all_figure_candidates = table_filtered
+        
+        # 第2段: 同一カラム内のクラスタを安全にマージ
+        # 本文バリアがない場合のみマージする
+        def is_body_text_line(text, line_width, col_width):
+            """本文らしい行かどうかを判定"""
+            if len(text) < 15:
+                return False
+            if "。" in text:
+                return True
+            particles = ["が", "を", "に", "で", "は", "の", "と", "も", "や"]
+            if any(p in text for p in particles) and line_width > col_width * 0.5:
+                return True
+            return False
+        
+        def has_body_barrier(bbox1, bbox2, text_lines, col_width):
+            """2つのbbox間に本文バリアがあるか判定"""
+            y_min = min(bbox1[3], bbox2[3])
+            y_max = max(bbox1[1], bbox2[1])
+            x_overlap_start = max(bbox1[0], bbox2[0])
+            x_overlap_end = min(bbox1[2], bbox2[2])
+            
+            for line in text_lines:
+                line_bbox = line["bbox"]
+                line_center_y = (line_bbox[1] + line_bbox[3]) / 2
+                line_center_x = (line_bbox[0] + line_bbox[2]) / 2
+                line_width = line_bbox[2] - line_bbox[0]
+                
+                if y_min < line_center_y < y_max:
+                    if x_overlap_start - 20 < line_center_x < x_overlap_end + 20:
+                        if is_body_text_line(line["text"], line_width, col_width):
+                            return True
+            return False
+        
+        def get_x_overlap_ratio(bbox1, bbox2):
+            """x方向の重なり率を計算"""
+            x_overlap = max(0, min(bbox1[2], bbox2[2]) - max(bbox1[0], bbox2[0]))
+            min_width = min(bbox1[2] - bbox1[0], bbox2[2] - bbox2[0])
+            if min_width <= 0:
+                return 0
+            return x_overlap / min_width
+        
+        # page_text_linesは表検出で既に取得済み
+        col_width = page_width / 2
+        
+        # 同一カラム内でマージ可能なクラスタをマージ
+        debug_print(f"[DEBUG] クラスタ再マージ開始: {len(all_figure_candidates)}個のクラスタ")
+        merged = True
+        merge_iteration = 0
+        while merged:
+            merge_iteration += 1
+            merged = False
+            new_candidates = []
+            used = set()
+            
+            for i, cand1 in enumerate(all_figure_candidates):
+                if i in used:
+                    continue
+                
+                best_merge = None
+                best_y_gap = float('inf')
+                
+                for j, cand2 in enumerate(all_figure_candidates):
+                    if i >= j or j in used:
+                        continue
+                    
+                    # 同一カラムのみマージ
+                    if cand1["column"] != cand2["column"]:
+                        continue
+                    
+                    bbox1 = cand1["union_bbox"]
+                    bbox2 = cand2["union_bbox"]
+                    
+                    # x方向の重なりが十分あるか
+                    x_overlap_ratio = get_x_overlap_ratio(bbox1, bbox2)
+                    if x_overlap_ratio < 0.3:
+                        debug_print(f"[DEBUG] クラスタ{i}と{j}: x重なり不足 {x_overlap_ratio:.2f}")
+                        continue
+                    
+                    # y方向のギャップを計算
+                    y_gap = max(0, max(bbox1[1], bbox2[1]) - min(bbox1[3], bbox2[3]))
+                    
+                    # y_gapが80pt以内で、本文バリアがない場合のみマージ
+                    if y_gap <= 80:
+                        if not has_body_barrier(bbox1, bbox2, page_text_lines, col_width):
+                            debug_print(f"[DEBUG] クラスタ{i}と{j}: マージ候補 y_gap={y_gap:.1f}")
+                            if y_gap < best_y_gap:
+                                best_y_gap = y_gap
+                                best_merge = j
+                        else:
+                            debug_print(f"[DEBUG] クラスタ{i}と{j}: 本文バリアあり")
+                    else:
+                        debug_print(f"[DEBUG] クラスタ{i}と{j}: y_gap超過 {y_gap:.1f}")
+                
+                if best_merge is not None:
+                    cand2 = all_figure_candidates[best_merge]
+                    bbox1 = cand1["union_bbox"]
+                    bbox2 = cand2["union_bbox"]
+                    
+                    # マージしたbboxを作成
+                    merged_bbox = (
+                        min(bbox1[0], bbox2[0]),
+                        min(bbox1[1], bbox2[1]),
+                        max(bbox1[2], bbox2[2]),
+                        max(bbox1[3], bbox2[3])
+                    )
+                    
+                    debug_print(f"[DEBUG] クラスタ{i}と{best_merge}をマージ")
+                    new_candidates.append({
+                        "union_bbox": merged_bbox,
+                        "cluster_size": cand1["cluster_size"] + cand2["cluster_size"],
+                        "column": cand1["column"]
+                    })
+                    used.add(i)
+                    used.add(best_merge)
+                    merged = True
+                else:
+                    new_candidates.append(cand1)
+                    used.add(i)
+            
+            all_figure_candidates = new_candidates
+        
+        debug_print(f"[DEBUG] クラスタ再マージ完了: {len(all_figure_candidates)}個のクラスタ")
+        
         if not all_figure_candidates:
             return []
         
         debug_print(f"[DEBUG] ページ {page_num + 1}: {len(all_bboxes)}個の要素を{len(all_figure_candidates)}個の図にグループ化")
         
+        # 切り出し範囲制御: キャプションの上、本文の下でトリム
+        import re as re_module
+        
+        def find_caption_below(graphics_bbox, text_lines):
+            """図の下にあるキャプション行を探す"""
+            caption_pattern = re_module.compile(r'^(図|表)\s*\d+')
+            best_caption = None
+            best_y = float('inf')
+            
+            for line in text_lines:
+                line_bbox = line["bbox"]
+                line_text = line["text"].strip()
+                
+                # キャプションパターンにマッチするか
+                if not caption_pattern.match(line_text):
+                    continue
+                
+                # 図の下にあるか（y0がgraphics_bbox[3]より大きい）
+                if line_bbox[1] < graphics_bbox[3]:
+                    continue
+                
+                # x方向で図と重なりがあるか
+                x_overlap = max(0, min(graphics_bbox[2], line_bbox[2]) - max(graphics_bbox[0], line_bbox[0]))
+                if x_overlap < 20:
+                    continue
+                
+                # 最も近いキャプションを選択
+                if line_bbox[1] < best_y:
+                    best_y = line_bbox[1]
+                    best_caption = line
+            
+            return best_caption
+        
+        def find_body_text_above(graphics_bbox, text_lines, col_width):
+            """図の上にある本文行を探す"""
+            best_body = None
+            best_y = 0
+            
+            for line in text_lines:
+                line_bbox = line["bbox"]
+                line_text = line["text"].strip()
+                line_width = line_bbox[2] - line_bbox[0]
+                
+                # 図の上にあるか（y1がgraphics_bbox[1]より小さい）
+                if line_bbox[3] > graphics_bbox[1]:
+                    continue
+                
+                # x方向で図と重なりがあるか
+                x_overlap = max(0, min(graphics_bbox[2], line_bbox[2]) - max(graphics_bbox[0], line_bbox[0]))
+                if x_overlap < 20:
+                    continue
+                
+                # 本文らしい行か（短いラベルは除外）
+                if is_body_text_line(line_text, line_width, col_width):
+                    if line_bbox[3] > best_y:
+                        best_y = line_bbox[3]
+                        best_body = line
+            
+            return best_body
+        
+        def compute_clip_bbox(graphics_bbox, text_lines, col_width, page_height):
+            """graphics_bboxからclip_bboxを計算（トリム処理）"""
+            padding = 20.0
+            clip_x0 = max(0, graphics_bbox[0] - padding)
+            clip_y0 = max(0, graphics_bbox[1] - padding)
+            clip_x1 = min(page_width, graphics_bbox[2] + padding)
+            clip_y1 = min(page_height, graphics_bbox[3] + padding)
+            
+            # 下側: キャプションの上までトリム
+            caption = find_caption_below(graphics_bbox, text_lines)
+            if caption:
+                caption_y0 = caption["bbox"][1]
+                # キャプションの上までに制限（マージン5pt）
+                new_clip_y1 = caption_y0 - 5.0
+                # graphics_bboxを侵食しないようにクランプ
+                if new_clip_y1 >= graphics_bbox[3]:
+                    clip_y1 = new_clip_y1
+                    debug_print(f"[DEBUG] キャプション検出: clip_y1を{clip_y1:.1f}にトリム")
+            
+            # 上側: 本文の下までトリム
+            body_above = find_body_text_above(graphics_bbox, text_lines, col_width)
+            if body_above:
+                body_y1 = body_above["bbox"][3]
+                # 本文の下までに制限（マージン5pt）
+                new_clip_y0 = body_y1 + 5.0
+                # graphics_bboxを侵食しないようにクランプ
+                if new_clip_y0 <= graphics_bbox[1]:
+                    clip_y0 = new_clip_y0
+                    debug_print(f"[DEBUG] 本文検出: clip_y0を{clip_y0:.1f}にトリム")
+            
+            return (clip_x0, clip_y0, clip_x1, clip_y1)
+        
         for fig_info in all_figure_candidates:
             try:
-                union_bbox = fig_info["union_bbox"]
+                graphics_bbox = fig_info["union_bbox"]
                 column = fig_info["column"]
+                
+                # clip_bboxを計算（トリム処理）
+                clip_bbox = compute_clip_bbox(graphics_bbox, page_text_lines, col_width, page.rect.height)
                 
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
                 
-                clip_rect = fitz.Rect(union_bbox)
+                clip_rect = fitz.Rect(clip_bbox)
                 matrix = fitz.Matrix(2.0, 2.0)
                 pix = page.get_pixmap(matrix=matrix, clip=clip_rect)
                 
