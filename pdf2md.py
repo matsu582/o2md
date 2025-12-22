@@ -169,10 +169,6 @@ class PDFToMarkdownConverter:
             page: PyMuPDFのページオブジェクト
             page_num: ページ番号（0始まり）
         """
-        # ページ見出し
-        self.markdown_lines.append(f"## ページ {page_num + 1}")
-        self.markdown_lines.append("")
-        
         # テキストベースのPDFかどうかを判定
         text_blocks = self._extract_structured_text(page)
         
@@ -321,15 +317,22 @@ class PDFToMarkdownConverter:
         """
         text_stripped = text.strip()
         
-        # 箇条書きの検出
-        list_markers = ['•', '・', '-', '－', '―', '*', '＊', '○', '●', '◆', '◇', '▪', '▫']
-        for marker in list_markers:
-            if text_stripped.startswith(marker):
-                return "list_item"
-        
-        # 番号付きリストの検出
+        # 箇条書きの検出（マーカーの後に空白がある場合のみ）
         import re
-        if re.match(r'^[\d０-９]+[\.．\)）]\s*', text_stripped):
+        
+        # 記号マーカー + 空白のパターン（--で始まる行は除外）
+        if not text_stripped.startswith('--'):
+            # 空白必須のマーカー（-, *, など）
+            if re.match(r'^[\-\*]\s+', text_stripped):
+                return "list_item"
+            # 空白不要のマーカー（•, ・, ○, ● など）
+            bullet_markers = ['•', '・', '○', '●', '◆', '◇', '▪', '▫', '－', '―', '＊']
+            for marker in bullet_markers:
+                if text_stripped.startswith(marker):
+                    return "list_item"
+        
+        # 番号付きリストの検出（区切り記号の後に空白が必須）
+        if re.match(r'^[\d０-９]+[\.．\)）]\s+', text_stripped):
             return "list_item"
         
         # 見出しの検出（フォントサイズと太字に基づく）
@@ -642,14 +645,15 @@ class PDFToMarkdownConverter:
                             self.markdown_lines.append("")
                         list_active = True
                     
-                    # 箇条書きマーカーを統一
+                    # 箇条書きマーカーを除去（判定ルールと一致させる）
                     import re
-                    cleaned_text = re.sub(
-                        r'^[•・\-－―\*＊○●◆◇▪▫]\s*', '', text
-                    )
-                    cleaned_text = re.sub(
-                        r'^[\d０-９]+[\.．\)）]\s*', '', cleaned_text
-                    )
+                    cleaned_text = text
+                    # 空白必須のマーカー（-, *）
+                    cleaned_text = re.sub(r'^[\-\*]\s+', '', cleaned_text)
+                    # 空白不要のマーカー（•, ・, ○, ● など）
+                    cleaned_text = re.sub(r'^[•・○●◆◇▪▫－―＊]\s*', '', cleaned_text)
+                    # 番号付きリスト
+                    cleaned_text = re.sub(r'^[\d０-９]+[\.．\)）]\s+', '', cleaned_text)
                     self.markdown_lines.append(f"- {cleaned_text}")
                     
                 elif block_type == "table":
@@ -715,14 +719,15 @@ class PDFToMarkdownConverter:
                         self.markdown_lines.append("")
                     list_active = True
                 
-                # 箇条書きマーカーを統一
+                # 箇条書きマーカーを除去（判定ルールと一致させる）
                 import re
-                cleaned_text = re.sub(
-                    r'^[•・\-－―\*＊○●◆◇▪▫]\s*', '', text
-                )
-                cleaned_text = re.sub(
-                    r'^[\d０-９]+[\.．\)）]\s*', '', cleaned_text
-                )
+                cleaned_text = text
+                # 空白必須のマーカー（-, *）
+                cleaned_text = re.sub(r'^[\-\*]\s+', '', cleaned_text)
+                # 空白不要のマーカー（•, ・, ○, ● など）
+                cleaned_text = re.sub(r'^[•・○●◆◇▪▫－―＊]\s*', '', cleaned_text)
+                # 番号付きリスト
+                cleaned_text = re.sub(r'^[\d０-９]+[\.．\)）]\s+', '', cleaned_text)
                 self.markdown_lines.append(f"- {cleaned_text}")
                 
             elif block_type == "table":
