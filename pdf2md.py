@@ -779,16 +779,20 @@ class PDFToMarkdownConverter:
             
             # 複数セルがある行を検出
             multi_cell_rows = []
+            all_rows = []  # 全ての行（単一セル含む）
             for y_key in sorted(y_groups.keys()):
                 cells = y_groups[y_key]
                 # X座標でソートして、異なるX位置にあるセルをカウント
                 x_positions = sorted(set(round(c["x"] / 20) * 20 for c in cells))
+                row_data = {
+                    "y": y_key,
+                    "cells": sorted(cells, key=lambda c: c["x"]),
+                    "x_positions": x_positions,
+                    "is_multi_cell": len(x_positions) >= 2
+                }
+                all_rows.append(row_data)
                 if len(x_positions) >= 2:
-                    multi_cell_rows.append({
-                        "y": y_key,
-                        "cells": sorted(cells, key=lambda c: c["x"]),
-                        "x_positions": x_positions
-                    })
+                    multi_cell_rows.append(row_data)
             
             # 連続する複数セル行を表領域としてグループ化
             if not multi_cell_rows:
@@ -798,7 +802,8 @@ class PDFToMarkdownConverter:
                 "y_start": multi_cell_rows[0]["y"],
                 "y_end": multi_cell_rows[0]["y"] + 20,
                 "column": column_name,
-                "rows": [multi_cell_rows[0]]
+                "rows": [multi_cell_rows[0]],
+                "all_rows": all_rows  # 単一セル行も含む全行を保持
             }
             
             for i in range(1, len(multi_cell_rows)):
@@ -806,11 +811,11 @@ class PDFToMarkdownConverter:
                 prev_row = multi_cell_rows[i - 1]
                 
                 # 連続している場合（Y座標の差が小さい）
-                if row["y"] - prev_row["y"] < 30:
+                if row["y"] - prev_row["y"] < 50:  # 許容範囲を広げる
                     current_region["rows"].append(row)
                     current_region["y_end"] = row["y"] + 20
                 else:
-                    # 3行以上の連続した複数セル行があれば表として認識
+                    # 2行以上の連続した複数セル行があれば表として認識
                     if len(current_region["rows"]) >= 2:
                         table_regions.append(current_region)
                     
@@ -818,7 +823,8 @@ class PDFToMarkdownConverter:
                         "y_start": row["y"],
                         "y_end": row["y"] + 20,
                         "column": column_name,
-                        "rows": [row]
+                        "rows": [row],
+                        "all_rows": all_rows
                     }
             
             # 最後の領域をチェック
@@ -858,6 +864,13 @@ class PDFToMarkdownConverter:
             
             # タイトル部分が短すぎる場合は除外
             if len(title_part) < 2:
+                return (False, 0, "")
+            
+            # タイトル部分が日本語の見出しらしい文字で始まる場合のみ見出しとして認識
+            # 「年」「月」「日」「倍」などの単位で始まる場合は除外
+            first_char = title_part[0]
+            excluded_chars = '年月日倍個回分秒時点番号件台人円万億兆'
+            if first_char in excluded_chars:
                 return (False, 0, "")
             
             # 見出しレベルを決定（ドットの数 + 1）
@@ -1019,6 +1032,8 @@ class PDFToMarkdownConverter:
     def _format_table_region(self, table_region: Dict) -> str:
         """表領域をMarkdownテーブル形式に変換
         
+        単一セル行（継続行）も含めて処理し、適切にマージする。
+        
         Args:
             table_region: 表領域データ
             
@@ -1026,61 +1041,102 @@ class PDFToMarkdownConverter:
             Markdownテーブル文字列
         """
         rows = table_region.get("rows", [])
+        all_rows = table_region.get("all_rows", [])
         if not rows:
             return ""
         
-        # 全行のX位置を収集して列を決定
-        all_x_positions = set()
-        for row in rows:
-            for pos in row.get("x_positions", []):
-                all_x_positions.add(pos)
+        y_start = table_region.get("y_start", 0)
+        y_end = table_region.get("y_end", 0)
         
-        column_positions = sorted(all_x_positions)
+        # 表領域内の全行を取得（単一セル行も含む）
+        table_all_rows = []
+        for row in all_rows:
+            if y_start - 10 <= row["y"] <= y_end + 10:
+                table_all_rows.append(row)
+        
+        if not table_all_rows:
+            table_all_rows = rows
+        
+        # 複数セル行からヘッダ行を特定（最初の複数セル行）
+        header_row = None
+        for row in table_all_rows:
+            if row.get("is_multi_cell", False):
+                header_row = row
+                break
+        
+        if not header_row:
+            return ""
+        
+        # ヘッダ行の列位置を基準にする
+        column_positions = sorted(header_row.get("x_positions", []))
         if len(column_positions) < 2:
             return ""
         
         # 各行のセルを列に割り当て
         table_rows = []
-        for row in rows:
+        for row in table_all_rows:
             cells = row.get("cells", [])
             row_data = [""] * len(column_positions)
             
             for cell in cells:
                 cell_x = round(cell["x"] / 20) * 20
-                try:
-                    col_idx = column_positions.index(cell_x)
-                    row_data[col_idx] = cell["text"].strip()
-                except ValueError:
-                    # 最も近い列に割り当て
-                    min_dist = float("inf")
-                    best_idx = 0
-                    for idx, pos in enumerate(column_positions):
-                        dist = abs(cell_x - pos)
-                        if dist < min_dist:
-                            min_dist = dist
-                            best_idx = idx
-                    if not row_data[best_idx]:
-                        row_data[best_idx] = cell["text"].strip()
-                    else:
-                        row_data[best_idx] += " " + cell["text"].strip()
+                # 最も近い列に割り当て
+                min_dist = float("inf")
+                best_idx = 0
+                for idx, pos in enumerate(column_positions):
+                    dist = abs(cell_x - pos)
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_idx = idx
+                
+                cell_text = cell["text"].strip()
+                if not row_data[best_idx]:
+                    row_data[best_idx] = cell_text
+                else:
+                    row_data[best_idx] += " " + cell_text
             
-            table_rows.append(row_data)
+            table_rows.append({
+                "data": row_data,
+                "is_multi_cell": row.get("is_multi_cell", False),
+                "y": row["y"]
+            })
         
         if not table_rows:
+            return ""
+        
+        # 継続行をマージ（単一セル行を前の行にマージ）
+        merged_rows = []
+        for row in table_rows:
+            if row["is_multi_cell"]:
+                merged_rows.append(row["data"])
+            else:
+                # 単一セル行: 前の行にマージ
+                if merged_rows:
+                    prev_row = merged_rows[-1]
+                    for i, cell in enumerate(row["data"]):
+                        if cell:
+                            if prev_row[i]:
+                                prev_row[i] += " " + cell
+                            else:
+                                prev_row[i] = cell
+                else:
+                    merged_rows.append(row["data"])
+        
+        if not merged_rows:
             return ""
         
         # Markdownテーブルを生成
         md_lines = []
         
         # ヘッダ行
-        header = table_rows[0]
+        header = merged_rows[0]
         md_lines.append("| " + " | ".join(header) + " |")
         
         # 区切り行
         md_lines.append("| " + " | ".join(["---"] * len(header)) + " |")
         
         # データ行
-        for row in table_rows[1:]:
+        for row in merged_rows[1:]:
             md_lines.append("| " + " | ".join(row) + " |")
         
         return "\n".join(md_lines)
