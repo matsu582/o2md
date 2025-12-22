@@ -305,11 +305,9 @@ class PDFToMarkdownConverter:
             # テキストベースのPDF: 構造化されたMarkdownを出力
             debug_print(f"[DEBUG] ページ {page_num + 1}: テキストベースPDFとして処理")
             
-            # 埋め込み画像を抽出
-            embedded_images = self._extract_embedded_images(page, page_num)
-            
-            # 画像とベクタ図を統合
-            all_images = embedded_images + vector_figures
+            # 統合版の図抽出を使用（ベクター図形と埋め込み画像を統合）
+            # vector_figuresは既に_extract_all_figuresで統合処理済み
+            all_images = vector_figures
             
             # 構造化テキストと画像を出力
             self._output_structured_markdown_with_images(text_blocks, all_images)
@@ -1693,11 +1691,11 @@ class PDFToMarkdownConverter:
         
         return []
     
-    def _extract_vector_figures(self, page, page_num: int) -> List[Dict[str, Any]]:
-        """ベクタ描画（図）を抽出
+    def _extract_all_figures(self, page, page_num: int) -> List[Dict[str, Any]]:
+        """ベクター図形と埋め込み画像を統合して図を抽出
         
-        get_drawings()からベクタ図形をクラスタリングして抽出する。
-        図内のテキストも抽出して<details>タグで出力する。
+        ベクター描画と埋め込み画像を統合してクラスタリングし、
+        クラスタリング後にカラム判定を行う（先にクラスタリング、後でカラム判定）。
         
         Args:
             page: PyMuPDFのページオブジェクト
@@ -1707,60 +1705,174 @@ class PDFToMarkdownConverter:
             抽出された図の情報リスト
         """
         figures = []
+        page_width = page.rect.width
+        gutter_x = page_width / 2
+        gutter_margin = 10.0  # ガター跨ぎ判定のマージン
+        
+        all_bboxes = []
         
         try:
             drawings = page.get_drawings()
+            for d in drawings:
+                rect = d.get("rect")
+                if rect:
+                    bbox = (rect.x0, rect.y0, rect.x1, rect.y1)
+                    area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                    if area >= 200:
+                        all_bboxes.append(bbox)
         except Exception as e:
             debug_print(f"[DEBUG] 描画取得エラー: {e}")
+        
+        try:
+            image_list = page.get_images(full=True)
+            for img_info in image_list:
+                xref = img_info[0]
+                for img_rect in page.get_image_rects(xref):
+                    bbox = (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1)
+                    area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                    if area >= 100:
+                        all_bboxes.append(bbox)
+                        break
+        except Exception as e:
+            debug_print(f"[DEBUG] 画像取得エラー: {e}")
+        
+        if len(all_bboxes) < 2:
             return []
         
-        if not drawings:
-            return []
+        def get_column_for_union_bbox(bbox):
+            """クラスタのunion_bboxからカラムを判定（ガター跨ぎを優先）"""
+            x0, y0, x1, y1 = bbox
+            width = x1 - x0
+            center_x = (x0 + x1) / 2
+            
+            # ガター跨ぎ判定（左端がガター左側、右端がガター右側）
+            crosses_gutter = x0 < gutter_x - gutter_margin and x1 > gutter_x + gutter_margin
+            
+            # 全幅判定
+            is_full_width = width > page_width * 0.5
+            
+            if crosses_gutter or is_full_width:
+                return "full"
+            elif center_x < gutter_x:
+                return "left"
+            else:
+                return "right"
         
-        # 描画のbboxを収集
-        drawing_bboxes = []
-        for d in drawings:
-            rect = d.get("rect")
-            if rect:
-                bbox = (rect.x0, rect.y0, rect.x1, rect.y1)
-                area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-                # 小さすぎる描画は除外（装飾線など）
-                if area >= 200:
-                    drawing_bboxes.append(bbox)
+        def cluster_with_anisotropic_threshold(bboxes, x_threshold=100.0, y_threshold=40.0):
+            """異方性閾値でクラスタリング（全要素を一度にクラスタリング）"""
+            if not bboxes:
+                return []
+            
+            n = len(bboxes)
+            visited = [False] * n
+            clusters = []
+            
+            def boxes_close(b1, b2):
+                x0_1, y0_1, x1_1, y1_1 = b1
+                x0_2, y0_2, x1_2, y1_2 = b2
+                
+                x_gap = max(0, max(x0_1, x0_2) - min(x1_1, x1_2))
+                y_gap = max(0, max(y0_1, y0_2) - min(y1_1, y1_2))
+                
+                return x_gap <= x_threshold and y_gap <= y_threshold
+            
+            for i in range(n):
+                if visited[i]:
+                    continue
+                
+                cluster = [i]
+                visited[i] = True
+                queue = [i]
+                
+                while queue:
+                    current = queue.pop(0)
+                    current_bbox = bboxes[current]
+                    
+                    for j in range(n):
+                        if visited[j]:
+                            continue
+                        
+                        if boxes_close(current_bbox, bboxes[j]):
+                            cluster.append(j)
+                            visited[j] = True
+                            queue.append(j)
+                
+                clusters.append(cluster)
+            
+            return clusters
         
-        if len(drawing_bboxes) < 3:
-            return []
+        # 全要素を一度にクラスタリング
+        clusters = cluster_with_anisotropic_threshold(all_bboxes)
         
-        # 描画をクラスタリング
-        clusters = self._cluster_image_bboxes(drawing_bboxes, distance_threshold=30.0)
-        
-        # 小さすぎるクラスタは除外
-        valid_clusters = []
+        all_figure_candidates = []
         for cluster in clusters:
-            if len(cluster) >= 3:
-                union_bbox = self._get_cluster_union_bbox(drawing_bboxes, cluster, margin=15.0)
-                area = (union_bbox[2] - union_bbox[0]) * (union_bbox[3] - union_bbox[1])
-                if area >= 1000:
-                    valid_clusters.append((cluster, union_bbox))
+            if len(cluster) < 2:
+                bbox = all_bboxes[cluster[0]]
+                area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                if area < 2000:
+                    continue
+            
+            cluster_bboxes = [all_bboxes[i] for i in cluster]
+            x0 = min(b[0] for b in cluster_bboxes) - 5.0
+            y0 = min(b[1] for b in cluster_bboxes) - 5.0
+            x1 = max(b[2] for b in cluster_bboxes) + 5.0
+            y1 = max(b[3] for b in cluster_bboxes) + 5.0
+            union_bbox = (max(0, x0), max(0, y0), x1, y1)
+            
+            area = (union_bbox[2] - union_bbox[0]) * (union_bbox[3] - union_bbox[1])
+            if area < 1000:
+                continue
+            
+            # クラスタリング後にカラム判定
+            column = get_column_for_union_bbox(union_bbox)
+            
+            all_figure_candidates.append({
+                "union_bbox": union_bbox,
+                "cluster_size": len(cluster),
+                "column": column
+            })
         
-        if not valid_clusters:
+        # 包含除去フィルタ: 大きいbboxが小さいbboxを包含している場合、小さい方を除去
+        def bbox_contains(outer, inner, margin=10.0):
+            """outerがinnerを包含しているか判定"""
+            return (outer[0] - margin <= inner[0] and 
+                    outer[1] - margin <= inner[1] and 
+                    outer[2] + margin >= inner[2] and 
+                    outer[3] + margin >= inner[3])
+        
+        filtered_candidates = []
+        for i, cand in enumerate(all_figure_candidates):
+            is_contained = False
+            for j, other in enumerate(all_figure_candidates):
+                if i != j:
+                    if bbox_contains(other["union_bbox"], cand["union_bbox"]):
+                        is_contained = True
+                        break
+            if not is_contained:
+                filtered_candidates.append(cand)
+        
+        all_figure_candidates = filtered_candidates
+        
+        if not all_figure_candidates:
             return []
         
-        debug_print(f"[DEBUG] ページ {page_num + 1}: {len(drawing_bboxes)}個の描画要素を{len(valid_clusters)}個の図にグループ化")
+        debug_print(f"[DEBUG] ページ {page_num + 1}: {len(all_bboxes)}個の要素を{len(all_figure_candidates)}個の図にグループ化")
         
-        for cluster_idx, (cluster, union_bbox) in enumerate(valid_clusters):
+        for fig_info in all_figure_candidates:
             try:
+                union_bbox = fig_info["union_bbox"]
+                column = fig_info["column"]
+                
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
                 
-                # クリップ領域を指定してレンダリング
                 clip_rect = fitz.Rect(union_bbox)
                 matrix = fitz.Matrix(2.0, 2.0)
                 pix = page.get_pixmap(matrix=matrix, clip=clip_rect)
                 
                 if self.output_format == 'svg':
                     image_path = os.path.join(self.images_dir, f"{image_filename}.svg")
-                    temp_png = os.path.join(self.images_dir, f"temp_vec_{self.image_counter}.png")
+                    temp_png = os.path.join(self.images_dir, f"temp_fig_{self.image_counter}.png")
                     pix.save(temp_png)
                     self._convert_png_to_svg(temp_png, image_path)
                     if os.path.exists(temp_png):
@@ -1769,56 +1881,83 @@ class PDFToMarkdownConverter:
                     image_path = os.path.join(self.images_dir, f"{image_filename}.png")
                     pix.save(image_path)
                 
-                # 図内のテキストを抽出（ラベルテキストを含めるためにbboxを拡張）
-                figure_texts, expanded_bbox = self._extract_text_in_bbox(page, union_bbox)
+                figure_texts, expanded_bbox = self._extract_text_in_bbox(
+                    page, union_bbox, expand_for_labels=True, column=column, gutter_x=gutter_x
+                )
                 
                 figures.append({
                     "path": image_path,
                     "filename": os.path.basename(image_path),
-                    "bbox": expanded_bbox,  # 拡張後のbboxを使用
+                    "bbox": expanded_bbox,
                     "y_position": union_bbox[1],
-                    "texts": figure_texts
+                    "texts": figure_texts,
+                    "column": column
                 })
                 
-                debug_print(f"[DEBUG] ベクタ図を抽出: {image_path} ({len(cluster)}要素, {len(figure_texts)}テキスト)")
+                debug_print(f"[DEBUG] 図を抽出: {image_path} ({fig_info['cluster_size']}要素, {len(figure_texts)}テキスト, {column})")
                 
             except Exception as e:
-                debug_print(f"[DEBUG] ベクタ図抽出エラー: {e}")
+                debug_print(f"[DEBUG] 図抽出エラー: {e}")
                 continue
         
         figures.sort(key=lambda x: x["y_position"])
         return figures
     
+    def _extract_vector_figures(self, page, page_num: int) -> List[Dict[str, Any]]:
+        """ベクタ描画（図）を抽出（統合版を使用）
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            page_num: ページ番号
+            
+        Returns:
+            抽出された図の情報リスト
+        """
+        return self._extract_all_figures(page, page_num)
+    
     def _extract_text_in_bbox(
         self, page, bbox: Tuple[float, float, float, float],
-        expand_for_labels: bool = True
+        expand_for_labels: bool = True,
+        column: str = None,
+        gutter_x: float = None
     ) -> Tuple[List[str], Tuple[float, float, float, float]]:
         """指定されたbbox内のテキストを抽出
         
         図のラベルテキストを含めるため、bboxを近傍の短いテキストで拡張する。
+        カラム境界を考慮して、隣のカラムのテキストを取り込まないようにする。
         
         Args:
             page: PyMuPDFのページオブジェクト
             bbox: バウンディングボックス (x0, y0, x1, y1)
             expand_for_labels: ラベルテキストを含めるためにbboxを拡張するか
+            column: 図のカラム ("left", "right", "full")
+            gutter_x: カラム境界のX座標
             
         Returns:
             (抽出されたテキストのリスト, 拡張後のbbox)
         """
+        import re
         texts = []
         expanded_bbox = bbox
+        
+        if gutter_x is None:
+            gutter_x = page.rect.width / 2
         
         try:
             text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
             
-            # 図ラベルらしいテキストを検出するための条件
-            # - 短いテキスト（30文字以下）
-            # - 句点（。）を含まない
-            # - 図bboxの近傍（50pt以内）にある
             label_margin = 50.0
             
+            def is_in_same_column(line_center_x):
+                if column == "full":
+                    return True
+                elif column == "left":
+                    return line_center_x < gutter_x
+                elif column == "right":
+                    return line_center_x >= gutter_x
+                return True
+            
             if expand_for_labels:
-                # 近傍のラベルテキストを収集してbboxを拡張
                 for block in text_dict.get("blocks", []):
                     if block.get("type") != 0:
                         continue
@@ -1828,7 +1967,9 @@ class PDFToMarkdownConverter:
                         line_center_x = (line_bbox[0] + line_bbox[2]) / 2
                         line_center_y = (line_bbox[1] + line_bbox[3]) / 2
                         
-                        # 図bboxの近傍にあるか確認
+                        if not is_in_same_column(line_center_x):
+                            continue
+                        
                         near_bbox = (
                             bbox[0] - label_margin <= line_center_x <= bbox[2] + label_margin and
                             bbox[1] - label_margin <= line_center_y <= bbox[3] + label_margin
@@ -1837,13 +1978,14 @@ class PDFToMarkdownConverter:
                         if not near_bbox:
                             continue
                         
-                        # テキストを取得
                         line_text = ""
                         for span in line.get("spans", []):
                             line_text += span.get("text", "")
                         line_text = line_text.strip()
                         
-                        # 図ラベルらしいか判定
+                        if re.match(r'^図\d+', line_text) or re.match(r'^表\d+', line_text):
+                            continue
+                        
                         is_label = (
                             line_text and
                             len(line_text) <= 30 and
@@ -1852,15 +1994,21 @@ class PDFToMarkdownConverter:
                         )
                         
                         if is_label:
-                            # bboxを拡張
+                            new_x0 = min(expanded_bbox[0], line_bbox[0])
+                            new_x1 = max(expanded_bbox[2], line_bbox[2])
+                            
+                            if column == "left" and new_x1 > gutter_x - 10:
+                                continue
+                            if column == "right" and new_x0 < gutter_x + 10:
+                                continue
+                            
                             expanded_bbox = (
-                                min(expanded_bbox[0], line_bbox[0]),
+                                new_x0,
                                 min(expanded_bbox[1], line_bbox[1]),
-                                max(expanded_bbox[2], line_bbox[2]),
+                                new_x1,
                                 max(expanded_bbox[3], line_bbox[3])
                             )
             
-            # 拡張後のbbox内のテキストを収集
             for block in text_dict.get("blocks", []):
                 if block.get("type") != 0:
                     continue
@@ -1868,9 +2016,11 @@ class PDFToMarkdownConverter:
                 for line in block.get("lines", []):
                     line_bbox = line.get("bbox", (0, 0, 0, 0))
                     
-                    # 行の中心が拡張後のbbox内にあるか確認
                     line_center_x = (line_bbox[0] + line_bbox[2]) / 2
                     line_center_y = (line_bbox[1] + line_bbox[3]) / 2
+                    
+                    if not is_in_same_column(line_center_x):
+                        continue
                     
                     if (expanded_bbox[0] <= line_center_x <= expanded_bbox[2] and
                         expanded_bbox[1] <= line_center_y <= expanded_bbox[3]):
