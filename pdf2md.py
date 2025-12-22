@@ -2197,20 +2197,34 @@ class PDFToMarkdownConverter:
                     # Markdownテーブルとして出力不可能な場合は表画像として出力
                     debug_print(f"[DEBUG] page={page_num+1}: 図候補を表画像として出力: overlap={overlap:.2f}")
                     # 表画像用のclip_bboxを計算
-                    # 図候補のunion_bbox（描画要素のbbox）を基準に、下側のみトリム
-                    # 上側はキャプションを含めるためトリムしない
+                    # 上端: キャプションを除外（union_bboxの上端を基準に探索）
+                    # 下端: union_bbox（描画要素のbbox）の下端を使用
                     union = cand_bbox
-                    clip_x0 = union[0] - 2
-                    clip_y0 = union[1] - 2  # 上側はトリムしない
-                    clip_x1 = union[2] + 2
-                    clip_y1 = union[3] + 2
                     
-                    # 下側: 表領域の下端でトリム（本文テキストを除外）
-                    # 表領域の下端 + 少しのマージンを使用
-                    table_bottom = matched_table_bbox[3] + 10
-                    if clip_y1 > table_bottom:
-                        clip_y1 = table_bottom
-                        debug_print(f"[DEBUG] 表画像: 下側をトリム y1={clip_y1:.1f}")
+                    # 上端: union_bboxの上端を基準にキャプション行を検出
+                    union_top = union[1]
+                    clip_y0 = union_top - 2  # デフォルトはunion_bboxの上端
+                    
+                    # キャプション行を検出（「表N」パターン）
+                    # union_bboxの上端付近にあるキャプション行を探す
+                    import re
+                    for line in page_text_lines:
+                        line_bbox = line["bbox"]
+                        line_text = line["text"]
+                        # union_bboxの上端付近（上端から20pt以内）にあるキャプション行を探す
+                        if line_bbox[1] >= union_top - 5 and line_bbox[3] <= union_top + 20:
+                            if re.match(r'^表\s*\d', line_text):
+                                # キャプション行の下端を上端にする
+                                clip_y0 = line_bbox[3] + 2
+                                debug_print(f"[DEBUG] 表画像: キャプション検出 '{line_text[:20]}' y={line_bbox[3]:.1f}")
+                                break
+                    
+                    # 下端: union_bboxの下端を使用（表の罫線全体を含める）
+                    clip_x0 = union[0] - 2
+                    clip_x1 = union[2] + 2
+                    clip_y1 = union[3] + 5  # 少しのマージン
+                    
+                    debug_print(f"[DEBUG] 表画像: clip_bbox=({clip_x0:.1f}, {clip_y0:.1f}, {clip_x1:.1f}, {clip_y1:.1f})")
                     
                     table_clip_bbox = (clip_x0, clip_y0, clip_x1, clip_y1)
                     cand["clip_bbox"] = table_clip_bbox
