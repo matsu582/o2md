@@ -1026,6 +1026,31 @@ class PDFToMarkdownConverter:
             return ''.join(f"[^{r}]" for r in refs)
         return text
     
+    def _fix_broken_urls(self, text: str) -> str:
+        """PDF抽出時に混入したURL内のスペースを除去
+        
+        http://example.com/path/file name.pdf
+        ↓
+        http://example.com/path/filename.pdf
+        
+        Args:
+            text: 処理対象のテキスト
+            
+        Returns:
+            URL内のスペースを除去したテキスト
+        """
+        import re
+        
+        def fix_url(match):
+            """URL内のスペースを除去"""
+            url = match.group(0)
+            return re.sub(r'\s+', '', url)
+        
+        # スペースを含むURLにマッチ（http(s)://で始まり、区切り文字で終わる）
+        # 少なくとも1回はスペースを含むURLのみを対象にする
+        pattern = r'https?://[^\s,、)\]>\"]+(?:\s+[^\s,、)\]>\"]+)+'
+        return re.sub(pattern, fix_url, text)
+    
     def _format_footnote_definitions(self, text: str) -> str:
         """参考文献または用語の説明ブロックを注釈定義形式に変換
         
@@ -1050,6 +1075,9 @@ class PDFToMarkdownConverter:
             Markdown注釈定義形式のテキスト
         """
         import re
+        
+        # URL内のスペースを除去
+        text = self._fix_broken_urls(text)
         
         # 用語の説明ブロックの処理
         if text.lstrip().startswith("用語の説明") and re.search(r'用語\s*\d+\s*[:：]', text):
