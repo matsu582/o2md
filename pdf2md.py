@@ -1027,24 +1027,60 @@ class PDFToMarkdownConverter:
         return text
     
     def _format_footnote_definitions(self, text: str) -> str:
-        """参考文献ブロックを注釈定義形式に変換
+        """参考文献または用語の説明ブロックを注釈定義形式に変換
         
         参考文献[1]	 説明...[2]	 説明...
         ↓
         ## 参考文献
         
         [^1]: 説明...
+        
         [^2]: 説明...
         
+        用語の説明用語1：	説明...
+        ↓
+        ## 用語の説明
+        
+        [^用語1]: 説明...
+        
         Args:
-            text: 参考文献ブロックのテキスト
+            text: 参考文献または用語の説明ブロックのテキスト
             
         Returns:
             Markdown注釈定義形式のテキスト
         """
         import re
         
-        # 参考文献ブロックかどうかを判定
+        # 用語の説明ブロックの処理
+        if text.lstrip().startswith("用語の説明") and re.search(r'用語\s*\d+\s*[:：]', text):
+            # 「用語の説明」を除去
+            text = re.sub(r'^\s*用語の説明\s*', '', text)
+            
+            # 用語N: マーカーの位置を全て見つける
+            markers = list(re.finditer(r'用語\s*(\d+)\s*[:：]\s*', text))
+            if not markers:
+                return f"## 用語の説明\n\n{text}"
+            
+            # 各マーカー間のテキストを切り出して注釈定義を生成
+            definitions = []
+            for i, match in enumerate(markers):
+                num = match.group(1)
+                start = match.end()
+                if i + 1 < len(markers):
+                    end = markers[i + 1].start()
+                else:
+                    end = len(text)
+                
+                content = text[start:end].strip()
+                if content:
+                    definitions.append(f"[^用語{num}]: {content}")
+            
+            if definitions:
+                return "## 用語の説明\n\n" + "\n\n".join(definitions) + "\n"
+            else:
+                return f"## 用語の説明\n\n{text}"
+        
+        # 参考文献ブロックの処理
         if not re.match(r'^\s*参考文献\s*\[\d+\]', text):
             return text
         
@@ -1074,21 +1110,27 @@ class PDFToMarkdownConverter:
                 definitions.append(f"[^{num}]: {content}")
         
         if definitions:
-            return "## 参考文献\n\n" + "\n".join(definitions)
+            return "## 参考文献\n\n" + "\n\n".join(definitions) + "\n"
         else:
             return f"## 参考文献\n\n{text}"
     
     def _is_footnote_definition_block(self, text: str) -> bool:
-        """テキストが参考文献ブロックかどうかを判定
+        """テキストが参考文献または用語の説明ブロックかどうかを判定
         
         Args:
             text: 判定するテキスト
             
         Returns:
-            参考文献ブロックの場合True
+            参考文献または用語の説明ブロックの場合True
         """
         import re
-        return bool(re.match(r'^\s*参考文献\s*\[\d+\]', text))
+        # 参考文献ブロック
+        if re.match(r'^\s*参考文献\s*\[\d+\]', text):
+            return True
+        # 用語の説明ブロック
+        if text.lstrip().startswith("用語の説明") and re.search(r'用語\s*\d+\s*[:：]', text):
+            return True
+        return False
     
     def _apply_text_formatting(self, spans_list: List[List[Dict]]) -> str:
         """span情報を使って書式付きテキストを生成
