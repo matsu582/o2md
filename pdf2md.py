@@ -105,6 +105,9 @@ class PDFToMarkdownConverter:
         # manga-ocrインスタンス（遅延初期化）
         self._ocr = None
         
+        # 脚注番号セット（参考文献ブロックから抽出した番号のみ変換対象）
+        self._defined_footnote_nums: Set[str] = set()
+        
         print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
     
     def _get_ocr(self):
@@ -1054,6 +1057,8 @@ class PDFToMarkdownConverter:
     def _convert_inline_footnote_refs(self, text: str) -> str:
         """本文中のインライン参照[N]を[^N]に変換
         
+        脚注定義が存在する番号のみを変換する。
+        
         ...として[4]。読む確率を...
         ↓
         ...として[^4]。読む確率を...
@@ -1065,24 +1070,21 @@ class PDFToMarkdownConverter:
             インライン参照を変換したテキスト
         """
         import re
-        # [N]パターンを[^N]に変換（1-99の数字のみ対象）
-        # 既に[^N]形式になっているものは変換しない
-        # 図表番号（図[4]、表[4]など）は変換しない
-        def convert_ref(match):
-            prefix = match.group(1)
-            num = match.group(2)
-            # 図/表の直後の場合は変換しない
-            if prefix and re.search(r'[図表]$', prefix):
-                return match.group(0)
-            return f"{prefix}[^{num}]"
         
-        # 前の文字を含めてマッチし、図/表の直後でないことを確認
-        pattern = r'(^|[^^\[図表])(\[(\d{1,2})\])'
+        # 脚注番号セットが空の場合は変換しない
+        if not self._defined_footnote_nums:
+            return text
         
         def replace_func(match):
             prefix = match.group(1)
             num = match.group(3)
-            return f"{prefix}[^{num}]"
+            # 脚注定義が存在する番号のみ変換
+            if num in self._defined_footnote_nums:
+                return f"{prefix}[^{num}]"
+            return match.group(0)
+        
+        # 前の文字を含めてマッチし、図/表の直後でないことを確認
+        pattern = r'(^|[^^\[図表])(\[(\d{1,2})\])'
         
         return re.sub(pattern, replace_func, text)
     
@@ -1194,6 +1196,31 @@ class PDFToMarkdownConverter:
         if text.lstrip().startswith("用語の説明") and re.search(r'用語\s*\d+\s*[:：]', text):
             return True
         return False
+    
+    def _extract_footnote_nums_from_blocks(self, blocks: List[Dict[str, Any]]) -> None:
+        """blocksから脚注番号を抽出してインスタンス変数に保存
+        
+        参考文献ブロックから[N]形式の番号を抽出し、
+        _defined_footnote_numsに保存する。
+        
+        Args:
+            blocks: 構造化されたテキストブロックのリスト
+        """
+        import re
+        self._defined_footnote_nums = set()
+        
+        for block in blocks:
+            text = block.get("text", "").strip()
+            if not text:
+                continue
+            
+            # 参考文献ブロックから番号を抽出
+            if re.match(r'^\s*参考文献\s*\[\d+\]', text):
+                nums = re.findall(r'\[(\d+)\]', text)
+                self._defined_footnote_nums.update(nums)
+        
+        if self._defined_footnote_nums:
+            debug_print(f"[DEBUG] 脚注番号セット: {sorted(self._defined_footnote_nums, key=int)}")
     
     def _apply_text_formatting(self, spans_list: List[List[Dict]]) -> str:
         """span情報を使って書式付きテキストを生成
@@ -3416,6 +3443,9 @@ class PDFToMarkdownConverter:
             images: 抽出された画像情報のリスト
         """
         import re
+        
+        # 脚注番号セットを抽出（インライン参照変換に使用）
+        self._extract_footnote_nums_from_blocks(blocks)
         
         # 画像がない場合は従来の処理
         if not images:
