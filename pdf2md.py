@@ -347,10 +347,54 @@ class PDFToMarkdownConverter:
         
         return "paragraph"
     
+    def _detect_column_layout(self, text_dict: Dict) -> int:
+        """段組み（カラム）レイアウトを検出
+        
+        テキストブロックのX座標分布から段組みを判定する。
+        
+        Args:
+            text_dict: PyMuPDFのテキスト辞書
+            
+        Returns:
+            カラム数（1=単一カラム、2=2段組み）
+        """
+        # ページ幅を取得
+        page_width = text_dict.get("width", 612)
+        page_center = page_width / 2
+        
+        # 各行のX座標を収集
+        x_positions = []
+        for block in text_dict.get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                bbox = line.get("bbox", (0, 0, 0, 0))
+                x_start = bbox[0]
+                x_end = bbox[2]
+                line_width = x_end - x_start
+                # 短すぎる行は除外（見出しや箇条書きマーカーなど）
+                if line_width > page_width * 0.2:
+                    x_positions.append(x_start)
+        
+        if len(x_positions) < 5:
+            return 1
+        
+        # 左半分と右半分に分類
+        left_count = sum(1 for x in x_positions if x < page_center * 0.6)
+        right_count = sum(1 for x in x_positions if x > page_center * 0.8)
+        
+        # 両方に一定数以上の行があれば2段組みと判定
+        if left_count >= 3 and right_count >= 3:
+            debug_print(f"[DEBUG] 2段組みレイアウトを検出 (左: {left_count}, 右: {right_count})")
+            return 2
+        
+        return 1
+    
     def _detect_table_structure(self, text_dict: Dict) -> List[List[Dict]]:
         """表構造を検出
         
         同じY座標に複数のテキストブロックがある場合、表として検出する。
+        段組みレイアウトの場合は表検出を無効化する。
         
         Args:
             text_dict: PyMuPDFのテキスト辞書
@@ -358,6 +402,14 @@ class PDFToMarkdownConverter:
         Returns:
             表の行リスト（各行はセルのリスト）
         """
+        # 段組みレイアウトの場合は表検出をスキップ
+        column_count = self._detect_column_layout(text_dict)
+        if column_count >= 2:
+            debug_print("[DEBUG] 段組みレイアウトのため表検出をスキップ")
+            return []
+        
+        page_width = text_dict.get("width", 612)
+        
         # Y座標でグループ化
         y_groups: Dict[int, List[Dict]] = {}
         
@@ -389,11 +441,25 @@ class PDFToMarkdownConverter:
             if len(cells) >= 2:  # 2つ以上のセルがある行
                 # X座標でソート
                 cells_sorted = sorted(cells, key=lambda c: c["x"])
-                table_rows.append(cells_sorted)
+                
+                # 表の追加条件: セルの平均文字数が短め（長文は段組みの可能性）
+                avg_text_len = sum(len(c["text"]) for c in cells_sorted) / len(cells_sorted)
+                if avg_text_len < 50:  # 平均50文字未満
+                    table_rows.append(cells_sorted)
         
-        # 連続する表の行が3行以上ある場合のみ表として認識
-        if len(table_rows) >= 2:
-            return table_rows
+        # 表として認識する条件を強化
+        # 1. 連続する行が3行以上
+        # 2. 列数が行ごとに大きくブレない
+        if len(table_rows) >= 3:
+            # 列数の一貫性をチェック
+            col_counts = [len(row) for row in table_rows]
+            most_common_cols = max(set(col_counts), key=col_counts.count)
+            consistent_rows = sum(1 for c in col_counts if c == most_common_cols)
+            
+            # 80%以上の行が同じ列数なら表として認識
+            if consistent_rows / len(table_rows) >= 0.8:
+                return table_rows
+        
         return []
     
     def _merge_table_blocks(
@@ -453,8 +519,91 @@ class PDFToMarkdownConverter:
         
         return filtered_blocks
     
+    def _cluster_image_bboxes(
+        self, bboxes: List[Tuple[float, float, float, float]], 
+        distance_threshold: float = 15.0
+    ) -> List[List[int]]:
+        """画像のbboxをクラスタリング
+        
+        近接する画像要素をグループ化する。
+        
+        Args:
+            bboxes: bboxのリスト [(x0, y0, x1, y1), ...]
+            distance_threshold: クラスタリングの距離閾値（ピクセル）
+            
+        Returns:
+            クラスタのリスト（各クラスタはbboxのインデックスリスト）
+        """
+        if not bboxes:
+            return []
+        
+        n = len(bboxes)
+        visited = [False] * n
+        clusters = []
+        
+        def boxes_overlap_or_close(b1, b2, threshold):
+            """2つのbboxが重なるか、近接しているかを判定"""
+            x0_1, y0_1, x1_1, y1_1 = b1
+            x0_2, y0_2, x1_2, y1_2 = b2
+            
+            # 重なりチェック
+            if not (x1_1 < x0_2 - threshold or x1_2 < x0_1 - threshold or
+                    y1_1 < y0_2 - threshold or y1_2 < y0_1 - threshold):
+                return True
+            return False
+        
+        for i in range(n):
+            if visited[i]:
+                continue
+            
+            # 新しいクラスタを開始
+            cluster = [i]
+            visited[i] = True
+            queue = [i]
+            
+            while queue:
+                current = queue.pop(0)
+                current_bbox = bboxes[current]
+                
+                for j in range(n):
+                    if visited[j]:
+                        continue
+                    
+                    if boxes_overlap_or_close(current_bbox, bboxes[j], distance_threshold):
+                        cluster.append(j)
+                        visited[j] = True
+                        queue.append(j)
+            
+            clusters.append(cluster)
+        
+        return clusters
+    
+    def _get_cluster_union_bbox(
+        self, bboxes: List[Tuple[float, float, float, float]], 
+        indices: List[int],
+        margin: float = 5.0
+    ) -> Tuple[float, float, float, float]:
+        """クラスタ内のbboxの和集合を計算
+        
+        Args:
+            bboxes: 全bboxのリスト
+            indices: クラスタに含まれるbboxのインデックス
+            margin: 周囲に追加するマージン（ピクセル）
+            
+        Returns:
+            和集合のbbox (x0, y0, x1, y1)
+        """
+        cluster_bboxes = [bboxes[i] for i in indices]
+        x0 = min(b[0] for b in cluster_bboxes) - margin
+        y0 = min(b[1] for b in cluster_bboxes) - margin
+        x1 = max(b[2] for b in cluster_bboxes) + margin
+        y1 = max(b[3] for b in cluster_bboxes) + margin
+        return (max(0, x0), max(0, y0), x1, y1)
+    
     def _extract_embedded_images(self, page, page_num: int) -> List[Dict[str, Any]]:
         """PDFページから埋め込み画像を抽出
+        
+        複数の図形要素をクラスタリングして1つの図としてまとめる。
         
         Args:
             page: PyMuPDFのページオブジェクト
@@ -464,7 +613,10 @@ class PDFToMarkdownConverter:
             抽出された画像情報のリスト
         """
         images = []
-        doc = page.parent
+        
+        # 画像のbboxを収集
+        image_bboxes = []
+        image_xrefs = []
         
         try:
             image_list = page.get_images(full=True)
@@ -472,11 +624,105 @@ class PDFToMarkdownConverter:
             debug_print(f"[DEBUG] 画像リスト取得エラー: {e}")
             return []
         
-        for img_index, img_info in enumerate(image_list):
+        for img_info in image_list:
             try:
                 xref = img_info[0]
+                for img_rect in page.get_image_rects(xref):
+                    bbox = (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1)
+                    # 小さすぎる画像は除外（面積が100平方ピクセル未満）
+                    area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                    if area >= 100:
+                        image_bboxes.append(bbox)
+                        image_xrefs.append(xref)
+                    break
+            except Exception as e:
+                debug_print(f"[DEBUG] 画像bbox取得エラー: {e}")
+                continue
+        
+        if not image_bboxes:
+            return []
+        
+        # 画像が少ない場合はクラスタリングせずに個別に出力
+        if len(image_bboxes) <= 3:
+            return self._extract_individual_images(page, page_num, image_bboxes, image_xrefs)
+        
+        # 画像をクラスタリング
+        clusters = self._cluster_image_bboxes(image_bboxes, distance_threshold=20.0)
+        
+        debug_print(f"[DEBUG] ページ {page_num + 1}: {len(image_bboxes)}個の画像要素を{len(clusters)}個のクラスタにグループ化")
+        
+        for cluster_idx, cluster in enumerate(clusters):
+            try:
+                # クラスタが1つの画像のみの場合
+                if len(cluster) == 1:
+                    bbox = image_bboxes[cluster[0]]
+                    # 十分な大きさがある場合のみ出力
+                    area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                    if area < 500:  # 小さすぎるクラスタはスキップ
+                        continue
                 
-                # 画像データを取得
+                # クラスタの和集合bboxを計算
+                union_bbox = self._get_cluster_union_bbox(image_bboxes, cluster, margin=3.0)
+                
+                # クラスタ領域をレンダリング
+                self.image_counter += 1
+                image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
+                
+                # クリップ領域を指定してレンダリング
+                clip_rect = fitz.Rect(union_bbox)
+                matrix = fitz.Matrix(2.0, 2.0)  # 2倍の解像度
+                pix = page.get_pixmap(matrix=matrix, clip=clip_rect)
+                
+                if self.output_format == 'svg':
+                    image_path = os.path.join(self.images_dir, f"{image_filename}.svg")
+                    temp_png = os.path.join(self.images_dir, f"temp_cluster_{self.image_counter}.png")
+                    pix.save(temp_png)
+                    self._convert_png_to_svg(temp_png, image_path)
+                    if os.path.exists(temp_png):
+                        os.remove(temp_png)
+                else:
+                    image_path = os.path.join(self.images_dir, f"{image_filename}.png")
+                    pix.save(image_path)
+                
+                images.append({
+                    "path": image_path,
+                    "filename": os.path.basename(image_path),
+                    "bbox": union_bbox,
+                    "y_position": union_bbox[1]
+                })
+                
+                debug_print(f"[DEBUG] クラスタ画像を抽出: {image_path} ({len(cluster)}要素)")
+                
+            except Exception as e:
+                debug_print(f"[DEBUG] クラスタ画像抽出エラー: {e}")
+                continue
+        
+        # Y座標でソート（上から順に）
+        images.sort(key=lambda x: x["y_position"])
+        
+        return images
+    
+    def _extract_individual_images(
+        self, page, page_num: int, 
+        bboxes: List[Tuple[float, float, float, float]],
+        xrefs: List[int]
+    ) -> List[Dict[str, Any]]:
+        """個別の画像を抽出（クラスタリングなし）
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            page_num: ページ番号
+            bboxes: 画像のbboxリスト
+            xrefs: 画像のxrefリスト
+            
+        Returns:
+            抽出された画像情報のリスト
+        """
+        images = []
+        doc = page.parent
+        
+        for bbox, xref in zip(bboxes, xrefs):
+            try:
                 base_image = doc.extract_image(xref)
                 if not base_image:
                     continue
@@ -487,27 +733,15 @@ class PDFToMarkdownConverter:
                 if not image_bytes:
                     continue
                 
-                # 画像の位置情報を取得
-                bbox = None
-                for img_rect in page.get_image_rects(xref):
-                    bbox = (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1)
-                    break
-                
-                # 画像ファイル名を生成
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_img_{page_num + 1:03d}_{self.image_counter:03d}"
                 
-                # 出力形式に応じて保存
                 if self.output_format == 'svg':
-                    image_path = os.path.join(
-                        self.images_dir, f"{image_filename}.svg"
-                    )
-                    # PNGとして一時保存してSVGに変換
+                    image_path = os.path.join(self.images_dir, f"{image_filename}.svg")
                     temp_png = os.path.join(self.images_dir, f"temp_{self.image_counter}.png")
                     with open(temp_png, 'wb') as f:
                         f.write(image_bytes)
                     
-                    # PILで画像を開いてPNGに変換（元がJPEGなどの場合）
                     try:
                         with Image.open(temp_png) as img:
                             png_path = temp_png
@@ -517,24 +751,17 @@ class PDFToMarkdownConverter:
                         
                         self._convert_png_to_svg(png_path, image_path)
                         
-                        # 一時ファイルを削除
                         if os.path.exists(temp_png):
                             os.remove(temp_png)
                         if png_path != temp_png and os.path.exists(png_path):
                             os.remove(png_path)
                     except Exception as e:
                         debug_print(f"[DEBUG] SVG変換エラー: {e}")
-                        # フォールバック: PNGとして保存
-                        image_path = os.path.join(
-                            self.images_dir, f"{image_filename}.png"
-                        )
+                        image_path = os.path.join(self.images_dir, f"{image_filename}.png")
                         with open(image_path, 'wb') as f:
                             f.write(image_bytes)
                 else:
-                    # PNG形式で保存
-                    image_path = os.path.join(
-                        self.images_dir, f"{image_filename}.png"
-                    )
+                    image_path = os.path.join(self.images_dir, f"{image_filename}.png")
                     with open(image_path, 'wb') as f:
                         f.write(image_bytes)
                 
@@ -548,12 +775,10 @@ class PDFToMarkdownConverter:
                 debug_print(f"[DEBUG] 埋め込み画像を抽出: {image_path}")
                 
             except Exception as e:
-                debug_print(f"[DEBUG] 画像抽出エラー (index {img_index}): {e}")
+                debug_print(f"[DEBUG] 画像抽出エラー: {e}")
                 continue
         
-        # Y座標でソート（上から順に）
         images.sort(key=lambda x: x["y_position"])
-        
         return images
     
     def _output_structured_markdown_with_images(
