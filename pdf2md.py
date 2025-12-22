@@ -15,7 +15,7 @@ import sys
 import tempfile
 import subprocess
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Set
 
 from utils import get_libreoffice_path
 
@@ -145,10 +145,15 @@ class PDFToMarkdownConverter:
             total_pages = len(doc)
             print(f"[INFO] 総ページ数: {total_pages}")
             
+            # ヘッダ・フッタパターンを検出（全ページから収集）
+            header_footer_patterns = self._detect_header_footer_patterns(doc)
+            if header_footer_patterns:
+                debug_print(f"[DEBUG] ヘッダ・フッタパターン検出: {len(header_footer_patterns)}個")
+            
             for page_num in range(total_pages):
                 print(f"[INFO] ページ {page_num + 1}/{total_pages} を処理中...")
                 page = doc[page_num]
-                self._convert_page(page, page_num)
+                self._convert_page(page, page_num, header_footer_patterns)
         finally:
             doc.close()
         
@@ -162,15 +167,111 @@ class PDFToMarkdownConverter:
         print(f"[SUCCESS] 変換完了: {output_file}")
         return output_file
     
-    def _convert_page(self, page, page_num: int):
+    def _detect_header_footer_patterns(self, doc) -> Set[str]:
+        """全ページからヘッダ・フッタパターンを検出
+        
+        ページ間で繰り返されるテキストをヘッダ・フッタとして検出する。
+        数字は正規化して比較する。
+        
+        Args:
+            doc: PyMuPDFのドキュメントオブジェクト
+            
+        Returns:
+            ヘッダ・フッタパターンのセット
+        """
+        import re
+        from collections import defaultdict
+        
+        # 各ページの上端・下端テキストを収集
+        page_texts = defaultdict(list)
+        
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            page_height = page.rect.height
+            
+            try:
+                text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+            except Exception:
+                continue
+            
+            for block in text_dict.get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                
+                bbox = block.get("bbox", (0, 0, 0, 0))
+                y_top = bbox[1]
+                y_bottom = bbox[3]
+                
+                # 上端10%または下端10%にあるテキスト
+                is_header = y_top < page_height * 0.1
+                is_footer = y_bottom > page_height * 0.9
+                
+                if is_header or is_footer:
+                    for line in block.get("lines", []):
+                        line_text = ""
+                        for span in line.get("spans", []):
+                            line_text += span.get("text", "")
+                        
+                        if line_text.strip():
+                            # 数字を正規化（ページ番号など）
+                            normalized = re.sub(r'\d+', '<NUM>', line_text.strip())
+                            # 全角数字も正規化
+                            normalized = re.sub(r'[０-９]+', '<NUM>', normalized)
+                            page_texts[normalized].append(page_num)
+        
+        # 2ページ以上で出現するパターンをヘッダ・フッタとして認識
+        patterns = set()
+        for pattern, pages in page_texts.items():
+            if len(set(pages)) >= 2:
+                patterns.add(pattern)
+        
+        return patterns
+    
+    def _is_header_footer(self, text: str, patterns: Set[str]) -> bool:
+        """テキストがヘッダ・フッタかどうかを判定
+        
+        Args:
+            text: 判定するテキスト
+            patterns: ヘッダ・フッタパターンのセット
+            
+        Returns:
+            ヘッダ・フッタの場合True
+        """
+        import re
+        text_stripped = text.strip()
+        
+        # ページ番号パターンを直接検出（−21−、−21 −、-21-など）
+        # マイナス記号（−, -, ー）で囲まれた数字
+        if re.match(r'^[−\-ー]\s*\d+\s*[−\-ー]$', text_stripped):
+            return True
+        
+        # 正規化してパターンマッチ
+        normalized = re.sub(r'\d+', '<NUM>', text_stripped)
+        normalized = re.sub(r'[０-９]+', '<NUM>', normalized)
+        # スペースを正規化（複数スペースを1つに、前後のスペースを除去）
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        
+        # パターンも同様に正規化して比較
+        for pattern in patterns:
+            pattern_normalized = re.sub(r'\s+', ' ', pattern).strip()
+            if normalized == pattern_normalized:
+                return True
+        
+        return False
+    
+    def _convert_page(self, page, page_num: int, header_footer_patterns: Set[str] = None):
         """PDFページを変換
         
         Args:
             page: PyMuPDFのページオブジェクト
             page_num: ページ番号（0始まり）
+            header_footer_patterns: ヘッダ・フッタパターンのセット
         """
+        if header_footer_patterns is None:
+            header_footer_patterns = set()
+        
         # テキストベースのPDFかどうかを判定
-        text_blocks = self._extract_structured_text(page)
+        text_blocks = self._extract_structured_text_v2(page, header_footer_patterns)
         
         if text_blocks:
             # テキストベースのPDF: 構造化されたMarkdownを出力
@@ -179,8 +280,14 @@ class PDFToMarkdownConverter:
             # 埋め込み画像を抽出
             embedded_images = self._extract_embedded_images(page, page_num)
             
+            # ベクタ描画（図）を抽出
+            vector_figures = self._extract_vector_figures(page, page_num)
+            
+            # 画像とベクタ図を統合
+            all_images = embedded_images + vector_figures
+            
             # 構造化テキストと画像を出力
-            self._output_structured_markdown_with_images(text_blocks, embedded_images)
+            self._output_structured_markdown_with_images(text_blocks, all_images)
         else:
             # 画像ベースのPDF: 従来の画像+OCR処理
             debug_print(f"[DEBUG] ページ {page_num + 1}: 画像ベースPDFとして処理")
@@ -298,6 +405,744 @@ class PDFToMarkdownConverter:
             blocks = self._merge_table_blocks(blocks, table_rows)
         
         return blocks
+    
+    def _extract_structured_text_v2(
+        self, page, header_footer_patterns: Set[str]
+    ) -> List[Dict[str, Any]]:
+        """PDFページから構造化されたテキストブロックを抽出（改良版）
+        
+        行単位で抽出し、カラム分割と段落リフローを行う。
+        ヘッダ・フッタを除外する。
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            header_footer_patterns: ヘッダ・フッタパターンのセット
+            
+        Returns:
+            構造化されたテキストブロックのリスト
+        """
+        import re
+        from collections import Counter
+        
+        try:
+            text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+        except Exception as e:
+            debug_print(f"[DEBUG] テキスト抽出エラー: {e}")
+            return []
+        
+        if not text_dict.get("blocks"):
+            return []
+        
+        page_width = text_dict.get("width", 612)
+        page_height = text_dict.get("height", 792)
+        page_center = page_width / 2
+        
+        # 行単位でテキストを収集
+        lines_data = []
+        font_sizes = []
+        
+        for block in text_dict.get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            
+            for line in block.get("lines", []):
+                line_bbox = line.get("bbox", (0, 0, 0, 0))
+                line_text = ""
+                line_font_size = 0
+                line_is_bold = False
+                
+                for span in line.get("spans", []):
+                    text = span.get("text", "")
+                    if text:
+                        line_text += text
+                        span_size = span.get("size", 12)
+                        line_font_size = max(line_font_size, span_size)
+                        font_sizes.append(span_size)
+                        font_name = span.get("font", "").lower()
+                        if "bold" in font_name or "heavy" in font_name:
+                            line_is_bold = True
+                
+                if not line_text.strip():
+                    continue
+                
+                # ヘッダ・フッタを除外
+                if self._is_header_footer(line_text, header_footer_patterns):
+                    debug_print(f"[DEBUG] ヘッダ・フッタ除外: {line_text.strip()[:30]}...")
+                    continue
+                
+                line_width = line_bbox[2] - line_bbox[0]
+                x_center = (line_bbox[0] + line_bbox[2]) / 2
+                
+                # カラム判定: フル幅、左カラム、右カラム
+                if line_width > page_width * 0.6:
+                    column = "full"
+                elif x_center < page_center:
+                    column = "left"
+                else:
+                    column = "right"
+                
+                lines_data.append({
+                    "text": line_text,
+                    "bbox": line_bbox,
+                    "font_size": line_font_size,
+                    "is_bold": line_is_bold,
+                    "column": column,
+                    "y": line_bbox[1],
+                    "x": line_bbox[0],
+                    "width": line_width
+                })
+        
+        if not lines_data:
+            return []
+        
+        # 基準フォントサイズを計算
+        size_counts = Counter(round(s, 1) for s in font_sizes)
+        base_font_size = size_counts.most_common(1)[0][0] if size_counts else 12
+        
+        # カラム内の表を検出（リフロー前に行う）
+        table_regions = self._detect_table_regions(lines_data, page_center)
+        
+        # カラムごとにソート（フル幅→左→右の順、各カラム内はY座標順）
+        sorted_lines = self._sort_lines_by_column(lines_data)
+        
+        # 段落リフロー（同一カラム内で近接する行を結合、表領域は除外）
+        reflowed_blocks = self._reflow_paragraphs_with_tables(
+            sorted_lines, base_font_size, table_regions
+        )
+        
+        # ブロックタイプを判定
+        blocks = []
+        for block_data in reflowed_blocks:
+            block_type = self._classify_block_type(
+                block_data["text"],
+                block_data["font_size"],
+                base_font_size,
+                block_data["is_bold"],
+                block_data["bbox"]
+            )
+            # 表ブロックはそのまま
+            if block_data.get("is_table"):
+                block_type = "table"
+            blocks.append({
+                "type": block_type,
+                "text": block_data["text"],
+                "font_size": block_data["font_size"],
+                "bbox": block_data["bbox"]
+            })
+        
+        return blocks
+    
+    def _sort_lines_by_column(self, lines_data: List[Dict]) -> List[Dict]:
+        """行をカラムごとにソート
+        
+        フル幅要素を基準に、その間の区間で左→右の順に出力する。
+        
+        Args:
+            lines_data: 行データのリスト
+            
+        Returns:
+            ソートされた行データのリスト
+        """
+        # フル幅行とカラム行を分離
+        full_lines = [l for l in lines_data if l["column"] == "full"]
+        left_lines = [l for l in lines_data if l["column"] == "left"]
+        right_lines = [l for l in lines_data if l["column"] == "right"]
+        
+        # 各グループをY座標でソート
+        full_lines.sort(key=lambda x: x["y"])
+        left_lines.sort(key=lambda x: x["y"])
+        right_lines.sort(key=lambda x: x["y"])
+        
+        # フル幅行がない場合は単純に左→右
+        if not full_lines:
+            return left_lines + right_lines
+        
+        # フル幅行を基準に区間を作成
+        result = []
+        full_y_positions = [l["y"] for l in full_lines]
+        full_y_positions = [-float('inf')] + full_y_positions + [float('inf')]
+        
+        for i in range(len(full_y_positions) - 1):
+            y_start = full_y_positions[i]
+            y_end = full_y_positions[i + 1]
+            
+            # この区間のフル幅行を追加
+            if i > 0:
+                for fl in full_lines:
+                    if abs(fl["y"] - y_start) < 1:
+                        result.append(fl)
+            
+            # この区間の左カラム行を追加
+            for ll in left_lines:
+                if y_start < ll["y"] < y_end:
+                    result.append(ll)
+            
+            # この区間の右カラム行を追加
+            for rl in right_lines:
+                if y_start < rl["y"] < y_end:
+                    result.append(rl)
+        
+        # 最後のフル幅行を追加
+        if full_lines:
+            last_full = full_lines[-1]
+            if last_full not in result:
+                result.append(last_full)
+        
+        return result
+    
+    def _reflow_paragraphs(
+        self, lines: List[Dict], base_font_size: float
+    ) -> List[Dict]:
+        """段落リフロー（近接する行を結合）
+        
+        同一カラム内で縦方向のギャップが小さい行を結合する。
+        
+        Args:
+            lines: ソートされた行データのリスト
+            base_font_size: 基準フォントサイズ
+            
+        Returns:
+            結合されたブロックのリスト
+        """
+        if not lines:
+            return []
+        
+        # 行高の推定（フォントサイズの1.2倍程度）
+        line_height = base_font_size * 1.2
+        gap_threshold = line_height * 0.8  # 結合する最大ギャップ
+        
+        blocks = []
+        current_block = {
+            "texts": [lines[0]["text"]],
+            "bbox": list(lines[0]["bbox"]),
+            "font_size": lines[0]["font_size"],
+            "is_bold": lines[0]["is_bold"],
+            "column": lines[0]["column"],
+            "last_y": lines[0]["bbox"][3],
+            "last_x": lines[0]["x"]
+        }
+        
+        for i in range(1, len(lines)):
+            line = lines[i]
+            prev_line = lines[i - 1]
+            
+            # 結合条件をチェック
+            y_gap = line["y"] - current_block["last_y"]
+            same_column = line["column"] == current_block["column"]
+            x_aligned = abs(line["x"] - current_block["last_x"]) < 20
+            
+            # 段落の区切り条件
+            is_new_paragraph = (
+                y_gap > gap_threshold or
+                not same_column or
+                line["is_bold"] != current_block["is_bold"] or
+                abs(line["font_size"] - current_block["font_size"]) > 1
+            )
+            
+            if is_new_paragraph:
+                # 現在のブロックを確定
+                blocks.append(self._finalize_block(current_block))
+                
+                # 新しいブロックを開始
+                current_block = {
+                    "texts": [line["text"]],
+                    "bbox": list(line["bbox"]),
+                    "font_size": line["font_size"],
+                    "is_bold": line["is_bold"],
+                    "column": line["column"],
+                    "last_y": line["bbox"][3],
+                    "last_x": line["x"]
+                }
+            else:
+                # 行を結合（日本語はスペースなし、英数字はスペースあり）
+                prev_text = current_block["texts"][-1]
+                curr_text = line["text"]
+                
+                # 前の行の末尾と現在の行の先頭をチェック
+                if prev_text and curr_text:
+                    prev_char = prev_text.rstrip()[-1] if prev_text.rstrip() else ""
+                    curr_char = curr_text.lstrip()[0] if curr_text.lstrip() else ""
+                    
+                    # 英数字同士の場合はスペースを入れる
+                    if prev_char.isascii() and curr_char.isascii():
+                        if prev_char.isalnum() and curr_char.isalnum():
+                            current_block["texts"].append(" " + curr_text)
+                        else:
+                            current_block["texts"].append(curr_text)
+                    else:
+                        # 日本語の場合はスペースなしで結合
+                        current_block["texts"].append(curr_text)
+                else:
+                    current_block["texts"].append(curr_text)
+                
+                # bboxを更新
+                current_block["bbox"][2] = max(current_block["bbox"][2], line["bbox"][2])
+                current_block["bbox"][3] = line["bbox"][3]
+                current_block["last_y"] = line["bbox"][3]
+                current_block["font_size"] = max(current_block["font_size"], line["font_size"])
+                if line["is_bold"]:
+                    current_block["is_bold"] = True
+        
+        # 最後のブロックを追加
+        blocks.append(self._finalize_block(current_block))
+        
+        return blocks
+    
+    def _finalize_block(self, block_data: Dict) -> Dict:
+        """ブロックデータを最終形式に変換"""
+        # テキストを結合（改行を除去）
+        text = "".join(block_data["texts"]).strip()
+        
+        return {
+            "text": text,
+            "bbox": tuple(block_data["bbox"]),
+            "font_size": block_data["font_size"],
+            "is_bold": block_data["is_bold"]
+        }
+    
+    def _detect_table_regions(
+        self, lines_data: List[Dict], page_center: float
+    ) -> List[Dict]:
+        """カラム内の表領域を検出
+        
+        同じY座標に複数のセルがある行が連続する領域を表として検出する。
+        
+        Args:
+            lines_data: 行データのリスト
+            page_center: ページの中央X座標
+            
+        Returns:
+            表領域のリスト（各領域は{y_start, y_end, column, rows}を含む）
+        """
+        # 左カラムと右カラムを分離
+        left_lines = [l for l in lines_data if l["column"] == "left"]
+        right_lines = [l for l in lines_data if l["column"] == "right"]
+        
+        table_regions = []
+        
+        for column_lines, column_name in [(left_lines, "left"), (right_lines, "right")]:
+            if not column_lines:
+                continue
+            
+            # Y座標でグループ化（同じ行にある要素を検出）
+            y_tolerance = 5  # Y座標の許容誤差
+            y_groups = {}
+            
+            for line in column_lines:
+                y_key = round(line["y"] / y_tolerance) * y_tolerance
+                if y_key not in y_groups:
+                    y_groups[y_key] = []
+                y_groups[y_key].append(line)
+            
+            # 複数セルがある行を検出
+            multi_cell_rows = []
+            for y_key in sorted(y_groups.keys()):
+                cells = y_groups[y_key]
+                # X座標でソートして、異なるX位置にあるセルをカウント
+                x_positions = sorted(set(round(c["x"] / 20) * 20 for c in cells))
+                if len(x_positions) >= 2:
+                    multi_cell_rows.append({
+                        "y": y_key,
+                        "cells": sorted(cells, key=lambda c: c["x"]),
+                        "x_positions": x_positions
+                    })
+            
+            # 連続する複数セル行を表領域としてグループ化
+            if not multi_cell_rows:
+                continue
+            
+            current_region = {
+                "y_start": multi_cell_rows[0]["y"],
+                "y_end": multi_cell_rows[0]["y"] + 20,
+                "column": column_name,
+                "rows": [multi_cell_rows[0]]
+            }
+            
+            for i in range(1, len(multi_cell_rows)):
+                row = multi_cell_rows[i]
+                prev_row = multi_cell_rows[i - 1]
+                
+                # 連続している場合（Y座標の差が小さい）
+                if row["y"] - prev_row["y"] < 30:
+                    current_region["rows"].append(row)
+                    current_region["y_end"] = row["y"] + 20
+                else:
+                    # 3行以上の連続した複数セル行があれば表として認識
+                    if len(current_region["rows"]) >= 2:
+                        table_regions.append(current_region)
+                    
+                    current_region = {
+                        "y_start": row["y"],
+                        "y_end": row["y"] + 20,
+                        "column": column_name,
+                        "rows": [row]
+                    }
+            
+            # 最後の領域をチェック
+            if len(current_region["rows"]) >= 2:
+                table_regions.append(current_region)
+        
+        return table_regions
+    
+    def _reflow_paragraphs_with_tables(
+        self, lines: List[Dict], base_font_size: float, table_regions: List[Dict]
+    ) -> List[Dict]:
+        """段落リフロー（表領域を考慮）
+        
+        同一カラム内で縦方向のギャップが小さい行を結合する。
+        表領域内の行は結合せず、Markdownテーブルとして出力する。
+        
+        Args:
+            lines: ソートされた行データのリスト
+            base_font_size: 基準フォントサイズ
+            table_regions: 表領域のリスト
+            
+        Returns:
+            結合されたブロックのリスト
+        """
+        if not lines:
+            return []
+        
+        def is_in_table_region(line: Dict) -> Optional[Dict]:
+            """行が表領域内にあるかチェック"""
+            for region in table_regions:
+                if (line["column"] == region["column"] and
+                    region["y_start"] - 10 <= line["y"] <= region["y_end"] + 10):
+                    return region
+            return None
+        
+        # 行高の推定（フォントサイズの1.2倍程度）
+        line_height = base_font_size * 1.2
+        gap_threshold = line_height * 0.8
+        
+        blocks = []
+        current_block = None
+        processed_table_regions = set()
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            table_region = is_in_table_region(line)
+            
+            if table_region:
+                region_id = (table_region["column"], table_region["y_start"])
+                if region_id not in processed_table_regions:
+                    # 現在のブロックを確定
+                    if current_block:
+                        blocks.append(self._finalize_block(current_block))
+                        current_block = None
+                    
+                    # 表をMarkdownテーブルとして出力
+                    table_md = self._format_table_region(table_region)
+                    if table_md:
+                        blocks.append({
+                            "text": table_md,
+                            "bbox": (0, table_region["y_start"], 300, table_region["y_end"]),
+                            "font_size": base_font_size,
+                            "is_bold": False,
+                            "is_table": True
+                        })
+                    processed_table_regions.add(region_id)
+                i += 1
+                continue
+            
+            if current_block is None:
+                current_block = {
+                    "texts": [line["text"]],
+                    "bbox": list(line["bbox"]),
+                    "font_size": line["font_size"],
+                    "is_bold": line["is_bold"],
+                    "column": line["column"],
+                    "last_y": line["bbox"][3],
+                    "last_x": line["x"]
+                }
+            else:
+                # 結合条件をチェック
+                y_gap = line["y"] - current_block["last_y"]
+                same_column = line["column"] == current_block["column"]
+                
+                is_new_paragraph = (
+                    y_gap > gap_threshold or
+                    not same_column or
+                    line["is_bold"] != current_block["is_bold"] or
+                    abs(line["font_size"] - current_block["font_size"]) > 1
+                )
+                
+                if is_new_paragraph:
+                    blocks.append(self._finalize_block(current_block))
+                    current_block = {
+                        "texts": [line["text"]],
+                        "bbox": list(line["bbox"]),
+                        "font_size": line["font_size"],
+                        "is_bold": line["is_bold"],
+                        "column": line["column"],
+                        "last_y": line["bbox"][3],
+                        "last_x": line["x"]
+                    }
+                else:
+                    # 行を結合
+                    prev_text = current_block["texts"][-1]
+                    curr_text = line["text"]
+                    
+                    if prev_text and curr_text:
+                        prev_char = prev_text.rstrip()[-1] if prev_text.rstrip() else ""
+                        curr_char = curr_text.lstrip()[0] if curr_text.lstrip() else ""
+                        
+                        if prev_char.isascii() and curr_char.isascii():
+                            if prev_char.isalnum() and curr_char.isalnum():
+                                current_block["texts"].append(" " + curr_text)
+                            else:
+                                current_block["texts"].append(curr_text)
+                        else:
+                            current_block["texts"].append(curr_text)
+                    else:
+                        current_block["texts"].append(curr_text)
+                    
+                    current_block["bbox"][2] = max(current_block["bbox"][2], line["bbox"][2])
+                    current_block["bbox"][3] = line["bbox"][3]
+                    current_block["last_y"] = line["bbox"][3]
+                    current_block["font_size"] = max(current_block["font_size"], line["font_size"])
+                    if line["is_bold"]:
+                        current_block["is_bold"] = True
+            
+            i += 1
+        
+        if current_block:
+            blocks.append(self._finalize_block(current_block))
+        
+        return blocks
+    
+    def _format_table_region(self, table_region: Dict) -> str:
+        """表領域をMarkdownテーブル形式に変換
+        
+        Args:
+            table_region: 表領域データ
+            
+        Returns:
+            Markdownテーブル文字列
+        """
+        rows = table_region.get("rows", [])
+        if not rows:
+            return ""
+        
+        # 全行のX位置を収集して列を決定
+        all_x_positions = set()
+        for row in rows:
+            for pos in row.get("x_positions", []):
+                all_x_positions.add(pos)
+        
+        column_positions = sorted(all_x_positions)
+        if len(column_positions) < 2:
+            return ""
+        
+        # 各行のセルを列に割り当て
+        table_rows = []
+        for row in rows:
+            cells = row.get("cells", [])
+            row_data = [""] * len(column_positions)
+            
+            for cell in cells:
+                cell_x = round(cell["x"] / 20) * 20
+                try:
+                    col_idx = column_positions.index(cell_x)
+                    row_data[col_idx] = cell["text"].strip()
+                except ValueError:
+                    # 最も近い列に割り当て
+                    min_dist = float("inf")
+                    best_idx = 0
+                    for idx, pos in enumerate(column_positions):
+                        dist = abs(cell_x - pos)
+                        if dist < min_dist:
+                            min_dist = dist
+                            best_idx = idx
+                    if not row_data[best_idx]:
+                        row_data[best_idx] = cell["text"].strip()
+                    else:
+                        row_data[best_idx] += " " + cell["text"].strip()
+            
+            table_rows.append(row_data)
+        
+        if not table_rows:
+            return ""
+        
+        # Markdownテーブルを生成
+        md_lines = []
+        
+        # ヘッダ行
+        header = table_rows[0]
+        md_lines.append("| " + " | ".join(header) + " |")
+        
+        # 区切り行
+        md_lines.append("| " + " | ".join(["---"] * len(header)) + " |")
+        
+        # データ行
+        for row in table_rows[1:]:
+            md_lines.append("| " + " | ".join(row) + " |")
+        
+        return "\n".join(md_lines)
+    
+    def _detect_table_in_fullwidth(
+        self, text_dict: Dict, header_footer_patterns: Set[str]
+    ) -> List[List[Dict]]:
+        """フル幅領域での表検出
+        
+        段組みページでも、フル幅領域（ページ幅の60%以上）にある
+        表構造を検出する。
+        
+        Args:
+            text_dict: PyMuPDFのテキスト辞書
+            header_footer_patterns: ヘッダ・フッタパターン
+            
+        Returns:
+            表の行リスト
+        """
+        page_width = text_dict.get("width", 612)
+        
+        # フル幅領域の行を収集
+        y_groups: Dict[int, List[Dict]] = {}
+        
+        for block in text_dict.get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            
+            block_bbox = block.get("bbox", (0, 0, 0, 0))
+            block_width = block_bbox[2] - block_bbox[0]
+            
+            # フル幅ブロックのみ対象
+            if block_width < page_width * 0.6:
+                continue
+            
+            for line in block.get("lines", []):
+                bbox = line.get("bbox", (0, 0, 0, 0))
+                y_key = round(bbox[1] / 8) * 8  # 8ピクセル単位でグループ化
+                
+                line_text = ""
+                for span in line.get("spans", []):
+                    line_text += span.get("text", "")
+                
+                if line_text.strip():
+                    # ヘッダ・フッタを除外
+                    if self._is_header_footer(line_text, header_footer_patterns):
+                        continue
+                    
+                    if y_key not in y_groups:
+                        y_groups[y_key] = []
+                    y_groups[y_key].append({
+                        "text": line_text.strip(),
+                        "x": bbox[0],
+                        "bbox": bbox
+                    })
+        
+        # 複数のセルがある行を表の行として抽出
+        table_rows = []
+        for y_key in sorted(y_groups.keys()):
+            cells = y_groups[y_key]
+            if len(cells) >= 2:
+                cells_sorted = sorted(cells, key=lambda c: c["x"])
+                avg_text_len = sum(len(c["text"]) for c in cells_sorted) / len(cells_sorted)
+                if avg_text_len < 50:
+                    table_rows.append(cells_sorted)
+        
+        # 表として認識する条件
+        if len(table_rows) >= 3:
+            col_counts = [len(row) for row in table_rows]
+            most_common_cols = max(set(col_counts), key=col_counts.count)
+            consistent_rows = sum(1 for c in col_counts if c == most_common_cols)
+            if consistent_rows / len(table_rows) >= 0.8:
+                return table_rows
+        
+        return []
+    
+    def _extract_vector_figures(self, page, page_num: int) -> List[Dict[str, Any]]:
+        """ベクタ描画（図）を抽出
+        
+        get_drawings()からベクタ図形をクラスタリングして抽出する。
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            page_num: ページ番号
+            
+        Returns:
+            抽出された図の情報リスト
+        """
+        figures = []
+        
+        try:
+            drawings = page.get_drawings()
+        except Exception as e:
+            debug_print(f"[DEBUG] 描画取得エラー: {e}")
+            return []
+        
+        if not drawings:
+            return []
+        
+        # 描画のbboxを収集
+        drawing_bboxes = []
+        for d in drawings:
+            rect = d.get("rect")
+            if rect:
+                bbox = (rect.x0, rect.y0, rect.x1, rect.y1)
+                area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                # 小さすぎる描画は除外（装飾線など）
+                if area >= 200:
+                    drawing_bboxes.append(bbox)
+        
+        if len(drawing_bboxes) < 3:
+            return []
+        
+        # 描画をクラスタリング
+        clusters = self._cluster_image_bboxes(drawing_bboxes, distance_threshold=30.0)
+        
+        # 小さすぎるクラスタは除外
+        valid_clusters = []
+        for cluster in clusters:
+            if len(cluster) >= 3:
+                union_bbox = self._get_cluster_union_bbox(drawing_bboxes, cluster, margin=2.0)
+                area = (union_bbox[2] - union_bbox[0]) * (union_bbox[3] - union_bbox[1])
+                if area >= 1000:
+                    valid_clusters.append((cluster, union_bbox))
+        
+        if not valid_clusters:
+            return []
+        
+        debug_print(f"[DEBUG] ページ {page_num + 1}: {len(drawing_bboxes)}個の描画要素を{len(valid_clusters)}個の図にグループ化")
+        
+        for cluster_idx, (cluster, union_bbox) in enumerate(valid_clusters):
+            try:
+                self.image_counter += 1
+                image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
+                
+                # クリップ領域を指定してレンダリング
+                clip_rect = fitz.Rect(union_bbox)
+                matrix = fitz.Matrix(2.0, 2.0)
+                pix = page.get_pixmap(matrix=matrix, clip=clip_rect)
+                
+                if self.output_format == 'svg':
+                    image_path = os.path.join(self.images_dir, f"{image_filename}.svg")
+                    temp_png = os.path.join(self.images_dir, f"temp_vec_{self.image_counter}.png")
+                    pix.save(temp_png)
+                    self._convert_png_to_svg(temp_png, image_path)
+                    if os.path.exists(temp_png):
+                        os.remove(temp_png)
+                else:
+                    image_path = os.path.join(self.images_dir, f"{image_filename}.png")
+                    pix.save(image_path)
+                
+                figures.append({
+                    "path": image_path,
+                    "filename": os.path.basename(image_path),
+                    "bbox": union_bbox,
+                    "y_position": union_bbox[1]
+                })
+                
+                debug_print(f"[DEBUG] ベクタ図を抽出: {image_path} ({len(cluster)}要素)")
+                
+            except Exception as e:
+                debug_print(f"[DEBUG] ベクタ図抽出エラー: {e}")
+                continue
+        
+        figures.sort(key=lambda x: x["y_position"])
+        return figures
     
     def _classify_block_type(
         self, text: str, font_size: float, base_size: float, 
