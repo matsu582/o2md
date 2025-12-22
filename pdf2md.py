@@ -2098,6 +2098,9 @@ class PDFToMarkdownConverter:
                     line_text += span.get("text", "")
                 page_text_lines.append({"text": line_text.strip(), "bbox": line_bbox})
         
+        # 段組みレイアウトを検出
+        column_count = self._detect_column_layout(text_dict)
+        
         # 表領域を検出
         table_bboxes = detect_table_bboxes_from_text(page_text_lines, page_width)
         
@@ -2106,23 +2109,118 @@ class PDFToMarkdownConverter:
             for i, tb in enumerate(table_bboxes):
                 debug_print(f"[DEBUG]   表{i+1}: y={tb[1]:.1f}-{tb[3]:.1f}, x={tb[0]:.1f}-{tb[2]:.1f}")
         
-        # 表領域と重なる図候補を除外
+        # 表領域がMarkdownテーブルとして出力可能かを判定
+        def can_output_as_markdown_table(table_bbox, text_lines, is_two_column_layout):
+            """表領域がMarkdownテーブルとして出力可能かを判定
+            
+            条件:
+            - 3行以上の行がある
+            - 80%以上の行が同じ列数
+            - 段組みページでも、列数の一貫性がある表はMarkdownテーブルとして出力可能
+            """
+            # 表領域内のテキスト行を取得
+            table_lines = []
+            for line in text_lines:
+                line_bbox = line["bbox"]
+                line_center_y = (line_bbox[1] + line_bbox[3]) / 2
+                line_center_x = (line_bbox[0] + line_bbox[2]) / 2
+                if (table_bbox[1] <= line_center_y <= table_bbox[3] and
+                    table_bbox[0] <= line_center_x <= table_bbox[2]):
+                    table_lines.append(line)
+            
+            if len(table_lines) < 3:
+                debug_print(f"[DEBUG] 表行数不足: {len(table_lines)} < 3")
+                return False
+            
+            # Y座標でグループ化
+            y_groups = {}
+            for line in table_lines:
+                y_key = round(line["bbox"][1] / 5) * 5
+                if y_key not in y_groups:
+                    y_groups[y_key] = []
+                y_groups[y_key].append(line)
+            
+            # 各行の列数をカウント
+            col_counts = []
+            for y_key in sorted(y_groups.keys()):
+                cells = y_groups[y_key]
+                x_positions = sorted(set(round(c["bbox"][0] / 20) * 20 for c in cells))
+                if len(x_positions) >= 2:
+                    col_counts.append(len(x_positions))
+            
+            if len(col_counts) < 3:
+                debug_print(f"[DEBUG] 複数列行数不足: {len(col_counts)} < 3")
+                return False
+            
+            # 列数の一貫性をチェック（80%以上が同じ列数）
+            most_common = max(set(col_counts), key=col_counts.count)
+            consistent = sum(1 for c in col_counts if c == most_common)
+            consistency_ratio = consistent / len(col_counts)
+            
+            debug_print(f"[DEBUG] 表の列数一貫性: {consistent}/{len(col_counts)} = {consistency_ratio:.2f}, 最頻列数={most_common}")
+            
+            if consistency_ratio < 0.8:
+                return False
+            
+            # 3列以上の表のみMarkdownテーブルとして出力可能
+            # _detect_table_regionsは3セル以上で表として認識するため
+            # 2列の表（表2など）はMarkdownテーブルとして出力されない
+            if most_common < 3:
+                debug_print(f"[DEBUG] 2列表のためMarkdownテーブルとして出力不可")
+                return False
+            
+            return True
+        
+        # 表領域と重なる図候補を分類（Markdown表可能なら除外、不可能なら表画像として出力）
         debug_print(f"[DEBUG] page={page_num+1}: 表フィルタ前の候補数={len(all_figure_candidates)}")
         table_filtered = []
+        table_image_candidates = []  # 表画像として出力する候補
+        
         for cand in all_figure_candidates:
             is_table = False
             cand_bbox = cand["union_bbox"]
+            matched_table_bbox = None
+            
             for table_bbox in table_bboxes:
                 overlap = bbox_overlap_ratio(cand_bbox, table_bbox)
                 if overlap >= 0.7:
-                    debug_print(f"[DEBUG] page={page_num+1}: 図候補を表として除外: overlap={overlap:.2f}, cand_bbox=({cand_bbox[0]:.1f}, {cand_bbox[1]:.1f}, {cand_bbox[2]:.1f}, {cand_bbox[3]:.1f})")
+                    matched_table_bbox = table_bbox
                     is_table = True
                     break
-            if not is_table:
+            
+            if is_table and matched_table_bbox:
+                # Markdownテーブルとして出力可能かを判定
+                is_two_col = (column_count >= 2)
+                if can_output_as_markdown_table(matched_table_bbox, page_text_lines, is_two_col):
+                    debug_print(f"[DEBUG] page={page_num+1}: 図候補をMarkdown表として除外: overlap={overlap:.2f}")
+                else:
+                    # Markdownテーブルとして出力不可能な場合は表画像として出力
+                    debug_print(f"[DEBUG] page={page_num+1}: 図候補を表画像として出力: overlap={overlap:.2f}")
+                    # 表画像用のclip_bboxを計算
+                    # 図候補のunion_bbox（描画要素のbbox）を基準に、下側のみトリム
+                    # 上側はキャプションを含めるためトリムしない
+                    union = cand_bbox
+                    clip_x0 = union[0] - 2
+                    clip_y0 = union[1] - 2  # 上側はトリムしない
+                    clip_x1 = union[2] + 2
+                    clip_y1 = union[3] + 2
+                    
+                    # 下側: 表領域の下端でトリム（本文テキストを除外）
+                    # 表領域の下端 + 少しのマージンを使用
+                    table_bottom = matched_table_bbox[3] + 10
+                    if clip_y1 > table_bottom:
+                        clip_y1 = table_bottom
+                        debug_print(f"[DEBUG] 表画像: 下側をトリム y1={clip_y1:.1f}")
+                    
+                    table_clip_bbox = (clip_x0, clip_y0, clip_x1, clip_y1)
+                    cand["clip_bbox"] = table_clip_bbox
+                    cand["is_table_image"] = True
+                    table_image_candidates.append(cand)
+            else:
                 table_filtered.append(cand)
         
-        debug_print(f"[DEBUG] page={page_num+1}: 表フィルタ後の候補数={len(table_filtered)}")
-        all_figure_candidates = table_filtered
+        debug_print(f"[DEBUG] page={page_num+1}: 表フィルタ後の候補数={len(table_filtered)}, 表画像候補数={len(table_image_candidates)}")
+        all_figure_candidates = table_filtered + table_image_candidates
         
         # 第2段: 同一カラム内のクラスタを安全にマージ
         # 本文バリアがない場合のみマージする
@@ -2381,6 +2479,8 @@ class PDFToMarkdownConverter:
             try:
                 # 埋め込み画像かどうかを判定（クラスタ構築時に判定済み）
                 is_embedded_image = fig_info.get("is_embedded", False)
+                # 表画像かどうかを判定（表フィルタ時に判定済み）
+                is_table_image = fig_info.get("is_table_image", False)
                 
                 # 埋め込み画像の場合はraw_union_bbox（パディングなし）を使用
                 if is_embedded_image:
@@ -2391,8 +2491,13 @@ class PDFToMarkdownConverter:
                 column = fig_info["column"]
                 union_bbox = graphics_bbox
                 
-                # clip_bboxを計算（トリム処理）
-                clip_bbox = compute_clip_bbox(graphics_bbox, page_text_lines, col_width, page.rect.height, column, is_embedded_image)
+                # 表画像の場合は既に設定されたclip_bboxを使用
+                if is_table_image and "clip_bbox" in fig_info:
+                    clip_bbox = fig_info["clip_bbox"]
+                    debug_print(f"[DEBUG] 表画像: 既存のclip_bboxを使用")
+                else:
+                    # clip_bboxを計算（トリム処理）
+                    clip_bbox = compute_clip_bbox(graphics_bbox, page_text_lines, col_width, page.rect.height, column, is_embedded_image)
                 
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
