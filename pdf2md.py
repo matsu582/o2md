@@ -1769,13 +1769,13 @@ class PDFToMarkdownConverter:
                     image_path = os.path.join(self.images_dir, f"{image_filename}.png")
                     pix.save(image_path)
                 
-                # 図内のテキストを抽出
-                figure_texts = self._extract_text_in_bbox(page, union_bbox)
+                # 図内のテキストを抽出（ラベルテキストを含めるためにbboxを拡張）
+                figure_texts, expanded_bbox = self._extract_text_in_bbox(page, union_bbox)
                 
                 figures.append({
                     "path": image_path,
                     "filename": os.path.basename(image_path),
-                    "bbox": union_bbox,
+                    "bbox": expanded_bbox,  # 拡張後のbboxを使用
                     "y_position": union_bbox[1],
                     "texts": figure_texts
                 })
@@ -1790,22 +1790,77 @@ class PDFToMarkdownConverter:
         return figures
     
     def _extract_text_in_bbox(
-        self, page, bbox: Tuple[float, float, float, float]
-    ) -> List[str]:
+        self, page, bbox: Tuple[float, float, float, float],
+        expand_for_labels: bool = True
+    ) -> Tuple[List[str], Tuple[float, float, float, float]]:
         """指定されたbbox内のテキストを抽出
+        
+        図のラベルテキストを含めるため、bboxを近傍の短いテキストで拡張する。
         
         Args:
             page: PyMuPDFのページオブジェクト
             bbox: バウンディングボックス (x0, y0, x1, y1)
+            expand_for_labels: ラベルテキストを含めるためにbboxを拡張するか
             
         Returns:
-            抽出されたテキストのリスト
+            (抽出されたテキストのリスト, 拡張後のbbox)
         """
         texts = []
+        expanded_bbox = bbox
         
         try:
             text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
             
+            # 図ラベルらしいテキストを検出するための条件
+            # - 短いテキスト（30文字以下）
+            # - 句点（。）を含まない
+            # - 図bboxの近傍（50pt以内）にある
+            label_margin = 50.0
+            
+            if expand_for_labels:
+                # 近傍のラベルテキストを収集してbboxを拡張
+                for block in text_dict.get("blocks", []):
+                    if block.get("type") != 0:
+                        continue
+                    
+                    for line in block.get("lines", []):
+                        line_bbox = line.get("bbox", (0, 0, 0, 0))
+                        line_center_x = (line_bbox[0] + line_bbox[2]) / 2
+                        line_center_y = (line_bbox[1] + line_bbox[3]) / 2
+                        
+                        # 図bboxの近傍にあるか確認
+                        near_bbox = (
+                            bbox[0] - label_margin <= line_center_x <= bbox[2] + label_margin and
+                            bbox[1] - label_margin <= line_center_y <= bbox[3] + label_margin
+                        )
+                        
+                        if not near_bbox:
+                            continue
+                        
+                        # テキストを取得
+                        line_text = ""
+                        for span in line.get("spans", []):
+                            line_text += span.get("text", "")
+                        line_text = line_text.strip()
+                        
+                        # 図ラベルらしいか判定
+                        is_label = (
+                            line_text and
+                            len(line_text) <= 30 and
+                            "。" not in line_text and
+                            not any(c in line_text for c in ["、", "が", "を", "に", "で", "は"])
+                        )
+                        
+                        if is_label:
+                            # bboxを拡張
+                            expanded_bbox = (
+                                min(expanded_bbox[0], line_bbox[0]),
+                                min(expanded_bbox[1], line_bbox[1]),
+                                max(expanded_bbox[2], line_bbox[2]),
+                                max(expanded_bbox[3], line_bbox[3])
+                            )
+            
+            # 拡張後のbbox内のテキストを収集
             for block in text_dict.get("blocks", []):
                 if block.get("type") != 0:
                     continue
@@ -1813,12 +1868,12 @@ class PDFToMarkdownConverter:
                 for line in block.get("lines", []):
                     line_bbox = line.get("bbox", (0, 0, 0, 0))
                     
-                    # 行の中心がbbox内にあるか確認
+                    # 行の中心が拡張後のbbox内にあるか確認
                     line_center_x = (line_bbox[0] + line_bbox[2]) / 2
                     line_center_y = (line_bbox[1] + line_bbox[3]) / 2
                     
-                    if (bbox[0] <= line_center_x <= bbox[2] and
-                        bbox[1] <= line_center_y <= bbox[3]):
+                    if (expanded_bbox[0] <= line_center_x <= expanded_bbox[2] and
+                        expanded_bbox[1] <= line_center_y <= expanded_bbox[3]):
                         
                         line_text = ""
                         for span in line.get("spans", []):
@@ -1830,7 +1885,7 @@ class PDFToMarkdownConverter:
         except Exception as e:
             debug_print(f"[DEBUG] bbox内テキスト抽出エラー: {e}")
         
-        return texts
+        return texts, expanded_bbox
     
     def _format_figure_texts_as_details(self, texts: List[str]) -> str:
         """図内テキストを<details>タグ形式に整形
