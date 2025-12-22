@@ -458,7 +458,7 @@ class PDFToMarkdownConverter:
         page_height = text_dict.get("height", 792)
         page_center = page_width / 2
         
-        # 行単位でテキストを収集
+        # 行単位でテキストを収集（span情報も保持）
         lines_data = []
         font_sizes = []
         
@@ -471,12 +471,19 @@ class PDFToMarkdownConverter:
                 line_text = ""
                 line_font_size = 0
                 line_is_bold = False
+                line_spans = []
                 
                 for span in line.get("spans", []):
                     text = span.get("text", "")
                     if text:
-                        line_text += text
                         span_size = span.get("size", 12)
+                        span_bbox = span.get("bbox", (0, 0, 0, 0))
+                        line_spans.append({
+                            "text": text,
+                            "size": span_size,
+                            "bbox": span_bbox
+                        })
+                        line_text += text
                         line_font_size = max(line_font_size, span_size)
                         font_sizes.append(span_size)
                         font_name = span.get("font", "").lower()
@@ -513,7 +520,8 @@ class PDFToMarkdownConverter:
                     "column": column,
                     "y": line_bbox[1],
                     "x": line_bbox[0],
-                    "width": line_width
+                    "width": line_width,
+                    "spans": line_spans
                 })
         
         if not lines_data:
@@ -522,6 +530,9 @@ class PDFToMarkdownConverter:
         # 基準フォントサイズを計算
         size_counts = Counter(round(s, 1) for s in font_sizes)
         base_font_size = size_counts.most_common(1)[0][0] if size_counts else 12
+        
+        # 傍注（上付き文字）を検出して結合
+        lines_data = self._merge_superscript_lines(lines_data, base_font_size)
         
         # カラム内の表を検出（リフロー前に行う）
         table_regions = self._detect_table_regions(lines_data, page_center)
@@ -574,6 +585,105 @@ class PDFToMarkdownConverter:
             })
         
         return blocks
+    
+    def _merge_superscript_lines(
+        self, lines_data: List[Dict], base_font_size: float
+    ) -> List[Dict]:
+        """傍注（上付き文字）を検出して前の行に結合
+        
+        フォントサイズが本文より小さく、前の行の直後に配置されている
+        テキストを<sup>タグで囲んで前の行に結合する。
+        
+        Args:
+            lines_data: 行データのリスト
+            base_font_size: 基準フォントサイズ
+            
+        Returns:
+            結合後の行データのリスト
+        """
+        if len(lines_data) < 2:
+            return lines_data
+        
+        # カラムごとに処理
+        result = []
+        skip_indices = set()
+        
+        # カラムごとにグループ化
+        column_groups = {}
+        for i, line in enumerate(lines_data):
+            col = line["column"]
+            if col not in column_groups:
+                column_groups[col] = []
+            column_groups[col].append((i, line))
+        
+        for col, col_lines in column_groups.items():
+            # Y座標が近い行のペアを探す
+            for idx1, (orig_idx1, line1) in enumerate(col_lines):
+                if orig_idx1 in skip_indices:
+                    continue
+                
+                for idx2, (orig_idx2, line2) in enumerate(col_lines):
+                    if idx1 == idx2 or orig_idx2 in skip_indices:
+                        continue
+                    
+                    # Y座標が近い（10ピクセル以内）
+                    if abs(line1["y"] - line2["y"]) >= 10:
+                        continue
+                    
+                    # どちらの行が先頭に小さいフォントのspanを持つか確認
+                    line1_spans = line1.get("spans", [])
+                    line2_spans = line2.get("spans", [])
+                    
+                    # line2の先頭spanが小さいフォントサイズか確認
+                    if line2_spans:
+                        first_span = line2_spans[0]
+                        first_span_size = first_span.get("size", base_font_size)
+                        sup_text = first_span.get("text", "").strip()
+                        
+                        # フォントサイズが本文の70%以下で、テキストが短い（15文字以下）
+                        if (first_span_size < base_font_size * 0.7 and
+                            len(sup_text) <= 15 and len(sup_text) > 0):
+                            
+                            # X座標が連続しているか確認（line1の右端とline2の左端）
+                            line1_right = line1["bbox"][2]
+                            line2_left = line2["bbox"][0]
+                            
+                            if abs(line1_right - line2_left) < 10:
+                                # 残りのテキストを取得
+                                remaining_text = ""
+                                for j, span in enumerate(line2_spans):
+                                    if j == 0:
+                                        continue
+                                    remaining_text += span.get("text", "")
+                                
+                                # 結合したテキストを作成
+                                merged_text = line1["text"].rstrip()
+                                merged_text += f"<sup>{sup_text}</sup>"
+                                if remaining_text.strip():
+                                    merged_text += remaining_text
+                                
+                                # 結合した行を作成
+                                merged_line = line1.copy()
+                                merged_line["text"] = merged_text
+                                merged_line["bbox"] = (
+                                    min(line1["bbox"][0], line2["bbox"][0]),
+                                    min(line1["bbox"][1], line2["bbox"][1]),
+                                    max(line1["bbox"][2], line2["bbox"][2]),
+                                    max(line1["bbox"][3], line2["bbox"][3])
+                                )
+                                
+                                # line1を更新、line2をスキップ
+                                lines_data[orig_idx1] = merged_line
+                                skip_indices.add(orig_idx2)
+                                debug_print(f"[DEBUG] 傍注結合: {line1['text'][:20]}... + <sup>{sup_text}</sup>")
+                                break
+        
+        # スキップされていない行を結果に追加
+        for i, line in enumerate(lines_data):
+            if i not in skip_indices:
+                result.append(line)
+        
+        return result
     
     def _sort_lines_by_column(self, lines_data: List[Dict]) -> List[Dict]:
         """行をカラムごとにソート
@@ -736,12 +846,70 @@ class PDFToMarkdownConverter:
         # テキストを結合（改行を除去）
         text = "".join(block_data["texts"]).strip()
         
+        # 番号付き箇条書きの検出と変換
+        text = self._convert_numbered_bullets(text)
+        
         return {
             "text": text,
             "bbox": tuple(block_data["bbox"]),
             "font_size": block_data["font_size"],
             "is_bold": block_data["is_bold"]
         }
+    
+    def _convert_numbered_bullets(self, text: str) -> str:
+        """番号付き箇条書きを検出してMarkdownリスト形式に変換
+        
+        ①②③④などの丸数字や、1. 2. 3.などの番号付きマーカーを検出し、
+        Markdownの番号付きリスト形式に変換する。
+        
+        Args:
+            text: 入力テキスト
+            
+        Returns:
+            変換後のテキスト
+        """
+        import re
+        
+        # 丸数字のパターン（①〜⑳）
+        circled_pattern = r'([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])'
+        
+        # 丸数字が2つ以上含まれているか確認
+        circled_matches = re.findall(circled_pattern, text)
+        if len(circled_matches) >= 2:
+            # 丸数字を番号に変換するマッピング
+            circled_to_num = {
+                '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5',
+                '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10',
+                '⑪': '11', '⑫': '12', '⑬': '13', '⑭': '14', '⑮': '15',
+                '⑯': '16', '⑰': '17', '⑱': '18', '⑲': '19', '⑳': '20'
+            }
+            
+            # 丸数字で分割
+            parts = re.split(circled_pattern, text)
+            
+            # 結果を構築
+            result_lines = []
+            current_num = None
+            current_text = ""
+            
+            for part in parts:
+                if part in circled_to_num:
+                    # 前の項目を保存
+                    if current_num is not None and current_text.strip():
+                        result_lines.append(f"{current_num}. {current_text.strip()}")
+                    current_num = circled_to_num[part]
+                    current_text = ""
+                else:
+                    current_text += part
+            
+            # 最後の項目を保存
+            if current_num is not None and current_text.strip():
+                result_lines.append(f"{current_num}. {current_text.strip()}")
+            
+            if result_lines:
+                return "\n".join(result_lines)
+        
+        return text
     
     def _detect_table_regions(
         self, lines_data: List[Dict], page_center: float
@@ -1217,6 +1385,7 @@ class PDFToMarkdownConverter:
         """ベクタ描画（図）を抽出
         
         get_drawings()からベクタ図形をクラスタリングして抽出する。
+        図内のテキストも抽出して<details>タグで出力する。
         
         Args:
             page: PyMuPDFのページオブジェクト
@@ -1288,14 +1457,18 @@ class PDFToMarkdownConverter:
                     image_path = os.path.join(self.images_dir, f"{image_filename}.png")
                     pix.save(image_path)
                 
+                # 図内のテキストを抽出
+                figure_texts = self._extract_text_in_bbox(page, union_bbox)
+                
                 figures.append({
                     "path": image_path,
                     "filename": os.path.basename(image_path),
                     "bbox": union_bbox,
-                    "y_position": union_bbox[1]
+                    "y_position": union_bbox[1],
+                    "texts": figure_texts
                 })
                 
-                debug_print(f"[DEBUG] ベクタ図を抽出: {image_path} ({len(cluster)}要素)")
+                debug_print(f"[DEBUG] ベクタ図を抽出: {image_path} ({len(cluster)}要素, {len(figure_texts)}テキスト)")
                 
             except Exception as e:
                 debug_print(f"[DEBUG] ベクタ図抽出エラー: {e}")
@@ -1303,6 +1476,76 @@ class PDFToMarkdownConverter:
         
         figures.sort(key=lambda x: x["y_position"])
         return figures
+    
+    def _extract_text_in_bbox(
+        self, page, bbox: Tuple[float, float, float, float]
+    ) -> List[str]:
+        """指定されたbbox内のテキストを抽出
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            bbox: バウンディングボックス (x0, y0, x1, y1)
+            
+        Returns:
+            抽出されたテキストのリスト
+        """
+        texts = []
+        
+        try:
+            text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+            
+            for block in text_dict.get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                
+                for line in block.get("lines", []):
+                    line_bbox = line.get("bbox", (0, 0, 0, 0))
+                    
+                    # 行の中心がbbox内にあるか確認
+                    line_center_x = (line_bbox[0] + line_bbox[2]) / 2
+                    line_center_y = (line_bbox[1] + line_bbox[3]) / 2
+                    
+                    if (bbox[0] <= line_center_x <= bbox[2] and
+                        bbox[1] <= line_center_y <= bbox[3]):
+                        
+                        line_text = ""
+                        for span in line.get("spans", []):
+                            line_text += span.get("text", "")
+                        
+                        if line_text.strip():
+                            texts.append(line_text.strip())
+        
+        except Exception as e:
+            debug_print(f"[DEBUG] bbox内テキスト抽出エラー: {e}")
+        
+        return texts
+    
+    def _format_figure_texts_as_details(self, texts: List[str]) -> str:
+        """図内テキストを<details>タグ形式に整形
+        
+        x2md_graphics.pyと同様の形式で出力する。
+        
+        Args:
+            texts: 図内テキストのリスト
+            
+        Returns:
+            整形されたテキスト
+        """
+        if not texts:
+            return ""
+        
+        quoted_texts = [f'"{t}"' for t in texts]
+        texts_line = ', '.join(quoted_texts)
+        
+        lines = []
+        lines.append("<details>")
+        lines.append("<summary>図形内テキスト</summary>")
+        lines.append("")
+        lines.append(texts_line)
+        lines.append("")
+        lines.append("</details>")
+        
+        return '\n'.join(lines)
     
     def _classify_block_type(
         self, text: str, font_size: float, base_size: float, 
@@ -1835,6 +2078,14 @@ class PDFToMarkdownConverter:
                 self.markdown_lines.append("")
                 self.markdown_lines.append(f"![図](images/{img_data['filename']})")
                 self.markdown_lines.append("")
+                
+                # 図内テキストを<details>タグで出力
+                figure_texts = img_data.get("texts", [])
+                if figure_texts:
+                    details_text = self._format_figure_texts_as_details(figure_texts)
+                    self.markdown_lines.append(details_text)
+                    self.markdown_lines.append("")
+                
                 prev_type = "image"
                 
             else:
