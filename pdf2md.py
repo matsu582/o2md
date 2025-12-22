@@ -2183,10 +2183,16 @@ class PDFToMarkdownConverter:
         import re as re_module
         
         def find_caption_below(graphics_bbox, text_lines):
-            """図の下にあるキャプション行を探す"""
+            """図の下部付近にあるキャプション行を探す
+            
+            graphics_bboxの内側にあるキャプションも検出する（境界トリム用）
+            """
             caption_pattern = re_module.compile(r'^(図|表)\s*\d+')
             best_caption = None
             best_y = float('inf')
+            
+            # graphics_bboxの下半分以降にあるキャプションを探す
+            search_y_start = (graphics_bbox[1] + graphics_bbox[3]) / 2
             
             for line in text_lines:
                 line_bbox = line["bbox"]
@@ -2196,8 +2202,8 @@ class PDFToMarkdownConverter:
                 if not caption_pattern.match(line_text):
                     continue
                 
-                # 図の下にあるか（y0がgraphics_bbox[3]より大きい）
-                if line_bbox[1] < graphics_bbox[3]:
+                # 図の下半分以降にあるか
+                if line_bbox[1] < search_y_start:
                     continue
                 
                 # x方向で図と重なりがあるか
@@ -2213,17 +2219,23 @@ class PDFToMarkdownConverter:
             return best_caption
         
         def find_body_text_above(graphics_bbox, text_lines, col_width):
-            """図の上にある本文行を探す"""
+            """図の上部付近にある本文行を探す
+            
+            graphics_bboxの内側にある本文も検出する（境界トリム用）
+            """
             best_body = None
             best_y = 0
+            
+            # graphics_bboxの上半分以前にある本文を探す
+            search_y_end = (graphics_bbox[1] + graphics_bbox[3]) / 2
             
             for line in text_lines:
                 line_bbox = line["bbox"]
                 line_text = line["text"].strip()
                 line_width = line_bbox[2] - line_bbox[0]
                 
-                # 図の上にあるか（y1がgraphics_bbox[1]より小さい）
-                if line_bbox[3] > graphics_bbox[1]:
+                # 図の上半分以前にあるか
+                if line_bbox[3] > search_y_end:
                     continue
                 
                 # x方向で図と重なりがあるか
@@ -2240,34 +2252,44 @@ class PDFToMarkdownConverter:
             return best_body
         
         def compute_clip_bbox(graphics_bbox, text_lines, col_width, page_height):
-            """graphics_bboxからclip_bboxを計算（トリム処理）"""
+            """graphics_bboxからclip_bboxを計算（トリム処理）
+            
+            本文の下〜キャプションの上でトリムする。
+            graphics_bboxを侵食してでも、境界を正しく設定する。
+            """
             padding = 20.0
             clip_x0 = max(0, graphics_bbox[0] - padding)
             clip_y0 = max(0, graphics_bbox[1] - padding)
             clip_x1 = min(page_width, graphics_bbox[2] + padding)
             clip_y1 = min(page_height, graphics_bbox[3] + padding)
             
-            # 下側: キャプションの上までトリム
+            # 下側: キャプションの上までトリム（常に適用）
             caption = find_caption_below(graphics_bbox, text_lines)
             if caption:
                 caption_y0 = caption["bbox"][1]
                 # キャプションの上までに制限（マージン5pt）
                 new_clip_y1 = caption_y0 - 5.0
-                # graphics_bboxを侵食しないようにクランプ
-                if new_clip_y1 >= graphics_bbox[3]:
-                    clip_y1 = new_clip_y1
-                    debug_print(f"[DEBUG] キャプション検出: clip_y1を{clip_y1:.1f}にトリム")
+                # 常に適用（graphics_bboxを侵食してでも境界を正しく設定）
+                clip_y1 = min(clip_y1, new_clip_y1)
+                debug_print(f"[DEBUG] キャプション検出: clip_y1を{clip_y1:.1f}にトリム")
             
-            # 上側: 本文の下までトリム
+            # 上側: 本文の下までトリム（常に適用）
             body_above = find_body_text_above(graphics_bbox, text_lines, col_width)
             if body_above:
                 body_y1 = body_above["bbox"][3]
                 # 本文の下までに制限（マージン5pt）
                 new_clip_y0 = body_y1 + 5.0
-                # graphics_bboxを侵食しないようにクランプ
-                if new_clip_y0 <= graphics_bbox[1]:
-                    clip_y0 = new_clip_y0
-                    debug_print(f"[DEBUG] 本文検出: clip_y0を{clip_y0:.1f}にトリム")
+                # 常に適用（graphics_bboxを侵食してでも境界を正しく設定）
+                clip_y0 = max(clip_y0, new_clip_y0)
+                debug_print(f"[DEBUG] 本文検出: clip_y0を{clip_y0:.1f}にトリム")
+            
+            # 健全性チェック: clip_y0 < clip_y1を保証（最小高さ50pt）
+            if clip_y1 - clip_y0 < 50:
+                # 最小高さを確保
+                center_y = (clip_y0 + clip_y1) / 2
+                clip_y0 = center_y - 25
+                clip_y1 = center_y + 25
+                debug_print(f"[DEBUG] 最小高さ確保: clip_y0={clip_y0:.1f}, clip_y1={clip_y1:.1f}")
             
             return (clip_x0, clip_y0, clip_x1, clip_y1)
         
