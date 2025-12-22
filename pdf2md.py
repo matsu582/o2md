@@ -725,7 +725,11 @@ class PDFToMarkdownConverter:
                                 
                                 # 結合したテキストを作成
                                 merged_text = line1["text"].rstrip()
-                                merged_text += f"<sup>{sup_text}</sup>"
+                                # 注釈参照の場合はMarkdown脚注形式に変換
+                                if self._is_footnote_reference(sup_text):
+                                    merged_text += self._format_footnote_ref(sup_text)
+                                else:
+                                    merged_text += f"<sup>{sup_text}</sup>"
                                 if remaining_text.strip():
                                     merged_text += remaining_text
                                 
@@ -1056,7 +1060,11 @@ class PDFToMarkdownConverter:
                 
                 # 書式を適用（優先順位: 上付き/下付き > 打消し線 > 太字/斜体）
                 if is_superscript:
-                    formatted = f"<sup>{text}</sup>"
+                    # 注釈参照の場合はMarkdown脚注形式に変換
+                    if self._is_footnote_reference(text):
+                        formatted = self._format_footnote_ref(text)
+                    else:
+                        formatted = f"<sup>{text}</sup>"
                 elif is_subscript:
                     formatted = f"<sub>{text}</sub>"
                 elif is_strikethrough:
@@ -2662,6 +2670,9 @@ class PDFToMarkdownConverter:
                                 max(expanded_bbox[3], line_bbox[3])
                             )
             
+            # テキストとY座標を一緒に収集（後でソートするため）
+            text_with_positions = []
+            
             for block in text_dict.get("blocks", []):
                 if block.get("type") != 0:
                     continue
@@ -2689,7 +2700,12 @@ class PDFToMarkdownConverter:
                             continue
                         
                         if line_text_stripped:
-                            texts.append(line_text_stripped)
+                            # Y座標（上端）とX座標（左端）を記録
+                            text_with_positions.append((line_bbox[1], line_bbox[0], line_text_stripped))
+            
+            # Y座標（上から下）、同じY座標ならX座標（左から右）でソート
+            text_with_positions.sort(key=lambda item: (item[0], item[1]))
+            texts = [item[2] for item in text_with_positions]
         
         except Exception as e:
             debug_print(f"[DEBUG] bbox内テキスト抽出エラー: {e}")
