@@ -291,18 +291,22 @@ class PDFToMarkdownConverter:
         if header_footer_patterns is None:
             header_footer_patterns = set()
         
-        # テキストベースのPDFかどうかを判定
-        text_blocks = self._extract_structured_text_v2(page, header_footer_patterns)
+        # 先にベクタ描画（図）を検出して、その領域を取得
+        # 図領域内のテキストは本文から除外するため
+        vector_figures = self._extract_vector_figures(page, page_num)
+        figure_bboxes = [fig["bbox"] for fig in vector_figures]
         
-        if text_blocks:
+        # テキストベースのPDFかどうかを判定（図領域を除外）
+        text_blocks = self._extract_structured_text_v2(
+            page, header_footer_patterns, exclude_bboxes=figure_bboxes
+        )
+        
+        if text_blocks or vector_figures:
             # テキストベースのPDF: 構造化されたMarkdownを出力
             debug_print(f"[DEBUG] ページ {page_num + 1}: テキストベースPDFとして処理")
             
             # 埋め込み画像を抽出
             embedded_images = self._extract_embedded_images(page, page_num)
-            
-            # ベクタ描画（図）を抽出
-            vector_figures = self._extract_vector_figures(page, page_num)
             
             # 画像とベクタ図を統合
             all_images = embedded_images + vector_figures
@@ -428,20 +432,25 @@ class PDFToMarkdownConverter:
         return blocks
     
     def _extract_structured_text_v2(
-        self, page, header_footer_patterns: Set[str]
+        self, page, header_footer_patterns: Set[str],
+        exclude_bboxes: List[Tuple[float, float, float, float]] = None
     ) -> List[Dict[str, Any]]:
         """PDFページから構造化されたテキストブロックを抽出（改良版）
         
         行単位で抽出し、カラム分割と段落リフローを行う。
         ヘッダ・フッタを除外する。
+        図領域内のテキストも除外する。
         
         Args:
             page: PyMuPDFのページオブジェクト
             header_footer_patterns: ヘッダ・フッタパターンのセット
+            exclude_bboxes: 除外するbboxのリスト（図領域など）
             
         Returns:
             構造化されたテキストブロックのリスト
         """
+        if exclude_bboxes is None:
+            exclude_bboxes = []
         import re
         from collections import Counter
         
@@ -478,16 +487,33 @@ class PDFToMarkdownConverter:
                     if text:
                         span_size = span.get("size", 12)
                         span_bbox = span.get("bbox", (0, 0, 0, 0))
+                        font_name = span.get("font", "").lower()
+                        span_flags = span.get("flags", 0)
+                        
+                        # 太字・斜体の検出（フォント名とflagsの両方をチェック）
+                        # PyMuPDF flags: bit 0 = superscript, bit 1 = italic, bit 2 = serifed, bit 3 = monospaced, bit 4 = bold
+                        span_is_bold = (
+                            "bold" in font_name or 
+                            "heavy" in font_name or
+                            (span_flags & (1 << 4)) != 0
+                        )
+                        span_is_italic = (
+                            "italic" in font_name or 
+                            "oblique" in font_name or
+                            (span_flags & (1 << 1)) != 0
+                        )
+                        
                         line_spans.append({
                             "text": text,
                             "size": span_size,
-                            "bbox": span_bbox
+                            "bbox": span_bbox,
+                            "is_bold": span_is_bold,
+                            "is_italic": span_is_italic
                         })
                         line_text += text
                         line_font_size = max(line_font_size, span_size)
                         font_sizes.append(span_size)
-                        font_name = span.get("font", "").lower()
-                        if "bold" in font_name or "heavy" in font_name:
+                        if span_is_bold:
                             line_is_bold = True
                 
                 if not line_text.strip():
@@ -501,6 +527,19 @@ class PDFToMarkdownConverter:
                     debug_print(f"[DEBUG] ヘッダ・フッタ除外: {line_text.strip()[:30]}...")
                     continue
                 
+                # 図領域内のテキストを除外（中心点が図領域内にある場合）
+                line_center_x = (line_bbox[0] + line_bbox[2]) / 2
+                line_center_y = (line_bbox[1] + line_bbox[3]) / 2
+                in_figure = False
+                for fig_bbox in exclude_bboxes:
+                    if (fig_bbox[0] <= line_center_x <= fig_bbox[2] and
+                        fig_bbox[1] <= line_center_y <= fig_bbox[3]):
+                        in_figure = True
+                        break
+                if in_figure:
+                    debug_print(f"[DEBUG] 図領域内テキスト除外: {line_text.strip()[:30]}...")
+                    continue
+                
                 line_width = line_bbox[2] - line_bbox[0]
                 x_center = (line_bbox[0] + line_bbox[2]) / 2
                 
@@ -512,11 +551,15 @@ class PDFToMarkdownConverter:
                 else:
                     column = "right"
                 
+                # 行全体の斜体フラグを計算
+                line_is_italic = any(s.get("is_italic", False) for s in line_spans)
+                
                 lines_data.append({
                     "text": line_text,
                     "bbox": line_bbox,
                     "font_size": line_font_size,
                     "is_bold": line_is_bold,
+                    "is_italic": line_is_italic,
                     "column": column,
                     "y": line_bbox[1],
                     "x": line_bbox[0],
@@ -780,9 +823,11 @@ class PDFToMarkdownConverter:
             "bbox": list(lines[0]["bbox"]),
             "font_size": lines[0]["font_size"],
             "is_bold": lines[0]["is_bold"],
+            "is_italic": lines[0].get("is_italic", False),
             "column": lines[0]["column"],
             "last_y": lines[0]["bbox"][3],
-            "last_x": lines[0]["x"]
+            "last_x": lines[0]["x"],
+            "spans_list": [lines[0].get("spans", [])]
         }
         
         for i in range(1, len(lines)):
@@ -812,9 +857,11 @@ class PDFToMarkdownConverter:
                     "bbox": list(line["bbox"]),
                     "font_size": line["font_size"],
                     "is_bold": line["is_bold"],
+                    "is_italic": line.get("is_italic", False),
                     "column": line["column"],
                     "last_y": line["bbox"][3],
-                    "last_x": line["x"]
+                    "last_x": line["x"],
+                    "spans_list": [line.get("spans", [])]
                 }
             else:
                 # 行を結合（日本語はスペースなし、英数字はスペースあり）
@@ -845,6 +892,10 @@ class PDFToMarkdownConverter:
                 current_block["font_size"] = max(current_block["font_size"], line["font_size"])
                 if line["is_bold"]:
                     current_block["is_bold"] = True
+                if line.get("is_italic", False):
+                    current_block["is_italic"] = True
+                # span情報を追加
+                current_block["spans_list"].append(line.get("spans", []))
         
         # 最後のブロックを追加
         blocks.append(self._finalize_block(current_block))
@@ -852,9 +903,17 @@ class PDFToMarkdownConverter:
         return blocks
     
     def _finalize_block(self, block_data: Dict) -> Dict:
-        """ブロックデータを最終形式に変換"""
-        # テキストを結合（改行を除去）
-        text = "".join(block_data["texts"]).strip()
+        """ブロックデータを最終形式に変換
+        
+        span情報を使って太字・斜体の書式を適用する。
+        """
+        # span情報を使って書式付きテキストを生成
+        spans_list = block_data.get("spans_list", [])
+        if spans_list and any(spans_list):
+            text = self._apply_text_formatting(spans_list)
+        else:
+            # span情報がない場合は従来通り
+            text = "".join(block_data["texts"]).strip()
         
         # 番号付き箇条書きの検出と変換
         text = self._convert_numbered_bullets(text)
@@ -863,7 +922,8 @@ class PDFToMarkdownConverter:
             "text": text,
             "bbox": tuple(block_data["bbox"]),
             "font_size": block_data["font_size"],
-            "is_bold": block_data["is_bold"]
+            "is_bold": block_data["is_bold"],
+            "is_italic": block_data.get("is_italic", False)
         }
         
         # カラム情報を保持（2段組みの順序維持に必要）
@@ -871,6 +931,133 @@ class PDFToMarkdownConverter:
             result["column"] = block_data["column"]
         
         return result
+    
+    def _apply_text_formatting(self, spans_list: List[List[Dict]]) -> str:
+        """span情報を使って書式付きテキストを生成
+        
+        太字は**text**、斜体は*text*、太字斜体は***text***として出力する。
+        番号付き箇条書きを検出し、リストマーカーには書式を適用しない。
+        
+        Args:
+            spans_list: 行ごとのspan情報のリスト
+            
+        Returns:
+            書式付きテキスト
+        """
+        import re
+        
+        # まず各行のテキストを生成（書式付き）
+        formatted_lines = []
+        for line_spans in spans_list:
+            if not line_spans:
+                continue
+            
+            line_text = ""
+            for span in line_spans:
+                text = span.get("text", "")
+                if not text:
+                    continue
+                
+                is_bold = span.get("is_bold", False)
+                is_italic = span.get("is_italic", False)
+                
+                # 書式を適用
+                if is_bold and is_italic:
+                    formatted = f"***{text}***"
+                elif is_bold:
+                    formatted = f"**{text}**"
+                elif is_italic:
+                    formatted = f"*{text}*"
+                else:
+                    formatted = text
+                
+                line_text += formatted
+            
+            if line_text.strip():
+                formatted_lines.append(line_text)
+        
+        if not formatted_lines:
+            return ""
+        
+        # 番号付き箇条書きパターン（行頭の数字+区切り+空白）
+        # 例: "1. ", "2) ", "1．", "①", "②"
+        numbered_pattern = re.compile(r'^[\s]*(\d+[.)．]\s|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])')
+        
+        # 各行が番号付き箇条書きかどうかを判定
+        is_list_item = []
+        for line in formatted_lines:
+            # 書式マーカーを除去してパターンマッチ
+            plain_line = re.sub(r'\*+([^*]+)\*+', r'\1', line)
+            is_list_item.append(bool(numbered_pattern.match(plain_line)))
+        
+        # 連続する番号付き箇条書きを検出（2つ以上連続で有効）
+        list_ranges = []
+        i = 0
+        while i < len(is_list_item):
+            if is_list_item[i]:
+                start = i
+                while i < len(is_list_item) and is_list_item[i]:
+                    i += 1
+                if i - start >= 2:
+                    list_ranges.append((start, i))
+            else:
+                i += 1
+        
+        # リスト範囲内の行を処理（マーカーから書式を除去）
+        for start, end in list_ranges:
+            for idx in range(start, end):
+                line = formatted_lines[idx]
+                # 行頭の書式マーカーを除去（リストマーカー部分のみ）
+                # 例: "**1.** text" → "1. text"
+                plain_line = re.sub(r'\*+([^*]+)\*+', r'\1', line)
+                match = numbered_pattern.match(plain_line)
+                if match:
+                    marker = match.group(0)
+                    rest = plain_line[len(marker):]
+                    # 丸数字を番号に変換
+                    circled_to_num = {
+                        '①': '1. ', '②': '2. ', '③': '3. ', '④': '4. ', '⑤': '5. ',
+                        '⑥': '6. ', '⑦': '7. ', '⑧': '8. ', '⑨': '9. ', '⑩': '10. ',
+                        '⑪': '11. ', '⑫': '12. ', '⑬': '13. ', '⑭': '14. ', '⑮': '15. ',
+                        '⑯': '16. ', '⑰': '17. ', '⑱': '18. ', '⑲': '19. ', '⑳': '20. '
+                    }
+                    for circled, num in circled_to_num.items():
+                        if circled in marker:
+                            marker = marker.replace(circled, num)
+                            break
+                    formatted_lines[idx] = marker + rest
+        
+        # 結果を構築（リスト範囲の後に空行を挿入）
+        result_parts = []
+        prev_line_end_char = ""
+        in_list = False
+        
+        for i, line in enumerate(formatted_lines):
+            # 現在の行がリスト範囲内かどうか
+            current_in_list = any(start <= i < end for start, end in list_ranges)
+            
+            # リストが終了した場合、空行を挿入
+            if in_list and not current_in_list:
+                result_parts.append("\n")
+            
+            # リスト内の行は改行で区切る
+            if current_in_list:
+                if result_parts and not result_parts[-1].endswith("\n"):
+                    result_parts.append("\n")
+                result_parts.append(line)
+            else:
+                # 通常の行間の結合（日本語はスペースなし、英数字はスペースあり）
+                if result_parts:
+                    curr_char = line.lstrip()[0] if line.lstrip() else ""
+                    if prev_line_end_char.isascii() and curr_char.isascii():
+                        if prev_line_end_char.isalnum() and curr_char.isalnum():
+                            result_parts.append(" ")
+                result_parts.append(line)
+            
+            prev_line_end_char = line.rstrip()[-1] if line.rstrip() else ""
+            in_list = current_in_list
+        
+        return "".join(result_parts).strip()
     
     def _convert_numbered_bullets(self, text: str) -> str:
         """番号付き箇条書きを検出してMarkdownリスト形式に変換
@@ -2158,16 +2345,26 @@ class PDFToMarkdownConverter:
                             self.markdown_lines.append("")
                         list_active = True
                     
-                    # 箇条書きマーカーを除去（判定ルールと一致させる）
+                    # 箇条書きマーカーを検出して適切な形式で出力
                     import re
                     cleaned_text = text
-                    # 空白必須のマーカー（-, *）
-                    cleaned_text = re.sub(r'^[\-\*]\s+', '', cleaned_text)
-                    # 空白不要のマーカー（•, ・, ○, ● など）
-                    cleaned_text = re.sub(r'^[•・○●◆◇▪▫－―＊]\s*', '', cleaned_text)
-                    # 番号付きリスト
-                    cleaned_text = re.sub(r'^[\d０-９]+[\.．\)）]\s+', '', cleaned_text)
-                    self.markdown_lines.append(f"- {cleaned_text}")
+                    output_marker = "-"
+                    
+                    # 番号付きリストを検出（元の番号を保持）
+                    num_match = re.match(r'^([\d０-９]+)[\.．\)）]\s+', text)
+                    if num_match:
+                        # 全角数字を半角に変換
+                        num_str = num_match.group(1)
+                        num_str = num_str.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
+                        output_marker = f"{num_str}."
+                        cleaned_text = text[num_match.end():]
+                    else:
+                        # 空白必須のマーカー（-, *）
+                        cleaned_text = re.sub(r'^[\-\*]\s+', '', cleaned_text)
+                        # 空白不要のマーカー（•, ・, ○, ● など）
+                        cleaned_text = re.sub(r'^[•・○●◆◇▪▫－―＊]\s*', '', cleaned_text)
+                    
+                    self.markdown_lines.append(f"{output_marker} {cleaned_text}")
                     
                 elif block_type == "table":
                     if prev_type:
@@ -2232,16 +2429,26 @@ class PDFToMarkdownConverter:
                         self.markdown_lines.append("")
                     list_active = True
                 
-                # 箇条書きマーカーを除去（判定ルールと一致させる）
+                # 箇条書きマーカーを検出して適切な形式で出力
                 import re
                 cleaned_text = text
-                # 空白必須のマーカー（-, *）
-                cleaned_text = re.sub(r'^[\-\*]\s+', '', cleaned_text)
-                # 空白不要のマーカー（•, ・, ○, ● など）
-                cleaned_text = re.sub(r'^[•・○●◆◇▪▫－―＊]\s*', '', cleaned_text)
-                # 番号付きリスト
-                cleaned_text = re.sub(r'^[\d０-９]+[\.．\)）]\s+', '', cleaned_text)
-                self.markdown_lines.append(f"- {cleaned_text}")
+                output_marker = "-"
+                
+                # 番号付きリストを検出（元の番号を保持）
+                num_match = re.match(r'^([\d０-９]+)[\.．\)）]\s+', text)
+                if num_match:
+                    # 全角数字を半角に変換
+                    num_str = num_match.group(1)
+                    num_str = num_str.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
+                    output_marker = f"{num_str}."
+                    cleaned_text = text[num_match.end():]
+                else:
+                    # 空白必須のマーカー（-, *）
+                    cleaned_text = re.sub(r'^[\-\*]\s+', '', cleaned_text)
+                    # 空白不要のマーカー（•, ・, ○, ● など）
+                    cleaned_text = re.sub(r'^[•・○●◆◇▪▫－―＊]\s*', '', cleaned_text)
+                
+                self.markdown_lines.append(f"{output_marker} {cleaned_text}")
                 
             elif block_type == "table":
                 if prev_type:
