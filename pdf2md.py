@@ -227,12 +227,18 @@ class PDFToMarkdownConverter:
         
         return patterns
     
-    def _is_header_footer(self, text: str, patterns: Set[str]) -> bool:
+    def _is_header_footer(
+        self, text: str, patterns: Set[str], 
+        y_pos: float = None, page_height: float = None, font_size: float = None
+    ) -> bool:
         """テキストがヘッダ・フッタかどうかを判定
         
         Args:
             text: 判定するテキスト
             patterns: ヘッダ・フッタパターンのセット
+            y_pos: 行のY座標（オプション）
+            page_height: ページの高さ（オプション）
+            font_size: フォントサイズ（オプション）
             
         Returns:
             ヘッダ・フッタの場合True
@@ -256,6 +262,21 @@ class PDFToMarkdownConverter:
             pattern_normalized = re.sub(r'\s+', ' ', pattern).strip()
             if normalized == pattern_normalized:
                 return True
+        
+        # ページ下部（84%以下）のフッタキーワード検出
+        footer_keywords = [
+            '〒', 'E-mail', 'Accepted', 'received', 'Revisions',
+            'Japan', 'INCORPORATED', 'Business Unit', 'Bissiness Unit',
+            'Original manuscript', 'pp.', 'Vol.'
+        ]
+        
+        if y_pos is not None and page_height is not None:
+            # ページ下部（84%以下）にある行をチェック
+            if y_pos > page_height * 0.84:
+                # フッタキーワードを含む場合は除外
+                for keyword in footer_keywords:
+                    if keyword in text_stripped:
+                        return True
         
         return False
     
@@ -465,8 +486,11 @@ class PDFToMarkdownConverter:
                 if not line_text.strip():
                     continue
                 
-                # ヘッダ・フッタを除外
-                if self._is_header_footer(line_text, header_footer_patterns):
+                # ヘッダ・フッタを除外（Y座標とページ高さを渡す）
+                if self._is_header_footer(
+                    line_text, header_footer_patterns,
+                    y_pos=line_bbox[1], page_height=page_height, font_size=line_font_size
+                ):
                     debug_print(f"[DEBUG] ヘッダ・フッタ除外: {line_text.strip()[:30]}...")
                     continue
                 
@@ -513,6 +537,28 @@ class PDFToMarkdownConverter:
         # ブロックタイプを判定
         blocks = []
         for block_data in reflowed_blocks:
+            # 見出しブロックはそのまま
+            if block_data.get("is_heading"):
+                level = block_data.get("heading_level", 1)
+                block_type = f"heading{level}"
+                blocks.append({
+                    "type": block_type,
+                    "text": block_data["text"],
+                    "font_size": block_data["font_size"],
+                    "bbox": block_data["bbox"]
+                })
+                continue
+            
+            # 表ブロックはそのまま
+            if block_data.get("is_table"):
+                blocks.append({
+                    "type": "table",
+                    "text": block_data["text"],
+                    "font_size": block_data["font_size"],
+                    "bbox": block_data["bbox"]
+                })
+                continue
+            
             block_type = self._classify_block_type(
                 block_data["text"],
                 block_data["font_size"],
@@ -520,9 +566,6 @@ class PDFToMarkdownConverter:
                 block_data["is_bold"],
                 block_data["bbox"]
             )
-            # 表ブロックはそのまま
-            if block_data.get("is_table"):
-                block_type = "table"
             blocks.append({
                 "type": block_type,
                 "text": block_data["text"],
@@ -784,6 +827,46 @@ class PDFToMarkdownConverter:
         
         return table_regions
     
+    def _is_numbered_heading(self, text: str) -> Tuple[bool, int, str]:
+        """番号付き見出しかどうかを判定
+        
+        「1　はじめに」「2.1　概要」などのパターンを検出する。
+        
+        Args:
+            text: 判定するテキスト
+            
+        Returns:
+            (見出しかどうか, 見出しレベル, 見出しテキスト)
+        """
+        import re
+        text = text.strip()
+        
+        # 長すぎる行は見出しではない
+        if len(text) > 50:
+            return (False, 0, "")
+        
+        # 末尾が句点で終わる場合は見出しではない
+        if text.endswith("。") or text.endswith("．"):
+            return (False, 0, "")
+        
+        # 番号付き見出しパターン: 「1　はじめに」「2.1　概要」など
+        # 数字 + (ドット + 数字)* + 全角/半角スペース + タイトル
+        match = re.match(r'^(\d+(?:[\.．]\d+)*)\s*[　 ]+(.{1,40})$', text)
+        if match:
+            number_part = match.group(1)
+            title_part = match.group(2).strip()
+            
+            # タイトル部分が短すぎる場合は除外
+            if len(title_part) < 2:
+                return (False, 0, "")
+            
+            # 見出しレベルを決定（ドットの数 + 1）
+            level = number_part.count('.') + number_part.count('．') + 1
+            
+            return (True, level, title_part)
+        
+        return (False, 0, "")
+    
     def _reflow_paragraphs_with_tables(
         self, lines: List[Dict], base_font_size: float, table_regions: List[Dict]
     ) -> List[Dict]:
@@ -791,6 +874,7 @@ class PDFToMarkdownConverter:
         
         同一カラム内で縦方向のギャップが小さい行を結合する。
         表領域内の行は結合せず、Markdownテーブルとして出力する。
+        番号付き見出しは単独ブロックとして確定する。
         
         Args:
             lines: ソートされた行データのリスト
@@ -843,6 +927,26 @@ class PDFToMarkdownConverter:
                             "is_table": True
                         })
                     processed_table_regions.add(region_id)
+                i += 1
+                continue
+            
+            # 番号付き見出しの検出
+            is_heading, heading_level, heading_text = self._is_numbered_heading(line["text"])
+            if is_heading:
+                # 現在のブロックを確定
+                if current_block:
+                    blocks.append(self._finalize_block(current_block))
+                    current_block = None
+                
+                # 見出しを単独ブロックとして追加
+                blocks.append({
+                    "text": heading_text,
+                    "bbox": tuple(line["bbox"]),
+                    "font_size": line["font_size"],
+                    "is_bold": True,
+                    "is_heading": True,
+                    "heading_level": heading_level
+                })
                 i += 1
                 continue
             
