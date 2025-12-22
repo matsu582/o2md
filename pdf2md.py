@@ -1181,9 +1181,15 @@ class PDFToMarkdownConverter:
         Returns:
             表領域のリスト（各領域は{y_start, y_end, column, rows}を含む）
         """
-        # 左カラムと右カラムを分離
-        left_lines = [l for l in lines_data if l["column"] == "left"]
-        right_lines = [l for l in lines_data if l["column"] == "right"]
+        import re as re_mod
+        # キャプションパターン（図X、表Xで始まる行は表検出から除外）
+        caption_pattern = re_mod.compile(r'^[図表]\s*\d+')
+        
+        # キャプション行を除外してから左右カラムを分離
+        filtered_lines = [l for l in lines_data 
+                         if not caption_pattern.match(l.get("text", ""))]
+        left_lines = [l for l in filtered_lines if l["column"] == "left"]
+        right_lines = [l for l in filtered_lines if l["column"] == "right"]
         
         table_regions = []
         
@@ -1201,21 +1207,26 @@ class PDFToMarkdownConverter:
                     y_groups[y_key] = []
                 y_groups[y_key].append(line)
             
-            # 複数セルがある行を検出
+            # 複数セルがある行を検出（3セル以上で表として認識）
+            # ただし、短いテキスト（3文字以下）だけで構成される行は除外（図内ラベルの誤検出防止）
             multi_cell_rows = []
             all_rows = []  # 全ての行（単一セル含む）
             for y_key in sorted(y_groups.keys()):
                 cells = y_groups[y_key]
                 # X座標でソートして、異なるX位置にあるセルをカウント
                 x_positions = sorted(set(round(c["x"] / 20) * 20 for c in cells))
+                # 短いテキストだけで構成される行は除外
+                texts = [c.get("text", "") for c in cells]
+                has_long_text = any(len(t) > 3 for t in texts)
+                is_multi = len(x_positions) >= 3 and has_long_text
                 row_data = {
                     "y": y_key,
                     "cells": sorted(cells, key=lambda c: c["x"]),
                     "x_positions": x_positions,
-                    "is_multi_cell": len(x_positions) >= 2
+                    "is_multi_cell": is_multi
                 }
                 all_rows.append(row_data)
-                if len(x_positions) >= 2:
+                if is_multi:
                     multi_cell_rows.append(row_data)
             
             # 連続する複数セル行を表領域としてグループ化
@@ -1885,13 +1896,20 @@ class PDFToMarkdownConverter:
         # 表は罫線（ベクター描画）として認識されるため、図として出力されてしまう問題を防ぐ
         def detect_table_bboxes_from_text(text_lines, page_width):
             """テキスト行の配置パターンから表領域を検出"""
+            import re as re_mod
             table_bboxes = []
             gutter = page_width / 2
+            
+            # キャプションパターン（図X、表Xで始まる行は表検出から除外）
+            caption_pattern = re_mod.compile(r'^[図表]\s*\d+')
             
             # 左右カラムごとに処理
             for is_left in [True, False]:
                 col_lines = []
                 for line in text_lines:
+                    # キャプション行は除外
+                    if caption_pattern.match(line.get("text", "")):
+                        continue
                     line_bbox = line["bbox"]
                     center_x = (line_bbox[0] + line_bbox[2]) / 2
                     if is_left and center_x < gutter:
@@ -1912,11 +1930,17 @@ class PDFToMarkdownConverter:
                     y_groups[y_key].append(line)
                 
                 # 複数セルがある行を検出（3セル以上で表として認識）
+                # ただし、短いテキスト（3文字以下）だけで構成される行は除外（図内ラベルの誤検出防止）
                 multi_cell_rows = []
                 for y_key in sorted(y_groups.keys()):
                     cells = y_groups[y_key]
                     x_positions = sorted(set(round(c["bbox"][0] / 20) * 20 for c in cells))
                     if len(x_positions) >= 3:
+                        # 短いテキストだけで構成される行は除外
+                        texts = [c.get("text", "") for c in cells]
+                        has_long_text = any(len(t) > 3 for t in texts)
+                        if not has_long_text:
+                            continue
                         all_bboxes = [c["bbox"] for c in cells]
                         row_bbox = (
                             min(b[0] for b in all_bboxes),
