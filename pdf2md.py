@@ -802,6 +802,7 @@ class PDFToMarkdownConverter:
         """段落リフロー（近接する行を結合）
         
         同一カラム内で縦方向のギャップが小さい行を結合する。
+        番号付き箇条書きの後に続く非番号行は別ブロックとして分離する。
         
         Args:
             lines: ソートされた行データのリスト
@@ -810,8 +811,19 @@ class PDFToMarkdownConverter:
         Returns:
             結合されたブロックのリスト
         """
+        import re
+        
         if not lines:
             return []
+        
+        # 番号付き箇条書きパターン
+        numbered_list_pattern = re.compile(
+            r'^[\s]*(\d+[.)．]\s|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])'
+        )
+        
+        def is_numbered_list_line(text: str) -> bool:
+            """行が番号付き箇条書きで始まるかを判定"""
+            return bool(numbered_list_pattern.match(text))
         
         # 行高の推定（フォントサイズの1.2倍程度）
         line_height = base_font_size * 1.2
@@ -827,7 +839,8 @@ class PDFToMarkdownConverter:
             "column": lines[0]["column"],
             "last_y": lines[0]["bbox"][3],
             "last_x": lines[0]["x"],
-            "spans_list": [lines[0].get("spans", [])]
+            "spans_list": [lines[0].get("spans", [])],
+            "is_list": is_numbered_list_line(lines[0]["text"])
         }
         
         for i in range(1, len(lines)):
@@ -839,12 +852,28 @@ class PDFToMarkdownConverter:
             same_column = line["column"] == current_block["column"]
             x_aligned = abs(line["x"] - current_block["last_x"]) < 20
             
+            # 現在の行が番号付き箇条書きかどうか
+            curr_is_numbered = is_numbered_list_line(line["text"])
+            
+            # 箇条書きブロックの終了判定
+            # 現在のブロックが箇条書きで、次の行が番号付きでない場合は分離
+            # ただし、吊り下げインデント（右に大きくずれている）場合は継続行として結合
+            indent_threshold = base_font_size * 1.5  # 吊り下げインデントの閾値
+            is_hanging_indent = (line["x"] - current_block["last_x"]) > indent_threshold
+            list_boundary = (
+                current_block["is_list"] and 
+                not curr_is_numbered and
+                not is_hanging_indent  # 吊り下げインデントでない場合は分離
+            )
+            
             # 段落の区切り条件
             is_new_paragraph = (
                 y_gap > gap_threshold or
                 not same_column or
                 line["is_bold"] != current_block["is_bold"] or
-                abs(line["font_size"] - current_block["font_size"]) > 1
+                abs(line["font_size"] - current_block["font_size"]) > 1 or
+                list_boundary or
+                curr_is_numbered  # 新しい番号付き行は常に新しいブロック
             )
             
             if is_new_paragraph:
@@ -861,7 +890,8 @@ class PDFToMarkdownConverter:
                     "column": line["column"],
                     "last_y": line["bbox"][3],
                     "last_x": line["x"],
-                    "spans_list": [line.get("spans", [])]
+                    "spans_list": [line.get("spans", [])],
+                    "is_list": curr_is_numbered
                 }
             else:
                 # 行を結合（日本語はスペースなし、英数字はスペースあり）
@@ -1259,6 +1289,7 @@ class PDFToMarkdownConverter:
         同一カラム内で縦方向のギャップが小さい行を結合する。
         表領域内の行は結合せず、Markdownテーブルとして出力する。
         番号付き見出しは単独ブロックとして確定する。
+        番号付き箇条書きの後に続く非番号行は別ブロックとして分離する。
         
         Args:
             lines: ソートされた行データのリスト
@@ -1268,8 +1299,19 @@ class PDFToMarkdownConverter:
         Returns:
             結合されたブロックのリスト
         """
+        import re
+        
         if not lines:
             return []
+        
+        # 番号付き箇条書きパターン
+        numbered_list_pattern = re.compile(
+            r'^[\s]*(\d+[.)．]\s|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])'
+        )
+        
+        def is_numbered_list_line(text: str) -> bool:
+            """行が番号付き箇条書きで始まるかを判定"""
+            return bool(numbered_list_pattern.match(text))
         
         def is_in_table_region(line: Dict) -> Optional[Dict]:
             """行が表領域内にあるかチェック"""
@@ -1336,6 +1378,9 @@ class PDFToMarkdownConverter:
                 i += 1
                 continue
             
+            # 現在の行が番号付き箇条書きかどうか
+            curr_is_numbered = is_numbered_list_line(line["text"])
+            
             if current_block is None:
                 current_block = {
                     "texts": [line["text"]],
@@ -1344,18 +1389,57 @@ class PDFToMarkdownConverter:
                     "is_bold": line["is_bold"],
                     "column": line["column"],
                     "last_y": line["bbox"][3],
-                    "last_x": line["x"]
+                    "last_x": line["x"],
+                    "is_list": curr_is_numbered,
+                    "list_start_x": line["x"] if curr_is_numbered else None
                 }
             else:
                 # 結合条件をチェック
                 y_gap = line["y"] - current_block["last_y"]
                 same_column = line["column"] == current_block["column"]
                 
+                # 箇条書きブロックの終了判定
+                # 現在のブロックが箇条書きで、次の行が番号付きでない場合
+                # 継続行かどうかは「先読み」で判定：
+                # - インデントされた行の次の行が左端に戻る場合は新しい段落
+                # - インデントされた行の次の行も右寄りなら継続行
+                list_boundary = False
+                if current_block.get("is_list", False) and not curr_is_numbered:
+                    list_start_x = current_block.get("list_start_x", current_block["last_x"])
+                    indent_threshold = base_font_size * 0.5
+                    left_tolerance = base_font_size * 0.3
+                    
+                    # 継続行は番号マーカーより右にインデントされている
+                    is_indented = line["x"] > list_start_x + indent_threshold
+                    
+                    if is_indented:
+                        # 先読み: 次の行が左端に戻るかを確認
+                        next_line_returns_left = False
+                        if i + 1 < len(lines):
+                            next_line = lines[i + 1]
+                            # 同一カラムの次の行のみ確認
+                            if next_line.get("column") == line.get("column"):
+                                # 次の行が左端（番号マーカーの位置）に戻るか
+                                next_x_diff = abs(next_line["x"] - list_start_x)
+                                next_line_returns_left = next_x_diff <= left_tolerance
+                        
+                        # 次の行が左端に戻る場合、現在の行は新しい段落の1行目
+                        if next_line_returns_left:
+                            list_boundary = True
+                        else:
+                            # 次の行も右寄りなら継続行として結合
+                            list_boundary = False
+                    else:
+                        # インデントされていない（左端に戻った）場合は分離
+                        list_boundary = True
+                
                 is_new_paragraph = (
                     y_gap > gap_threshold or
                     not same_column or
                     line["is_bold"] != current_block["is_bold"] or
-                    abs(line["font_size"] - current_block["font_size"]) > 1
+                    abs(line["font_size"] - current_block["font_size"]) > 1 or
+                    list_boundary or
+                    curr_is_numbered  # 新しい番号付き行は常に新しいブロック
                 )
                 
                 if is_new_paragraph:
@@ -1367,7 +1451,9 @@ class PDFToMarkdownConverter:
                         "is_bold": line["is_bold"],
                         "column": line["column"],
                         "last_y": line["bbox"][3],
-                        "last_x": line["x"]
+                        "last_x": line["x"],
+                        "is_list": curr_is_numbered,
+                        "list_start_x": line["x"] if curr_is_numbered else None
                     }
                 else:
                     # 行を結合
