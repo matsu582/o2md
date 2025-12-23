@@ -162,6 +162,12 @@ class PDFToMarkdownConverter:
         
         # Markdownファイルを書き出し
         markdown_content = "\n".join(self.markdown_lines)
+        
+        # 最終パス: 全文に対して脚注参照変換を適用
+        # （出力経路によっては変換が漏れる可能性があるため）
+        if self._defined_footnote_nums:
+            markdown_content = self._convert_inline_footnote_refs(markdown_content)
+        
         output_file = os.path.join(self.output_dir, f"{self.base_name}.md")
         
         with open(output_file, "w", encoding="utf-8") as f:
@@ -1198,17 +1204,18 @@ class PDFToMarkdownConverter:
         return False
     
     def _extract_footnote_nums_from_blocks(self, blocks: List[Dict[str, Any]]) -> None:
-        """blocksから脚注番号を抽出してインスタンス変数に保存
+        """blocksから脚注番号を抽出してインスタンス変数に追加
         
         参考文献ブロックから[N]形式の番号を抽出し、
-        _defined_footnote_numsに保存する。
+        _defined_footnote_numsに追加する。
+        （複数ページにまたがる場合も累積される）
         
         Args:
             blocks: 構造化されたテキストブロックのリスト
         """
         import re
-        self._defined_footnote_nums = set()
         
+        found_new = False
         for block in blocks:
             text = block.get("text", "").strip()
             if not text:
@@ -1217,9 +1224,11 @@ class PDFToMarkdownConverter:
             # 参考文献ブロックから番号を抽出
             if re.match(r'^\s*参考文献\s*\[\d+\]', text):
                 nums = re.findall(r'\[(\d+)\]', text)
-                self._defined_footnote_nums.update(nums)
+                if nums:
+                    self._defined_footnote_nums.update(nums)
+                    found_new = True
         
-        if self._defined_footnote_nums:
+        if found_new:
             debug_print(f"[DEBUG] 脚注番号セット: {sorted(self._defined_footnote_nums, key=int)}")
     
     def _apply_text_formatting(self, spans_list: List[List[Dict]]) -> str:
