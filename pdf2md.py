@@ -163,6 +163,9 @@ class PDFToMarkdownConverter:
         # Markdownファイルを書き出し
         markdown_content = "\n".join(self.markdown_lines)
         
+        # ページ跨ぎの文章を結合する後処理
+        markdown_content = self._merge_across_page_breaks(markdown_content)
+        
         # 最終パス: 全文に対して脚注参照変換を適用
         # （出力経路によっては変換が漏れる可能性があるため）
         if self._defined_footnote_nums:
@@ -340,7 +343,8 @@ class PDFToMarkdownConverter:
                         self.markdown_lines.append(line.strip())
                 self.markdown_lines.append("")
         
-        # ページ区切りは出力しない（連続した文章の分断を防ぐため）
+        # ページ境界マーカーを挿入（後処理でページ跨ぎの結合に使用）
+        self.markdown_lines.append("<!--PAGE_BREAK-->")
         self.markdown_lines.append("")
     
     def _extract_structured_text(self, page) -> List[Dict[str, Any]]:
@@ -1187,6 +1191,130 @@ class PDFToMarkdownConverter:
             refs = re.findall(r'\[(\d+)\]', text)
             return ''.join(f"[^{r}]" for r in refs)
         return text
+    
+    def _merge_across_page_breaks(self, content: str) -> str:
+        """ページ跨ぎの文章を結合する後処理
+        
+        ページ境界マーカー（<!--PAGE_BREAK-->）の前後の段落を分析し、
+        文が途中で切れている場合は結合する。
+        
+        Args:
+            content: ページ境界マーカーを含むMarkdownコンテンツ
+            
+        Returns:
+            ページ跨ぎの文章を結合したMarkdownコンテンツ
+        """
+        import re
+        
+        page_marker = "<!--PAGE_BREAK-->"
+        
+        # マーカーが存在しない場合はそのまま返す
+        if page_marker not in content:
+            return content
+        
+        # マーカーで分割してページごとの内容を取得
+        page_contents = content.split(page_marker)
+        
+        if len(page_contents) <= 1:
+            return content
+        
+        # 結合判定用のパターン（結合しない条件）
+        # 見出し、リスト、表、図、脚注定義などで始まる場合は結合しない
+        no_merge_start_patterns = [
+            r'^#{1,6}\s',  # 見出し
+            r'^[\d０-９]+[\.．\)）]\s',  # 番号付きリスト（1. 2) など）
+            r'^[(（][0-9０-９]+[)）]\s*',  # 括弧付き番号（(1) （１）など）
+            r'^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]',  # 丸数字
+            r'^[-\*]\s',  # 箇条書き
+            r'^\|',  # 表
+            r'^!\[',  # 画像
+            r'^\[\^',  # 脚注定義
+            r'^>\s',  # 引用
+            r'^<details',  # 詳細ブロック
+            r'^第[0-9０-９一二三四五六七八九十百]+\s*条',  # 「第N条」形式
+        ]
+        no_merge_start_re = re.compile('|'.join(no_merge_start_patterns))
+        
+        # 文末記号（これで終わる場合は結合しない）
+        sentence_end_chars = set('。！？」』】）)!?')
+        
+        merged_pages = [page_contents[0]]
+        
+        for i in range(1, len(page_contents)):
+            prev_content = merged_pages[-1]
+            curr_content = page_contents[i]
+            
+            # 前ページの末尾段落を取得
+            prev_lines = prev_content.rstrip().split('\n')
+            prev_last_line = ''
+            for line in reversed(prev_lines):
+                stripped = line.strip()
+                if stripped:
+                    prev_last_line = stripped
+                    break
+            
+            # 現ページの先頭段落を取得
+            curr_lines = curr_content.lstrip().split('\n')
+            curr_first_line = ''
+            curr_first_idx = 0
+            for idx, line in enumerate(curr_lines):
+                stripped = line.strip()
+                if stripped:
+                    curr_first_line = stripped
+                    curr_first_idx = idx
+                    break
+            
+            # 結合判定
+            should_merge = False
+            
+            if prev_last_line and curr_first_line:
+                # 前ページが文末記号で終わっていない
+                ends_with_sentence = prev_last_line[-1] in sentence_end_chars
+                
+                # 現ページが新しい構造要素で始まらない
+                starts_with_structure = bool(no_merge_start_re.match(curr_first_line))
+                
+                # 結合条件: 文末でなく、新構造要素でもない
+                if not ends_with_sentence and not starts_with_structure:
+                    should_merge = True
+                    debug_print(f"[DEBUG] ページ跨ぎ結合: '{prev_last_line[-20:]}' + '{curr_first_line[:20]}'")
+            
+            if should_merge:
+                # 前ページの末尾と現ページの先頭を結合
+                # 前ページの末尾の空行を削除
+                prev_stripped = prev_content.rstrip()
+                
+                # 現ページの先頭の空行を削除し、最初の行を前ページに結合
+                curr_remaining_lines = curr_lines[curr_first_idx + 1:]
+                curr_remaining = '\n'.join(curr_remaining_lines)
+                
+                # 結合（日本語の場合はスペースなし、英数字の場合はスペースあり）
+                last_char = prev_last_line[-1] if prev_last_line else ''
+                first_char = curr_first_line[0] if curr_first_line else ''
+                
+                # 両方がASCII英数字の場合のみスペースを挿入
+                need_space = (last_char.isascii() and last_char.isalnum() and 
+                              first_char.isascii() and first_char.isalnum())
+                
+                separator = ' ' if need_space else ''
+                merged_line = prev_stripped + separator + curr_first_line
+                
+                # 残りの内容を追加
+                if curr_remaining.strip():
+                    merged_pages[-1] = merged_line + '\n\n' + curr_remaining
+                else:
+                    merged_pages[-1] = merged_line + '\n'
+            else:
+                # 結合しない場合は通常通り追加
+                merged_pages.append(curr_content)
+        
+        # マーカーを削除して結合
+        result = ''.join(merged_pages)
+        
+        # 連続する空行を2つまでに正規化
+        result = re.sub(r'\n{3,}', '\n\n', result)
+        
+        return result
     
     def _fix_broken_urls(self, text: str) -> str:
         """PDF抽出時に混入したURL内のスペースを除去
