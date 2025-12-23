@@ -692,6 +692,7 @@ class PDFToMarkdownConverter:
         - 左端差（ハングインデント）が5〜60pxの範囲
         - 縦gap（行間）が15px以下
         - 前のlist_itemが句点（。）で終わらない
+        - 次のブロックが(N)形式の番号で始まらない
         
         Args:
             blocks: ブロックのリスト
@@ -699,6 +700,11 @@ class PDFToMarkdownConverter:
         Returns:
             結合後のブロックのリスト
         """
+        import re
+        
+        # (N)形式の番号パターン（半角・全角両対応）
+        paren_number_pattern = re.compile(r'^[\s]*[(（][0-9０-９]+[)）]\s+')
+        
         if len(blocks) < 2:
             return blocks
         
@@ -733,11 +739,16 @@ class PDFToMarkdownConverter:
                 curr_text = block.get("text", "")
                 ends_with_period = curr_text.rstrip().endswith("。")
                 
-                # 結合条件: ハングインデント範囲内、行間が近い、句点で終わらない
+                # 次のブロックが(N)形式の番号で始まるかチェック
+                next_text = next_block.get("text", "")
+                starts_with_paren_number = bool(paren_number_pattern.match(next_text))
+                
+                # 結合条件: ハングインデント範囲内、行間が近い、句点で終わらない、(N)形式でない
                 should_merge = (
                     5 <= delta_x <= 60 and
                     gap_y <= 15 and
-                    not ends_with_period
+                    not ends_with_period and
+                    not starts_with_paren_number
                 )
                 
                 if should_merge:
@@ -953,8 +964,13 @@ class PDFToMarkdownConverter:
         
         # 番号付き箇条書きパターン（全角数字も含む）
         # 小数（例: 14.0%）を誤認識しないよう、区切り記号の後に数字が続かないことを確認
+        # (N)形式の括弧付き番号も含む（半角・全角両対応）
         numbered_list_pattern = re.compile(
-            r'^[\s]*([0-9０-９]+[.)．）](?=\s*[^0-9０-９])|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])'
+            r'^[\s]*('
+            r'[0-9０-９]+[.)．）](?=\s*[^0-9０-９])|'  # 1. 2) など
+            r'[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]|'  # 丸数字
+            r'[(（][0-9０-９]+[)）]\s+'  # (1) （１） など
+            r')'
         )
         
         def is_numbered_list_line(text: str) -> bool:
@@ -1403,9 +1419,16 @@ class PDFToMarkdownConverter:
             return ""
         
         # 番号付き箇条書きパターン（行頭の数字+区切り+空白、全角数字も含む）
-        # 例: "1. ", "2) ", "1．", "１．", "①", "②"
+        # 例: "1. ", "2) ", "1．", "１．", "①", "②", "(1)", "（１）"
         # 小数（例: 14.0%）を誤認識しないよう、区切り記号の後に数字が続かないことを確認
-        numbered_pattern = re.compile(r'^[\s]*([0-9０-９]+[.)．）](?=\s*[^0-9０-９])|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])')
+        # (N)形式の括弧付き番号も含む（半角・全角両対応）
+        numbered_pattern = re.compile(
+            r'^[\s]*('
+            r'[0-9０-９]+[.)．）](?=\s*[^0-9０-９])|'  # 1. 2) など
+            r'[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]|'  # 丸数字
+            r'[(（][0-9０-９]+[)）]\s+'  # (1) （１） など
+            r')'
+        )
         
         # 各行が番号付き箇条書きかどうかを判定
         is_list_item = []
@@ -1753,8 +1776,13 @@ class PDFToMarkdownConverter:
         
         # 番号付き箇条書きパターン（全角数字も含む）
         # 小数（例: 14.0%）を誤認識しないよう、区切り記号の後に数字が続かないことを確認
+        # (N)形式の括弧付き番号も含む（半角・全角両対応）
         numbered_list_pattern = re.compile(
-            r'^[\s]*([0-9０-９]+[.)．）](?=\s*[^0-9０-９])|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])'
+            r'^[\s]*('
+            r'[0-9０-９]+[.)．）](?=\s*[^0-9０-９])|'  # 1. 2) など
+            r'[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]|'  # 丸数字
+            r'[(（][0-9０-９]+[)）]\s+'  # (1) （１） など
+            r')'
         )
         
         def is_numbered_list_line(text: str) -> bool:
