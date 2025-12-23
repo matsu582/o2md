@@ -688,11 +688,12 @@ class PDFToMarkdownConverter:
     ) -> List[Dict[str, Any]]:
         """番号付きリストの継続行を前のリスト項目に結合
         
-        list_itemの直後にparagraphが来て、かつ以下の条件を満たす場合に結合:
-        - 左端差（ハングインデント）が5〜60pxの範囲
+        list_itemまたはリスト項目開始パターンを含むparagraphの直後に
+        paragraphが来て、かつ以下の条件を満たす場合に結合:
         - 縦gap（行間）が15px以下
-        - 前のlist_itemが句点（。）で終わらない
-        - 次のブロックが(N)形式の番号で始まらない
+        - 前のブロックが句点（。）で終わらない
+        - 次のブロックが新しいリスト項目開始パターンで始まらない
+        - 次のブロックが短い（8文字以下）場合はdelta_x制限を緩和
         
         Args:
             blocks: ブロックのリスト
@@ -702,8 +703,14 @@ class PDFToMarkdownConverter:
         """
         import re
         
-        # (N)形式の番号パターン（半角・全角両対応）
-        paren_number_pattern = re.compile(r'^[\s]*[(（][0-9０-９]+[)）]\s+')
+        # リスト項目開始パターン（すべての形式を網羅）
+        list_start_pattern = re.compile(
+            r'^[\s]*('
+            r'[(（][0-9０-９]+[)）]\s*|'  # (1) （１） など
+            r'[0-9０-９]+[.)．）]\s*|'  # 1. 2) など
+            r'[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]'  # 丸数字
+            r')'
+        )
         
         if len(blocks) < 2:
             return blocks
@@ -722,10 +729,17 @@ class PDFToMarkdownConverter:
                 continue
             
             next_block = blocks[i + 1]
+            curr_text = block.get("text", "")
+            next_text = next_block.get("text", "")
             
-            # list_item -> paragraph のパターンを検出
-            if (block.get("type") == "list_item" and 
-                next_block.get("type") == "paragraph"):
+            # 現在のブロックがリスト項目かどうか判定
+            is_curr_list = (
+                block.get("type") == "list_item" or
+                bool(list_start_pattern.match(curr_text))
+            )
+            
+            # 次のブロックがparagraphで、現在がリスト項目の場合
+            if is_curr_list and next_block.get("type") == "paragraph":
                 
                 curr_bbox = block.get("bbox", (0, 0, 0, 0))
                 next_bbox = next_block.get("bbox", (0, 0, 0, 0))
@@ -735,25 +749,36 @@ class PDFToMarkdownConverter:
                 # 縦gap（行間）を計算
                 gap_y = next_bbox[1] - curr_bbox[3]
                 
-                # 前のlist_itemの末尾文字を取得
-                curr_text = block.get("text", "")
+                # 前のブロックの末尾文字を取得
                 ends_with_period = curr_text.rstrip().endswith("。")
                 
-                # 次のブロックが(N)形式の番号で始まるかチェック
-                next_text = next_block.get("text", "")
-                starts_with_paren_number = bool(paren_number_pattern.match(next_text))
+                # 次のブロックが新しいリスト項目開始パターンで始まるかチェック
+                starts_with_list_marker = bool(list_start_pattern.match(next_text))
                 
-                # 結合条件: ハングインデント範囲内、行間が近い、句点で終わらない、(N)形式でない
-                should_merge = (
-                    5 <= delta_x <= 60 and
-                    gap_y <= 15 and
-                    not ends_with_period and
-                    not starts_with_paren_number
-                )
+                # 次のブロックの文字数（短い継続行の判定用）
+                next_text_len = len(next_text.strip())
+                
+                # 結合条件を判定
+                # 短い継続行（8文字以下）の場合はdelta_x制限を緩和
+                if next_text_len <= 8:
+                    # 短い継続行: delta_x制限なし、gap_y制限のみ
+                    should_merge = (
+                        gap_y <= 15 and
+                        not ends_with_period and
+                        not starts_with_list_marker
+                    )
+                else:
+                    # 通常の継続行: ハングインデント範囲内
+                    should_merge = (
+                        5 <= delta_x <= 60 and
+                        gap_y <= 15 and
+                        not ends_with_period and
+                        not starts_with_list_marker
+                    )
                 
                 if should_merge:
                     # テキストを結合（日本語なのでスペースなしで連結）
-                    merged_text = curr_text.rstrip() + next_block.get("text", "").lstrip()
+                    merged_text = curr_text.rstrip() + next_text.lstrip()
                     # bboxを拡張
                     merged_bbox = (
                         min(curr_bbox[0], next_bbox[0]),
@@ -761,8 +786,9 @@ class PDFToMarkdownConverter:
                         max(curr_bbox[2], next_bbox[2]),
                         next_bbox[3]
                     )
+                    # 元のブロックタイプを維持（list_itemまたはparagraph）
                     merged_block = {
-                        "type": "list_item",
+                        "type": block.get("type", "paragraph"),
                         "text": merged_text,
                         "font_size": block.get("font_size", 0),
                         "bbox": merged_bbox
