@@ -350,10 +350,25 @@ class PDFToMarkdownConverter:
         normalized = re.sub(r'\s+', ' ', normalized).strip()
         
         # パターンも同様に正規化して比較
+        # ただし、y座標がヘッダー/フッター帯にある場合のみ除外
+        # （章扉ページの本文中の「第N章」「序論」などを誤除外しないため）
         for pattern in patterns:
             pattern_normalized = re.sub(r'\s+', ' ', pattern).strip()
             if normalized == pattern_normalized:
-                return True
+                # y座標情報がある場合は、ヘッダー/フッター帯にいるかチェック
+                if y_pos is not None and page_height is not None:
+                    # ヘッダー帯: ページ上端12%以内
+                    # フッター帯: ページ下端10%以内（90%以降）
+                    in_header_zone = y_pos < page_height * 0.12
+                    in_footer_zone = y_pos > page_height * 0.90
+                    if in_header_zone or in_footer_zone:
+                        return True
+                    # ヘッダー/フッター帯外にある場合は除外しない
+                    debug_print(f"[DEBUG] パターン一致だがヘッダー/フッター帯外のため除外しない: '{text_stripped[:30]}' y={y_pos:.1f}")
+                    continue
+                else:
+                    # y座標情報がない場合は従来通り除外
+                    return True
         
         # ページ下部（84%以下）のフッタキーワード検出
         footer_keywords = [
@@ -998,6 +1013,7 @@ class PDFToMarkdownConverter:
         """行をカラムごとにソート
         
         フル幅要素を基準に、その間の区間で左→右の順に出力する。
+        同じy座標（±フォントサイズの範囲内）にある行はx座標順にソートする。
         
         Args:
             lines_data: 行データのリスト
@@ -1005,15 +1021,106 @@ class PDFToMarkdownConverter:
         Returns:
             ソートされた行データのリスト
         """
+        import re
+        
+        def cluster_and_sort_by_row(lines: List[Dict]) -> List[Dict]:
+            """同じy座標の行をクラスタリングし、クラスタ内はx座標順にソート"""
+            if not lines:
+                return []
+            
+            # y座標でソート
+            sorted_by_y = sorted(lines, key=lambda x: x["y"])
+            
+            # 同じy座標（±フォントサイズの0.5倍以内）の行をクラスタリング
+            clusters = []
+            current_cluster = [sorted_by_y[0]]
+            
+            for line in sorted_by_y[1:]:
+                prev_line = current_cluster[-1]
+                y_diff = abs(line["y"] - prev_line["y"])
+                threshold = min(line.get("font_size", 12), prev_line.get("font_size", 12)) * 0.5
+                
+                if y_diff <= threshold:
+                    current_cluster.append(line)
+                else:
+                    clusters.append(current_cluster)
+                    current_cluster = [line]
+            
+            clusters.append(current_cluster)
+            
+            # 各クラスタ内をx座標順にソート
+            result = []
+            for cluster in clusters:
+                cluster_sorted = sorted(cluster, key=lambda x: x.get("x", 0))
+                result.extend(cluster_sorted)
+            
+            return result
+        
+        def merge_number_title_lines(lines: List[Dict]) -> List[Dict]:
+            """番号のみの行と直後のタイトル行をマージ
+            
+            例: 「1.1」と「背景」を「1.1 背景」にマージ
+            """
+            if not lines:
+                return []
+            
+            # 番号のみパターン（例: 1.1, 2.3.1, 第1章 など）
+            number_only_pattern = re.compile(r'^[\d.]+$|^第\s*[\d０-９一二三四五六七八十]+\s*章?$')
+            
+            result = []
+            skip_next = False
+            
+            for i, line in enumerate(lines):
+                if skip_next:
+                    skip_next = False
+                    continue
+                
+                text = line.get("text", "").strip()
+                
+                # 番号のみの行かチェック
+                if number_only_pattern.match(text) and i + 1 < len(lines):
+                    next_line = lines[i + 1]
+                    next_text = next_line.get("text", "").strip()
+                    
+                    # 次の行が同じy座標（±フォントサイズの0.5倍以内）かチェック
+                    y_diff = abs(line["y"] - next_line["y"])
+                    threshold = min(line.get("font_size", 12), next_line.get("font_size", 12)) * 0.5
+                    
+                    # 次の行が番号で始まらない短いテキストならマージ
+                    if (y_diff <= threshold and 
+                        not number_only_pattern.match(next_text) and
+                        len(next_text) < 50):
+                        # マージ
+                        merged_text = f"{text} {next_text}"
+                        merged_line = line.copy()
+                        merged_line["text"] = merged_text
+                        merged_line["bbox"] = (
+                            min(line["bbox"][0], next_line["bbox"][0]),
+                            min(line["bbox"][1], next_line["bbox"][1]),
+                            max(line["bbox"][2], next_line["bbox"][2]),
+                            max(line["bbox"][3], next_line["bbox"][3])
+                        )
+                        result.append(merged_line)
+                        skip_next = True
+                        debug_print(f"[DEBUG] 番号+タイトルをマージ: '{text}' + '{next_text}' -> '{merged_text}'")
+                        continue
+                
+                result.append(line)
+            
+            return result
+        
         # フル幅行とカラム行を分離
         full_lines = [l for l in lines_data if l["column"] == "full"]
         left_lines = [l for l in lines_data if l["column"] == "left"]
         right_lines = [l for l in lines_data if l["column"] == "right"]
         
-        # 各グループをY座標でソート
-        full_lines.sort(key=lambda x: x["y"])
-        left_lines.sort(key=lambda x: x["y"])
-        right_lines.sort(key=lambda x: x["y"])
+        # 各グループをクラスタリング＆ソート
+        full_lines = cluster_and_sort_by_row(full_lines)
+        left_lines = cluster_and_sort_by_row(left_lines)
+        right_lines = cluster_and_sort_by_row(right_lines)
+        
+        # 番号+タイトルのマージ（fullカラムのみ、2カラムでは誤結合の可能性があるため）
+        full_lines = merge_number_title_lines(full_lines)
         
         # フル幅行がない場合は単純に左→右
         if not full_lines:
@@ -2732,9 +2839,20 @@ class PDFToMarkdownConverter:
         all_figure_candidates = filtered_candidates
         
         # 単独画像候補がある場合は追加（要素が1個の場合の特別処理）
+        # ただし、既存の候補と重複している場合は追加しない
         if single_image_candidate is not None:
-            all_figure_candidates.append(single_image_candidate)
-            debug_print(f"[DEBUG] page={page_num+1}: 単独画像候補をall_figure_candidatesに追加")
+            single_bbox = single_image_candidate["union_bbox"]
+            is_duplicate = False
+            for cand in all_figure_candidates:
+                cand_bbox = cand["union_bbox"]
+                # 重複判定: 一方が他方を包含、または高いIoU
+                if bbox_contains(cand_bbox, single_bbox) or bbox_contains(single_bbox, cand_bbox):
+                    is_duplicate = True
+                    debug_print(f"[DEBUG] page={page_num+1}: 単独画像候補が既存候補と重複のため追加しない")
+                    break
+            if not is_duplicate:
+                all_figure_candidates.append(single_image_candidate)
+                debug_print(f"[DEBUG] page={page_num+1}: 単独画像候補をall_figure_candidatesに追加")
         
         # 表領域を検出して図候補から除外
         # 表は罫線（ベクター描画）として認識されるため、図として出力されてしまう問題を防ぐ
@@ -3227,13 +3345,15 @@ class PDFToMarkdownConverter:
             
             return best_body
         
-        def compute_clip_bbox(graphics_bbox, text_lines, col_width, page_height, column, is_embedded_image=False):
+        def compute_clip_bbox(graphics_bbox, text_lines, col_width, page_height, column, is_embedded_image=False,
+                               header_y_max_val=None, footer_y_min_val=None):
             """graphics_bboxからclip_bboxを計算（トリム処理）
             
             本文の下〜キャプションの上でトリムする。
             graphics_bboxを侵食してでも、境界を正しく設定する。
             カラム境界でクランプして他段のテキストが混入しないようにする。
             埋め込み画像の場合は最小限のpadding（1pt）を使用。
+            ヘッダー/フッター領域でクリップして、ヘッダー/フッター部分が図に含まれないようにする。
             """
             # 埋め込み画像の場合は最小限のpadding（1pt）を使用
             padding = 1.0 if is_embedded_image else 20.0
@@ -3241,6 +3361,14 @@ class PDFToMarkdownConverter:
             clip_y0 = max(0, graphics_bbox[1] - padding)
             clip_x1 = min(page_width, graphics_bbox[2] + padding)
             clip_y1 = min(page_height, graphics_bbox[3] + padding)
+            
+            # ヘッダー/フッター領域でクリップ
+            if header_y_max_val is not None and clip_y0 < header_y_max_val:
+                clip_y0 = header_y_max_val
+                debug_print(f"[DEBUG] ヘッダー領域クリップ: clip_y0を{clip_y0:.1f}に設定")
+            if footer_y_min_val is not None and clip_y1 > footer_y_min_val:
+                clip_y1 = footer_y_min_val
+                debug_print(f"[DEBUG] フッター領域クリップ: clip_y1を{clip_y1:.1f}に設定")
             
             # カラム境界でクランプ（他段のテキスト混入防止）
             if column == "left":
@@ -3302,8 +3430,11 @@ class PDFToMarkdownConverter:
                     clip_bbox = fig_info["clip_bbox"]
                     debug_print(f"[DEBUG] 表画像: 既存のclip_bboxを使用")
                 else:
-                    # clip_bboxを計算（トリム処理）
-                    clip_bbox = compute_clip_bbox(graphics_bbox, page_text_lines, col_width, page.rect.height, column, is_embedded_image)
+                    # clip_bboxを計算（トリム処理、ヘッダー/フッター領域でクリップ）
+                    clip_bbox = compute_clip_bbox(
+                        graphics_bbox, page_text_lines, col_width, page.rect.height, column, 
+                        is_embedded_image, header_y_max, footer_y_min
+                    )
                 
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
