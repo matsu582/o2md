@@ -108,6 +108,10 @@ class PDFToMarkdownConverter:
         # 脚注番号セット（参考文献ブロックから抽出した番号のみ変換対象）
         self._defined_footnote_nums: Set[str] = set()
         
+        # doc-wideのヘッダー/フッター領域（フォールバック用）
+        self._doc_header_y_max: Optional[float] = None
+        self._doc_footer_y_min: Optional[float] = None
+        
         print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
     
     def _get_ocr(self):
@@ -152,6 +156,9 @@ class PDFToMarkdownConverter:
             header_footer_patterns = self._detect_header_footer_patterns(doc)
             if header_footer_patterns:
                 debug_print(f"[DEBUG] ヘッダ・フッタパターン検出: {len(header_footer_patterns)}個")
+            
+            # doc-wideのヘッダー/フッター領域を計算（フォールバック用）
+            self._compute_doc_wide_header_footer(doc, header_footer_patterns)
             
             for page_num in range(total_pages):
                 print(f"[INFO] ページ {page_num + 1}/{total_pages} を処理中...")
@@ -238,6 +245,79 @@ class PDFToMarkdownConverter:
                 patterns.add(pattern)
         
         return patterns
+    
+    def _compute_doc_wide_header_footer(self, doc, header_footer_patterns: Set[str]) -> None:
+        """doc-wideのヘッダー/フッター領域を計算（フォールバック用）
+        
+        全ページからヘッダー/フッター領域のY座標を収集し、
+        中央値を計算してフォールバック値として保持する。
+        
+        Args:
+            doc: PyMuPDFのドキュメントオブジェクト
+            header_footer_patterns: ヘッダ・フッタパターンのセット
+        """
+        if not header_footer_patterns:
+            return
+        
+        header_y_values = []
+        footer_y_values = []
+        
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            page_height = page.rect.height
+            
+            try:
+                text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+            except Exception:
+                continue
+            
+            page_header_y = []
+            page_footer_y = []
+            
+            for block in text_dict.get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                
+                for line in block.get("lines", []):
+                    line_text = ""
+                    for span in line.get("spans", []):
+                        line_text += span.get("text", "")
+                    
+                    line_text = line_text.strip()
+                    if not line_text:
+                        continue
+                    
+                    line_bbox = line.get("bbox", (0, 0, 0, 0))
+                    y_center = (line_bbox[1] + line_bbox[3]) / 2
+                    
+                    # ヘッダー/フッター判定
+                    if self._is_header_footer(
+                        line_text, header_footer_patterns,
+                        y_pos=line_bbox[1], page_height=page_height
+                    ):
+                        if y_center < page_height / 2:
+                            page_header_y.append(line_bbox[3])
+                        else:
+                            page_footer_y.append(line_bbox[1])
+            
+            # ページごとのヘッダー/フッター領域を収集
+            if page_header_y:
+                header_y_values.append(max(page_header_y) + 15.0)
+            if page_footer_y:
+                footer_y_values.append(min(page_footer_y) - 15.0)
+        
+        # 中央値を計算してフォールバック値として保持
+        if header_y_values:
+            header_y_values.sort()
+            mid = len(header_y_values) // 2
+            self._doc_header_y_max = header_y_values[mid]
+            debug_print(f"[DEBUG] doc-wideヘッダー領域: y_max={self._doc_header_y_max:.1f} ({len(header_y_values)}ページから計算)")
+        
+        if footer_y_values:
+            footer_y_values.sort()
+            mid = len(footer_y_values) // 2
+            self._doc_footer_y_min = footer_y_values[mid]
+            debug_print(f"[DEBUG] doc-wideフッター領域: y_min={self._doc_footer_y_min:.1f} ({len(footer_y_values)}ページから計算)")
     
     def _is_header_footer(
         self, text: str, patterns: Set[str], 
@@ -2385,6 +2465,14 @@ class PDFToMarkdownConverter:
             except Exception as e:
                 debug_print(f"[DEBUG] ヘッダー/フッター領域計算エラー: {e}")
         
+        # ページ個別でヘッダー検出が失敗した場合、doc-wideの値をフォールバックとして使用
+        if header_y_max is None and self._doc_header_y_max is not None:
+            header_y_max = self._doc_header_y_max
+            debug_print(f"[DEBUG] page={page_num+1}: doc-wideヘッダー領域をフォールバック適用 y_max={header_y_max:.1f}")
+        if footer_y_min is None and self._doc_footer_y_min is not None:
+            footer_y_min = self._doc_footer_y_min
+            debug_print(f"[DEBUG] page={page_num+1}: doc-wideフッター領域をフォールバック適用 y_min={footer_y_min:.1f}")
+        
         # 要素タイプ（drawing/image）を保持するリスト
         all_elements = []
         
@@ -2525,9 +2613,18 @@ class PDFToMarkdownConverter:
             raw_union_bbox = (raw_x0, raw_y0, raw_x1, raw_y1)
             raw_area = (raw_x1 - raw_x0) * (raw_y1 - raw_y0)
             
-            # ヘッダー/フッター領域内のクラスタを除外（完全包含のみ）
-            is_in_header = header_y_max is not None and raw_y1 <= header_y_max
-            is_in_footer = footer_y_min is not None and raw_y0 >= footer_y_min
+            # ヘッダー/フッター領域内のクラスタを除外
+            # ヘッダー: クラスタの上端がヘッダー領域内、または大部分がヘッダー領域内
+            # フッター: クラスタの下端がフッター領域内、または大部分がフッター領域内
+            cluster_height = raw_y1 - raw_y0
+            is_in_header = False
+            is_in_footer = False
+            if header_y_max is not None:
+                overlap_with_header = max(0, min(raw_y1, header_y_max) - raw_y0)
+                is_in_header = overlap_with_header > cluster_height * 0.5 or raw_y0 < header_y_max * 0.5
+            if footer_y_min is not None:
+                overlap_with_footer = max(0, raw_y1 - max(raw_y0, footer_y_min))
+                is_in_footer = overlap_with_footer > cluster_height * 0.5 or raw_y1 > footer_y_min + (page_height - footer_y_min) * 0.5
             if is_in_header or is_in_footer:
                 region = "ヘッダー" if is_in_header else "フッター"
                 debug_print(f"[DEBUG] page={page_num+1}: {region}領域内のクラスタを除外 bbox=({raw_x0:.1f}, {raw_y0:.1f}, {raw_x1:.1f}, {raw_y1:.1f})")
