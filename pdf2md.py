@@ -1694,24 +1694,25 @@ class PDFToMarkdownConverter:
         import re
         text = text.strip()
         
-        # 長すぎる行は見出しではない
+        # 「第N条」形式の見出しパターン（先に判定、本文が続いていても対応）
+        # 「第1条（借入要項）」「第10 条（充当の指定）」など
+        # 数字と「条」の間にスペースがある場合も対応
+        article_match = re.match(
+            r'^(第[0-9０-９一二三四五六七八九十百]+\s*条[　 ]*[（(][^）)]+[）)])',
+            text
+        )
+        if article_match:
+            heading_text = article_match.group(1).strip()
+            # 「第N条」形式は見出しレベル3として扱う
+            return (True, 3, heading_text)
+        
+        # 長すぎる行は見出しではない（「第N条」以外のパターン用）
         if len(text) > 50:
             return (False, 0, "")
         
         # 末尾が句点で終わる場合は見出しではない
         if text.endswith("。") or text.endswith("．"):
             return (False, 0, "")
-        
-        # 「第N条」形式の見出しパターン
-        # 「第1条（借入要項）」「第１条（借入要項）」「第一条（借入要項）」など
-        article_match = re.match(
-            r'^第([0-9０-９一二三四五六七八九十百]+)条[　 ]*[（(]?(.+?)[）)]?$',
-            text
-        )
-        if article_match:
-            title_part = article_match.group(2).strip() if article_match.group(2) else ""
-            # 「第N条」形式は見出しレベル3として扱う
-            return (True, 3, text)
         
         # 「N．タイトル」形式の見出しパターン（例: 「１．固定金利型の利率変更」）
         # サブ番号形式（「3.1　タイトル」）は除外するため、ドットの後に数字が続かないことを確認
