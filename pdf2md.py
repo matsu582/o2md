@@ -302,7 +302,8 @@ class PDFToMarkdownConverter:
         
         # 先にベクタ描画（図）を検出して、その領域を取得
         # 図領域内のテキストは本文から除外するため
-        vector_figures = self._extract_vector_figures(page, page_num)
+        # ヘッダー/フッター領域内の装飾要素を除外するためにpatternsを渡す
+        vector_figures = self._extract_vector_figures(page, page_num, header_footer_patterns)
         figure_bboxes = [fig["bbox"] for fig in vector_figures]
         
         # テキストベースのPDFかどうかを判定（図領域を除外）
@@ -1965,23 +1966,85 @@ class PDFToMarkdownConverter:
         
         return []
     
-    def _extract_all_figures(self, page, page_num: int) -> List[Dict[str, Any]]:
+    def _extract_all_figures(
+        self, page, page_num: int, header_footer_patterns: Set[str] = None
+    ) -> List[Dict[str, Any]]:
         """ベクター図形と埋め込み画像を統合して図を抽出
         
         ベクター描画と埋め込み画像を統合してクラスタリングし、
         クラスタリング後にカラム判定を行う（先にクラスタリング、後でカラム判定）。
+        ヘッダー/フッター領域内の図クラスタは除外する。
         
         Args:
             page: PyMuPDFのページオブジェクト
             page_num: ページ番号
+            header_footer_patterns: ヘッダ・フッタパターンのセット
             
         Returns:
             抽出された図の情報リスト
         """
+        if header_footer_patterns is None:
+            header_footer_patterns = set()
+        
         figures = []
         page_width = page.rect.width
+        page_height = page.rect.height
         gutter_x = page_width / 2
         gutter_margin = 10.0  # ガター跨ぎ判定のマージン
+        
+        # ヘッダー/フッター領域のY座標境界を動的に計算
+        header_y_max = None
+        footer_y_min = None
+        
+        if header_footer_patterns:
+            try:
+                text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+                header_lines_y = []
+                footer_lines_y = []
+                
+                for block in text_dict.get("blocks", []):
+                    if block.get("type") != 0:
+                        continue
+                    
+                    for line in block.get("lines", []):
+                        line_text = ""
+                        for span in line.get("spans", []):
+                            line_text += span.get("text", "")
+                        
+                        line_text = line_text.strip()
+                        if not line_text:
+                            continue
+                        
+                        line_bbox = line.get("bbox", (0, 0, 0, 0))
+                        y_center = (line_bbox[1] + line_bbox[3]) / 2
+                        
+                        # 既存の_is_header_footer関数でヘッダー/フッター判定
+                        if self._is_header_footer(
+                            line_text, header_footer_patterns,
+                            y_pos=line_bbox[1], page_height=page_height
+                        ):
+                            # ページ中央より上ならヘッダー、下ならフッター
+                            if y_center < page_height / 2:
+                                header_lines_y.append(line_bbox[3])
+                            else:
+                                footer_lines_y.append(line_bbox[1])
+                
+                # ヘッダー/フッター領域の境界を決定
+                # ヘッダー: テキスト下端+マージン、またはページ上端から8%の大きい方
+                # フッター: テキスト上端-マージン、またはページ下端から8%の小さい方
+                if header_lines_y:
+                    text_based_y = max(header_lines_y) + 15.0
+                    position_based_y = page_height * 0.08
+                    header_y_max = max(text_based_y, position_based_y)
+                    debug_print(f"[DEBUG] page={page_num+1}: ヘッダー領域検出 y_max={header_y_max:.1f} (text={text_based_y:.1f}, pos={position_based_y:.1f})")
+                if footer_lines_y:
+                    text_based_y = min(footer_lines_y) - 15.0
+                    position_based_y = page_height * 0.92
+                    footer_y_min = min(text_based_y, position_based_y)
+                    debug_print(f"[DEBUG] page={page_num+1}: フッター領域検出 y_min={footer_y_min:.1f} (text={text_based_y:.1f}, pos={position_based_y:.1f})")
+                    
+            except Exception as e:
+                debug_print(f"[DEBUG] ヘッダー/フッター領域計算エラー: {e}")
         
         # 要素タイプ（drawing/image）を保持するリスト
         all_elements = []
@@ -2122,6 +2185,14 @@ class PDFToMarkdownConverter:
             raw_y1 = max(b[3] for b in cluster_bboxes)
             raw_union_bbox = (raw_x0, raw_y0, raw_x1, raw_y1)
             raw_area = (raw_x1 - raw_x0) * (raw_y1 - raw_y0)
+            
+            # ヘッダー/フッター領域内のクラスタを除外（完全包含のみ）
+            is_in_header = header_y_max is not None and raw_y1 <= header_y_max
+            is_in_footer = footer_y_min is not None and raw_y0 >= footer_y_min
+            if is_in_header or is_in_footer:
+                region = "ヘッダー" if is_in_header else "フッター"
+                debug_print(f"[DEBUG] page={page_num+1}: {region}領域内のクラスタを除外 bbox=({raw_x0:.1f}, {raw_y0:.1f}, {raw_x1:.1f}, {raw_y1:.1f})")
+                continue
             
             # 埋め込み画像判定: クラスタがimageのみで構成され、小面積の場合
             is_image_only = all(t == "image" for t in cluster_types)
@@ -2785,17 +2856,20 @@ class PDFToMarkdownConverter:
         figures.sort(key=lambda x: x["y_position"])
         return figures
     
-    def _extract_vector_figures(self, page, page_num: int) -> List[Dict[str, Any]]:
+    def _extract_vector_figures(
+        self, page, page_num: int, header_footer_patterns: Set[str] = None
+    ) -> List[Dict[str, Any]]:
         """ベクタ描画（図）を抽出（統合版を使用）
         
         Args:
             page: PyMuPDFのページオブジェクト
             page_num: ページ番号
+            header_footer_patterns: ヘッダ・フッタパターンのセット
             
         Returns:
             抽出された図の情報リスト
         """
-        return self._extract_all_figures(page, page_num)
+        return self._extract_all_figures(page, page_num, header_footer_patterns)
     
     def _extract_text_in_bbox(
         self, page, bbox: Tuple[float, float, float, float],
