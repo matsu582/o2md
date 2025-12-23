@@ -1019,8 +1019,14 @@ class PDFToMarkdownConverter:
         if not full_lines:
             return left_lines + right_lines
         
+        # 左右カラムがない場合（1段組み）は単純にY座標でソート
+        # 区間処理をスキップして重複を防ぐ
+        if not left_lines and not right_lines:
+            return full_lines
+        
         # フル幅行を基準に区間を作成
         result = []
+        added_indices = set()  # 追加済みの行インデックスを追跡
         full_y_positions = [l["y"] for l in full_lines]
         full_y_positions = [-float('inf')] + full_y_positions + [float('inf')]
         
@@ -1028,11 +1034,12 @@ class PDFToMarkdownConverter:
             y_start = full_y_positions[i]
             y_end = full_y_positions[i + 1]
             
-            # この区間のフル幅行を追加
+            # この区間のフル幅行を追加（重複チェック付き）
             if i > 0:
-                for fl in full_lines:
-                    if abs(fl["y"] - y_start) < 1:
+                for idx, fl in enumerate(full_lines):
+                    if idx not in added_indices and abs(fl["y"] - y_start) < 1:
                         result.append(fl)
+                        added_indices.add(idx)
             
             # この区間の左カラム行を追加
             for ll in left_lines:
@@ -1044,11 +1051,11 @@ class PDFToMarkdownConverter:
                 if y_start < rl["y"] < y_end:
                     result.append(rl)
         
-        # 最後のフル幅行を追加
+        # 最後のフル幅行を追加（まだ追加されていない場合）
         if full_lines:
-            last_full = full_lines[-1]
-            if last_full not in result:
-                result.append(last_full)
+            last_idx = len(full_lines) - 1
+            if last_idx not in added_indices:
+                result.append(full_lines[last_idx])
         
         return result
     
@@ -2473,6 +2480,21 @@ class PDFToMarkdownConverter:
             footer_y_min = self._doc_footer_y_min
             debug_print(f"[DEBUG] page={page_num+1}: doc-wideフッター領域をフォールバック適用 y_min={footer_y_min:.1f}")
         
+        # 外れ値ガード: ページ個別のヘッダー/フッター領域がdoc-wide値から大きく外れている場合、
+        # doc-wide値にフォールバックする（目次ページなどで異常に大きな領域が検出されるのを防ぐ）
+        # 閾値: doc-wide値の3倍を超える場合は外れ値とみなす
+        if header_y_max is not None and self._doc_header_y_max is not None:
+            if header_y_max > self._doc_header_y_max * 3.0:
+                debug_print(f"[DEBUG] page={page_num+1}: ヘッダー領域が外れ値 ({header_y_max:.1f} > {self._doc_header_y_max * 3.0:.1f})、doc-wide値にフォールバック")
+                header_y_max = self._doc_header_y_max
+        if footer_y_min is not None and self._doc_footer_y_min is not None:
+            # フッターは下端からの距離で比較（page_height - footer_y_min）
+            page_footer_dist = page_height - footer_y_min
+            doc_footer_dist = page_height - self._doc_footer_y_min
+            if page_footer_dist > doc_footer_dist * 3.0:
+                debug_print(f"[DEBUG] page={page_num+1}: フッター領域が外れ値、doc-wide値にフォールバック")
+                footer_y_min = self._doc_footer_y_min
+        
         # 要素タイプ（drawing/image）を保持するリスト
         all_elements = []
         
@@ -2504,8 +2526,39 @@ class PDFToMarkdownConverter:
         # 互換性のためにall_bboxesも作成
         all_bboxes = [e["bbox"] for e in all_elements]
         
-        if len(all_bboxes) < 2:
+        # 要素がない場合は早期リターン
+        if len(all_bboxes) == 0:
             return []
+        
+        # 単独の大きな画像も図として抽出するため、要素が1個の場合は特別処理
+        # （クラスタリングは2個以上必要だが、単独の大きな画像は図として有効）
+        single_image_candidate = None
+        if len(all_bboxes) == 1:
+            bbox = all_bboxes[0]
+            area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+            # 単独要素は面積が十分大きい場合のみ図として扱う（最小10000ピクセル^2）
+            if area >= 10000:
+                # ヘッダー/フッター領域内の場合は除外
+                in_header = header_y_max is not None and bbox[3] < header_y_max
+                in_footer = footer_y_min is not None and bbox[1] > footer_y_min
+                if not in_header and not in_footer:
+                    # 単独画像を候補として保存（後で通常の処理フローに乗せる）
+                    col = "full" if (bbox[2] - bbox[0]) > page_width * 0.5 else ("left" if (bbox[0] + bbox[2]) / 2 < page_width / 2 else "right")
+                    single_image_candidate = {
+                        "union_bbox": bbox,
+                        "raw_union_bbox": bbox,
+                        "column": col,
+                        "cluster_size": 1,
+                        "is_embedded": all_elements[0]["type"] == "image",
+                    }
+                    debug_print(f"[DEBUG] page={page_num+1}: 単独画像を候補として追加 bbox={bbox}, area={area:.1f}")
+                else:
+                    if in_header:
+                        debug_print(f"[DEBUG] page={page_num+1}: 単独画像がヘッダー領域内のため除外")
+                    if in_footer:
+                        debug_print(f"[DEBUG] page={page_num+1}: 単独画像がフッター領域内のため除外")
+            else:
+                debug_print(f"[DEBUG] page={page_num+1}: 単独画像が小さすぎるため除外 area={area:.1f}")
         
         def get_column_for_union_bbox(bbox):
             """クラスタのunion_bboxからカラムを判定（ガター跨ぎを優先）"""
@@ -2677,6 +2730,11 @@ class PDFToMarkdownConverter:
                 filtered_candidates.append(cand)
         
         all_figure_candidates = filtered_candidates
+        
+        # 単独画像候補がある場合は追加（要素が1個の場合の特別処理）
+        if single_image_candidate is not None:
+            all_figure_candidates.append(single_image_candidate)
+            debug_print(f"[DEBUG] page={page_num+1}: 単独画像候補をall_figure_candidatesに追加")
         
         # 表領域を検出して図候補から除外
         # 表は罫線（ベクター描画）として認識されるため、図として出力されてしまう問題を防ぐ
