@@ -474,6 +474,10 @@ class PDFToMarkdownConverter:
         page_height = text_dict.get("height", 792)
         page_center = page_width / 2
         
+        # 段組み判定（1段組みの場合は全行をfullにする）
+        column_count = self._detect_column_layout(text_dict)
+        is_single_column = (column_count == 1)
+        
         # 行単位でテキストを収集（span情報も保持）
         lines_data = []
         font_sizes = []
@@ -578,7 +582,10 @@ class PDFToMarkdownConverter:
                 x_center = (line_bbox[0] + line_bbox[2]) / 2
                 
                 # カラム判定: フル幅、左カラム、右カラム
-                if line_width > page_width * 0.6:
+                # 1段組みページでは全行をfullにして、誤った段落分割を防ぐ
+                if is_single_column:
+                    column = "full"
+                elif line_width > page_width * 0.6:
                     column = "full"
                 elif x_center < page_center:
                     column = "left"
@@ -1562,8 +1569,9 @@ class PDFToMarkdownConverter:
             return (True, 3, text)
         
         # 「N．タイトル」形式の見出しパターン（例: 「１．固定金利型の利率変更」）
+        # サブ番号形式（「3.1　タイトル」）は除外するため、ドットの後に数字が続かないことを確認
         numbered_dot_match = re.match(
-            r'^([0-9０-９]+)[．.][　 ]*(.{2,40})$',
+            r'^([0-9０-９]+)[．.][　 ]*([^0-9０-９].{1,39})$',
             text
         )
         if numbered_dot_match:
@@ -1574,9 +1582,10 @@ class PDFToMarkdownConverter:
             if first_char not in excluded_chars:
                 return (True, 3, text)
         
-        # 番号付き見出しパターン: 「1　はじめに」「2.1　概要」など
-        # 数字 + (ドット + 数字)* + 全角/半角スペース + タイトル
-        match = re.match(r'^(\d+(?:[\.．]\d+)*)\s*[　 ]+(.{1,40})$', text)
+        # 番号付き見出しパターン: 「1　はじめに」など
+        # 数字 + 全角/半角スペース + タイトル（サブ番号「2.1」形式は除外）
+        # サブ番号形式は親番号が存在しない場合に不自然なため、フォントサイズ判定に委ねる
+        match = re.match(r'^(\d+)\s*[　 ]+(.{1,40})$', text)
         if match:
             number_part = match.group(1)
             title_part = match.group(2).strip()
@@ -1592,10 +1601,8 @@ class PDFToMarkdownConverter:
             if first_char in excluded_chars:
                 return (False, 0, "")
             
-            # 見出しレベルを決定（ドットの数 + 1）
-            level = number_part.count('.') + number_part.count('．') + 1
-            
-            return (True, level, title_part)
+            # 親番号のみの場合は見出しレベル2として扱う
+            return (True, 2, title_part)
         
         return (False, 0, "")
     
