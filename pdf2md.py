@@ -678,7 +678,97 @@ class PDFToMarkdownConverter:
                 block["column"] = block_data["column"]
             blocks.append(block)
         
+        # 番号付きリストの継続行を結合する後処理
+        blocks = self._merge_list_continuations(blocks)
+        
         return blocks
+    
+    def _merge_list_continuations(
+        self, blocks: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """番号付きリストの継続行を前のリスト項目に結合
+        
+        list_itemの直後にparagraphが来て、かつ以下の条件を満たす場合に結合:
+        - 左端差（ハングインデント）が5〜60pxの範囲
+        - 縦gap（行間）が15px以下
+        - 前のlist_itemが句点（。）で終わらない
+        
+        Args:
+            blocks: ブロックのリスト
+            
+        Returns:
+            結合後のブロックのリスト
+        """
+        if len(blocks) < 2:
+            return blocks
+        
+        merged = []
+        skip_next = False
+        
+        for i, block in enumerate(blocks):
+            if skip_next:
+                skip_next = False
+                continue
+            
+            # 最後のブロックはそのまま追加
+            if i >= len(blocks) - 1:
+                merged.append(block)
+                continue
+            
+            next_block = blocks[i + 1]
+            
+            # list_item -> paragraph のパターンを検出
+            if (block.get("type") == "list_item" and 
+                next_block.get("type") == "paragraph"):
+                
+                curr_bbox = block.get("bbox", (0, 0, 0, 0))
+                next_bbox = next_block.get("bbox", (0, 0, 0, 0))
+                
+                # 左端差（ハングインデント）を計算
+                delta_x = next_bbox[0] - curr_bbox[0]
+                # 縦gap（行間）を計算
+                gap_y = next_bbox[1] - curr_bbox[3]
+                
+                # 前のlist_itemの末尾文字を取得
+                curr_text = block.get("text", "")
+                ends_with_period = curr_text.rstrip().endswith("。")
+                
+                # 結合条件: ハングインデント範囲内、行間が近い、句点で終わらない
+                should_merge = (
+                    5 <= delta_x <= 60 and
+                    gap_y <= 15 and
+                    not ends_with_period
+                )
+                
+                if should_merge:
+                    # テキストを結合（日本語なのでスペースなしで連結）
+                    merged_text = curr_text.rstrip() + next_block.get("text", "").lstrip()
+                    # bboxを拡張
+                    merged_bbox = (
+                        min(curr_bbox[0], next_bbox[0]),
+                        curr_bbox[1],
+                        max(curr_bbox[2], next_bbox[2]),
+                        next_bbox[3]
+                    )
+                    merged_block = {
+                        "type": "list_item",
+                        "text": merged_text,
+                        "font_size": block.get("font_size", 0),
+                        "bbox": merged_bbox
+                    }
+                    if "column" in block:
+                        merged_block["column"] = block["column"]
+                    merged.append(merged_block)
+                    skip_next = True
+                    continue
+            
+            merged.append(block)
+        
+        # 再帰的に結合（複数の継続行がある場合）
+        if len(merged) < len(blocks):
+            return self._merge_list_continuations(merged)
+        
+        return merged
     
     def _merge_superscript_lines(
         self, lines_data: List[Dict], base_font_size: float
