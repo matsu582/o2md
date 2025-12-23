@@ -340,8 +340,7 @@ class PDFToMarkdownConverter:
                         self.markdown_lines.append(line.strip())
                 self.markdown_lines.append("")
         
-        # ページ区切り
-        self.markdown_lines.append("---")
+        # ページ区切りは出力しない（連続した文章の分断を防ぐため）
         self.markdown_lines.append("")
     
     def _extract_structured_text(self, page) -> List[Dict[str, Any]]:
@@ -545,6 +544,17 @@ class PDFToMarkdownConverter:
                     y_pos=line_bbox[1], page_height=page_height, font_size=line_font_size
                 ):
                     debug_print(f"[DEBUG] ヘッダ・フッタ除外: {line_text.strip()[:30]}...")
+                    continue
+                
+                # 視覚的に見えないテキストを除外
+                # ページ中央付近の単独数字（装飾的な要素）を除外
+                line_text_stripped = line_text.strip()
+                line_center_x = (line_bbox[0] + line_bbox[2]) / 2
+                relative_x = line_center_x / page_width
+                is_centered = 0.4 < relative_x < 0.6
+                is_single_digit = re.match(r'^[0-9０-９]$', line_text_stripped)
+                if is_centered and is_single_digit:
+                    debug_print(f"[DEBUG] 装飾的テキスト除外: '{line_text_stripped}' at x={line_center_x:.1f}")
                     continue
                 
                 # 図領域内のテキストを除外（中心点が図領域内にある場合）
@@ -855,7 +865,9 @@ class PDFToMarkdownConverter:
         
         # 行高の推定（フォントサイズの1.2倍程度）
         line_height = base_font_size * 1.2
-        gap_threshold = line_height * 0.8  # 結合する最大ギャップ
+        # 結合する最大ギャップ
+        # 閾値を大きくしすぎると段落が過剰に結合されるため、0.8倍に設定
+        gap_threshold = line_height * 0.8
         
         blocks = []
         current_block = {
@@ -1375,8 +1387,8 @@ class PDFToMarkdownConverter:
     def _convert_numbered_bullets(self, text: str) -> str:
         """番号付き箇条書きを検出してMarkdownリスト形式に変換
         
-        ①②③④などの丸数字や、1. 2. 3.などの番号付きマーカーを検出し、
-        Markdownの番号付きリスト形式に変換する。
+        行頭の丸数字（①②③など）のみをMarkdownの番号付きリスト形式に変換する。
+        本文中の参照（「前記①により」など）は変換しない。
         
         Args:
             text: 入力テキスト
@@ -1386,46 +1398,34 @@ class PDFToMarkdownConverter:
         """
         import re
         
-        # 丸数字のパターン（①〜⑳）
-        circled_pattern = r'([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])'
+        # 丸数字を番号に変換するマッピング
+        circled_to_num = {
+            '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5',
+            '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10',
+            '⑪': '11', '⑫': '12', '⑬': '13', '⑭': '14', '⑮': '15',
+            '⑯': '16', '⑰': '17', '⑱': '18', '⑲': '19', '⑳': '20'
+        }
         
-        # 丸数字が2つ以上含まれているか確認
-        circled_matches = re.findall(circled_pattern, text)
-        if len(circled_matches) >= 2:
-            # 丸数字を番号に変換するマッピング
-            circled_to_num = {
-                '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5',
-                '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10',
-                '⑪': '11', '⑫': '12', '⑬': '13', '⑭': '14', '⑮': '15',
-                '⑯': '16', '⑰': '17', '⑱': '18', '⑲': '19', '⑳': '20'
-            }
-            
-            # 丸数字で分割
-            parts = re.split(circled_pattern, text)
-            
-            # 結果を構築
-            result_lines = []
-            current_num = None
-            current_text = ""
-            
-            for part in parts:
-                if part in circled_to_num:
-                    # 前の項目を保存
-                    if current_num is not None and current_text.strip():
-                        result_lines.append(f"{current_num}. {current_text.strip()}")
-                    current_num = circled_to_num[part]
-                    current_text = ""
-                else:
-                    current_text += part
-            
-            # 最後の項目を保存
-            if current_num is not None and current_text.strip():
-                result_lines.append(f"{current_num}. {current_text.strip()}")
-            
-            if result_lines:
-                return "\n".join(result_lines)
+        # 行頭の丸数字パターン（行頭または改行直後の丸数字のみ）
+        # 丸数字の後にスペースまたは本文が続く場合のみマッチ
+        line_start_pattern = re.compile(
+            r'^([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])(\s*)(.*)$',
+            re.MULTILINE
+        )
         
-        return text
+        def replace_line_start(match):
+            """行頭の丸数字を番号付きリストに変換"""
+            circled = match.group(1)
+            space = match.group(2)
+            rest = match.group(3)
+            num = circled_to_num.get(circled, circled)
+            # スペースがない場合は追加
+            if not space:
+                space = ' '
+            return f"{num}.{space}{rest}"
+        
+        # 行頭の丸数字のみを変換（本文中の参照はそのまま）
+        return line_start_pattern.sub(replace_line_start, text)
     
     def _detect_table_regions(
         self, lines_data: List[Dict], page_center: float
@@ -1531,7 +1531,7 @@ class PDFToMarkdownConverter:
     def _is_numbered_heading(self, text: str) -> Tuple[bool, int, str]:
         """番号付き見出しかどうかを判定
         
-        「1　はじめに」「2.1　概要」などのパターンを検出する。
+        「1　はじめに」「2.1　概要」「第1条（借入要項）」などのパターンを検出する。
         
         Args:
             text: 判定するテキスト
@@ -1549,6 +1549,30 @@ class PDFToMarkdownConverter:
         # 末尾が句点で終わる場合は見出しではない
         if text.endswith("。") or text.endswith("．"):
             return (False, 0, "")
+        
+        # 「第N条」形式の見出しパターン
+        # 「第1条（借入要項）」「第１条（借入要項）」「第一条（借入要項）」など
+        article_match = re.match(
+            r'^第([0-9０-９一二三四五六七八九十百]+)条[　 ]*[（(]?(.+?)[）)]?$',
+            text
+        )
+        if article_match:
+            title_part = article_match.group(2).strip() if article_match.group(2) else ""
+            # 「第N条」形式は見出しレベル3として扱う
+            return (True, 3, text)
+        
+        # 「N．タイトル」形式の見出しパターン（例: 「１．固定金利型の利率変更」）
+        numbered_dot_match = re.match(
+            r'^([0-9０-９]+)[．.][　 ]*(.{2,40})$',
+            text
+        )
+        if numbered_dot_match:
+            title_part = numbered_dot_match.group(2).strip()
+            # タイトル部分が単位で始まる場合は除外
+            first_char = title_part[0] if title_part else ""
+            excluded_chars = '年月日倍個回分秒時点番号件台人円万億兆'
+            if first_char not in excluded_chars:
+                return (True, 3, text)
         
         # 番号付き見出しパターン: 「1　はじめに」「2.1　概要」など
         # 数字 + (ドット + 数字)* + 全角/半角スペース + タイトル
@@ -1617,6 +1641,8 @@ class PDFToMarkdownConverter:
         
         # 行高の推定（フォントサイズの1.2倍程度）
         line_height = base_font_size * 1.2
+        # 結合する最大ギャップ
+        # 閾値を大きくしすぎると段落が過剰に結合されるため、0.8倍に設定
         gap_threshold = line_height * 0.8
         
         blocks = []
