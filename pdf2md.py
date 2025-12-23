@@ -861,9 +861,10 @@ class PDFToMarkdownConverter:
         if not lines:
             return []
         
-        # 番号付き箇条書きパターン
+        # 番号付き箇条書きパターン（全角数字も含む）
+        # 小数（例: 14.0%）を誤認識しないよう、区切り記号の後に数字が続かないことを確認
         numbered_list_pattern = re.compile(
-            r'^[\s]*(\d+[.)．]\s|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])'
+            r'^[\s]*([0-9０-９]+[.)．）](?=\s*[^0-9０-９])|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])'
         )
         
         def is_numbered_list_line(text: str) -> bool:
@@ -1311,9 +1312,10 @@ class PDFToMarkdownConverter:
         if not formatted_lines:
             return ""
         
-        # 番号付き箇条書きパターン（行頭の数字+区切り+空白）
-        # 例: "1. ", "2) ", "1．", "①", "②"
-        numbered_pattern = re.compile(r'^[\s]*(\d+[.)．]\s|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])')
+        # 番号付き箇条書きパターン（行頭の数字+区切り+空白、全角数字も含む）
+        # 例: "1. ", "2) ", "1．", "１．", "①", "②"
+        # 小数（例: 14.0%）を誤認識しないよう、区切り記号の後に数字が続かないことを確認
+        numbered_pattern = re.compile(r'^[\s]*([0-9０-９]+[.)．）](?=\s*[^0-9０-９])|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])')
         
         # 各行が番号付き箇条書きかどうかを判定
         is_list_item = []
@@ -1394,8 +1396,10 @@ class PDFToMarkdownConverter:
     def _convert_numbered_bullets(self, text: str) -> str:
         """番号付き箇条書きを検出してMarkdownリスト形式に変換
         
-        行頭の丸数字（①②③など）のみをMarkdownの番号付きリスト形式に変換する。
+        行頭の丸数字（①②③など）および全角番号（１．２．など）を
+        Markdownの番号付きリスト形式に変換する。
         本文中の参照（「前記①により」など）は変換しない。
+        小数（例: 14.0%）は変換しない。
         
         Args:
             text: 入力テキスト
@@ -1413,26 +1417,54 @@ class PDFToMarkdownConverter:
             '⑯': '16', '⑰': '17', '⑱': '18', '⑲': '19', '⑳': '20'
         }
         
+        # 全角数字を半角数字に変換するマッピング
+        fullwidth_to_halfwidth = {
+            '０': '0', '１': '1', '２': '2', '３': '3', '４': '4',
+            '５': '5', '６': '6', '７': '7', '８': '8', '９': '9'
+        }
+        
         # 行頭の丸数字パターン（行頭または改行直後の丸数字のみ）
-        # 丸数字の後にスペースまたは本文が続く場合のみマッチ
-        line_start_pattern = re.compile(
+        circled_pattern = re.compile(
             r'^([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])(\s*)(.*)$',
             re.MULTILINE
         )
         
-        def replace_line_start(match):
+        def replace_circled(match):
             """行頭の丸数字を番号付きリストに変換"""
             circled = match.group(1)
             space = match.group(2)
             rest = match.group(3)
             num = circled_to_num.get(circled, circled)
-            # スペースがない場合は追加
             if not space:
                 space = ' '
             return f"{num}.{space}{rest}"
         
-        # 行頭の丸数字のみを変換（本文中の参照はそのまま）
-        return line_start_pattern.sub(replace_line_start, text)
+        # 行頭の全角番号パターン（例: 「１．借主は...」）
+        # 小数を除外するため、区切り記号の後に数字が続かないことを確認
+        fullwidth_pattern = re.compile(
+            r'^([０-９]+)[．.)）](\s*)([^0-9０-９].*)$',
+            re.MULTILINE
+        )
+        
+        def replace_fullwidth(match):
+            """行頭の全角番号を番号付きリストに変換"""
+            fullwidth_num = match.group(1)
+            space = match.group(2)
+            rest = match.group(3)
+            # 全角数字を半角に変換
+            halfwidth_num = ''.join(
+                fullwidth_to_halfwidth.get(c, c) for c in fullwidth_num
+            )
+            if not space:
+                space = ' '
+            return f"{halfwidth_num}.{space}{rest}"
+        
+        # 行頭の丸数字を変換
+        result = circled_pattern.sub(replace_circled, text)
+        # 行頭の全角番号を変換
+        result = fullwidth_pattern.sub(replace_fullwidth, result)
+        
+        return result
     
     def _detect_table_regions(
         self, lines_data: List[Dict], page_center: float
@@ -1629,9 +1661,10 @@ class PDFToMarkdownConverter:
         if not lines:
             return []
         
-        # 番号付き箇条書きパターン
+        # 番号付き箇条書きパターン（全角数字も含む）
+        # 小数（例: 14.0%）を誤認識しないよう、区切り記号の後に数字が続かないことを確認
         numbered_list_pattern = re.compile(
-            r'^[\s]*(\d+[.)．]\s|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])'
+            r'^[\s]*([0-9０-９]+[.)．）](?=\s*[^0-9０-９])|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])'
         )
         
         def is_numbered_list_line(text: str) -> bool:
