@@ -396,6 +396,51 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         return False
     
+    def _is_scan_page(self, page, text_blocks: list, vector_figures: list) -> bool:
+        """スキャンページ（画像ベースPDF）かどうかを判定
+        
+        以下の条件を満たす場合にスキャンページと判定:
+        - テキストブロックが空
+        - 図が1つだけ
+        - その図がページの大部分（80%以上）を覆っている
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            text_blocks: 抽出されたテキストブロック
+            vector_figures: 抽出された図のリスト
+            
+        Returns:
+            スキャンページの場合True
+        """
+        # テキストブロックがある場合はスキャンページではない
+        if text_blocks:
+            return False
+        
+        # 図が1つだけの場合のみチェック
+        if len(vector_figures) != 1:
+            return False
+        
+        # ページサイズを取得
+        page_rect = page.rect
+        page_width = page_rect.width
+        page_height = page_rect.height
+        page_area = page_width * page_height
+        
+        # 図のbboxを取得
+        fig_bbox = vector_figures[0].get("bbox", (0, 0, 0, 0))
+        fig_width = fig_bbox[2] - fig_bbox[0]
+        fig_height = fig_bbox[3] - fig_bbox[1]
+        fig_area = fig_width * fig_height
+        
+        # 図がページの80%以上を覆っている場合はスキャンページ
+        coverage_ratio = fig_area / page_area if page_area > 0 else 0
+        
+        if coverage_ratio >= 0.8:
+            debug_print(f"[DEBUG] スキャンページ検出: 図の面積比={coverage_ratio:.2%}")
+            return True
+        
+        return False
+    
     def _convert_page(self, page, page_num: int, header_footer_patterns: Set[str] = None):
         """PDFページを変換
         
@@ -418,7 +463,31 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             page, header_footer_patterns, exclude_bboxes=figure_bboxes
         )
         
-        if text_blocks or vector_figures:
+        # スキャンページ（画像ベースPDF）かどうかを判定
+        is_scan = self._is_scan_page(page, text_blocks, vector_figures)
+        
+        if is_scan:
+            # スキャンページ: 図の画像を出力し、OCRでテキスト抽出
+            debug_print(f"[DEBUG] ページ {page_num + 1}: スキャンページとして処理（OCR実行）")
+            
+            # 図の画像を出力
+            if vector_figures:
+                fig = vector_figures[0]
+                image_filename = fig.get("filename", "")
+                if image_filename:
+                    self.markdown_lines.append(f"![ページ {page_num + 1}](images/{image_filename})")
+                    self.markdown_lines.append("")
+            
+            # OCRでテキスト抽出
+            ocr_text = self._ocr_page(page)
+            if ocr_text and ocr_text.strip() and ocr_text != "(OCR利用不可)":
+                self.markdown_lines.append("### 抽出テキスト（OCR）")
+                self.markdown_lines.append("")
+                for line in ocr_text.strip().split('\n'):
+                    if line.strip():
+                        self.markdown_lines.append(line.strip())
+                self.markdown_lines.append("")
+        elif text_blocks or vector_figures:
             # テキストベースのPDF: 構造化されたMarkdownを出力
             debug_print(f"[DEBUG] ページ {page_num + 1}: テキストベースPDFとして処理")
             
@@ -1467,8 +1536,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             return "(OCR利用不可)"
         
         try:
-            # ページを画像に変換
-            matrix = fitz.Matrix(2.0, 2.0)
+            # ページを画像に変換（300dpi相当: 300/72 ≈ 4.17）
+            scale = 300 / 72
+            matrix = fitz.Matrix(scale, scale)
             pix = page.get_pixmap(matrix=matrix)
             
             # PILイメージに変換
