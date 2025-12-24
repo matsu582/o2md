@@ -2424,17 +2424,50 @@ class PDFToMarkdownConverter:
                         blocks.append(self._finalize_block(current_block))
                         current_block = None
                     
+                    # 見出しの継続行をマージ
+                    # 見出しが列幅いっぱいで折り返している場合、次の行を結合
+                    merged_heading_text = heading_text
+                    merged_bbox = list(line["bbox"])
+                    j = i + 1
+                    while j < len(lines):
+                        next_line = lines[j]
+                        # 継続行の条件:
+                        # 1. 同じカラム
+                        # 2. Y方向のギャップが小さい（行高の1.5倍以内）
+                        # 3. フォントサイズが同等
+                        # 4. 次の行が番号付き見出しではない
+                        # 5. 次の行が短い（折り返しの続き）
+                        if next_line.get("column") != line.get("column"):
+                            break
+                        y_gap = next_line["y"] - merged_bbox[3]
+                        if y_gap > base_font_size * 1.5:
+                            break
+                        if abs(next_line["font_size"] - line["font_size"]) > 1:
+                            break
+                        next_is_heading, _, _ = self._is_numbered_heading(next_line["text"])
+                        if next_is_heading:
+                            break
+                        # 次の行が短い場合のみマージ（長い本文は除外）
+                        next_text = next_line["text"].strip()
+                        if len(next_text) > 30:
+                            break
+                        # マージ
+                        merged_heading_text += next_text
+                        merged_bbox[2] = max(merged_bbox[2], next_line["bbox"][2])
+                        merged_bbox[3] = next_line["bbox"][3]
+                        j += 1
+                    
                     # 見出しを単独ブロックとして追加（カラム情報も保持）
                     blocks.append({
-                        "text": heading_text,
-                        "bbox": tuple(line["bbox"]),
+                        "text": merged_heading_text,
+                        "bbox": tuple(merged_bbox),
                         "font_size": line["font_size"],
                         "is_bold": True,
                         "is_heading": True,
                         "heading_level": heading_level,
                         "column": line["column"]
                     })
-                    i += 1
+                    i = j
                     continue
             
             # 現在の行が番号付き箇条書きかどうか
@@ -4168,6 +4201,30 @@ class PDFToMarkdownConverter:
         
         # 見出しの検出（フォントサイズと太字に基づく）
         size_ratio = font_size / base_size if base_size > 0 else 1.0
+        
+        # 見出しから除外する条件（文らしさフィルタ）
+        def is_sentence_like(txt: str) -> bool:
+            """文らしいテキストかどうかを判定"""
+            # 句点で終わる場合は文として扱う（ただし短い場合は除外）
+            if len(txt) > 15 and txt.endswith(('.', '。', '．')):
+                return True
+            # 表/図キャプション形式は見出しではない
+            if re.match(r'^(図|表)\s*[\d０-９]+[\.\:．：]', txt):
+                return True
+            return False
+        
+        # 文らしいテキストは見出しにしない
+        if is_sentence_like(text_stripped):
+            return "paragraph"
+        
+        # 短いテキストは見出しにしない（継続行の可能性が高い）
+        # ただし、以下の場合は除外:
+        # - 番号付き見出し形式（「N.N」「第N章」など）
+        # - フォントサイズが非常に大きい場合（size_ratio >= 2.0）
+        if len(text_stripped) <= 10 and size_ratio < 2.0:
+            if not re.match(r'^[\d０-９]+[\.\s]', text_stripped):
+                if not re.match(r'^第[\d０-９一二三四五六七八九十]+\s*(章|節|条)', text_stripped):
+                    return "paragraph"
         
         if size_ratio >= 1.8 or (size_ratio >= 1.5 and is_bold):
             return "heading1"
