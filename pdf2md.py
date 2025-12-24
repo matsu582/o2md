@@ -127,6 +127,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         """manga-ocrインスタンスを取得（遅延初期化）"""
         if self._ocr is None:
             try:
+                # tokenizersのスレッドプール生成を抑止（終了時ハング対策）
+                os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+                
                 from manga_ocr import MangaOcr
                 self._ocr = MangaOcr()
                 print("[INFO] manga-ocrを初期化しました")

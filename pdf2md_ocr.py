@@ -8,6 +8,7 @@ manga-ocrで各領域のテキストを抽出します。
 
 import os
 import sys
+import time
 import urllib.request
 from typing import List, Tuple, Optional
 from pathlib import Path
@@ -19,6 +20,10 @@ from PIL import Image
 # モデルのダウンロードURL
 MODEL_URL = "https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx"
 MODEL_FILENAME = "comictextdetector.pt.onnx"
+MODEL_EXPECTED_SIZE = 99000000  # 約94.6MB、最小サイズとして99MBを期待
+
+# 最大検出領域数（これを超える場合はフォールバック）
+MAX_REGIONS = 100
 
 # グローバル変数
 _VERBOSE = False
@@ -345,6 +350,9 @@ class OCRProcessor:
         """manga-ocrインスタンスを遅延初期化"""
         if self._ocr is None:
             try:
+                # tokenizersのスレッドプール生成を抑止（終了時ハング対策）
+                os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+                
                 from manga_ocr import MangaOcr
                 self._ocr = MangaOcr()
                 debug_print("[INFO] manga-ocrを初期化しました")
