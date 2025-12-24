@@ -530,12 +530,12 @@ class TextDetectorOCR:
         return regions
     
     def get_combined_text(self, regions: List[TextRegion], 
-                          separator: str = "\n") -> str:
+                          separator: str = "\n\n") -> str:
         """テキスト領域のテキストを結合
         
         Args:
             regions: テキスト領域のリスト
-            separator: 区切り文字
+            separator: 区切り文字（デフォルトは空行で段落分割）
             
         Returns:
             結合されたテキスト
