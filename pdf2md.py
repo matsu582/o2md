@@ -720,12 +720,16 @@ class PDFToMarkdownConverter:
         # カラム内の表を検出（リフロー前に行う）
         table_regions = self._detect_table_regions(lines_data, page_center)
         
+        # 罫線ベースの表検出（find_tables()を使用）
+        # テキストベースの検出で見逃した表を補完する
+        line_based_tables = self._detect_line_based_tables(page, lines_data)
+        
         # カラムごとにソート（フル幅→左→右の順、各カラム内はY座標順）
         sorted_lines = self._sort_lines_by_column(lines_data)
         
         # 段落リフロー（同一カラム内で近接する行を結合、表領域は除外）
         reflowed_blocks = self._reflow_paragraphs_with_tables(
-            sorted_lines, base_font_size, table_regions
+            sorted_lines, base_font_size, table_regions, line_based_tables
         )
         
         # ブロックタイプを判定（カラム情報を保持）
@@ -2034,6 +2038,117 @@ class PDFToMarkdownConverter:
         
         return table_regions
     
+    def _detect_line_based_tables(
+        self, page, lines_data: List[Dict]
+    ) -> List[Dict]:
+        """罫線ベースの表検出（PyMuPDFのfind_tables()を使用）
+        
+        テキストベースの検出で見逃した表を補完する。
+        検出された表領域内のテキストを除外し、Markdownテーブルを生成する。
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            lines_data: 行データのリスト（表領域内の行を除外するために使用）
+            
+        Returns:
+            検出された表のリスト（各表は{bbox, markdown, y_start}を含む）
+        """
+        detected_tables = []
+        
+        try:
+            tables = page.find_tables()
+            if not tables.tables:
+                return []
+            
+            for table in tables.tables:
+                bbox = table.bbox
+                rows = table.extract()
+                
+                if not rows:
+                    continue
+                
+                # 列数を確認（最低2列以上）
+                col_count = len(rows[0]) if rows[0] else 0
+                if col_count < 2:
+                    continue
+                
+                # 各行を処理（改行を含むセルを処理）
+                # セル内に改行がある場合は、複数行に展開する
+                processed_rows = []
+                for row in rows:
+                    # 各セルの改行で分割した行数を取得
+                    cell_lines_list = []
+                    max_lines = 1
+                    for cell in row:
+                        if cell is None:
+                            cell_lines_list.append([""])
+                        else:
+                            lines = str(cell).split("\n")
+                            cell_lines_list.append([l.strip() for l in lines])
+                            max_lines = max(max_lines, len(lines))
+                    
+                    # 複数行に展開
+                    for line_idx in range(max_lines):
+                        expanded_row = []
+                        for cell_lines in cell_lines_list:
+                            if line_idx < len(cell_lines):
+                                cell_text = cell_lines[line_idx]
+                            else:
+                                cell_text = ""
+                            # パイプ文字をエスケープ
+                            cell_text = cell_text.replace("|", "\\|")
+                            expanded_row.append(cell_text)
+                        processed_rows.append(expanded_row)
+                
+                # 展開後の行数を確認（最低2行以上）
+                if len(processed_rows) < 2:
+                    continue
+                
+                # Markdownテーブルを生成
+                md_lines = []
+                
+                # ヘッダー行
+                if processed_rows:
+                    header = "| " + " | ".join(processed_rows[0]) + " |"
+                    md_lines.append(header)
+                    
+                    # 区切り行
+                    separator = "| " + " | ".join(["---"] * len(processed_rows[0])) + " |"
+                    md_lines.append(separator)
+                    
+                    # データ行
+                    for row in processed_rows[1:]:
+                        # 列数を揃える
+                        while len(row) < len(processed_rows[0]):
+                            row.append("")
+                        data_row = "| " + " | ".join(row) + " |"
+                        md_lines.append(data_row)
+                
+                markdown = "\n".join(md_lines)
+                
+                # 表領域内の行を除外対象としてマーク
+                for line in lines_data:
+                    line_y = line.get("y", 0)
+                    line_x = line.get("x", 0)
+                    # 表のbbox内にある行を除外
+                    if (bbox[1] - 5 <= line_y <= bbox[3] + 5 and
+                        bbox[0] - 5 <= line_x <= bbox[2] + 5):
+                        line["in_line_based_table"] = True
+                
+                detected_tables.append({
+                    "bbox": bbox,
+                    "markdown": markdown,
+                    "y_start": bbox[1],
+                    "y_end": bbox[3]
+                })
+                
+                debug_print(f"[DEBUG] 罫線ベース表検出: bbox={bbox}, rows={len(rows)}, cols={col_count}")
+                
+        except Exception as e:
+            debug_print(f"[DEBUG] find_tables()エラー: {e}")
+        
+        return detected_tables
+    
     def _is_numbered_heading(self, text: str) -> Tuple[bool, int, str]:
         """番号付き見出しかどうかを判定
         
@@ -2116,7 +2231,8 @@ class PDFToMarkdownConverter:
         return (False, 0, "")
     
     def _reflow_paragraphs_with_tables(
-        self, lines: List[Dict], base_font_size: float, table_regions: List[Dict]
+        self, lines: List[Dict], base_font_size: float, table_regions: List[Dict],
+        line_based_tables: List[Dict] = None
     ) -> List[Dict]:
         """段落リフロー（表領域を考慮）
         
@@ -2129,11 +2245,15 @@ class PDFToMarkdownConverter:
             lines: ソートされた行データのリスト
             base_font_size: 基準フォントサイズ
             table_regions: 表領域のリスト
+            line_based_tables: 罫線ベースで検出された表のリスト
             
         Returns:
             結合されたブロックのリスト
         """
         import re
+        
+        if line_based_tables is None:
+            line_based_tables = []
         
         if not lines:
             return []
@@ -2161,6 +2281,18 @@ class PDFToMarkdownConverter:
                     return region
             return None
         
+        # 罫線ベースの表をY座標でソート
+        sorted_line_tables = sorted(line_based_tables, key=lambda t: t["y_start"])
+        processed_line_tables = set()
+        
+        def get_line_based_table(line: Dict) -> Optional[Dict]:
+            """行が罫線ベースの表領域内にあるかチェック"""
+            line_y = line.get("y", 0)
+            for table in sorted_line_tables:
+                if table["y_start"] - 5 <= line_y <= table["y_end"] + 5:
+                    return table
+            return None
+        
         # 行高の推定（フォントサイズの1.2倍程度）
         line_height = base_font_size * 1.2
         # 結合する最大ギャップ
@@ -2174,6 +2306,30 @@ class PDFToMarkdownConverter:
         i = 0
         while i < len(lines):
             line = lines[i]
+            
+            # 罫線ベースの表領域内の行は除外し、Markdownテーブルを出力
+            line_table = get_line_based_table(line)
+            if line_table:
+                table_id = (line_table["y_start"], line_table["y_end"])
+                if table_id not in processed_line_tables:
+                    # 現在のブロックを確定
+                    if current_block:
+                        blocks.append(self._finalize_block(current_block))
+                        current_block = None
+                    
+                    # 罫線ベースの表をMarkdownテーブルとして出力
+                    blocks.append({
+                        "text": line_table["markdown"],
+                        "bbox": line_table["bbox"],
+                        "font_size": base_font_size,
+                        "is_bold": False,
+                        "is_table": True,
+                        "column": "full"
+                    })
+                    processed_line_tables.add(table_id)
+                i += 1
+                continue
+            
             table_region = is_in_table_region(line)
             
             if table_region:
@@ -3320,6 +3476,116 @@ class PDFToMarkdownConverter:
             all_figure_candidates = new_candidates
         
         debug_print(f"[DEBUG] クラスタ再マージ完了: {len(all_figure_candidates)}個のクラスタ")
+        
+        # 左右クラスタのマージ処理
+        # Y方向の重なりが大きく、ガター近傍で隣接し、本文バリアがない場合にマージ
+        def get_y_overlap_ratio(bbox1, bbox2):
+            """Y方向の重なり率を計算"""
+            y_overlap = max(0, min(bbox1[3], bbox2[3]) - max(bbox1[1], bbox2[1]))
+            min_height = min(bbox1[3] - bbox1[1], bbox2[3] - bbox2[1])
+            if min_height <= 0:
+                return 0
+            return y_overlap / min_height
+        
+        debug_print(f"[DEBUG] 左右クラスタマージ開始: {len(all_figure_candidates)}個のクラスタ")
+        lr_merged = True
+        while lr_merged:
+            lr_merged = False
+            new_candidates = []
+            used = set()
+            
+            # 左右クラスタのペアを探す
+            left_candidates = [(i, c) for i, c in enumerate(all_figure_candidates) 
+                               if c["column"] == "left" and i not in used]
+            right_candidates = [(i, c) for i, c in enumerate(all_figure_candidates) 
+                                if c["column"] == "right" and i not in used]
+            
+            for left_idx, left_cand in left_candidates:
+                if left_idx in used:
+                    continue
+                
+                best_right_idx = None
+                best_y_overlap = 0
+                
+                for right_idx, right_cand in right_candidates:
+                    if right_idx in used:
+                        continue
+                    
+                    left_bbox = left_cand["union_bbox"]
+                    right_bbox = right_cand["union_bbox"]
+                    
+                    # Y方向の重なり率を計算（90%以上必要）
+                    y_overlap_ratio = get_y_overlap_ratio(left_bbox, right_bbox)
+                    if y_overlap_ratio < 0.9:
+                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: Y重なり不足 {y_overlap_ratio:.2f}")
+                        continue
+                    
+                    # 左クラスタの右端と右クラスタの左端がガター近傍にあるか
+                    left_right_edge = left_bbox[2]
+                    right_left_edge = right_bbox[0]
+                    x_gap = right_left_edge - left_right_edge
+                    
+                    # ガター近傍（ガターから±50pt以内）にあるか
+                    if not (gutter_x - 50 < left_right_edge < gutter_x + 50 and
+                            gutter_x - 50 < right_left_edge < gutter_x + 50):
+                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: ガター近傍でない")
+                        continue
+                    
+                    # X方向のギャップが小さいか（100pt以内）
+                    if x_gap > 100:
+                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: X gap超過 {x_gap:.1f}")
+                        continue
+                    
+                    # 本文バリアがないか
+                    if has_body_barrier(left_bbox, right_bbox, page_text_lines, col_width):
+                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 本文バリアあり")
+                        continue
+                    
+                    # 最もY重なりが大きいペアを選択
+                    if y_overlap_ratio > best_y_overlap:
+                        best_y_overlap = y_overlap_ratio
+                        best_right_idx = right_idx
+                
+                if best_right_idx is not None:
+                    right_cand = all_figure_candidates[best_right_idx]
+                    left_bbox = left_cand["union_bbox"]
+                    right_bbox = right_cand["union_bbox"]
+                    
+                    # マージしたbboxを作成
+                    merged_bbox = (
+                        min(left_bbox[0], right_bbox[0]),
+                        min(left_bbox[1], right_bbox[1]),
+                        max(left_bbox[2], right_bbox[2]),
+                        max(left_bbox[3], right_bbox[3])
+                    )
+                    
+                    debug_print(f"[DEBUG] 左右クラスタ{left_idx}と{best_right_idx}をマージ (Y重なり={best_y_overlap:.2f})")
+                    new_candidates.append({
+                        "union_bbox": merged_bbox,
+                        "cluster_size": left_cand["cluster_size"] + right_cand["cluster_size"],
+                        "column": "full"
+                    })
+                    used.add(left_idx)
+                    used.add(best_right_idx)
+                    lr_merged = True
+                else:
+                    new_candidates.append(left_cand)
+                    used.add(left_idx)
+            
+            # マージされなかった右クラスタを追加
+            for right_idx, right_cand in right_candidates:
+                if right_idx not in used:
+                    new_candidates.append(right_cand)
+                    used.add(right_idx)
+            
+            # fullクラスタを追加
+            for i, cand in enumerate(all_figure_candidates):
+                if cand["column"] == "full" and i not in used:
+                    new_candidates.append(cand)
+            
+            all_figure_candidates = new_candidates
+        
+        debug_print(f"[DEBUG] 左右クラスタマージ完了: {len(all_figure_candidates)}個のクラスタ")
         
         if not all_figure_candidates:
             return []
