@@ -3018,12 +3018,16 @@ class PDFToMarkdownConverter:
             # クラスタリング後にカラム判定（raw_union_bboxを使用）
             column = get_column_for_union_bbox(raw_union_bbox)
             
+            # 画像の数をカウント（左右マージの条件に使用）
+            image_count = sum(1 for t in cluster_types if t == "image")
+            
             all_figure_candidates.append({
                 "union_bbox": union_bbox,
                 "raw_union_bbox": raw_union_bbox,
                 "cluster_size": len(cluster),
                 "column": column,
-                "is_embedded": is_embedded
+                "is_embedded": is_embedded,
+                "image_count": image_count
             })
         
         # 包含除去フィルタ: 大きいbboxが小さいbboxを包含している場合、小さい方を除去
@@ -3464,7 +3468,8 @@ class PDFToMarkdownConverter:
                     new_candidates.append({
                         "union_bbox": merged_bbox,
                         "cluster_size": cand1["cluster_size"] + cand2["cluster_size"],
-                        "column": cand1["column"]
+                        "column": cand1["column"],
+                        "image_count": cand1.get("image_count", 0) + cand2.get("image_count", 0)
                     })
                     used.add(i)
                     used.add(best_merge)
@@ -3509,6 +3514,14 @@ class PDFToMarkdownConverter:
                 
                 for right_idx, right_cand in right_candidates:
                     if right_idx in used:
+                        continue
+                    
+                    # 両クラスタに画像が含まれている場合のみマージを許可
+                    # （段組ドキュメントで左右に別々の図がある場合の誤マージを防止）
+                    left_image_count = left_cand.get("image_count", 0)
+                    right_image_count = right_cand.get("image_count", 0)
+                    if left_image_count == 0 or right_image_count == 0:
+                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 画像なし (left={left_image_count}, right={right_image_count})")
                         continue
                     
                     left_bbox = left_cand["union_bbox"]
@@ -3563,7 +3576,8 @@ class PDFToMarkdownConverter:
                     new_candidates.append({
                         "union_bbox": merged_bbox,
                         "cluster_size": left_cand["cluster_size"] + right_cand["cluster_size"],
-                        "column": "full"
+                        "column": "full",
+                        "image_count": left_cand.get("image_count", 0) + right_cand.get("image_count", 0)
                     })
                     used.add(left_idx)
                     used.add(best_right_idx)
