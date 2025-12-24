@@ -1565,7 +1565,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             return text.strip() if text else ""
             
         except ImportError as e:
-            debug_print(f"[WARNING] pdf2md_ocrモジュールが利用できません: {e}")
+            # ImportErrorは常に表示（原因特定のため）
+            print(f"[WARNING] pdf2md_ocrモジュールが利用できません: {e}")
+            print("[WARNING] テキスト領域検出が無効です。フォールバックOCRを使用します。")
             # フォールバック: 従来のmanga-ocr直接呼び出し
             return self._ocr_page_fallback(page)
         except Exception as e:
