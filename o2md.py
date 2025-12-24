@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """
 Office to Markdown Converter (o2md)
-Excel、Word、PowerPointファイルを自動判定してMarkdownに変換する統合ツール
+Excel、Word、PowerPoint、PDFファイルを自動判定してMarkdownに変換する統合ツール
 
 機能:
 - ファイル拡張子に基づいて自動的に適切な変換クラスを選択
 - Excel (.xlsx, .xls) → x2md.ExcelToMarkdownConverter
 - Word (.docx, .doc) → d2md.WordToMarkdownConverter
 - PowerPoint (.pptx, .ppt) → p2md.PowerPointToMarkdownConverter
+- PDF (.pdf) → pdf2md.PDFToMarkdownConverter
 - 古い形式（.xls, .doc, .ppt）は自動的に新形式に変換してから処理
 
 対応ファイル形式:
 - Excel: .xlsx, .xls
 - Word: .docx, .doc
 - PowerPoint: .pptx, .ppt
+- PDF: .pdf
 
 使用例:
     # 基本的な使用方法
@@ -74,6 +76,14 @@ except ImportError as e:
         "p2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
     ) from e
 
+try:
+    from pdf2md import PDFToMarkdownConverter
+    import pdf2md
+except ImportError as e:
+    raise ImportError(
+        "pdf2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
+    ) from e
+
 
 
 # グローバルverboseフラグ
@@ -86,6 +96,7 @@ def set_verbose(verbose: bool):
     x2md.set_verbose(verbose)
     d2md.set_verbose(verbose)
     p2md.set_verbose(verbose)
+    pdf2md.set_verbose(verbose)
 
 def is_verbose() -> bool:
     """verboseモードかどうかを返す"""
@@ -103,7 +114,7 @@ def detect_file_type(file_path: str) -> str:
         file_path: ファイルパス
         
     Returns:
-        'excel', 'word', 'powerpoint', 'unknown'のいずれか
+        'excel', 'word', 'powerpoint', 'pdf', 'unknown'のいずれか
     """
     file_path_lower = file_path.lower()
     
@@ -113,6 +124,8 @@ def detect_file_type(file_path: str) -> str:
         return 'word'
     elif file_path_lower.endswith(('.pptx', '.ppt')):
         return 'powerpoint'
+    elif file_path_lower.endswith('.pdf'):
+        return 'pdf'
     else:
         return 'unknown'
 
@@ -143,7 +156,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
     if file_type == 'unknown':
         raise ValueError(
             f"サポートされていないファイル形式です: {file_path}\n"
-            "対応形式: .xlsx, .xls, .docx, .doc, .pptx, .ppt"
+            "対応形式: .xlsx, .xls, .docx, .doc, .pptx, .ppt, .pdf"
         )
     
     print(f"[INFO] ファイルタイプを検出: {file_type}")
@@ -214,6 +227,16 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             )
             output_file = converter.convert()
         
+        elif file_type == 'pdf':
+            # PDF変換
+            output_format = kwargs.get('output_format', 'png')
+            converter = PDFToMarkdownConverter(
+                file_path,
+                output_dir=output_dir,
+                output_format=output_format
+            )
+            output_file = converter.convert()
+        
         return output_file
         
     finally:
@@ -248,18 +271,20 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
 def main():
     """メイン関数"""
     parser = argparse.ArgumentParser(
-        description='Office文書（Excel、Word、PowerPoint）をMarkdownに変換',
+        description='Office文書（Excel、Word、PowerPoint、PDF）をMarkdownに変換',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 対応ファイル形式:
   Excel:      .xlsx, .xls
   Word:       .docx, .doc
   PowerPoint: .pptx, .ppt
+  PDF:        .pdf
 
 使用例:
   python o2md.py data.xlsx
   python o2md.py document.docx --use-heading-text
   python o2md.py presentation.pptx -o custom_output
+  python o2md.py document.pdf -o pdf_output
         """
     )
     
