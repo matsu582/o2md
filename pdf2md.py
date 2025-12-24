@@ -2925,6 +2925,56 @@ class PDFToMarkdownConverter:
         # 各bboxのカラムを事前計算
         bbox_columns = [get_bbox_column(b) for b in all_bboxes]
         
+        # 図キャプションの位置を検出（クラスタ分離に使用）
+        figure_caption_lines = []
+        try:
+            import re as re_mod
+            caption_pattern = re_mod.compile(r'^図\s*\d+[\.\:．：]')
+            text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+            for block in text_dict.get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    line_text = ""
+                    for span in line.get("spans", []):
+                        line_text += span.get("text", "")
+                    line_text = line_text.strip()
+                    if caption_pattern.match(line_text):
+                        line_bbox = line.get("bbox", (0, 0, 0, 0))
+                        figure_caption_lines.append({
+                            "text": line_text,
+                            "bbox": line_bbox,
+                            "y_center": (line_bbox[1] + line_bbox[3]) / 2
+                        })
+        except Exception as e:
+            debug_print(f"[DEBUG] 図キャプション検出エラー: {e}")
+        
+        def has_caption_between(bbox1, bbox2):
+            """2つのbbox間に図キャプションがあるかどうかを判定"""
+            y1_bottom = bbox1[3]
+            y2_top = bbox2[1]
+            y1_top = bbox1[1]
+            y2_bottom = bbox2[3]
+            
+            # bbox1が上、bbox2が下の場合
+            if y1_bottom < y2_top:
+                gap_top = y1_bottom
+                gap_bottom = y2_top
+            # bbox2が上、bbox1が下の場合
+            elif y2_bottom < y1_top:
+                gap_top = y2_bottom
+                gap_bottom = y1_top
+            else:
+                # 重なっている場合はキャプションなし
+                return False
+            
+            # キャプションがギャップ内にあるか確認
+            for cap in figure_caption_lines:
+                cap_y = cap["y_center"]
+                if gap_top <= cap_y <= gap_bottom:
+                    return True
+            return False
+        
         def cluster_with_gutter_constraint(bboxes, x_threshold=100.0, y_threshold=40.0):
             """ガター制約付きクラスタリング（左右カラム同士は繋げない）"""
             if not bboxes:
@@ -2940,6 +2990,11 @@ class PDFToMarkdownConverter:
                 
                 # ガター制約: 左右カラム同士で、どちらもガター跨ぎでない場合は繋げない
                 if col1 != col2 and col1 != "full" and col2 != "full":
+                    return False
+                
+                # キャプション制約: 2つのbbox間に図キャプションがある場合は繋げない
+                if has_caption_between(b1, b2):
+                    debug_print(f"[DEBUG] キャプション制約: bbox1=({b1[1]:.1f}-{b1[3]:.1f}), bbox2=({b2[1]:.1f}-{b2[3]:.1f}) 間にキャプションあり")
                     return False
                 
                 x0_1, y0_1, x1_1, y1_1 = b1
@@ -3388,10 +3443,25 @@ class PDFToMarkdownConverter:
         
         def has_body_barrier(bbox1, bbox2, text_lines, col_width):
             """2つのbbox間に本文バリアがあるか判定"""
+            import re as re_mod
             y_min = min(bbox1[3], bbox2[3])
             y_max = max(bbox1[1], bbox2[1])
             x_overlap_start = max(bbox1[0], bbox2[0])
             x_overlap_end = min(bbox1[2], bbox2[2])
+            
+            # 図キャプションパターン（「図X.X:」形式）
+            caption_pattern = re_mod.compile(r'^図\s*\d+[\.\:．：]')
+            
+            # bbox1とbbox2の間のギャップを計算
+            if bbox1[3] < bbox2[1]:
+                gap_top = bbox1[3]
+                gap_bottom = bbox2[1]
+            elif bbox2[3] < bbox1[1]:
+                gap_top = bbox2[3]
+                gap_bottom = bbox1[1]
+            else:
+                gap_top = y_min
+                gap_bottom = y_max
             
             for line in text_lines:
                 line_bbox = line["bbox"]
@@ -3399,6 +3469,14 @@ class PDFToMarkdownConverter:
                 line_center_x = (line_bbox[0] + line_bbox[2]) / 2
                 line_width = line_bbox[2] - line_bbox[0]
                 
+                # ギャップ内またはギャップ近傍（±30pt）にキャプションがあるか確認
+                if caption_pattern.match(line["text"]):
+                    if gap_top - 30 <= line_center_y <= gap_bottom + 30:
+                        if x_overlap_start - 20 < line_center_x < x_overlap_end + 20:
+                            debug_print(f"[DEBUG] 図キャプションバリア検出: '{line['text'][:30]}...' y={line_center_y:.1f}")
+                            return True
+                
+                # 本文バリアの判定（従来のロジック）
                 if y_min < line_center_y < y_max:
                     if x_overlap_start - 20 < line_center_x < x_overlap_end + 20:
                         if is_body_text_line(line["text"], line_width, col_width):
@@ -3455,6 +3533,7 @@ class PDFToMarkdownConverter:
                     
                     # y_gapが80pt以内で、本文バリアがない場合のみマージ
                     if y_gap <= 80:
+                        debug_print(f"[DEBUG] クラスタ{i}と{j}: bbox1=({bbox1[1]:.1f}-{bbox1[3]:.1f}), bbox2=({bbox2[1]:.1f}-{bbox2[3]:.1f}), y_gap={y_gap:.1f}")
                         if not has_body_barrier(bbox1, bbox2, page_text_lines, col_width):
                             debug_print(f"[DEBUG] クラスタ{i}と{j}: マージ候補 y_gap={y_gap:.1f}")
                             if y_gap < best_y_gap:
