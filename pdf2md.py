@@ -739,7 +739,8 @@ class PDFToMarkdownConverter:
                     "type": block_type,
                     "text": block_data["text"],
                     "font_size": block_data["font_size"],
-                    "bbox": block_data["bbox"]
+                    "bbox": block_data["bbox"],
+                    "is_heading": True
                 }
                 if "column" in block_data:
                     block["column"] = block_data["column"]
@@ -830,6 +831,11 @@ class PDFToMarkdownConverter:
             next_block = blocks[i + 1]
             curr_text = block.get("text", "")
             next_text = next_block.get("text", "")
+            
+            # 見出しブロックは継続行結合の対象外
+            if block.get("is_heading"):
+                merged.append(block)
+                continue
             
             # 現在のブロックがリスト項目かどうか判定
             is_curr_list = (
@@ -2032,6 +2038,7 @@ class PDFToMarkdownConverter:
         """番号付き見出しかどうかを判定
         
         「1　はじめに」「2.1　概要」「第1条（借入要項）」などのパターンを検出する。
+        文末表現（述語終止形）を含む場合は見出しではないと判定する。
         
         Args:
             text: 判定するテキスト
@@ -2043,59 +2050,67 @@ class PDFToMarkdownConverter:
         text = text.strip()
         
         # 「第N条」形式の見出しパターン（先に判定、本文が続いていても対応）
-        # 「第1条（借入要項）」「第10 条（充当の指定）」など
-        # 数字と「条」の間にスペースがある場合も対応
         article_match = re.match(
             r'^(第[0-9０-９一二三四五六七八九十百]+\s*条[　 ]*[（(][^）)]+[）)])',
             text
         )
         if article_match:
             heading_text = article_match.group(1).strip()
-            # 「第N条」形式は見出しレベル3として扱う
             return (True, 3, heading_text)
         
         # 長すぎる行は見出しではない（「第N条」以外のパターン用）
         if len(text) > 50:
             return (False, 0, "")
         
-        # 末尾が句点で終わる場合は見出しではない
+        # 文末表現（述語終止形）を含む場合は見出しではない
+        # 句点（。．）で終わる場合
         if text.endswith("。") or text.endswith("．"):
             return (False, 0, "")
         
+        # 半角ピリオドで終わる場合の判定
+        if text.endswith("."):
+            # 「N.」形式の番号のみは除外しない
+            if not re.match(r'^[0-9０-９]+\.$', text):
+                return (False, 0, "")
+        
+        # 文として完結する表現を含む場合は見出しではない
+        # 述語終止形: である、ある、する、した、いる、いた、ない、れる、られる、ます、です等
+        sentence_endings = (
+            r'(である|ある|する|した|いる|いた|った|ない|れる|られる|'
+            r'ます|です|ました|でした|ません|ている|ていた|ておく|ておいた|'
+            r'なる|なった|できる|できた|おく|おいた|くる|きた|いく|いった)$'
+        )
+        if re.search(sentence_endings, text):
+            return (False, 0, "")
+        
         # 「N．タイトル」形式の見出しパターン（例: 「１．固定金利型の利率変更」）
-        # サブ番号形式（「3.1　タイトル」）は除外するため、ドットの後に数字が続かないことを確認
         numbered_dot_match = re.match(
             r'^([0-9０-９]+)[．.][　 ]*([^0-9０-９].{1,39})$',
             text
         )
         if numbered_dot_match:
             title_part = numbered_dot_match.group(2).strip()
-            # タイトル部分が単位で始まる場合は除外
             first_char = title_part[0] if title_part else ""
-            excluded_chars = '年月日倍個回分秒時点番号件台人円万億兆'
+            # 単位や助数詞で始まる場合は除外
+            excluded_chars = '年月日倍個回分秒時点番号件台人円万億兆つ'
             if first_char not in excluded_chars:
                 return (True, 3, text)
         
         # 番号付き見出しパターン: 「1　はじめに」など
-        # 数字 + 全角/半角スペース + タイトル（サブ番号「2.1」形式は除外）
-        # サブ番号形式は親番号が存在しない場合に不自然なため、フォントサイズ判定に委ねる
         match = re.match(r'^(\d+)\s*[　 ]+(.{1,40})$', text)
         if match:
-            number_part = match.group(1)
             title_part = match.group(2).strip()
             
             # タイトル部分が短すぎる場合は除外
             if len(title_part) < 2:
                 return (False, 0, "")
             
-            # タイトル部分が日本語の見出しらしい文字で始まる場合のみ見出しとして認識
-            # 「年」「月」「日」「倍」などの単位で始まる場合は除外
+            # 単位や助数詞で始まる場合は除外
             first_char = title_part[0]
-            excluded_chars = '年月日倍個回分秒時点番号件台人円万億兆'
+            excluded_chars = '年月日倍個回分秒時点番号件台人円万億兆つ'
             if first_char in excluded_chars:
                 return (False, 0, "")
             
-            # 親番号のみの場合は見出しレベル2として扱う
             return (True, 2, title_part)
         
         return (False, 0, "")
@@ -2187,23 +2202,61 @@ class PDFToMarkdownConverter:
             # 番号付き見出しの検出
             is_heading, heading_level, heading_text = self._is_numbered_heading(line["text"])
             if is_heading:
-                # 現在のブロックを確定
-                if current_block:
-                    blocks.append(self._finalize_block(current_block))
-                    current_block = None
+                # 連続する番号付きリストかどうかを先読みで判定
+                # 同じインデントで連番（1, 2, 3...）が3件以上続く場合はリストとして扱う
+                is_consecutive_list = False
+                line_number_match = re.match(r'^([0-9０-９]+)[．.\s]', line["text"])
+                if line_number_match:
+                    current_num = int(line_number_match.group(1).translate(
+                        str.maketrans('０１２３４５６７８９', '0123456789')))
+                    consecutive_count = 1
+                    current_x = line["x"]
+                    x_tolerance = base_font_size * 0.5
+                    
+                    # 後続の行を先読み
+                    for j in range(i + 1, min(i + 10, len(lines))):
+                        next_line = lines[j]
+                        if next_line.get("column") != line.get("column"):
+                            break
+                        next_match = re.match(r'^([0-9０-９]+)[．.\s]', next_line["text"])
+                        if next_match:
+                            next_num = int(next_match.group(1).translate(
+                                str.maketrans('０１２３４５６７８９', '0123456789')))
+                            # 連番かつ同じx位置
+                            if next_num == current_num + consecutive_count and abs(next_line["x"] - current_x) <= x_tolerance:
+                                consecutive_count += 1
+                                if consecutive_count >= 3:
+                                    is_consecutive_list = True
+                                    break
+                            else:
+                                break
+                        else:
+                            # 継続行（インデントされた行）はスキップ
+                            if next_line["x"] > current_x + x_tolerance:
+                                continue
+                            break
                 
-                # 見出しを単独ブロックとして追加（カラム情報も保持）
-                blocks.append({
-                    "text": heading_text,
-                    "bbox": tuple(line["bbox"]),
-                    "font_size": line["font_size"],
-                    "is_bold": True,
-                    "is_heading": True,
-                    "heading_level": heading_level,
-                    "column": line["column"]
-                })
-                i += 1
-                continue
+                if is_consecutive_list:
+                    # 連続リストの場合は見出しとして扱わない
+                    pass
+                else:
+                    # 現在のブロックを確定
+                    if current_block:
+                        blocks.append(self._finalize_block(current_block))
+                        current_block = None
+                    
+                    # 見出しを単独ブロックとして追加（カラム情報も保持）
+                    blocks.append({
+                        "text": heading_text,
+                        "bbox": tuple(line["bbox"]),
+                        "font_size": line["font_size"],
+                        "is_bold": True,
+                        "is_heading": True,
+                        "heading_level": heading_level,
+                        "column": line["column"]
+                    })
+                    i += 1
+                    continue
             
             # 現在の行が番号付き箇条書きかどうか
             curr_is_numbered = is_numbered_list_line(line["text"])
