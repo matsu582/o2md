@@ -2830,12 +2830,12 @@ class PDFToMarkdownConverter:
             image_list = page.get_images(full=True)
             for img_info in image_list:
                 xref = img_info[0]
+                # 同じ画像が複数の場所に配置されている場合があるため、すべてのrectを取得
                 for img_rect in page.get_image_rects(xref):
                     bbox = (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1)
                     area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
                     if area >= 100:
                         all_elements.append({"bbox": bbox, "type": "image"})
-                        break
         except Exception as e:
             debug_print(f"[DEBUG] 画像取得エラー: {e}")
         
