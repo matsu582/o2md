@@ -2359,8 +2359,8 @@ class PDFToMarkdownConverter:
             # 番号付き見出しの検出
             is_heading, heading_level, heading_text = self._is_numbered_heading(line["text"])
             if is_heading:
-                # 連続する番号付きリストかどうかを先読みで判定
-                # 同じインデントで連番（1, 2, 3...）が3件以上続く場合はリストとして扱う
+                # 連続する番号付きリストかどうかを先読み・後読みで判定
+                # 同じインデントで連番（1, 2, 3...）が続く場合はリストとして扱う
                 is_consecutive_list = False
                 line_number_match = re.match(r'^([0-9０-９]+)[．.\s]', line["text"])
                 if line_number_match:
@@ -2370,28 +2370,50 @@ class PDFToMarkdownConverter:
                     current_x = line["x"]
                     x_tolerance = base_font_size * 0.5
                     
-                    # 後続の行を先読み
-                    for j in range(i + 1, min(i + 10, len(lines))):
-                        next_line = lines[j]
-                        if next_line.get("column") != line.get("column"):
+                    # 前方向の先読み（前の行が連番の場合はリストとして扱う）
+                    for j in range(i - 1, max(i - 10, -1), -1):
+                        prev_line = lines[j]
+                        if prev_line.get("column") != line.get("column"):
                             break
-                        next_match = re.match(r'^([0-9０-９]+)[．.\s]', next_line["text"])
-                        if next_match:
-                            next_num = int(next_match.group(1).translate(
+                        prev_match = re.match(r'^([0-9０-９]+)[．.\s]', prev_line["text"])
+                        if prev_match:
+                            prev_num = int(prev_match.group(1).translate(
                                 str.maketrans('０１２３４５６７８９', '0123456789')))
                             # 連番かつ同じx位置
-                            if next_num == current_num + consecutive_count and abs(next_line["x"] - current_x) <= x_tolerance:
-                                consecutive_count += 1
-                                if consecutive_count >= 3:
-                                    is_consecutive_list = True
-                                    break
+                            if prev_num == current_num - 1 and abs(prev_line["x"] - current_x) <= x_tolerance:
+                                is_consecutive_list = True
+                                break
                             else:
                                 break
                         else:
                             # 継続行（インデントされた行）はスキップ
-                            if next_line["x"] > current_x + x_tolerance:
+                            if prev_line["x"] > current_x + x_tolerance:
                                 continue
                             break
+                    
+                    # 後続の行を先読み（前方向で見つからなかった場合）
+                    if not is_consecutive_list:
+                        for j in range(i + 1, min(i + 10, len(lines))):
+                            next_line = lines[j]
+                            if next_line.get("column") != line.get("column"):
+                                break
+                            next_match = re.match(r'^([0-9０-９]+)[．.\s]', next_line["text"])
+                            if next_match:
+                                next_num = int(next_match.group(1).translate(
+                                    str.maketrans('０１２３４５６７８９', '0123456789')))
+                                # 連番かつ同じx位置
+                                if next_num == current_num + consecutive_count and abs(next_line["x"] - current_x) <= x_tolerance:
+                                    consecutive_count += 1
+                                    if consecutive_count >= 3:
+                                        is_consecutive_list = True
+                                        break
+                                else:
+                                    break
+                            else:
+                                # 継続行（インデントされた行）はスキップ
+                                if next_line["x"] > current_x + x_tolerance:
+                                    continue
+                                break
                 
                 if is_consecutive_list:
                     # 連続リストの場合は見出しとして扱わない
