@@ -455,6 +455,102 @@ class TextDetectorOCR:
         self.detector = ComicTextDetector(model_path=model_path)
         self.ocr_processor = OCRProcessor()
     
+    def _split_multiline_region(self, img: np.ndarray, region: TextRegion,
+                                 min_gap_height: int = 5,
+                                 min_region_height: int = 100,
+                                 min_line_height: int = 20) -> List[TextRegion]:
+        """複数行を含む領域を水平方向の空白で分割
+        
+        Args:
+            img: 入力画像 (BGR形式)
+            region: 分割対象の領域
+            min_gap_height: 最小ギャップ高さ（ピクセル）
+            min_region_height: 分割対象とする最小領域高さ
+            min_line_height: 分割後の最小行高さ
+            
+        Returns:
+            分割された領域のリスト
+        """
+        # 縦書き領域は分割しない（縦書きは別のロジックが必要）
+        if region.is_vertical:
+            return [region]
+        
+        # 高さが小さい領域は分割しない
+        if region.height < min_region_height:
+            return [region]
+        
+        # 領域をクロップ
+        im_h, im_w = img.shape[:2]
+        x1 = max(0, region.x1)
+        y1 = max(0, region.y1)
+        x2 = min(im_w, region.x2)
+        y2 = min(im_h, region.y2)
+        
+        cropped = img[y1:y2, x1:x2]
+        if cropped.size == 0:
+            return [region]
+        
+        # グレースケールに変換して2値化
+        gray = cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY)
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        
+        # y方向の投影（各行の黒画素数）
+        projection = np.sum(binary, axis=1)
+        
+        # 空白行を検出（投影値が閾値以下）
+        max_proj = np.max(projection)
+        if max_proj == 0:
+            return [region]
+        threshold = max_proj * 0.05
+        is_gap = projection < threshold
+        
+        # 連続する空白行のグループを検出
+        gaps = []
+        gap_start = None
+        for i, is_g in enumerate(is_gap):
+            if is_g and gap_start is None:
+                gap_start = i
+            elif not is_g and gap_start is not None:
+                if i - gap_start >= min_gap_height:
+                    gaps.append((gap_start, i))
+                gap_start = None
+        
+        # ギャップがなければ分割しない
+        if len(gaps) == 0:
+            return [region]
+        
+        # ギャップで分割
+        sub_regions = []
+        prev_end = 0
+        for gap_start, gap_end in gaps:
+            if gap_start > prev_end:
+                sub_y1 = y1 + prev_end
+                sub_y2 = y1 + gap_start
+                if sub_y2 - sub_y1 >= min_line_height:
+                    sub_regions.append(TextRegion(
+                        bbox=(x1, sub_y1, x2, sub_y2),
+                        confidence=region.confidence,
+                        is_vertical=region.is_vertical
+                    ))
+            prev_end = gap_end
+        
+        # 最後の領域
+        if prev_end < region.height:
+            sub_y1 = y1 + prev_end
+            sub_y2 = y2
+            if sub_y2 - sub_y1 >= min_line_height:
+                sub_regions.append(TextRegion(
+                    bbox=(x1, sub_y1, x2, sub_y2),
+                    confidence=region.confidence,
+                    is_vertical=region.is_vertical
+                ))
+        
+        if len(sub_regions) > 1:
+            debug_print(f"[DEBUG] 領域を{len(sub_regions)}行に分割")
+            return sub_regions
+        
+        return [region]
+    
     def process_image(self, img: np.ndarray, 
                       sort_regions: bool = True) -> List[TextRegion]:
         """画像からテキストを検出してOCRを実行
@@ -474,6 +570,16 @@ class TextDetectorOCR:
             return []
         
         debug_print(f"[DEBUG] {len(regions)}個のテキスト領域を検出")
+        
+        # 複数行を含む領域を行ごとに分割
+        split_regions = []
+        for region in regions:
+            split_regions.extend(self._split_multiline_region(img, region))
+        
+        if len(split_regions) != len(regions):
+            debug_print(f"[DEBUG] 分割後: {len(split_regions)}個の領域")
+        
+        regions = split_regions
         
         # 読み順にソート（上から下、左から右）
         if sort_regions:
@@ -516,7 +622,10 @@ class TextDetectorOCR:
         else:
             # 横書き: 上から下、左から右
             # 行をグループ化（Y座標が近いものを同じ行とみなす）
-            line_threshold = im_h * 0.02  # 画像高さの2%
+            # 閾値は領域の中央値高さの半分を使用
+            heights = [r.height for r in regions]
+            median_height = sorted(heights)[len(heights) // 2] if heights else 50
+            line_threshold = median_height * 0.5
             
             def get_sort_key(r):
                 cy = r.center()[1]
@@ -530,18 +639,71 @@ class TextDetectorOCR:
         return regions
     
     def get_combined_text(self, regions: List[TextRegion], 
-                          separator: str = "\n\n") -> str:
-        """テキスト領域のテキストを結合
+                          im_h: int = 0,
+                          line_separator: str = "  ",
+                          paragraph_separator: str = "\n\n") -> str:
+        """テキスト領域のテキストを結合（同じ行は横に並べる）
         
         Args:
             regions: テキスト領域のリスト
-            separator: 区切り文字（デフォルトは空行で段落分割）
+            im_h: 画像高さ（行グループ化の閾値計算用）
+            line_separator: 同じ行内の区切り文字
+            paragraph_separator: 行間の区切り文字
             
         Returns:
             結合されたテキスト
         """
-        texts = [r.text for r in regions if r.text]
-        return separator.join(texts)
+        if not regions:
+            return ""
+        
+        # テキストがある領域のみ
+        regions_with_text = [r for r in regions if r.text]
+        if not regions_with_text:
+            return ""
+        
+        # 画像高さが指定されていない場合は単純結合
+        if im_h == 0:
+            texts = [r.text for r in regions_with_text]
+            return paragraph_separator.join(texts)
+        
+        # 行をグループ化（Y座標が近いものを同じ行とみなす）
+        # 閾値は領域の中央値高さの半分を使用
+        heights = [r.height for r in regions_with_text]
+        median_height = sorted(heights)[len(heights) // 2] if heights else 50
+        line_threshold = median_height * 0.5
+        
+        # 領域を行ごとにグループ化
+        lines = []
+        current_line = []
+        current_line_y = None
+        
+        for region in regions_with_text:
+            cy = region.center()[1]
+            
+            if current_line_y is None:
+                current_line_y = cy
+                current_line.append(region)
+            elif abs(cy - current_line_y) < line_threshold:
+                current_line.append(region)
+            else:
+                # 新しい行
+                if current_line:
+                    lines.append(current_line)
+                current_line = [region]
+                current_line_y = cy
+        
+        # 最後の行を追加
+        if current_line:
+            lines.append(current_line)
+        
+        # 各行内をX座標でソートして結合
+        result_lines = []
+        for line in lines:
+            line.sort(key=lambda r: r.center()[0])
+            line_texts = [r.text for r in line if r.text]
+            result_lines.append(line_separator.join(line_texts))
+        
+        return paragraph_separator.join(result_lines)
 
 
 def process_pdf_page_with_detection(page_img: np.ndarray, 
@@ -563,4 +725,6 @@ def process_pdf_page_with_detection(page_img: np.ndarray,
         debug_print("[DEBUG] テキスト領域が検出されなかったため、画像全体でOCRを実行")
         return processor.ocr_processor.ocr_full_image(page_img)
     
-    return processor.get_combined_text(regions)
+    # 画像高さを渡して行グループ化を有効にする
+    im_h = page_img.shape[0]
+    return processor.get_combined_text(regions, im_h=im_h)
