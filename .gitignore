@@ -210,3 +210,6 @@ __marimo__/
 test_*/
 output_*/
 debug_*/
+
+# Model files (downloaded automatically)
+models/

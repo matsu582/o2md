@@ -1523,7 +1523,54 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         return ocr_text
     
     def _ocr_page(self, page) -> str:
-        """manga-ocrを使用してページからテキストを抽出
+        """テキスト検出とOCRを使用してページからテキストを抽出
+        
+        comic-text-detectorでテキスト領域を検出し、
+        各領域ごとにmanga-ocrでテキストを抽出します。
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            
+        Returns:
+            OCRで抽出されたテキスト
+        """
+        try:
+            # ページを画像に変換（300dpi相当: 300/72 ≈ 4.17）
+            scale = 300 / 72
+            matrix = fitz.Matrix(scale, scale)
+            pix = page.get_pixmap(matrix=matrix)
+            
+            # numpy配列に変換（BGR形式）
+            import numpy as np
+            img_array = np.frombuffer(pix.samples, dtype=np.uint8)
+            img_array = img_array.reshape(pix.height, pix.width, pix.n)
+            
+            # RGBの場合はBGRに変換
+            if pix.n == 3:
+                img_bgr = img_array[:, :, ::-1].copy()
+            elif pix.n == 4:
+                # RGBAの場合はRGBに変換してからBGRに
+                img_bgr = img_array[:, :, :3][:, :, ::-1].copy()
+            else:
+                img_bgr = img_array
+            
+            # pdf2md_ocrモジュールを使用してテキスト抽出
+            from pdf2md_ocr import process_pdf_page_with_detection, set_verbose as ocr_set_verbose
+            ocr_set_verbose(is_verbose())
+            
+            text = process_pdf_page_with_detection(img_bgr)
+            return text.strip() if text else ""
+            
+        except ImportError as e:
+            debug_print(f"[WARNING] pdf2md_ocrモジュールが利用できません: {e}")
+            # フォールバック: 従来のmanga-ocr直接呼び出し
+            return self._ocr_page_fallback(page)
+        except Exception as e:
+            print(f"[WARNING] OCR処理中にエラーが発生: {e}")
+            return "(OCRエラー)"
+    
+    def _ocr_page_fallback(self, page) -> str:
+        """フォールバック: manga-ocrを直接使用してページからテキストを抽出
         
         Args:
             page: PyMuPDFのページオブジェクト
@@ -1536,7 +1583,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             return "(OCR利用不可)"
         
         try:
-            # ページを画像に変換（300dpi相当: 300/72 ≈ 4.17）
+            # ページを画像に変換（300dpi相当）
             scale = 300 / 72
             matrix = fitz.Matrix(scale, scale)
             pix = page.get_pixmap(matrix=matrix)
@@ -1551,7 +1598,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             return text.strip() if text else ""
             
         except Exception as e:
-            print(f"[WARNING] OCR処理中にエラーが発生: {e}")
+            print(f"[WARNING] フォールバックOCR処理中にエラーが発生: {e}")
             return "(OCRエラー)"
 
 
