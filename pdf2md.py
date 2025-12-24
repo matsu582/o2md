@@ -2811,6 +2811,20 @@ class PDFToMarkdownConverter:
                 debug_print(f"[DEBUG] page={page_num+1}: フッター領域が外れ値、doc-wide値にフォールバック")
                 footer_y_min = self._doc_footer_y_min
         
+        # 罫線ベースの表を検出（図抽出から除外するため）
+        line_based_table_bboxes = []
+        try:
+            tables = page.find_tables()
+            if tables.tables:
+                for table in tables.tables:
+                    bbox = table.bbox
+                    rows = table.extract()
+                    if rows and len(rows) >= 2 and len(rows[0]) >= 2:
+                        line_based_table_bboxes.append(bbox)
+                        debug_print(f"[DEBUG] page={page_num+1}: 罫線ベース表検出 bbox=({bbox[0]:.1f}, {bbox[1]:.1f}, {bbox[2]:.1f}, {bbox[3]:.1f})")
+        except Exception as e:
+            debug_print(f"[DEBUG] find_tables()エラー: {e}")
+        
         # 要素タイプ（drawing/image）を保持するリスト
         all_elements = []
         
@@ -3792,8 +3806,10 @@ class PDFToMarkdownConverter:
                 
                 # 図形内テキスト抽出にはclip_bboxを使用（本文の巻き込みを防ぐ）
                 # clip_bboxは本文の下〜キャプションの上でトリムされている
+                # 罫線ベースの表領域内のテキストは除外する
                 figure_texts, expanded_bbox = self._extract_text_in_bbox(
-                    page, clip_bbox, expand_for_labels=True, column=column, gutter_x=gutter_x
+                    page, clip_bbox, expand_for_labels=True, column=column, gutter_x=gutter_x,
+                    exclude_table_bboxes=line_based_table_bboxes
                 )
                 
                 figures.append({
@@ -3833,12 +3849,14 @@ class PDFToMarkdownConverter:
         self, page, bbox: Tuple[float, float, float, float],
         expand_for_labels: bool = True,
         column: str = None,
-        gutter_x: float = None
+        gutter_x: float = None,
+        exclude_table_bboxes: List[Tuple[float, float, float, float]] = None
     ) -> Tuple[List[str], Tuple[float, float, float, float]]:
         """指定されたbbox内のテキストを抽出
         
         図のラベルテキストを含めるため、bboxを近傍の短いテキストで拡張する。
         カラム境界を考慮して、隣のカラムのテキストを取り込まないようにする。
+        罫線ベースの表領域内のテキストは除外する。
         
         Args:
             page: PyMuPDFのページオブジェクト
@@ -3846,6 +3864,7 @@ class PDFToMarkdownConverter:
             expand_for_labels: ラベルテキストを含めるためにbboxを拡張するか
             column: 図のカラム ("left", "right", "full")
             gutter_x: カラム境界のX座標
+            exclude_table_bboxes: 除外する罫線ベースの表領域のリスト
             
         Returns:
             (抽出されたテキストのリスト, 拡張後のbbox)
@@ -3856,6 +3875,19 @@ class PDFToMarkdownConverter:
         
         if gutter_x is None:
             gutter_x = page.rect.width / 2
+        
+        if exclude_table_bboxes is None:
+            exclude_table_bboxes = []
+        
+        def is_in_table_area(line_bbox):
+            """行が罫線ベースの表領域内にあるかどうかを判定"""
+            line_center_x = (line_bbox[0] + line_bbox[2]) / 2
+            line_center_y = (line_bbox[1] + line_bbox[3]) / 2
+            for table_bbox in exclude_table_bboxes:
+                if (table_bbox[0] - 5 <= line_center_x <= table_bbox[2] + 5 and
+                    table_bbox[1] - 5 <= line_center_y <= table_bbox[3] + 5):
+                    return True
+            return False
         
         try:
             text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
@@ -3937,6 +3969,10 @@ class PDFToMarkdownConverter:
                     line_center_y = (line_bbox[1] + line_bbox[3]) / 2
                     
                     if not is_in_same_column(line_center_x):
+                        continue
+                    
+                    # 罫線ベースの表領域内のテキストは除外
+                    if is_in_table_area(line_bbox):
                         continue
                     
                     if (expanded_bbox[0] <= line_center_x <= expanded_bbox[2] and
