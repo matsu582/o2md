@@ -1436,6 +1436,7 @@ class PDFToMarkdownConverter:
             r'^>\s',  # 引用
             r'^<details',  # 詳細ブロック
             r'^第[0-9０-９一二三四五六七八九十百]+\s*条',  # 「第N条」形式
+            r'^(図|表)\s*[\d０-９]+[\.\:．：]',  # 図・表キャプション（図3.1: 表4.2:など）
         ]
         no_merge_start_re = re.compile('|'.join(no_merge_start_patterns))
         
