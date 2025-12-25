@@ -461,13 +461,15 @@ class OCRProcessor(BaseOCRProcessor):
 class TesseractOCRProcessor(BaseOCRProcessor):
     """Tesseractを使用したOCR処理器"""
     
-    def __init__(self, lang: str = "jpn"):
+    def __init__(self, lang: str = "jpn+eng", tessdata_dir: Optional[str] = None):
         """
         Args:
-            lang: Tesseractの言語設定（デフォルト: jpn）
+            lang: Tesseractの言語設定（デフォルト: jpn+eng）
+            tessdata_dir: tessdataディレクトリのパス（tessdata_best使用時に指定）
         """
         self._tesseract = None
         self._lang = lang
+        self._tessdata_dir = tessdata_dir
     
     def _get_tesseract(self):
         """pytesseractモジュールを遅延インポート"""
@@ -524,7 +526,11 @@ class TesseractOCRProcessor(BaseOCRProcessor):
         pil_img = Image.fromarray(rgb)
         
         try:
-            text = tesseract.image_to_string(pil_img, lang=self._lang)
+            # tessdata_dirが指定されている場合はconfigに追加
+            config = ""
+            if self._tessdata_dir:
+                config = f"--tessdata-dir {self._tessdata_dir}"
+            text = tesseract.image_to_string(pil_img, lang=self._lang, config=config)
             return text.strip() if text else ""
         except Exception as e:
             debug_print(f"[WARNING] Tesseract OCRエラー: {e}")
@@ -548,7 +554,11 @@ class TesseractOCRProcessor(BaseOCRProcessor):
         pil_img = Image.fromarray(rgb)
         
         try:
-            text = tesseract.image_to_string(pil_img, lang=self._lang)
+            # tessdata_dirが指定されている場合はconfigに追加
+            config = ""
+            if self._tessdata_dir:
+                config = f"--tessdata-dir {self._tessdata_dir}"
+            text = tesseract.image_to_string(pil_img, lang=self._lang, config=config)
             return text.strip() if text else ""
         except Exception as e:
             debug_print(f"[WARNING] Tesseract OCRエラー: {e}")
@@ -562,18 +572,20 @@ OCR_ENGINES = [OCR_ENGINE_MANGA, OCR_ENGINE_TESSERACT]
 
 
 def create_ocr_processor(engine: str = OCR_ENGINE_TESSERACT, 
-                         lang: str = "jpn") -> BaseOCRProcessor:
+                         lang: str = "jpn+eng",
+                         tessdata_dir: Optional[str] = None) -> BaseOCRProcessor:
     """OCRエンジンに応じたOCR処理器を作成
     
     Args:
         engine: OCRエンジン名（"manga-ocr" または "tesseract"）
-        lang: Tesseractの言語設定
+        lang: Tesseractの言語設定（デフォルト: jpn+eng）
+        tessdata_dir: tessdataディレクトリのパス（tessdata_best使用時に指定）
         
     Returns:
         OCR処理器インスタンス
     """
     if engine == OCR_ENGINE_TESSERACT:
-        return TesseractOCRProcessor(lang=lang)
+        return TesseractOCRProcessor(lang=lang, tessdata_dir=tessdata_dir)
     else:
         return OCRProcessor()
 
@@ -583,15 +595,19 @@ class TextDetectorOCR:
     
     def __init__(self, model_path: Optional[str] = None,
                  ocr_engine: str = OCR_ENGINE_TESSERACT,
-                 ocr_lang: str = "jpn"):
+                 ocr_lang: str = "jpn+eng",
+                 tessdata_dir: Optional[str] = None):
         """
         Args:
             model_path: テキスト検出モデルのパス
             ocr_engine: OCRエンジン名（"manga-ocr" または "tesseract"）
-            ocr_lang: Tesseractの言語設定
+            ocr_lang: Tesseractの言語設定（デフォルト: jpn+eng）
+            tessdata_dir: tessdataディレクトリのパス（tessdata_best使用時に指定）
         """
         self.detector = ComicTextDetector(model_path=model_path)
-        self.ocr_processor = create_ocr_processor(engine=ocr_engine, lang=ocr_lang)
+        self.ocr_processor = create_ocr_processor(
+            engine=ocr_engine, lang=ocr_lang, tessdata_dir=tessdata_dir
+        )
         self.ocr_engine = ocr_engine
     
     def _split_multiline_region(self, img: np.ndarray, region: TextRegion,
@@ -848,21 +864,24 @@ class TextDetectorOCR:
 def process_pdf_page_with_detection(page_img: np.ndarray, 
                                     model_path: Optional[str] = None,
                                     ocr_engine: str = OCR_ENGINE_TESSERACT,
-                                    ocr_lang: str = "jpn") -> str:
+                                    ocr_lang: str = "jpn+eng",
+                                    tessdata_dir: Optional[str] = None) -> str:
     """PDFページ画像からテキストを検出してOCRを実行
     
     Args:
         page_img: ページ画像 (BGR形式)
         model_path: テキスト検出モデルのパス
         ocr_engine: OCRエンジン名（"manga-ocr" または "tesseract"）
-        ocr_lang: Tesseractの言語設定
+        ocr_lang: Tesseractの言語設定（デフォルト: jpn+eng）
+        tessdata_dir: tessdataディレクトリのパス（tessdata_best使用時に指定）
         
     Returns:
         抽出されたテキスト
     """
     processor = TextDetectorOCR(model_path=model_path, 
                                 ocr_engine=ocr_engine,
-                                ocr_lang=ocr_lang)
+                                ocr_lang=ocr_lang,
+                                tessdata_dir=tessdata_dir)
     regions = processor.process_image(page_img)
     
     if len(regions) == 0:
