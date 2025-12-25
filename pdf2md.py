@@ -625,6 +625,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 # 前ページが文末記号で終わっていない
                 ends_with_sentence = prev_last_line[-1] in sentence_end_chars
                 
+                # 「以上」で終わる場合も文末として扱う（空白を除去して完全一致）
+                # 「以 上」「以　上」などの表記ゆれに対応
+                prev_normalized = re.sub(r'\s+', '', prev_last_line)
+                if prev_normalized == '以上':
+                    ends_with_sentence = True
+                
                 # 現ページが新しい構造要素で始まらない
                 starts_with_structure = bool(no_merge_start_re.match(curr_first_line))
                 
