@@ -79,7 +79,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         pdf_file_path: str,
         output_dir: Optional[str] = None,
         output_format: str = 'png',
-        ocr_engine: str = 'tesseract'
+        ocr_engine: str = 'tesseract',
+        tessdata_dir: Optional[str] = None
     ):
         """コンバータインスタンスの初期化
         
@@ -88,6 +89,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             output_dir: 出力ディレクトリ（省略時は./output）
             output_format: 出力画像形式 ('png' または 'svg')
             ocr_engine: OCRエンジン ('manga-ocr' または 'tesseract')
+            tessdata_dir: tessdataディレクトリのパス（tessdata_best使用時に指定）
         """
         self.pdf_file = pdf_file_path
         self.base_name = Path(pdf_file_path).stem
@@ -121,6 +123,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         if self.ocr_engine not in ('manga-ocr', 'tesseract'):
             print(f"[WARNING] 不明なOCRエンジン '{ocr_engine}'。'tesseract'を使用します。")
             self.ocr_engine = 'tesseract'
+        
+        # tessdataディレクトリ（tessdata_best使用時に指定）
+        self.tessdata_dir = tessdata_dir
         
         # 脚注番号セット（参考文献ブロックから抽出した番号のみ変換対象）
         self._defined_footnote_nums: Set[str] = set()
@@ -1571,7 +1576,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             
             text = process_pdf_page_with_detection(
                 img_bgr, 
-                ocr_engine=self.ocr_engine
+                ocr_engine=self.ocr_engine,
+                tessdata_dir=self.tessdata_dir
             )
             return text.strip() if text else ""
             
@@ -1631,6 +1637,8 @@ def main():
     parser.add_argument('--ocr-engine', choices=['manga-ocr', 'tesseract'], 
                        default='tesseract',
                        help='OCRエンジンを指定（デフォルト: tesseract）')
+    parser.add_argument('--tessdata-dir', type=str,
+                       help='tessdataディレクトリを指定（tessdata_best使用時）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力')
     
@@ -1651,7 +1659,8 @@ def main():
             args.pdf_file,
             output_dir=args.output_dir,
             output_format=args.format,
-            ocr_engine=args.ocr_engine
+            ocr_engine=args.ocr_engine,
+            tessdata_dir=args.tessdata_dir
         )
         output_file = converter.convert()
         print("\n変換完了!")
