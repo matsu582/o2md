@@ -1426,6 +1426,7 @@ class _FiguresMixin:
         """図内テキストを<details>タグ形式に整形
         
         x2md_graphics.pyと同様の形式で出力する。
+        テキストが少ない場合（1つだけ、または合計20文字以下）は出力しない。
         
         Args:
             texts: 図内テキストのリスト
@@ -1434,6 +1435,11 @@ class _FiguresMixin:
             整形されたテキスト
         """
         if not texts:
+            return ""
+        
+        # テキストが少ない場合は出力しない
+        total_chars = sum(len(t) for t in texts)
+        if len(texts) <= 1 or total_chars <= 20:
             return ""
         
         quoted_texts = [f'"{t}"' for t in texts]

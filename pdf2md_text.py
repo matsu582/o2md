@@ -1284,27 +1284,32 @@ class _TextMixin:
         sorted_line_tables = sorted(line_based_tables, key=lambda t: t["y_start"])
         processed_line_tables = set()
         
-        def get_line_based_table(line: Dict) -> Optional[Dict]:
-            """行が罫線ベースの表領域内にあるかチェック
+        def get_line_based_table_by_y(line: Dict) -> Optional[Dict]:
+            """行のy座標が罫線ベースの表領域内にあるかチェック（テーブル出力トリガ用）
             
-            2段組の場合、テーブルのx範囲と行のx座標を比較して、
-            同じカラム内の行のみをテーブルの一部として扱う。
+            y座標のみで判定し、テーブルの出力タイミングを決定する。
             """
             line_y = line.get("y", 0)
-            line_x = line.get("x", 0)
             for table in sorted_line_tables:
                 if table["y_start"] - 5 <= line_y <= table["y_end"] + 5:
-                    # テーブルのbboxからx範囲を取得
-                    table_bbox = table.get("bbox", (0, 0, 0, 0))
-                    table_x_start = table_bbox[0]
-                    table_x_end = table_bbox[2]
-                    # 行のx座標がテーブルのx範囲内にあるかチェック
-                    # 許容範囲を広めに設定（テーブル幅の20%程度）
-                    table_width = table_x_end - table_x_start
-                    margin = max(table_width * 0.2, 30)
-                    if table_x_start - margin <= line_x <= table_x_end + margin:
-                        return table
+                    return table
             return None
+        
+        def should_skip_line_for_table(line: Dict, table: Dict) -> bool:
+            """行がテーブルの一部としてスキップすべきかチェック（行除外判定用）
+            
+            2段組の場合、テーブルのx範囲と行のx座標を比較して、
+            同じカラム内の行のみをスキップする。
+            """
+            line_x = line.get("x", 0)
+            table_bbox = table.get("bbox", (0, 0, 0, 0))
+            table_x_start = table_bbox[0]
+            table_x_end = table_bbox[2]
+            # 行のx座標がテーブルのx範囲内にあるかチェック
+            # 許容範囲を広めに設定（テーブル幅の20%程度）
+            table_width = table_x_end - table_x_start
+            margin = max(table_width * 0.2, 30)
+            return table_x_start - margin <= line_x <= table_x_end + margin
         
         # 行高の推定（フォントサイズの1.2倍程度）
         line_height = base_font_size * 1.2
@@ -1320,10 +1325,11 @@ class _TextMixin:
         while i < len(lines):
             line = lines[i]
             
-            # 罫線ベースの表領域内の行は除外し、Markdownテーブルを出力
-            line_table = get_line_based_table(line)
+            # 罫線ベースの表領域をチェック
+            line_table = get_line_based_table_by_y(line)
             if line_table:
                 table_id = (line_table["y_start"], line_table["y_end"])
+                # テーブルがまだ出力されていない場合、出力する（y座標のみで判定）
                 if table_id not in processed_line_tables:
                     # 現在のブロックを確定
                     if current_block:
@@ -1340,8 +1346,12 @@ class _TextMixin:
                         "column": "full"
                     })
                     processed_line_tables.add(table_id)
-                i += 1
-                continue
+                
+                # 行をスキップするかはx座標も含めて判定
+                if should_skip_line_for_table(line, line_table):
+                    i += 1
+                    continue
+                # x座標がテーブル範囲外の場合は、行を通常処理する（continueしない）
             
             table_region = is_in_table_region(line)
             
