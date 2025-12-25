@@ -1285,11 +1285,25 @@ class _TextMixin:
         processed_line_tables = set()
         
         def get_line_based_table(line: Dict) -> Optional[Dict]:
-            """行が罫線ベースの表領域内にあるかチェック"""
+            """行が罫線ベースの表領域内にあるかチェック
+            
+            2段組の場合、テーブルのx範囲と行のx座標を比較して、
+            同じカラム内の行のみをテーブルの一部として扱う。
+            """
             line_y = line.get("y", 0)
+            line_x = line.get("x", 0)
             for table in sorted_line_tables:
                 if table["y_start"] - 5 <= line_y <= table["y_end"] + 5:
-                    return table
+                    # テーブルのbboxからx範囲を取得
+                    table_bbox = table.get("bbox", (0, 0, 0, 0))
+                    table_x_start = table_bbox[0]
+                    table_x_end = table_bbox[2]
+                    # 行のx座標がテーブルのx範囲内にあるかチェック
+                    # 許容範囲を広めに設定（テーブル幅の20%程度）
+                    table_width = table_x_end - table_x_start
+                    margin = max(table_width * 0.2, 30)
+                    if table_x_start - margin <= line_x <= table_x_end + margin:
+                        return table
             return None
         
         # 行高の推定（フォントサイズの1.2倍程度）
