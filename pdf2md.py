@@ -947,6 +947,11 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             if first_char in excluded_chars:
                 return (False, 0, "")
             
+            # 「名詞＋助詞＋区切り」パターンは見出しではない（例: 「乙は、」「甲が 」）
+            particle_pattern = re.compile(r'^.{1,3}[はがをにでともや][、。\s,.]')
+            if particle_pattern.match(title_part):
+                return (False, 0, "")
+            
             return (True, 2, title_part)
         
         return (False, 0, "")

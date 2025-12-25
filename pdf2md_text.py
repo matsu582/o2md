@@ -1261,6 +1261,17 @@ class _TextMixin:
             """行が番号付き箇条書きで始まるかを判定"""
             return bool(numbered_list_pattern.match(text))
         
+        def is_structured_field_line(text: str) -> bool:
+            """構造化フィールド行かどうかを判定（ラベル＋多スペース＋値）"""
+            t = text.strip()
+            if not t:
+                return False
+            if "。" in t or "、" in t:
+                return False
+            if not re.search(r'[\u3000 ]{2,}', t):
+                return False
+            return bool(re.match(r'^\S{1,6}[\u3000 ]{2,}\S+', t))
+        
         def is_in_table_region(line: Dict) -> Optional[Dict]:
             """行が表領域内にあるかチェック"""
             for region in table_regions:
@@ -1539,7 +1550,13 @@ class _TextMixin:
                     prev_text = current_block["texts"][-1]
                     curr_text = line["text"]
                     
-                    if prev_text and curr_text:
+                    # 構造化フィールド行（ラベル＋多スペース＋値）の場合は改行を保持
+                    if current_block.get("is_list", False) and is_structured_field_line(curr_text):
+                        first_line = current_block["texts"][0]
+                        marker_match = re.match(r'^(\s*[0-9０-９]+[.)．）]\s*)', first_line)
+                        indent = "   " if marker_match else ""
+                        current_block["texts"].append("\n" + indent + curr_text.strip())
+                    elif prev_text and curr_text:
                         prev_char = prev_text.rstrip()[-1] if prev_text.rstrip() else ""
                         curr_char = curr_text.lstrip()[0] if curr_text.lstrip() else ""
                         
