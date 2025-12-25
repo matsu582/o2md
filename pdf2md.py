@@ -873,8 +873,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
     def _is_numbered_heading(self, text: str) -> Tuple[bool, int, str]:
         """番号付き見出しかどうかを判定
         
-        「1　はじめに」「2.1　概要」「第1条（借入要項）」などのパターンを検出する。
+        「1　はじめに」「2.1　概要」「4.1.1　詳細」「第1条（借入要項）」などのパターンを検出する。
         文末表現（述語終止形）を含む場合は見出しではないと判定する。
+        図表キャプション（「図N」「表N」）は見出しではないと判定する。
         
         Args:
             text: 判定するテキスト
@@ -884,6 +885,10 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         """
         import re
         text = text.strip()
+        
+        # 図表キャプション（「図N」「表N」）は見出しではない
+        if re.match(r'^(図|表)\s*[0-9０-９]+', text):
+            return (False, 0, "")
         
         # 「第N条」形式の見出しパターン（先に判定、本文が続いていても対応）
         article_match = re.match(
@@ -918,6 +923,26 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         )
         if re.search(sentence_endings, text):
             return (False, 0, "")
+        
+        # 階層番号パターン: 「4.1　QRコードの構造」「4.1.1　ファインダパターン」など
+        # ドットの数に応じて見出しレベルを決定（4.1 → レベル2、4.1.1 → レベル3）
+        hierarchical_match = re.match(
+            r'^(\d+(?:\.\d+)+)[　 ]+(.{1,40})$',
+            text
+        )
+        if hierarchical_match:
+            number_part = hierarchical_match.group(1)
+            title_part = hierarchical_match.group(2).strip()
+            
+            # タイトル部分が短すぎる場合は除外
+            if len(title_part) < 2:
+                return (False, 0, "")
+            
+            # ドットの数でレベルを決定（4.1 → 1ドット → レベル2、4.1.1 → 2ドット → レベル3）
+            dot_count = number_part.count('.')
+            heading_level = min(dot_count + 1, 3)  # 最大レベル3
+            
+            return (True, heading_level, text)
         
         # 「N．タイトル」形式の見出しパターン（例: 「１．固定金利型の利率変更」）
         numbered_dot_match = re.match(
@@ -1008,8 +1033,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             # 句点で終わる場合は文として扱う（ただし短い場合は除外）
             if len(txt) > 15 and txt.endswith(('.', '。', '．')):
                 return True
-            # 表/図キャプション形式は見出しではない
-            if re.match(r'^(図|表)\s*[\d０-９]+[\.\:．：]', txt):
+            # 図表キャプション形式は見出しではない（「図N」「表N」で始まる）
+            if re.match(r'^(図|表)\s*[0-9０-９]+', txt):
                 return True
             return False
         
