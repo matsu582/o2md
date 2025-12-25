@@ -124,6 +124,64 @@ class _FiguresMixin:
             return True
         return False
 
+    def _fig_is_text_box_candidate(
+        self, candidate: Dict, text_lines: List[Dict], col_width: float
+    ) -> bool:
+        """図形候補が囲み記事（テキストボックス）かどうかを判定
+        
+        囲み記事の特徴:
+        - image要素を含まない（image_count == 0）
+        - bbox内に段落っぽい本文行が多数存在する
+        
+        Args:
+            candidate: 図形候補の辞書
+            text_lines: ページ内のテキスト行リスト
+            col_width: カラム幅
+            
+        Returns:
+            囲み記事と判定された場合True
+        """
+        # image要素を含む場合は囲み記事ではない
+        image_count = candidate.get("image_count", 0)
+        if image_count > 0:
+            return False
+        
+        # bboxを取得
+        bbox = candidate.get("raw_union_bbox", candidate.get("union_bbox"))
+        if not bbox:
+            return False
+        
+        # bbox内のテキスト行を収集
+        body_line_count = 0
+        total_line_count = 0
+        
+        for line in text_lines:
+            line_bbox = line.get("bbox", (0, 0, 0, 0))
+            line_text = line.get("text", "").strip()
+            
+            # bbox内のテキスト行かどうかを判定
+            line_center_y = (line_bbox[1] + line_bbox[3]) / 2
+            line_center_x = (line_bbox[0] + line_bbox[2]) / 2
+            
+            if not (bbox[0] <= line_center_x <= bbox[2] and 
+                    bbox[1] <= line_center_y <= bbox[3]):
+                continue
+            
+            total_line_count += 1
+            line_width = line_bbox[2] - line_bbox[0]
+            
+            # 本文らしい行かどうかを判定
+            if self._fig_is_body_text_line(line_text, line_width, col_width):
+                body_line_count += 1
+        
+        # 本文行が10行以上ある場合は囲み記事と判定
+        # （短い行や空白行が多い場合でも、本文行が十分にあれば囲み記事）
+        if body_line_count >= 10:
+            debug_print(f"[DEBUG] 囲み記事検出: {body_line_count}本文行/{total_line_count}行")
+            return True
+        
+        return False
+
     def _fig_compute_header_footer_bounds(
         self, page, page_num: int, page_height: float, 
         header_footer_patterns: Set[str]
@@ -404,6 +462,43 @@ class _FiguresMixin:
                         queue.append(j)
             
             clusters.append(cluster)
+
+        # 混在クラスタの分割処理
+        # drawing要素とimage要素が混在し、y方向に離れている場合は分割
+        split_clusters = []
+        for cluster in clusters:
+            if len(cluster) < 2:
+                split_clusters.append(cluster)
+                continue
+            
+            # クラスタ内の要素タイプを確認
+            drawing_indices = [i for i in cluster if all_elements[i]["type"] == "drawing"]
+            image_indices = [i for i in cluster if all_elements[i]["type"] == "image"]
+            
+            # drawing要素とimage要素が両方存在する場合のみ分割を検討
+            if not drawing_indices or not image_indices:
+                split_clusters.append(cluster)
+                continue
+            
+            # drawing要素のy座標範囲を取得
+            drawing_y_max = max(all_bboxes[i][3] for i in drawing_indices)
+            drawing_y_min = min(all_bboxes[i][1] for i in drawing_indices)
+            
+            # image要素のy座標範囲を取得
+            image_y_min = min(all_bboxes[i][1] for i in image_indices)
+            image_y_max = max(all_bboxes[i][3] for i in image_indices)
+            
+            # drawing要素とimage要素がy方向に離れている場合（20px以上）は分割
+            y_gap = image_y_min - drawing_y_max
+            if y_gap > 20.0:
+                # drawingクラスタとimageクラスタに分割
+                split_clusters.append(drawing_indices)
+                split_clusters.append(image_indices)
+                debug_print(f"[DEBUG] page={page_num+1}: 混在クラスタを分割（y_gap={y_gap:.1f}）")
+            else:
+                split_clusters.append(cluster)
+        
+        clusters = split_clusters
 
         # 候補生成
         all_figure_candidates = []
@@ -1245,8 +1340,21 @@ class _FiguresMixin:
             all_figure_candidates, table_bboxes, page_text_lines, column_count, page_num
         )
         
-        # フェーズ6: 同一カラム内マージ
+        # フェーズ5.5: 囲み記事（テキストボックス）のフィルタリング
+        # マージ処理の前に囲み記事を除外する（マージで画像と結合されるのを防ぐ）
         col_width = page_width / 2
+        filtered_candidates = []
+        for cand in all_figure_candidates:
+            if self._fig_is_text_box_candidate(cand, page_text_lines, col_width):
+                debug_print(f"[DEBUG] page={page_num+1}: 囲み記事候補を除外")
+                continue
+            filtered_candidates.append(cand)
+        all_figure_candidates = filtered_candidates
+        
+        if not all_figure_candidates:
+            return []
+        
+        # フェーズ6: 同一カラム内マージ
         all_figure_candidates = self._fig_merge_same_column(
             all_figure_candidates, page_text_lines, col_width
         )
