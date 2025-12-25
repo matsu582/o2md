@@ -78,7 +78,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         self,
         pdf_file_path: str,
         output_dir: Optional[str] = None,
-        output_format: str = 'png'
+        output_format: str = 'png',
+        ocr_engine: str = 'manga-ocr'
     ):
         """コンバータインスタンスの初期化
         
@@ -86,6 +87,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             pdf_file_path: 変換するPDFファイルのパス
             output_dir: 出力ディレクトリ（省略時は./output）
             output_format: 出力画像形式 ('png' または 'svg')
+            ocr_engine: OCRエンジン ('manga-ocr' または 'tesseract')
         """
         self.pdf_file = pdf_file_path
         self.base_name = Path(pdf_file_path).stem
@@ -113,6 +115,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         # manga-ocrインスタンス（遅延初期化）
         self._ocr = None
+        
+        # OCRエンジン設定
+        self.ocr_engine = ocr_engine.lower() if ocr_engine else 'manga-ocr'
+        if self.ocr_engine not in ('manga-ocr', 'tesseract'):
+            print(f"[WARNING] 不明なOCRエンジン '{ocr_engine}'。'manga-ocr'を使用します。")
+            self.ocr_engine = 'manga-ocr'
         
         # 脚注番号セット（参考文献ブロックから抽出した番号のみ変換対象）
         self._defined_footnote_nums: Set[str] = set()
@@ -1561,7 +1569,10 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             from pdf2md_ocr import process_pdf_page_with_detection, set_verbose as ocr_set_verbose
             ocr_set_verbose(is_verbose())
             
-            text = process_pdf_page_with_detection(img_bgr)
+            text = process_pdf_page_with_detection(
+                img_bgr, 
+                ocr_engine=self.ocr_engine
+            )
             return text.strip() if text else ""
             
         except ImportError as e:
@@ -1617,6 +1628,9 @@ def main():
                        help='出力ディレクトリを指定（デフォルト: ./output）')
     parser.add_argument('--format', choices=['png', 'svg'], default='svg',
                        help='出力画像形式を指定（デフォルト: svg）')
+    parser.add_argument('--ocr-engine', choices=['manga-ocr', 'tesseract'], 
+                       default='manga-ocr',
+                       help='OCRエンジンを指定（デフォルト: manga-ocr）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力')
     
@@ -1636,7 +1650,8 @@ def main():
         converter = PDFToMarkdownConverter(
             args.pdf_file,
             output_dir=args.output_dir,
-            output_format=args.format
+            output_format=args.format,
+            ocr_engine=args.ocr_engine
         )
         output_file = converter.convert()
         print("\n変換完了!")

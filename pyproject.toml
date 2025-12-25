@@ -15,6 +15,7 @@ dependencies = [
     "numpy>=1.24.0",
     "manga-ocr>=0.1.8",
     "opencv-python>=4.8.0",
+    "pytesseract>=0.3.10",
 ]
 
 [project.optional-dependencies]

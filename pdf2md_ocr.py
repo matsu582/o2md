@@ -340,7 +340,21 @@ class ComicTextDetector:
         return regions
 
 
-class OCRProcessor:
+class BaseOCRProcessor:
+    """OCR処理器の基底クラス"""
+    
+    def ocr_region(self, img: np.ndarray, region: TextRegion, 
+                   padding_ratio: float = 0.1,
+                   min_size: int = 32) -> str:
+        """テキスト領域からOCRでテキストを抽出（サブクラスで実装）"""
+        raise NotImplementedError
+    
+    def ocr_full_image(self, img: np.ndarray) -> str:
+        """画像全体からOCRでテキストを抽出（サブクラスで実装）"""
+        raise NotImplementedError
+
+
+class OCRProcessor(BaseOCRProcessor):
     """manga-ocrを使用したOCR処理器"""
     
     def __init__(self):
@@ -444,16 +458,141 @@ class OCRProcessor:
             return ""
 
 
+class TesseractOCRProcessor(BaseOCRProcessor):
+    """Tesseractを使用したOCR処理器"""
+    
+    def __init__(self, lang: str = "jpn"):
+        """
+        Args:
+            lang: Tesseractの言語設定（デフォルト: jpn）
+        """
+        self._tesseract = None
+        self._lang = lang
+    
+    def _get_tesseract(self):
+        """pytesseractモジュールを遅延インポート"""
+        if self._tesseract is None:
+            try:
+                import pytesseract
+                self._tesseract = pytesseract
+                debug_print("[INFO] Tesseractを初期化しました")
+            except ImportError:
+                debug_print("[WARNING] pytesseractがインストールされていません")
+                self._tesseract = False
+            except Exception as e:
+                debug_print(f"[WARNING] Tesseract初期化エラー: {e}")
+                self._tesseract = False
+        
+        return self._tesseract if self._tesseract else None
+    
+    def ocr_region(self, img: np.ndarray, region: TextRegion, 
+                   padding_ratio: float = 0.1,
+                   min_size: int = 32) -> str:
+        """テキスト領域からOCRでテキストを抽出
+        
+        Args:
+            img: 入力画像 (BGR形式)
+            region: テキスト領域
+            padding_ratio: パディング比率
+            min_size: 最小サイズ（これより小さい場合は拡大）
+            
+        Returns:
+            抽出されたテキスト
+        """
+        tesseract = self._get_tesseract()
+        if tesseract is None:
+            return ""
+        
+        im_h, im_w = img.shape[:2]
+        
+        # パディングを追加してクロップ
+        pad_x = int(region.width * padding_ratio)
+        pad_y = int(region.height * padding_ratio)
+        
+        x1 = max(0, region.x1 - pad_x)
+        y1 = max(0, region.y1 - pad_y)
+        x2 = min(im_w, region.x2 + pad_x)
+        y2 = min(im_h, region.y2 + pad_y)
+        
+        cropped = img[y1:y2, x1:x2]
+        
+        if cropped.size == 0:
+            return ""
+        
+        # BGR -> RGB -> PIL Image
+        rgb = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(rgb)
+        
+        try:
+            text = tesseract.image_to_string(pil_img, lang=self._lang)
+            return text.strip() if text else ""
+        except Exception as e:
+            debug_print(f"[WARNING] Tesseract OCRエラー: {e}")
+            return ""
+    
+    def ocr_full_image(self, img: np.ndarray) -> str:
+        """画像全体からOCRでテキストを抽出
+        
+        Args:
+            img: 入力画像 (BGR形式)
+            
+        Returns:
+            抽出されたテキスト
+        """
+        tesseract = self._get_tesseract()
+        if tesseract is None:
+            return ""
+        
+        # BGR -> RGB -> PIL Image
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(rgb)
+        
+        try:
+            text = tesseract.image_to_string(pil_img, lang=self._lang)
+            return text.strip() if text else ""
+        except Exception as e:
+            debug_print(f"[WARNING] Tesseract OCRエラー: {e}")
+            return ""
+
+
+# OCRエンジンの種類
+OCR_ENGINE_MANGA = "manga-ocr"
+OCR_ENGINE_TESSERACT = "tesseract"
+OCR_ENGINES = [OCR_ENGINE_MANGA, OCR_ENGINE_TESSERACT]
+
+
+def create_ocr_processor(engine: str = OCR_ENGINE_MANGA, 
+                         lang: str = "jpn") -> BaseOCRProcessor:
+    """OCRエンジンに応じたOCR処理器を作成
+    
+    Args:
+        engine: OCRエンジン名（"manga-ocr" または "tesseract"）
+        lang: Tesseractの言語設定
+        
+    Returns:
+        OCR処理器インスタンス
+    """
+    if engine == OCR_ENGINE_TESSERACT:
+        return TesseractOCRProcessor(lang=lang)
+    else:
+        return OCRProcessor()
+
+
 class TextDetectorOCR:
     """テキスト検出とOCRを統合したクラス"""
     
-    def __init__(self, model_path: Optional[str] = None):
+    def __init__(self, model_path: Optional[str] = None,
+                 ocr_engine: str = OCR_ENGINE_MANGA,
+                 ocr_lang: str = "jpn"):
         """
         Args:
             model_path: テキスト検出モデルのパス
+            ocr_engine: OCRエンジン名（"manga-ocr" または "tesseract"）
+            ocr_lang: Tesseractの言語設定
         """
         self.detector = ComicTextDetector(model_path=model_path)
-        self.ocr_processor = OCRProcessor()
+        self.ocr_processor = create_ocr_processor(engine=ocr_engine, lang=ocr_lang)
+        self.ocr_engine = ocr_engine
     
     def _split_multiline_region(self, img: np.ndarray, region: TextRegion,
                                  min_gap_height: int = 5,
@@ -707,17 +846,23 @@ class TextDetectorOCR:
 
 
 def process_pdf_page_with_detection(page_img: np.ndarray, 
-                                    model_path: Optional[str] = None) -> str:
+                                    model_path: Optional[str] = None,
+                                    ocr_engine: str = OCR_ENGINE_MANGA,
+                                    ocr_lang: str = "jpn") -> str:
     """PDFページ画像からテキストを検出してOCRを実行
     
     Args:
         page_img: ページ画像 (BGR形式)
         model_path: テキスト検出モデルのパス
+        ocr_engine: OCRエンジン名（"manga-ocr" または "tesseract"）
+        ocr_lang: Tesseractの言語設定
         
     Returns:
         抽出されたテキスト
     """
-    processor = TextDetectorOCR(model_path=model_path)
+    processor = TextDetectorOCR(model_path=model_path, 
+                                ocr_engine=ocr_engine,
+                                ocr_lang=ocr_lang)
     regions = processor.process_image(page_img)
     
     if len(regions) == 0:
