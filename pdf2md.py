@@ -534,15 +534,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         # ページ境界マーカーを挿入（後処理でページ跨ぎの結合に使用）
         # 先頭ブロックのy座標を埋め込む（ヘッダ帯判定用）
-        # 注意: text_blocksはヘッダ/フッター除外後なので、生のブロックから取得
+        # text_blocks（ヘッダ/フッター除外後）の先頭ブロックを使用
         first_block_y = None
-        text_dict = page.get_text('dict')
-        raw_blocks = text_dict.get('blocks', [])
-        for block in raw_blocks:
-            if block.get('type') == 0:  # テキストブロック
-                bbox = block.get('bbox', [0, 0, 0, 0])
-                block_y = bbox[1]
-                if block_y > 0:
+        if text_blocks:
+            for block in text_blocks:
+                block_y = block.get("y", block.get("bbox", [0, 0, 0, 0])[1] if block.get("bbox") else 0)
+                if block_y is not None and block_y > 0:
                     first_block_y = block_y
                     break
         self.markdown_lines.append(f"<!--PAGE_BREAK first_y={first_block_y}-->")
@@ -664,7 +661,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 
                 # 次ページの先頭ブロックがヘッダ帯にあるかチェック（汎用的な判定）
                 # y座標がヘッダ帯（doc_header_y_max以下）にある場合は結合しない
-                curr_first_y = first_block_y_values[i - 1] if i - 1 < len(first_block_y_values) else None
+                # 注意: first_block_y_values[i]は次のページ（curr_content）の先頭ブロックのy座標
+                curr_first_y = first_block_y_values[i] if i < len(first_block_y_values) else None
                 in_header_area = False
                 if curr_first_y is not None and self._doc_header_y_max is not None:
                     if curr_first_y <= self._doc_header_y_max:
