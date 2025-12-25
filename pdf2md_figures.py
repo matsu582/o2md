@@ -222,8 +222,6 @@ class _FiguresMixin:
             (all_elements, all_bboxes) のタプル
         """
         all_elements = []
-        page_rect = page.rect
-        page_area = page_rect.width * page_rect.height
         
         try:
             drawings = page.get_drawings()
@@ -233,21 +231,6 @@ class _FiguresMixin:
                     bbox = (rect.x0, rect.y0, rect.x1, rect.y1)
                     area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
                     if area >= 200:
-                        # 大きな枠線（テキストを囲む装飾的な矩形）を除外
-                        # 条件: 面積がページの30%以上、線幅が小さい、白色の塗りつぶし
-                        width = d.get("width", 0)
-                        fill = d.get("fill")
-                        is_large_frame = (
-                            area > page_area * 0.3 and
-                            width is not None and width <= 2.0 and
-                            fill is not None and
-                            isinstance(fill, (list, tuple)) and
-                            len(fill) >= 3 and
-                            all(c > 0.9 for c in fill[:3])
-                        )
-                        if is_large_frame:
-                            debug_print(f"[DEBUG] 大きな枠線を除外: bbox={bbox}, width={width}, fill={fill}")
-                            continue
                         all_elements.append({"bbox": bbox, "type": "drawing"})
         except Exception as e:
             debug_print(f"[DEBUG] 描画取得エラー: {e}")
@@ -1243,32 +1226,6 @@ class _FiguresMixin:
         all_figure_candidates = self._fig_filter_table_regions(
             all_figure_candidates, table_bboxes, page_text_lines, column_count, page_num
         )
-        
-        # フェーズ5.5: テキストが多い drawing-only 候補を除外
-        # 画像を含まない候補で、bbox内のテキストが多い場合は囲み記事として扱い除外
-        filtered_candidates = []
-        for candidate in all_figure_candidates:
-            elements = candidate.get("elements", [])
-            has_image = any(e.get("type") == "image" for e in elements)
-            
-            if not has_image:
-                union_bbox = candidate.get("union_bbox", (0, 0, 0, 0))
-                text_count = 0
-                line_count = 0
-                for tl in page_text_lines:
-                    tb = tl.get("bbox", (0, 0, 0, 0))
-                    if (tb[0] >= union_bbox[0] - 5 and tb[2] <= union_bbox[2] + 5 and
-                        tb[1] >= union_bbox[1] - 5 and tb[3] <= union_bbox[3] + 5):
-                        text_count += len(tl.get("text", ""))
-                        line_count += 1
-                
-                if text_count >= 80 or line_count >= 3:
-                    debug_print(f"[DEBUG] テキストが多い候補を除外: {text_count}文字, {line_count}行")
-                    continue
-            
-            filtered_candidates.append(candidate)
-        
-        all_figure_candidates = filtered_candidates
         
         # フェーズ6: 同一カラム内マージ
         col_width = page_width / 2
