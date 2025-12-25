@@ -1104,9 +1104,27 @@ class _FiguresMixin:
                     image_path = os.path.join(self.images_dir, f"{image_filename}.png")
                     pix.save(image_path)
                 
+                # 図形のbboxが罫線ベースの表領域と重なる場合は、表領域除外をしない
+                # （図形として出力する表のテキストを抽出するため）
+                figure_overlaps_table = False
+                for table_bbox in line_based_table_bboxes:
+                    # 図形と表の重なりを計算
+                    overlap_x0 = max(clip_bbox[0], table_bbox[0])
+                    overlap_y0 = max(clip_bbox[1], table_bbox[1])
+                    overlap_x1 = min(clip_bbox[2], table_bbox[2])
+                    overlap_y1 = min(clip_bbox[3], table_bbox[3])
+                    if overlap_x0 < overlap_x1 and overlap_y0 < overlap_y1:
+                        overlap_area = (overlap_x1 - overlap_x0) * (overlap_y1 - overlap_y0)
+                        table_area = (table_bbox[2] - table_bbox[0]) * (table_bbox[3] - table_bbox[1])
+                        # 表の50%以上が図形に含まれている場合
+                        if table_area > 0 and overlap_area / table_area > 0.5:
+                            figure_overlaps_table = True
+                            break
+                
+                exclude_tables = [] if figure_overlaps_table else line_based_table_bboxes
                 figure_texts, expanded_bbox = self._extract_text_in_bbox(
                     page, clip_bbox, expand_for_labels=True, column=column, gutter_x=gutter_x,
-                    exclude_table_bboxes=line_based_table_bboxes
+                    exclude_table_bboxes=exclude_tables
                 )
                 
                 figures.append({
@@ -1426,7 +1444,6 @@ class _FiguresMixin:
         """図内テキストを<details>タグ形式に整形
         
         x2md_graphics.pyと同様の形式で出力する。
-        テキストが少ない場合（1つだけ、または合計20文字以下）は出力しない。
         
         Args:
             texts: 図内テキストのリスト
@@ -1435,11 +1452,6 @@ class _FiguresMixin:
             整形されたテキスト
         """
         if not texts:
-            return ""
-        
-        # テキストが少ない場合は出力しない
-        total_chars = sum(len(t) for t in texts)
-        if len(texts) <= 1 or total_chars <= 20:
             return ""
         
         quoted_texts = [f'"{t}"' for t in texts]
