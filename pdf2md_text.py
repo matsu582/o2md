@@ -329,8 +329,10 @@ class _TextMixin:
         sorted_lines = self._sort_lines_by_column(lines_data)
         
         # 段落リフロー（同一カラム内で近接する行を結合、表領域は除外）
+        # exclude_bboxes（図形のbbox）を渡して、図形と重なるテーブルの重複出力を防ぐ
         reflowed_blocks = self._reflow_paragraphs_with_tables(
-            sorted_lines, base_font_size, table_regions, line_based_tables
+            sorted_lines, base_font_size, table_regions, line_based_tables,
+            figure_bboxes=exclude_bboxes
         )
         
         # ブロックタイプを判定（カラム情報を保持）
@@ -1220,7 +1222,8 @@ class _TextMixin:
 
     def _reflow_paragraphs_with_tables(
         self, lines: List[Dict], base_font_size: float, table_regions: List[Dict],
-        line_based_tables: List[Dict] = None
+        line_based_tables: List[Dict] = None,
+        figure_bboxes: List[Tuple[float, float, float, float]] = None
     ) -> List[Dict]:
         """段落リフロー（表領域を考慮）
         
@@ -1228,12 +1231,14 @@ class _TextMixin:
         表領域内の行は結合せず、Markdownテーブルとして出力する。
         番号付き見出しは単独ブロックとして確定する。
         番号付き箇条書きの後に続く非番号行は別ブロックとして分離する。
+        図形として出力された領域と重なるテーブルはMarkdownテーブルとして出力しない。
         
         Args:
             lines: ソートされた行データのリスト
             base_font_size: 基準フォントサイズ
             table_regions: 表領域のリスト
             line_based_tables: 罫線ベースで検出された表のリスト
+            figure_bboxes: 図形として出力されたbboxのリスト（重複出力を防ぐため）
             
         Returns:
             結合されたブロックのリスト
@@ -1242,6 +1247,9 @@ class _TextMixin:
         
         if line_based_tables is None:
             line_based_tables = []
+        
+        if figure_bboxes is None:
+            figure_bboxes = []
         
         if not lines:
             return []
@@ -1311,6 +1319,39 @@ class _TextMixin:
             margin = max(table_width * 0.2, 30)
             return table_x_start - margin <= line_x <= table_x_end + margin
         
+        def table_overlaps_with_figure(table: Dict) -> bool:
+            """テーブルが図形と重なるかチェック（重複出力防止用）
+            
+            テーブルのbboxが図形のbboxと80%以上重なる場合はTrueを返す。
+            図形として出力された表はMarkdownテーブルとして出力しない。
+            """
+            if not figure_bboxes:
+                return False
+            
+            table_bbox = table.get("bbox", (0, 0, 0, 0))
+            table_x0, table_y0, table_x1, table_y1 = table_bbox
+            table_area = (table_x1 - table_x0) * (table_y1 - table_y0)
+            
+            if table_area <= 0:
+                return False
+            
+            for fig_bbox in figure_bboxes:
+                fig_x0, fig_y0, fig_x1, fig_y1 = fig_bbox
+                # 重なり領域を計算
+                overlap_x0 = max(table_x0, fig_x0)
+                overlap_y0 = max(table_y0, fig_y0)
+                overlap_x1 = min(table_x1, fig_x1)
+                overlap_y1 = min(table_y1, fig_y1)
+                
+                if overlap_x0 < overlap_x1 and overlap_y0 < overlap_y1:
+                    overlap_area = (overlap_x1 - overlap_x0) * (overlap_y1 - overlap_y0)
+                    # テーブルの80%以上が図形に含まれている場合
+                    if overlap_area / table_area >= 0.8:
+                        debug_print(f"[DEBUG] テーブルが図形と重なるためスキップ: table_bbox={table_bbox}, fig_bbox={fig_bbox}")
+                        return True
+            
+            return False
+        
         # 行高の推定（フォントサイズの1.2倍程度）
         line_height = base_font_size * 1.2
         # 結合する最大ギャップ
@@ -1331,20 +1372,22 @@ class _TextMixin:
                 table_id = (line_table["y_start"], line_table["y_end"])
                 # テーブルがまだ出力されていない場合、出力する（y座標のみで判定）
                 if table_id not in processed_line_tables:
-                    # 現在のブロックを確定
-                    if current_block:
-                        blocks.append(self._finalize_block(current_block))
-                        current_block = None
-                    
-                    # 罫線ベースの表をMarkdownテーブルとして出力
-                    blocks.append({
-                        "text": line_table["markdown"],
-                        "bbox": line_table["bbox"],
-                        "font_size": base_font_size,
-                        "is_bold": False,
-                        "is_table": True,
-                        "column": "full"
-                    })
+                    # 図形と重なるテーブルはMarkdownテーブルとして出力しない
+                    if not table_overlaps_with_figure(line_table):
+                        # 現在のブロックを確定
+                        if current_block:
+                            blocks.append(self._finalize_block(current_block))
+                            current_block = None
+                        
+                        # 罫線ベースの表をMarkdownテーブルとして出力
+                        blocks.append({
+                            "text": line_table["markdown"],
+                            "bbox": line_table["bbox"],
+                            "font_size": base_font_size,
+                            "is_bold": False,
+                            "is_table": True,
+                            "column": "full"
+                        })
                     processed_line_tables.add(table_id)
                 
                 # 行をスキップするかはx座標も含めて判定
