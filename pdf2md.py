@@ -533,7 +533,19 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 self.markdown_lines.append("")
         
         # ページ境界マーカーを挿入（後処理でページ跨ぎの結合に使用）
-        self.markdown_lines.append("<!--PAGE_BREAK-->")
+        # 先頭ブロックのy座標を埋め込む（ヘッダ帯判定用）
+        # 注意: text_blocksはヘッダ/フッター除外後なので、生のブロックから取得
+        first_block_y = None
+        text_dict = page.get_text('dict')
+        raw_blocks = text_dict.get('blocks', [])
+        for block in raw_blocks:
+            if block.get('type') == 0:  # テキストブロック
+                bbox = block.get('bbox', [0, 0, 0, 0])
+                block_y = bbox[1]
+                if block_y > 0:
+                    first_block_y = block_y
+                    break
+        self.markdown_lines.append(f"<!--PAGE_BREAK first_y={first_block_y}-->")
         self.markdown_lines.append("")
     
     
@@ -548,8 +560,10 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
     def _merge_across_page_breaks(self, content: str) -> str:
         """ページ跨ぎの文章を結合する後処理
         
-        ページ境界マーカー（<!--PAGE_BREAK-->）の前後の段落を分析し、
+        ページ境界マーカー（<!--PAGE_BREAK first_y=...-->）の前後の段落を分析し、
         文が途中で切れている場合は結合する。
+        ただし、次ページの先頭ブロックがヘッダ帯（y ≤ doc_header_y_max）にある場合は
+        結合しない（ヘッダ/メタデータとして扱う）。
         
         Args:
             content: ページ境界マーカーを含むMarkdownコンテンツ
@@ -559,14 +573,34 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         """
         import re
         
-        page_marker = "<!--PAGE_BREAK-->"
+        # マーカーパターン（y座標付き）
+        page_marker_pattern = r'<!--PAGE_BREAK first_y=([^>]+)-->'
         
         # マーカーが存在しない場合はそのまま返す
-        if page_marker not in content:
+        if '<!--PAGE_BREAK' not in content:
             return content
         
-        # マーカーで分割してページごとの内容を取得
-        page_contents = content.split(page_marker)
+        # マーカーで分割してページごとの内容を取得（y座標も抽出）
+        parts = re.split(page_marker_pattern, content)
+        # parts = [content0, y0, content1, y1, content2, ...]
+        # 奇数インデックスがy座標、偶数インデックスがコンテンツ
+        
+        if len(parts) <= 1:
+            return content
+        
+        # ページコンテンツとy座標を分離
+        page_contents = []
+        first_block_y_values = []
+        for i, part in enumerate(parts):
+            if i % 2 == 0:
+                page_contents.append(part)
+            else:
+                # y座標を解析（"None"の場合はNone）
+                try:
+                    y_val = float(part) if part != 'None' else None
+                except ValueError:
+                    y_val = None
+                first_block_y_values.append(y_val)
         
         if len(page_contents) <= 1:
             return content
@@ -625,17 +659,20 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 # 前ページが文末記号で終わっていない
                 ends_with_sentence = prev_last_line[-1] in sentence_end_chars
                 
-                # 「以上」で終わる場合も文末として扱う（空白を除去して完全一致）
-                # 「以 上」「以　上」などの表記ゆれに対応
-                prev_normalized = re.sub(r'\s+', '', prev_last_line)
-                if prev_normalized == '以上':
-                    ends_with_sentence = True
-                
                 # 現ページが新しい構造要素で始まらない
                 starts_with_structure = bool(no_merge_start_re.match(curr_first_line))
                 
-                # 結合条件: 文末でなく、新構造要素でもない
-                if not ends_with_sentence and not starts_with_structure:
+                # 次ページの先頭ブロックがヘッダ帯にあるかチェック（汎用的な判定）
+                # y座標がヘッダ帯（doc_header_y_max以下）にある場合は結合しない
+                curr_first_y = first_block_y_values[i - 1] if i - 1 < len(first_block_y_values) else None
+                in_header_area = False
+                if curr_first_y is not None and self._doc_header_y_max is not None:
+                    if curr_first_y <= self._doc_header_y_max:
+                        in_header_area = True
+                        debug_print(f"[DEBUG] ヘッダ帯検出: y={curr_first_y:.1f} <= header_y_max={self._doc_header_y_max:.1f}")
+                
+                # 結合条件: 文末でなく、新構造要素でもなく、ヘッダ帯でもない
+                if not ends_with_sentence and not starts_with_structure and not in_header_area:
                     should_merge = True
                     debug_print(f"[DEBUG] ページ跨ぎ結合: '{prev_last_line[-20:]}' + '{curr_first_line[:20]}'")
             
