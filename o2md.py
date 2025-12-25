@@ -230,10 +230,12 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
         elif file_type == 'pdf':
             # PDF変換
             output_format = kwargs.get('output_format', 'png')
+            ocr_engine = kwargs.get('ocr_engine', 'tesseract')
             converter = PDFToMarkdownConverter(
                 file_path,
                 output_dir=output_dir,
-                output_format=output_format
+                output_format=output_format,
+                ocr_engine=ocr_engine
             )
             output_file = converter.convert()
         
@@ -297,6 +299,9 @@ def main():
                        help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
     parser.add_argument('--format', choices=['png', 'svg'], default='svg',
                        help='出力画像形式を指定（デフォルト: png）')
+    parser.add_argument('--ocr-engine', choices=['manga-ocr', 'tesseract'], 
+                       default='tesseract',
+                       help='[PDF専用] OCRエンジンを指定（デフォルト: tesseract）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力し、debug_workbooks/pdfs/diagnosticsフォルダを保存')
     
@@ -310,7 +315,8 @@ def main():
             output_dir=args.output_dir,
             use_heading_text=args.use_heading_text,
             shape_metadata=args.shape_metadata,
-            output_format=args.format
+            output_format=args.format,
+            ocr_engine=args.ocr_engine
         )
         
         print("\n" + "=" * 50)

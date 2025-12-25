@@ -79,7 +79,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         pdf_file_path: str,
         output_dir: Optional[str] = None,
         output_format: str = 'png',
-        ocr_engine: str = 'manga-ocr'
+        ocr_engine: str = 'tesseract'
     ):
         """コンバータインスタンスの初期化
         
@@ -117,10 +117,10 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         self._ocr = None
         
         # OCRエンジン設定
-        self.ocr_engine = ocr_engine.lower() if ocr_engine else 'manga-ocr'
+        self.ocr_engine = ocr_engine.lower() if ocr_engine else 'tesseract'
         if self.ocr_engine not in ('manga-ocr', 'tesseract'):
-            print(f"[WARNING] 不明なOCRエンジン '{ocr_engine}'。'manga-ocr'を使用します。")
-            self.ocr_engine = 'manga-ocr'
+            print(f"[WARNING] 不明なOCRエンジン '{ocr_engine}'。'tesseract'を使用します。")
+            self.ocr_engine = 'tesseract'
         
         # 脚注番号セット（参考文献ブロックから抽出した番号のみ変換対象）
         self._defined_footnote_nums: Set[str] = set()
@@ -1629,8 +1629,8 @@ def main():
     parser.add_argument('--format', choices=['png', 'svg'], default='svg',
                        help='出力画像形式を指定（デフォルト: svg）')
     parser.add_argument('--ocr-engine', choices=['manga-ocr', 'tesseract'], 
-                       default='manga-ocr',
-                       help='OCRエンジンを指定（デフォルト: manga-ocr）')
+                       default='tesseract',
+                       help='OCRエンジンを指定（デフォルト: tesseract）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力')
     

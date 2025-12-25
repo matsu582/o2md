@@ -561,7 +561,7 @@ OCR_ENGINE_TESSERACT = "tesseract"
 OCR_ENGINES = [OCR_ENGINE_MANGA, OCR_ENGINE_TESSERACT]
 
 
-def create_ocr_processor(engine: str = OCR_ENGINE_MANGA, 
+def create_ocr_processor(engine: str = OCR_ENGINE_TESSERACT, 
                          lang: str = "jpn") -> BaseOCRProcessor:
     """OCRエンジンに応じたOCR処理器を作成
     
@@ -582,7 +582,7 @@ class TextDetectorOCR:
     """テキスト検出とOCRを統合したクラス"""
     
     def __init__(self, model_path: Optional[str] = None,
-                 ocr_engine: str = OCR_ENGINE_MANGA,
+                 ocr_engine: str = OCR_ENGINE_TESSERACT,
                  ocr_lang: str = "jpn"):
         """
         Args:
@@ -847,7 +847,7 @@ class TextDetectorOCR:
 
 def process_pdf_page_with_detection(page_img: np.ndarray, 
                                     model_path: Optional[str] = None,
-                                    ocr_engine: str = OCR_ENGINE_MANGA,
+                                    ocr_engine: str = OCR_ENGINE_TESSERACT,
                                     ocr_lang: str = "jpn") -> str:
     """PDFページ画像からテキストを検出してOCRを実行
     
