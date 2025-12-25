@@ -22,7 +22,7 @@ o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）およびPDFを**
 - **Excel変換** (x2md.py): 表、グラフ、図形を含むワークシートを変換
 - **Word変換** (d2md.py): 見出し、表、画像、リストを含む文書を変換
 - **PowerPoint変換** (p2md.py): スライド、図形、表、テキストを変換
-- **PDF変換** (pdf2md.py): PDFを画像とテキストに変換（manga-ocrによるOCRフォールバック対応）
+- **PDF変換** (pdf2md.py): PDFを画像とテキストに変換（Tesseract/manga-ocrによるOCR対応）
 - **画像処理**: 図形やグラフを自動的に画像として抽出・埋め込み
 - **複雑な要素の処理**: 表と図形が混在するスライドは全体を画像化
 
@@ -102,6 +102,13 @@ uv run python o2md.py input_files/document.docx --use-heading-text
 
 # PNG形式で画像を出力（デフォルトはSVG）
 uv run python o2md.py input_files/data.xlsx --format png
+
+# PDF変換でOCRエンジンを指定（デフォルト: tesseract）
+uv run python o2md.py input_files/document.pdf --ocr-engine tesseract
+uv run python o2md.py input_files/document.pdf --ocr-engine manga-ocr
+
+# tessdata_bestを使用する場合（高精度モード）
+uv run python o2md.py input_files/document.pdf --tessdata-dir ~/tessdata_best
 ```
 
 ### 古い形式のファイル
@@ -122,6 +129,8 @@ uv run python o2md.py input_files/old_presentation.ppt
 | `--format`           | 画像出力形式を指定（`svg`または`png`、デフォルト: `svg`）|
 | `--use-heading-text` | [Word専用] 章番号の代わりに見出しテキストをリンクに使用 |
 | `--shape-metadata`   | [Word/Excel専用] 図形のメタデータを出力                 |
+| `--ocr-engine`       | [PDF専用] OCRエンジンを指定（`tesseract`または`manga-ocr`、デフォルト: `tesseract`）|
+| `--tessdata-dir`     | [PDF専用] tessdataディレクトリを指定（tessdata_best使用時）|
 | `-v, --verbose`      | 詳細なデバッグ出力を表示                                |
 | `-h, --help`         | ヘルプメッセージを表示                                  |
 
@@ -191,7 +200,10 @@ SVG形式はベクター形式のため、拡大しても品質が劣化しま�
 
 - PDFの各ページを画像ファイル（PNG/SVG）に変換
 - 埋め込みテキストの抽出
-- **OCRフォールバック**: テキストが抽出できない場合はmanga-ocrで読み取り
+- **OCR対応**: 画像ベースPDF（スキャンPDF）のテキスト抽出
+  - Tesseract OCR（デフォルト）: 文書向けOCR、日本語+英語対応
+  - manga-ocr + comic-text-detector: マンガ/コミック向けOCR
+- **tessdata_best対応**: `--tessdata-dir`オプションで高精度モデルを指定可能
 - 出力形式: ページごとの画像 + Markdownファイル
 
 #### PDF変換の出力構造
@@ -242,5 +254,8 @@ output/
 ### PDF (pdf2md.py)
 - 暗号化されたPDFは処理できません
 - 複雑なレイアウトのPDFではテキスト抽出の精度が低下する場合があります
-- OCR機能を使用するにはmanga-ocrのインストールが必要です（pyproject.tomlに含まれています）
+- Tesseract OCRを使用するには事前にTesseractのインストールが必要です
+  - macOS: `brew install tesseract tesseract-lang`
+  - Ubuntu/Debian: `sudo apt-get install tesseract-ocr tesseract-ocr-jpn tesseract-ocr-eng`
+- tessdata_bestを使用する場合は別途ダウンロードが必要です（`--tessdata-dir`オプションで指定）
 

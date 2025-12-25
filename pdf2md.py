@@ -78,7 +78,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         self,
         pdf_file_path: str,
         output_dir: Optional[str] = None,
-        output_format: str = 'png'
+        output_format: str = 'png',
+        ocr_engine: str = 'tesseract',
+        tessdata_dir: Optional[str] = None
     ):
         """コンバータインスタンスの初期化
         
@@ -86,6 +88,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             pdf_file_path: 変換するPDFファイルのパス
             output_dir: 出力ディレクトリ（省略時は./output）
             output_format: 出力画像形式 ('png' または 'svg')
+            ocr_engine: OCRエンジン ('manga-ocr' または 'tesseract')
+            tessdata_dir: tessdataディレクトリのパス（tessdata_best使用時に指定）
         """
         self.pdf_file = pdf_file_path
         self.base_name = Path(pdf_file_path).stem
@@ -114,6 +118,15 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         # manga-ocrインスタンス（遅延初期化）
         self._ocr = None
         
+        # OCRエンジン設定
+        self.ocr_engine = ocr_engine.lower() if ocr_engine else 'tesseract'
+        if self.ocr_engine not in ('manga-ocr', 'tesseract'):
+            print(f"[WARNING] 不明なOCRエンジン '{ocr_engine}'。'tesseract'を使用します。")
+            self.ocr_engine = 'tesseract'
+        
+        # tessdataディレクトリ（tessdata_best使用時に指定）
+        self.tessdata_dir = tessdata_dir
+        
         # 脚注番号セット（参考文献ブロックから抽出した番号のみ変換対象）
         self._defined_footnote_nums: Set[str] = set()
         
@@ -127,6 +140,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         """manga-ocrインスタンスを取得（遅延初期化）"""
         if self._ocr is None:
             try:
+                # tokenizersのスレッドプール生成を抑止（終了時ハング対策）
+                os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+                
                 from manga_ocr import MangaOcr
                 self._ocr = MangaOcr()
                 print("[INFO] manga-ocrを初期化しました")
@@ -396,6 +412,51 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         return False
     
+    def _is_scan_page(self, page, text_blocks: list, vector_figures: list) -> bool:
+        """スキャンページ（画像ベースPDF）かどうかを判定
+        
+        以下の条件を満たす場合にスキャンページと判定:
+        - テキストブロックが空
+        - 図が1つだけ
+        - その図がページの大部分（80%以上）を覆っている
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            text_blocks: 抽出されたテキストブロック
+            vector_figures: 抽出された図のリスト
+            
+        Returns:
+            スキャンページの場合True
+        """
+        # テキストブロックがある場合はスキャンページではない
+        if text_blocks:
+            return False
+        
+        # 図が1つだけの場合のみチェック
+        if len(vector_figures) != 1:
+            return False
+        
+        # ページサイズを取得
+        page_rect = page.rect
+        page_width = page_rect.width
+        page_height = page_rect.height
+        page_area = page_width * page_height
+        
+        # 図のbboxを取得
+        fig_bbox = vector_figures[0].get("bbox", (0, 0, 0, 0))
+        fig_width = fig_bbox[2] - fig_bbox[0]
+        fig_height = fig_bbox[3] - fig_bbox[1]
+        fig_area = fig_width * fig_height
+        
+        # 図がページの80%以上を覆っている場合はスキャンページ
+        coverage_ratio = fig_area / page_area if page_area > 0 else 0
+        
+        if coverage_ratio >= 0.8:
+            debug_print(f"[DEBUG] スキャンページ検出: 図の面積比={coverage_ratio:.2%}")
+            return True
+        
+        return False
+    
     def _convert_page(self, page, page_num: int, header_footer_patterns: Set[str] = None):
         """PDFページを変換
         
@@ -418,7 +479,31 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             page, header_footer_patterns, exclude_bboxes=figure_bboxes
         )
         
-        if text_blocks or vector_figures:
+        # スキャンページ（画像ベースPDF）かどうかを判定
+        is_scan = self._is_scan_page(page, text_blocks, vector_figures)
+        
+        if is_scan:
+            # スキャンページ: 図の画像を出力し、OCRでテキスト抽出
+            debug_print(f"[DEBUG] ページ {page_num + 1}: スキャンページとして処理（OCR実行）")
+            
+            # 図の画像を出力
+            if vector_figures:
+                fig = vector_figures[0]
+                image_filename = fig.get("filename", "")
+                if image_filename:
+                    self.markdown_lines.append(f"![ページ {page_num + 1}](images/{image_filename})")
+                    self.markdown_lines.append("")
+            
+            # OCRでテキスト抽出
+            ocr_text = self._ocr_page(page)
+            if ocr_text and ocr_text.strip() and ocr_text != "(OCR利用不可)":
+                self.markdown_lines.append("### 抽出テキスト（OCR）")
+                self.markdown_lines.append("")
+                for line in ocr_text.strip().split('\n'):
+                    if line.strip():
+                        self.markdown_lines.append(line.strip())
+                self.markdown_lines.append("")
+        elif text_blocks or vector_figures:
             # テキストベースのPDF: 構造化されたMarkdownを出力
             debug_print(f"[DEBUG] ページ {page_num + 1}: テキストベースPDFとして処理")
             
@@ -1454,7 +1539,60 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         return ocr_text
     
     def _ocr_page(self, page) -> str:
-        """manga-ocrを使用してページからテキストを抽出
+        """テキスト検出とOCRを使用してページからテキストを抽出
+        
+        comic-text-detectorでテキスト領域を検出し、
+        各領域ごとにmanga-ocrでテキストを抽出します。
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            
+        Returns:
+            OCRで抽出されたテキスト
+        """
+        try:
+            # ページを画像に変換（300dpi相当: 300/72 ≈ 4.17）
+            scale = 300 / 72
+            matrix = fitz.Matrix(scale, scale)
+            pix = page.get_pixmap(matrix=matrix)
+            
+            # numpy配列に変換（BGR形式）
+            import numpy as np
+            img_array = np.frombuffer(pix.samples, dtype=np.uint8)
+            img_array = img_array.reshape(pix.height, pix.width, pix.n)
+            
+            # RGBの場合はBGRに変換
+            if pix.n == 3:
+                img_bgr = img_array[:, :, ::-1].copy()
+            elif pix.n == 4:
+                # RGBAの場合はRGBに変換してからBGRに
+                img_bgr = img_array[:, :, :3][:, :, ::-1].copy()
+            else:
+                img_bgr = img_array
+            
+            # pdf2md_ocrモジュールを使用してテキスト抽出
+            from pdf2md_ocr import process_pdf_page_with_detection, set_verbose as ocr_set_verbose
+            ocr_set_verbose(is_verbose())
+            
+            text = process_pdf_page_with_detection(
+                img_bgr, 
+                ocr_engine=self.ocr_engine,
+                tessdata_dir=self.tessdata_dir
+            )
+            return text.strip() if text else ""
+            
+        except ImportError as e:
+            # ImportErrorは常に表示（原因特定のため）
+            print(f"[WARNING] pdf2md_ocrモジュールが利用できません: {e}")
+            print("[WARNING] テキスト領域検出が無効です。フォールバックOCRを使用します。")
+            # フォールバック: 従来のmanga-ocr直接呼び出し
+            return self._ocr_page_fallback(page)
+        except Exception as e:
+            print(f"[WARNING] OCR処理中にエラーが発生: {e}")
+            return "(OCRエラー)"
+    
+    def _ocr_page_fallback(self, page) -> str:
+        """フォールバック: manga-ocrを直接使用してページからテキストを抽出
         
         Args:
             page: PyMuPDFのページオブジェクト
@@ -1467,8 +1605,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             return "(OCR利用不可)"
         
         try:
-            # ページを画像に変換
-            matrix = fitz.Matrix(2.0, 2.0)
+            # ページを画像に変換（300dpi相当）
+            scale = 300 / 72
+            matrix = fitz.Matrix(scale, scale)
             pix = page.get_pixmap(matrix=matrix)
             
             # PILイメージに変換
@@ -1481,7 +1620,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             return text.strip() if text else ""
             
         except Exception as e:
-            print(f"[WARNING] OCR処理中にエラーが発生: {e}")
+            print(f"[WARNING] フォールバックOCR処理中にエラーが発生: {e}")
             return "(OCRエラー)"
 
 
@@ -1495,6 +1634,11 @@ def main():
                        help='出力ディレクトリを指定（デフォルト: ./output）')
     parser.add_argument('--format', choices=['png', 'svg'], default='svg',
                        help='出力画像形式を指定（デフォルト: svg）')
+    parser.add_argument('--ocr-engine', choices=['manga-ocr', 'tesseract'], 
+                       default='tesseract',
+                       help='OCRエンジンを指定（デフォルト: tesseract）')
+    parser.add_argument('--tessdata-dir', type=str,
+                       help='tessdataディレクトリを指定（tessdata_best使用時）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力')
     
@@ -1514,7 +1658,9 @@ def main():
         converter = PDFToMarkdownConverter(
             args.pdf_file,
             output_dir=args.output_dir,
-            output_format=args.format
+            output_format=args.format,
+            ocr_engine=args.ocr_engine,
+            tessdata_dir=args.tessdata_dir
         )
         output_file = converter.convert()
         print("\n変換完了!")
