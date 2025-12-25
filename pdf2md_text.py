@@ -1426,8 +1426,29 @@ class _TextMixin:
                     # 見出しが列幅いっぱいで折り返している場合、次の行を結合
                     merged_heading_text = heading_text
                     merged_bbox = list(line["bbox"])
+                    
+                    # 見出し行がカラム幅の大部分を占めているかを判定
+                    # 短い見出しは折り返しが発生しないため、マージ不要
+                    heading_width = line["bbox"][2] - line["bbox"][0]
+                    
+                    # 同じカラム内の行からカラム幅を推定
+                    column_lines = [l for l in lines if l.get("column") == line.get("column")]
+                    if column_lines:
+                        column_left = min(l["bbox"][0] for l in column_lines)
+                        column_right = max(l["bbox"][2] for l in column_lines)
+                        column_width = column_right - column_left
+                    else:
+                        column_width = heading_width
+                    
+                    # 見出し行がカラム幅の70%以上を占める場合のみマージを許可
+                    # （2段組の場合も列幅が短くなるため、比率で判定）
+                    should_merge_continuation = (
+                        column_width > 0 and 
+                        heading_width / column_width >= 0.7
+                    )
+                    
                     j = i + 1
-                    while j < len(lines):
+                    while should_merge_continuation and j < len(lines):
                         next_line = lines[j]
                         # 継続行の条件:
                         # 1. 同じカラム
