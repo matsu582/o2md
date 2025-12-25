@@ -170,6 +170,24 @@ class _TablesMixin:
                 if col_count < 2:
                     continue
                 
+                # 空セル比率と高さによるフィルタリング
+                # ヘッダ部分の装飾的な罫線を誤検出しないようにする
+                table_height = bbox[3] - bbox[1]
+                empty_cell_count = 0
+                total_cell_count = 0
+                for row in rows:
+                    for cell in row:
+                        total_cell_count += 1
+                        if cell is None or str(cell).strip() == "":
+                            empty_cell_count += 1
+                
+                if total_cell_count > 0:
+                    empty_ratio = empty_cell_count / total_cell_count
+                    # 空セル比率が50%以上かつ高さが50px以下の場合は除外
+                    if empty_ratio >= 0.5 and table_height <= 50:
+                        debug_print(f"[DEBUG] 罫線ベース表スキップ（空セル多/高さ小）: bbox={bbox}, empty_ratio={empty_ratio:.2f}, height={table_height:.1f}")
+                        continue
+                
                 # 各行を処理（改行を含むセルを処理）
                 # セル内に改行がある場合は、複数行に展開する
                 processed_rows = []
