@@ -1168,7 +1168,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
     
     def _classify_block_type(
         self, text: str, font_size: float, base_size: float, 
-        is_bold: bool, bbox: Tuple[float, float, float, float]
+        is_bold: bool, bbox: Tuple[float, float, float, float],
+        is_slide_document: bool = False
     ) -> str:
         """テキストブロックのタイプを分類
         
@@ -1178,6 +1179,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             base_size: 基準フォントサイズ
             is_bold: 太字かどうか
             bbox: バウンディングボックス
+            is_slide_document: スライド文書フラグ
             
         Returns:
             ブロックタイプ ('heading1', 'heading2', 'heading3', 'paragraph', 'list_item')
@@ -1228,6 +1230,20 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             if not re.match(r'^[\d０-９]+[\.．\s]', text_stripped):
                 if not re.match(r'^第[\d０-９一二三四五六七八九十]+\s*(章|節|条)', text_stripped):
                     return "paragraph"
+        
+        # スライド文書の場合、ページ上部のタイトルのみ見出しとして統一（全て##に）
+        # 条件: ページ上部20%以内 + フォントサイズが大きい（size_ratio >= 1.3）
+        if is_slide_document:
+            # bboxのy座標でページ上部かどうかを判定
+            # bbox = (x0, y0, x1, y1) で、y0が小さいほど上部
+            y0 = bbox[1] if bbox else 0
+            page_height = 540  # PPTスライドの標準高さ
+            is_top_area = y0 < page_height * 0.20  # 上部20%以内
+            
+            if is_top_area and size_ratio >= 1.3:
+                return "heading2"
+            # スライド文書では通常の見出し判定をスキップ
+            return "paragraph"
         
         if size_ratio >= 1.8 or (size_ratio >= 1.5 and is_bold):
             return "heading1"

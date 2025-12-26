@@ -1261,8 +1261,10 @@ class _FiguresMixin:
                             break
                 
                 exclude_tables = [] if figure_overlaps_table else line_based_table_bboxes
+                # スライド文書の場合はラベル拡張をしない（clip_bbox内のテキストのみ抽出）
+                expand_labels = not is_slide_document
                 figure_texts, expanded_bbox = self._extract_text_in_bbox(
-                    page, clip_bbox, expand_for_labels=True, column=column, gutter_x=gutter_x,
+                    page, clip_bbox, expand_for_labels=expand_labels, column=column, gutter_x=gutter_x,
                     exclude_table_bboxes=exclude_tables
                 )
                 

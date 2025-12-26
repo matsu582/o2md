@@ -381,7 +381,8 @@ class _TextMixin:
                 block_data["font_size"],
                 base_font_size,
                 block_data["is_bold"],
-                block_data["bbox"]
+                block_data["bbox"],
+                is_slide_document=is_slide_document
             )
             block = {
                 "type": block_type,
