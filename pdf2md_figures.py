@@ -1462,33 +1462,52 @@ class _FiguresMixin:
             return []
         
         # フェーズ7.5: スライド文書での図形内テキスト量による除外
-        # マージ後の図形に対して、テキストがページ全体の50%以上を占める場合は除外
+        # マージ後の図形に対して、面積比70%以上かつテキスト比50%以上の場合のみ除外
+        # これにより、ページ全体を覆う背景的な図形のみを除外し、小さな図形は保持
         if is_slide_document and all_figure_candidates:
+            page_area = page_width * page_height
             total_page_text_chars = sum(len(line.get("text", "")) for line in page_text_lines)
             debug_print(f"[DEBUG] page={page_num+1}: フェーズ7.5開始 - 図形候補数={len(all_figure_candidates)}, 総テキスト文字数={total_page_text_chars}")
             slide_text_filtered = []
             for cand_idx, cand in enumerate(all_figure_candidates):
                 bbox = cand.get("union_bbox", (0, 0, 0, 0))
-                debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} bbox={bbox}")
-                # 図形内のテキスト文字数をカウント
+                fig_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                area_ratio = fig_area / page_area if page_area > 0 else 0
+                debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} bbox={bbox}, 面積比={area_ratio:.1%}")
+                
+                # 面積比が70%未満の図形は除外しない（小さな図形は保持）
+                if area_ratio < 0.7:
+                    slide_text_filtered.append(cand)
+                    continue
+                
+                # 面積比70%以上の大きな図形のみテキスト比をチェック
                 fig_text_chars = 0
                 for line in page_text_lines:
                     line_bbox = line.get("bbox", (0, 0, 0, 0))
-                    # 行が図形内に含まれているかチェック
                     if (line_bbox[0] >= bbox[0] - 5 and line_bbox[2] <= bbox[2] + 5 and
                         line_bbox[1] >= bbox[1] - 5 and line_bbox[3] <= bbox[3] + 5):
                         fig_text_chars += len(line.get("text", ""))
                 
-                # ページ全体のテキストの50%以上が図形内にある場合は除外
                 if total_page_text_chars > 0:
                     text_ratio = fig_text_chars / total_page_text_chars
                     debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} テキスト比={text_ratio:.1%} ({fig_text_chars}/{total_page_text_chars})")
                     if text_ratio >= 0.5:
-                        debug_print(f"[DEBUG] page={page_num+1}: テキスト量が多い図形を除外（テキスト比={text_ratio:.1%}）")
+                        debug_print(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, テキスト比={text_ratio:.1%}）")
                         continue
                 
                 slide_text_filtered.append(cand)
             all_figure_candidates = slide_text_filtered
+        
+        # スライド文書で全ての図形候補が除外された場合、個別の埋め込み画像を抽出
+        if not all_figure_candidates and is_slide_document:
+            debug_print(f"[DEBUG] page={page_num+1}: 図形候補が全て除外されたため、個別の埋め込み画像を抽出")
+            individual_images = self._extract_slide_individual_images(
+                page, page_num, page_text_lines, header_y_max, footer_y_min
+            )
+            if individual_images:
+                debug_print(f"[DEBUG] page={page_num+1}: 個別画像を{len(individual_images)}個抽出")
+                return individual_images
+            return []
         
         if not all_figure_candidates:
             return []
@@ -1786,6 +1805,99 @@ class _FiguresMixin:
             抽出された画像の情報リスト
         """
         return self._extract_all_figures(page, page_num, header_footer_patterns)
+
+    def _extract_slide_individual_images(
+        self, page, page_num: int, page_text_lines: List[Dict],
+        header_y_max: Optional[float], footer_y_min: Optional[float]
+    ) -> List[Dict[str, Any]]:
+        """スライド文書用の個別埋め込み画像抽出
+        
+        クラスタリングで大きな図形が除外された場合に、
+        個別の埋め込み画像を直接抽出する。
+        ヘッダー/フッター領域の画像は除外する。
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            page_num: ページ番号
+            page_text_lines: ページ内のテキスト行リスト
+            header_y_max: ヘッダー領域の下端Y座標
+            footer_y_min: フッター領域の上端Y座標
+            
+        Returns:
+            抽出された画像の情報リスト
+        """
+        images = []
+        page_width = page.rect.width
+        page_height = page.rect.height
+        page_area = page_width * page_height
+        
+        # 最小面積閾値（ページ面積の2%以上）
+        min_area = page_area * 0.02
+        
+        try:
+            img_infos = page.get_image_info()
+            
+            for img_info in img_infos:
+                bbox = img_info.get('bbox')
+                if not bbox:
+                    continue
+                
+                area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                
+                # 小さすぎる画像は除外
+                if area < min_area:
+                    debug_print(f"[DEBUG] page={page_num+1}: 小さな画像を除外（面積={area:.0f}）")
+                    continue
+                
+                # ヘッダー領域の画像は除外
+                if header_y_max and bbox[3] < header_y_max:
+                    debug_print(f"[DEBUG] page={page_num+1}: ヘッダー領域の画像を除外")
+                    continue
+                
+                # フッター領域の画像は除外
+                if footer_y_min and bbox[1] > footer_y_min:
+                    debug_print(f"[DEBUG] page={page_num+1}: フッター領域の画像を除外")
+                    continue
+                
+                self.image_counter += 1
+                image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
+                
+                clip_rect = fitz.Rect(bbox)
+                matrix = fitz.Matrix(2.0, 2.0)
+                pix = page.get_pixmap(matrix=matrix, clip=clip_rect)
+                
+                if self.output_format == 'svg':
+                    image_path = os.path.join(self.images_dir, f"{image_filename}.svg")
+                    temp_png = os.path.join(self.images_dir, f"temp_fig_{self.image_counter}.png")
+                    pix.save(temp_png)
+                    self._convert_png_to_svg(temp_png, image_path)
+                    if os.path.exists(temp_png):
+                        os.remove(temp_png)
+                else:
+                    image_path = os.path.join(self.images_dir, f"{image_filename}.png")
+                    pix.save(image_path)
+                
+                # 図形内テキストを抽出（ラベル拡張なし）
+                figure_texts, _ = self._extract_text_in_bbox(
+                    page, bbox, expand_for_labels=False
+                )
+                
+                images.append({
+                    "path": image_path,
+                    "filename": os.path.basename(image_path),
+                    "bbox": bbox,
+                    "y_position": bbox[1],
+                    "texts": figure_texts,
+                    "column": "full"
+                })
+                
+                debug_print(f"[DEBUG] page={page_num+1}: 個別画像を抽出 {image_filename}")
+                
+        except Exception as e:
+            debug_print(f"[DEBUG] page={page_num+1}: 個別画像抽出エラー: {e}")
+        
+        images.sort(key=lambda x: x["y_position"])
+        return images
 
     def _extract_individual_images(
         self, page, page_num: int

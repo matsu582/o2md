@@ -764,6 +764,40 @@ class _TextMixin:
         if not is_slide_document:
             full_lines = merge_number_title_lines(full_lines)
         
+        # スライド文書用: タイトル行の直後に「N/N」形式が来たら結合
+        # 例: 「１．エグゼクティブサマリー」+ 「1/3」→「１．エグゼクティブサマリー 1/3」
+        if is_slide_document and full_lines:
+            page_fraction_pattern = re.compile(r'^\s*\d+\s*/\s*\d+\s*$')
+            merged_full_lines = []
+            skip_next = False
+            for i, line in enumerate(full_lines):
+                if skip_next:
+                    skip_next = False
+                    continue
+                text = line.get("text", "").strip()
+                # 次の行が「N/N」形式かチェック
+                if i + 1 < len(full_lines):
+                    next_line = full_lines[i + 1]
+                    next_text = next_line.get("text", "").strip()
+                    if page_fraction_pattern.match(next_text):
+                        # タイトル行（番号付き見出し形式）の場合のみ結合
+                        if re.match(r'^[０-９\d]+[．.]\s*', text):
+                            merged_text = f"{text} {next_text}"
+                            merged_line = line.copy()
+                            merged_line["text"] = merged_text
+                            merged_line["bbox"] = (
+                                min(line["bbox"][0], next_line["bbox"][0]),
+                                min(line["bbox"][1], next_line["bbox"][1]),
+                                max(line["bbox"][2], next_line["bbox"][2]),
+                                max(line["bbox"][3], next_line["bbox"][3])
+                            )
+                            merged_full_lines.append(merged_line)
+                            skip_next = True
+                            debug_print(f"[DEBUG] スライドタイトル+ページ番号をマージ: '{text}' + '{next_text}'")
+                            continue
+                merged_full_lines.append(line)
+            full_lines = merged_full_lines
+        
         # フル幅行がない場合は単純に左→右
         if not full_lines:
             return left_lines + right_lines
