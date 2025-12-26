@@ -586,11 +586,14 @@ class _FiguresMixin:
             
             # 有意な画像数を計算（ページ面積の5%以上の画像のみカウント）
             # 小さなロゴ等は「有意な画像」としてカウントしない
+            # また、埋め込み画像のbboxリストを収集（本文フィルタリング用）
             page_area = page_width * page_height
             significant_image_count = 0
+            image_bboxes = []
             for idx in cluster:
                 if all_elements[idx]["type"] == "image":
                     img_bbox = all_bboxes[idx]
+                    image_bboxes.append(img_bbox)
                     img_area = (img_bbox[2] - img_bbox[0]) * (img_bbox[3] - img_bbox[1])
                     if img_area >= page_area * 0.05:
                         significant_image_count += 1
@@ -602,7 +605,8 @@ class _FiguresMixin:
                 "column": column,
                 "is_embedded": is_embedded,
                 "image_count": image_count,
-                "significant_image_count": significant_image_count
+                "significant_image_count": significant_image_count,
+                "image_bboxes": image_bboxes
             })
 
         # 包含除去フィルタ
@@ -1321,9 +1325,12 @@ class _FiguresMixin:
                 exclude_tables = [] if figure_overlaps_table else line_based_table_bboxes
                 # スライド文書の場合はラベル拡張をしない（clip_bbox内のテキストのみ抽出）
                 expand_labels = not is_slide_document
+                # 埋め込み画像bboxを取得（スライド文書用の本文フィルタリング）
+                image_bboxes = fig_info.get("image_bboxes", [])
                 figure_texts, expanded_bbox = self._extract_text_in_bbox(
                     page, clip_bbox, expand_for_labels=expand_labels, column=column, gutter_x=gutter_x,
-                    exclude_table_bboxes=exclude_tables
+                    exclude_table_bboxes=exclude_tables, image_bboxes=image_bboxes,
+                    is_slide_document=is_slide_document
                 )
                 
                 # スライド文書: 本文テキストがない場合は除外しない（図中ラベルのみのページ）
@@ -1600,13 +1607,16 @@ class _FiguresMixin:
         expand_for_labels: bool = True,
         column: str = None,
         gutter_x: float = None,
-        exclude_table_bboxes: List[Tuple[float, float, float, float]] = None
+        exclude_table_bboxes: List[Tuple[float, float, float, float]] = None,
+        image_bboxes: List[Tuple[float, float, float, float]] = None,
+        is_slide_document: bool = False
     ) -> Tuple[List[str], Tuple[float, float, float, float]]:
         """指定されたbbox内のテキストを抽出
         
         図のラベルテキストを含めるため、bboxを近傍の短いテキストで拡張する。
         カラム境界を考慮して、隣のカラムのテキストを取り込まないようにする。
         罫線ベースの表領域内のテキストは除外する。
+        スライド文書の場合、埋め込み画像bbox外の本文テキストを除外する。
         
         Args:
             page: PyMuPDFのページオブジェクト
@@ -1615,6 +1625,8 @@ class _FiguresMixin:
             column: 図のカラム ("left", "right", "full")
             gutter_x: カラム境界のX座標
             exclude_table_bboxes: 除外する罫線ベースの表領域のリスト
+            image_bboxes: 埋め込み画像のbboxリスト（スライド文書用）
+            is_slide_document: スライド文書フラグ
             
         Returns:
             (抽出されたテキストのリスト, 拡張後のbbox)
@@ -1737,6 +1749,32 @@ class _FiguresMixin:
                         # キャプションパターンをフィルタリング（図形内テキストから除外）
                         if re.match(r'^図\s*\d+', line_text_stripped) or re.match(r'^表\s*\d+', line_text_stripped):
                             continue
+                        
+                        # スライド文書の場合、本文テキストを除外
+                        # 図形内テキストには短いラベルのみを含め、本文は含めない
+                        if is_slide_document:
+                            line_width = line_bbox[2] - line_bbox[0]
+                            col_width = page.rect.width * 0.4
+                            is_body = self._fig_is_body_text_line(line_text_stripped, line_width, col_width)
+                            if is_body:
+                                # 埋め込み画像がある場合、画像bboxの近傍にある本文のみ含める
+                                if image_bboxes:
+                                    # 本文行が埋め込み画像bboxの近傍にあるかチェック
+                                    # 上下方向: 画像bboxを20px拡張
+                                    # 左右方向: 画像bboxを50px拡張
+                                    near_image = False
+                                    for img_bbox in image_bboxes:
+                                        if (img_bbox[0] - 50 <= line_center_x <= img_bbox[2] + 50 and
+                                            img_bbox[1] - 20 <= line_center_y <= img_bbox[3] + 20):
+                                            near_image = True
+                                            break
+                                    if not near_image:
+                                        debug_print(f"[DEBUG] スライド文書: 本文行を除外（画像近傍外）: {line_text_stripped[:30]}...")
+                                        continue
+                                else:
+                                    # 埋め込み画像がない場合、本文テキストは全て除外
+                                    debug_print(f"[DEBUG] スライド文書: 本文行を除外（画像なし）: {line_text_stripped[:30]}...")
+                                    continue
                         
                         if line_text_stripped:
                             # Y座標（上端）とX座標（左端）を記録
