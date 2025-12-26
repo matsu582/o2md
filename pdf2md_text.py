@@ -329,8 +329,10 @@ class _TextMixin:
         sorted_lines = self._sort_lines_by_column(lines_data)
         
         # 段落リフロー（同一カラム内で近接する行を結合、表領域は除外）
+        # exclude_bboxes（図形のbbox）を渡して、図形と重なるテーブルの重複出力を防ぐ
         reflowed_blocks = self._reflow_paragraphs_with_tables(
-            sorted_lines, base_font_size, table_regions, line_based_tables
+            sorted_lines, base_font_size, table_regions, line_based_tables,
+            figure_bboxes=exclude_bboxes
         )
         
         # ブロックタイプを判定（カラム情報を保持）
@@ -1220,7 +1222,8 @@ class _TextMixin:
 
     def _reflow_paragraphs_with_tables(
         self, lines: List[Dict], base_font_size: float, table_regions: List[Dict],
-        line_based_tables: List[Dict] = None
+        line_based_tables: List[Dict] = None,
+        figure_bboxes: List[Tuple[float, float, float, float]] = None
     ) -> List[Dict]:
         """段落リフロー（表領域を考慮）
         
@@ -1228,12 +1231,14 @@ class _TextMixin:
         表領域内の行は結合せず、Markdownテーブルとして出力する。
         番号付き見出しは単独ブロックとして確定する。
         番号付き箇条書きの後に続く非番号行は別ブロックとして分離する。
+        図形として出力された領域と重なるテーブルはMarkdownテーブルとして出力しない。
         
         Args:
             lines: ソートされた行データのリスト
             base_font_size: 基準フォントサイズ
             table_regions: 表領域のリスト
             line_based_tables: 罫線ベースで検出された表のリスト
+            figure_bboxes: 図形として出力されたbboxのリスト（重複出力を防ぐため）
             
         Returns:
             結合されたブロックのリスト
@@ -1242,6 +1247,9 @@ class _TextMixin:
         
         if line_based_tables is None:
             line_based_tables = []
+        
+        if figure_bboxes is None:
+            figure_bboxes = []
         
         if not lines:
             return []
@@ -1261,6 +1269,17 @@ class _TextMixin:
             """行が番号付き箇条書きで始まるかを判定"""
             return bool(numbered_list_pattern.match(text))
         
+        def is_structured_field_line(text: str) -> bool:
+            """構造化フィールド行かどうかを判定（ラベル＋多スペース＋値）"""
+            t = text.strip()
+            if not t:
+                return False
+            if "。" in t or "、" in t:
+                return False
+            if not re.search(r'[\u3000 ]{2,}', t):
+                return False
+            return bool(re.match(r'^\S{1,6}[\u3000 ]{2,}\S+', t))
+        
         def is_in_table_region(line: Dict) -> Optional[Dict]:
             """行が表領域内にあるかチェック"""
             for region in table_regions:
@@ -1273,13 +1292,65 @@ class _TextMixin:
         sorted_line_tables = sorted(line_based_tables, key=lambda t: t["y_start"])
         processed_line_tables = set()
         
-        def get_line_based_table(line: Dict) -> Optional[Dict]:
-            """行が罫線ベースの表領域内にあるかチェック"""
+        def get_line_based_table_by_y(line: Dict) -> Optional[Dict]:
+            """行のy座標が罫線ベースの表領域内にあるかチェック（テーブル出力トリガ用）
+            
+            y座標のみで判定し、テーブルの出力タイミングを決定する。
+            """
             line_y = line.get("y", 0)
             for table in sorted_line_tables:
                 if table["y_start"] - 5 <= line_y <= table["y_end"] + 5:
                     return table
             return None
+        
+        def should_skip_line_for_table(line: Dict, table: Dict) -> bool:
+            """行がテーブルの一部としてスキップすべきかチェック（行除外判定用）
+            
+            2段組の場合、テーブルのx範囲と行のx座標を比較して、
+            同じカラム内の行のみをスキップする。
+            """
+            line_x = line.get("x", 0)
+            table_bbox = table.get("bbox", (0, 0, 0, 0))
+            table_x_start = table_bbox[0]
+            table_x_end = table_bbox[2]
+            # 行のx座標がテーブルのx範囲内にあるかチェック
+            # 許容範囲を広めに設定（テーブル幅の20%程度）
+            table_width = table_x_end - table_x_start
+            margin = max(table_width * 0.2, 30)
+            return table_x_start - margin <= line_x <= table_x_end + margin
+        
+        def table_overlaps_with_figure(table: Dict) -> bool:
+            """テーブルが図形と重なるかチェック（重複出力防止用）
+            
+            テーブルのbboxが図形のbboxと80%以上重なる場合はTrueを返す。
+            図形として出力された表はMarkdownテーブルとして出力しない。
+            """
+            if not figure_bboxes:
+                return False
+            
+            table_bbox = table.get("bbox", (0, 0, 0, 0))
+            table_x0, table_y0, table_x1, table_y1 = table_bbox
+            table_area = (table_x1 - table_x0) * (table_y1 - table_y0)
+            
+            if table_area <= 0:
+                return False
+            
+            for fig_bbox in figure_bboxes:
+                fig_x0, fig_y0, fig_x1, fig_y1 = fig_bbox
+                # 重なり領域を計算
+                overlap_x0 = max(table_x0, fig_x0)
+                overlap_y0 = max(table_y0, fig_y0)
+                overlap_x1 = min(table_x1, fig_x1)
+                overlap_y1 = min(table_y1, fig_y1)
+                
+                if overlap_x0 < overlap_x1 and overlap_y0 < overlap_y1:
+                    overlap_area = (overlap_x1 - overlap_x0) * (overlap_y1 - overlap_y0)
+                    # テーブルの80%以上が図形に含まれている場合
+                    if overlap_area / table_area >= 0.8:
+                        debug_print(f"[DEBUG] テーブルが図形と重なるためスキップ: table_bbox={table_bbox}, fig_bbox={fig_bbox}")
+                        return True
+            
+            return False
         
         # 行高の推定（フォントサイズの1.2倍程度）
         line_height = base_font_size * 1.2
@@ -1295,28 +1366,35 @@ class _TextMixin:
         while i < len(lines):
             line = lines[i]
             
-            # 罫線ベースの表領域内の行は除外し、Markdownテーブルを出力
-            line_table = get_line_based_table(line)
+            # 罫線ベースの表領域をチェック
+            line_table = get_line_based_table_by_y(line)
             if line_table:
                 table_id = (line_table["y_start"], line_table["y_end"])
+                # テーブルがまだ出力されていない場合、出力する（y座標のみで判定）
                 if table_id not in processed_line_tables:
-                    # 現在のブロックを確定
-                    if current_block:
-                        blocks.append(self._finalize_block(current_block))
-                        current_block = None
-                    
-                    # 罫線ベースの表をMarkdownテーブルとして出力
-                    blocks.append({
-                        "text": line_table["markdown"],
-                        "bbox": line_table["bbox"],
-                        "font_size": base_font_size,
-                        "is_bold": False,
-                        "is_table": True,
-                        "column": "full"
-                    })
+                    # 図形と重なるテーブルはMarkdownテーブルとして出力しない
+                    if not table_overlaps_with_figure(line_table):
+                        # 現在のブロックを確定
+                        if current_block:
+                            blocks.append(self._finalize_block(current_block))
+                            current_block = None
+                        
+                        # 罫線ベースの表をMarkdownテーブルとして出力
+                        blocks.append({
+                            "text": line_table["markdown"],
+                            "bbox": line_table["bbox"],
+                            "font_size": base_font_size,
+                            "is_bold": False,
+                            "is_table": True,
+                            "column": "full"
+                        })
                     processed_line_tables.add(table_id)
-                i += 1
-                continue
+                
+                # 行をスキップするかはx座標も含めて判定
+                if should_skip_line_for_table(line, line_table):
+                    i += 1
+                    continue
+                # x座標がテーブル範囲外の場合は、行を通常処理する（continueしない）
             
             table_region = is_in_table_region(line)
             
@@ -1415,8 +1493,29 @@ class _TextMixin:
                     # 見出しが列幅いっぱいで折り返している場合、次の行を結合
                     merged_heading_text = heading_text
                     merged_bbox = list(line["bbox"])
+                    
+                    # 見出し行がカラム幅の大部分を占めているかを判定
+                    # 短い見出しは折り返しが発生しないため、マージ不要
+                    heading_width = line["bbox"][2] - line["bbox"][0]
+                    
+                    # 同じカラム内の行からカラム幅を推定
+                    column_lines = [l for l in lines if l.get("column") == line.get("column")]
+                    if column_lines:
+                        column_left = min(l["bbox"][0] for l in column_lines)
+                        column_right = max(l["bbox"][2] for l in column_lines)
+                        column_width = column_right - column_left
+                    else:
+                        column_width = heading_width
+                    
+                    # 見出し行がカラム幅の70%以上を占める場合のみマージを許可
+                    # （2段組の場合も列幅が短くなるため、比率で判定）
+                    should_merge_continuation = (
+                        column_width > 0 and 
+                        heading_width / column_width >= 0.7
+                    )
+                    
                     j = i + 1
-                    while j < len(lines):
+                    while should_merge_continuation and j < len(lines):
                         next_line = lines[j]
                         # 継続行の条件:
                         # 1. 同じカラム
@@ -1512,13 +1611,25 @@ class _TextMixin:
                         # インデントされていない（左端に戻った）場合は分離
                         list_boundary = True
                 
+                # 図表キャプション（「図N」「表N」）で始まるブロックは次の行と結合しない
+                prev_is_caption = False
+                if current_block.get("texts"):
+                    first_text = current_block["texts"][0].strip()
+                    if re.match(r'^(図|表)\s*[0-9０-９]+', first_text):
+                        prev_is_caption = True
+                
+                # 現在の行が図表キャプションで始まる場合は新しいブロックとして分離
+                curr_is_caption = bool(re.match(r'^(図|表)\s*[0-9０-９]+', line["text"].strip()))
+                
                 is_new_paragraph = (
                     y_gap > gap_threshold or
                     not same_column or
                     line["is_bold"] != current_block["is_bold"] or
                     abs(line["font_size"] - current_block["font_size"]) > 1 or
                     list_boundary or
-                    curr_is_numbered  # 新しい番号付き行は常に新しいブロック
+                    curr_is_numbered or  # 新しい番号付き行は常に新しいブロック
+                    prev_is_caption or  # 図表キャプションの後は新しいブロック
+                    curr_is_caption  # 図表キャプションは新しいブロックとして開始
                 )
                 
                 if is_new_paragraph:
@@ -1539,7 +1650,13 @@ class _TextMixin:
                     prev_text = current_block["texts"][-1]
                     curr_text = line["text"]
                     
-                    if prev_text and curr_text:
+                    # 構造化フィールド行（ラベル＋多スペース＋値）の場合は改行を保持
+                    if current_block.get("is_list", False) and is_structured_field_line(curr_text):
+                        first_line = current_block["texts"][0]
+                        marker_match = re.match(r'^(\s*[0-9０-９]+[.)．）]\s*)', first_line)
+                        indent = "   " if marker_match else ""
+                        current_block["texts"].append("\n" + indent + curr_text.strip())
+                    elif prev_text and curr_text:
                         prev_char = prev_text.rstrip()[-1] if prev_text.rstrip() else ""
                         curr_char = curr_text.lstrip()[0] if curr_text.lstrip() else ""
                         

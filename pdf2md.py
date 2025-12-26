@@ -533,7 +533,29 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 self.markdown_lines.append("")
         
         # ページ境界マーカーを挿入（後処理でページ跨ぎの結合に使用）
-        self.markdown_lines.append("<!--PAGE_BREAK-->")
+        # 先頭ブロックのy座標を埋め込む（ヘッダ帯判定用）
+        # 末尾ブロックのy座標・幅とページサイズも埋め込む（署名帯判定用）
+        # text_blocks（ヘッダ/フッター除外後）の先頭・末尾ブロックを使用
+        first_block_y = None
+        last_block_y = None
+        last_block_w = None
+        page_height = page.rect.height
+        page_width = page.rect.width
+        if text_blocks:
+            for block in text_blocks:
+                block_y = block.get("y", block.get("bbox", [0, 0, 0, 0])[1] if block.get("bbox") else 0)
+                if block_y is not None and block_y > 0:
+                    first_block_y = block_y
+                    break
+            for block in reversed(text_blocks):
+                block_bbox = block.get("bbox", [0, 0, 0, 0])
+                block_y = block_bbox[3] if block_bbox else 0  # y1（下端）を使用
+                block_w = block_bbox[2] - block_bbox[0] if block_bbox else 0
+                if block_y is not None and block_y > 0:
+                    last_block_y = block_y
+                    last_block_w = block_w
+                    break
+        self.markdown_lines.append(f"<!--PAGE_BREAK first_y={first_block_y} last_y={last_block_y} last_w={last_block_w} page_h={page_height} page_w={page_width}-->")
         self.markdown_lines.append("")
     
     
@@ -548,8 +570,10 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
     def _merge_across_page_breaks(self, content: str) -> str:
         """ページ跨ぎの文章を結合する後処理
         
-        ページ境界マーカー（<!--PAGE_BREAK-->）の前後の段落を分析し、
+        ページ境界マーカー（<!--PAGE_BREAK first_y=...-->）の前後の段落を分析し、
         文が途中で切れている場合は結合する。
+        ただし、次ページの先頭ブロックがヘッダ帯（y ≤ doc_header_y_max）にある場合は
+        結合しない（ヘッダ/メタデータとして扱う）。
         
         Args:
             content: ページ境界マーカーを含むMarkdownコンテンツ
@@ -559,14 +583,46 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         """
         import re
         
-        page_marker = "<!--PAGE_BREAK-->"
+        # マーカーパターン（拡張フォーマット対応）
+        # 新フォーマット: <!--PAGE_BREAK first_y=... last_y=... last_w=... page_h=... page_w=...-->
+        # 旧フォーマット: <!--PAGE_BREAK first_y=...-->（後方互換性）
+        page_marker_pattern = r'<!--PAGE_BREAK ([^>]+)-->'
         
         # マーカーが存在しない場合はそのまま返す
-        if page_marker not in content:
+        if '<!--PAGE_BREAK' not in content:
             return content
         
         # マーカーで分割してページごとの内容を取得
-        page_contents = content.split(page_marker)
+        parts = re.split(page_marker_pattern, content)
+        # parts = [content0, params0, content1, params1, content2, ...]
+        # 奇数インデックスがパラメータ文字列、偶数インデックスがコンテンツ
+        
+        if len(parts) <= 1:
+            return content
+        
+        def parse_marker_params(param_str):
+            """マーカーパラメータを解析して辞書で返す"""
+            result = {}
+            for item in param_str.split():
+                if '=' in item:
+                    key, val = item.split('=', 1)
+                    if val == 'None':
+                        result[key] = None
+                    else:
+                        try:
+                            result[key] = float(val)
+                        except ValueError:
+                            result[key] = None
+            return result
+        
+        # ページコンテンツとパラメータを分離
+        page_contents = []
+        page_params = []
+        for i, part in enumerate(parts):
+            if i % 2 == 0:
+                page_contents.append(part)
+            else:
+                page_params.append(parse_marker_params(part))
         
         if len(page_contents) <= 1:
             return content
@@ -628,8 +684,35 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 # 現ページが新しい構造要素で始まらない
                 starts_with_structure = bool(no_merge_start_re.match(curr_first_line))
                 
-                # 結合条件: 文末でなく、新構造要素でもない
-                if not ends_with_sentence and not starts_with_structure:
+                # 次ページの先頭ブロックがヘッダ帯にあるかチェック（汎用的な判定）
+                # y座標がヘッダ帯（doc_header_y_max以下）にある場合は結合しない
+                # 注意: page_params[i]は次のページ（curr_content）のパラメータ
+                curr_params = page_params[i] if i < len(page_params) else {}
+                curr_first_y = curr_params.get('first_y')
+                in_header_area = False
+                if curr_first_y is not None and self._doc_header_y_max is not None:
+                    if curr_first_y <= self._doc_header_y_max:
+                        in_header_area = True
+                        debug_print(f"[DEBUG] ヘッダ帯検出: y={curr_first_y:.1f} <= header_y_max={self._doc_header_y_max:.1f}")
+                
+                # 前ページの末尾ブロックが署名帯にあるかチェック（座標ベース）
+                # 署名帯の条件: ページ下部（85%以上）かつ幅が狭い（50%以下）
+                prev_params = page_params[i - 1] if i - 1 < len(page_params) else {}
+                prev_last_y = prev_params.get('last_y')
+                prev_last_w = prev_params.get('last_w')
+                prev_page_h = prev_params.get('page_h')
+                prev_page_w = prev_params.get('page_w')
+                in_signature_area = False
+                if all(v is not None for v in [prev_last_y, prev_last_w, prev_page_h, prev_page_w]):
+                    y_ratio = prev_last_y / prev_page_h
+                    w_ratio = prev_last_w / prev_page_w
+                    # 署名帯: ページ下部85%以上 かつ 幅がページ幅の50%以下
+                    if y_ratio >= 0.85 and w_ratio < 0.50:
+                        in_signature_area = True
+                        debug_print(f"[DEBUG] 署名帯検出: y_ratio={y_ratio:.2%}, w_ratio={w_ratio:.2%}")
+                
+                # 結合条件: 文末でなく、新構造要素でもなく、ヘッダ帯でもなく、署名帯でもない
+                if not ends_with_sentence and not starts_with_structure and not in_header_area and not in_signature_area:
                     should_merge = True
                     debug_print(f"[DEBUG] ページ跨ぎ結合: '{prev_last_line[-20:]}' + '{curr_first_line[:20]}'")
             
@@ -873,8 +956,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
     def _is_numbered_heading(self, text: str) -> Tuple[bool, int, str]:
         """番号付き見出しかどうかを判定
         
-        「1　はじめに」「2.1　概要」「第1条（借入要項）」などのパターンを検出する。
+        「1　はじめに」「2.1　概要」「4.1.1　詳細」「第1条（借入要項）」などのパターンを検出する。
         文末表現（述語終止形）を含む場合は見出しではないと判定する。
+        図表キャプション（「図N」「表N」）は見出しではないと判定する。
         
         Args:
             text: 判定するテキスト
@@ -884,6 +968,10 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         """
         import re
         text = text.strip()
+        
+        # 図表キャプション（「図N」「表N」）は見出しではない
+        if re.match(r'^(図|表)\s*[0-9０-９]+', text):
+            return (False, 0, "")
         
         # 「第N条」形式の見出しパターン（先に判定、本文が続いていても対応）
         article_match = re.match(
@@ -919,6 +1007,26 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         if re.search(sentence_endings, text):
             return (False, 0, "")
         
+        # 階層番号パターン: 「4.1　QRコードの構造」「4.1.1　ファインダパターン」など
+        # ドットの数に応じて見出しレベルを決定（4.1 → レベル2、4.1.1 → レベル3）
+        hierarchical_match = re.match(
+            r'^(\d+(?:\.\d+)+)[　 ]+(.{1,40})$',
+            text
+        )
+        if hierarchical_match:
+            number_part = hierarchical_match.group(1)
+            title_part = hierarchical_match.group(2).strip()
+            
+            # タイトル部分が短すぎる場合は除外
+            if len(title_part) < 2:
+                return (False, 0, "")
+            
+            # ドットの数でレベルを決定（4.1 → 1ドット → レベル2、4.1.1 → 2ドット → レベル3）
+            dot_count = number_part.count('.')
+            heading_level = min(dot_count + 1, 3)  # 最大レベル3
+            
+            return (True, heading_level, text)
+        
         # 「N．タイトル」形式の見出しパターン（例: 「１．固定金利型の利率変更」）
         numbered_dot_match = re.match(
             r'^([0-9０-９]+)[．.][　 ]*([^0-9０-９].{1,39})$',
@@ -945,6 +1053,11 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             first_char = title_part[0]
             excluded_chars = '年月日倍個回分秒時点番号件台人円万億兆つ'
             if first_char in excluded_chars:
+                return (False, 0, "")
+            
+            # 「名詞＋助詞＋区切り」パターンは見出しではない（例: 「乙は、」「甲が 」）
+            particle_pattern = re.compile(r'^.{1,3}[はがをにでともや][、。\s,.]')
+            if particle_pattern.match(title_part):
                 return (False, 0, "")
             
             return (True, 2, title_part)
@@ -1003,8 +1116,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             # 句点で終わる場合は文として扱う（ただし短い場合は除外）
             if len(txt) > 15 and txt.endswith(('.', '。', '．')):
                 return True
-            # 表/図キャプション形式は見出しではない
-            if re.match(r'^(図|表)\s*[\d０-９]+[\.\:．：]', txt):
+            # 図表キャプション形式は見出しではない（「図N」「表N」で始まる）
+            if re.match(r'^(図|表)\s*[0-9０-９]+', txt):
                 return True
             return False
         
@@ -1200,8 +1313,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 column = "left" if img_center_x < 297.64 else "right"
             column_order = {"left": 0, "full": 1, "right": 2}.get(column, 1)
             
-            # Y座標は上キャプションがあればそのY座標を使用（順序を正しくするため）
-            y_position = img["y_position"]
+            # Y座標はbboxのy_min（上端）を使用（正確な位置で順序を決定）
+            # 上キャプションがあればそのY座標を使用（順序を正しくするため）
+            y_position = bbox[1]  # bboxのy_minを使用
             caption_above = img.get("_caption_above")
             if caption_above:
                 caption_bbox = caption_above.get("bbox", (0, 0, 0, 0))
