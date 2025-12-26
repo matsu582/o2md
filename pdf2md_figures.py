@@ -280,6 +280,7 @@ class _FiguresMixin:
             (all_elements, all_bboxes) のタプル
         """
         all_elements = []
+        page_area = page.rect.width * page.rect.height
         
         try:
             drawings = page.get_drawings()
@@ -289,6 +290,10 @@ class _FiguresMixin:
                     bbox = (rect.x0, rect.y0, rect.x1, rect.y1)
                     area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
                     if area >= 200:
+                        # PPT由来の背景矩形を除外（ページ面積の90%以上を覆うdrawing）
+                        if area >= page_area * 0.9:
+                            debug_print(f"[DEBUG] page={page_num+1}: 背景矩形を除外（面積比={area/page_area:.2f}）")
+                            continue
                         all_elements.append({"bbox": bbox, "type": "drawing"})
         except Exception as e:
             debug_print(f"[DEBUG] 描画取得エラー: {e}")
@@ -522,12 +527,22 @@ class _FiguresMixin:
             cluster_height = raw_y1 - raw_y0
             is_in_header = False
             is_in_footer = False
+            # 巨大クラスタ（ページの50%以上の高さ）は緩和判定
+            is_large_cluster = cluster_height > page_height * 0.5
             if header_y_max is not None:
                 overlap_with_header = max(0, min(raw_y1, header_y_max) - raw_y0)
-                is_in_header = overlap_with_header > cluster_height * 0.5 or raw_y0 < header_y_max * 0.5
+                if is_large_cluster:
+                    # 巨大クラスタはoverlap率のみで判定（緩和）
+                    is_in_header = overlap_with_header > cluster_height * 0.8
+                else:
+                    is_in_header = overlap_with_header > cluster_height * 0.5 or raw_y0 < header_y_max * 0.5
             if footer_y_min is not None:
                 overlap_with_footer = max(0, raw_y1 - max(raw_y0, footer_y_min))
-                is_in_footer = overlap_with_footer > cluster_height * 0.5 or raw_y1 > footer_y_min + (page_height - footer_y_min) * 0.5
+                if is_large_cluster:
+                    # 巨大クラスタはoverlap率のみで判定（緩和）
+                    is_in_footer = overlap_with_footer > cluster_height * 0.8
+                else:
+                    is_in_footer = overlap_with_footer > cluster_height * 0.5 or raw_y1 > footer_y_min + (page_height - footer_y_min) * 0.5
             if is_in_header or is_in_footer:
                 region = "ヘッダー" if is_in_header else "フッター"
                 debug_print(f"[DEBUG] page={page_num+1}: {region}領域内のクラスタを除外")

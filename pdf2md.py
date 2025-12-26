@@ -419,6 +419,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         - テキストブロックが空
         - 図が1つだけ
         - その図がページの大部分（80%以上）を覆っている
+        - 埋め込み画像が存在する（PPT由来の背景矩形のみの場合は除外）
+        - 生テキストが存在しない
         
         Args:
             page: PyMuPDFのページオブジェクト
@@ -434,6 +436,18 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         # 図が1つだけの場合のみチェック
         if len(vector_figures) != 1:
+            return False
+        
+        # 生テキストが存在する場合はスキャンページではない（PPTスライドなど）
+        raw_text = page.get_text().strip()
+        if raw_text:
+            debug_print(f"[DEBUG] 生テキストが存在するためスキャン判定をスキップ: {len(raw_text)}文字")
+            return False
+        
+        # 埋め込み画像が存在しない場合はスキャンページではない（背景矩形のみ）
+        images = page.get_images(full=True)
+        if not images:
+            debug_print(f"[DEBUG] 埋め込み画像がないためスキャン判定をスキップ")
             return False
         
         # ページサイズを取得

@@ -330,9 +330,12 @@ class _TextMixin:
         
         # 段落リフロー（同一カラム内で近接する行を結合、表領域は除外）
         # exclude_bboxes（図形のbbox）を渡して、図形と重なるテーブルの重複出力を防ぐ
+        # ページサイズを渡して横長ページ（PPTスライド等）での改行保持を有効化
         reflowed_blocks = self._reflow_paragraphs_with_tables(
             sorted_lines, base_font_size, table_regions, line_based_tables,
-            figure_bboxes=exclude_bboxes
+            figure_bboxes=exclude_bboxes,
+            page_width=page_width,
+            page_height=page_height
         )
         
         # ブロックタイプを判定（カラム情報を保持）
@@ -1223,7 +1226,9 @@ class _TextMixin:
     def _reflow_paragraphs_with_tables(
         self, lines: List[Dict], base_font_size: float, table_regions: List[Dict],
         line_based_tables: List[Dict] = None,
-        figure_bboxes: List[Tuple[float, float, float, float]] = None
+        figure_bboxes: List[Tuple[float, float, float, float]] = None,
+        page_width: float = None,
+        page_height: float = None
     ) -> List[Dict]:
         """段落リフロー（表領域を考慮）
         
@@ -1232,6 +1237,7 @@ class _TextMixin:
         番号付き見出しは単独ブロックとして確定する。
         番号付き箇条書きの後に続く非番号行は別ブロックとして分離する。
         図形として出力された領域と重なるテーブルはMarkdownテーブルとして出力しない。
+        横長ページ（PPTスライド等）では改行を保持する。
         
         Args:
             lines: ソートされた行データのリスト
@@ -1239,6 +1245,8 @@ class _TextMixin:
             table_regions: 表領域のリスト
             line_based_tables: 罫線ベースで検出された表のリスト
             figure_bboxes: 図形として出力されたbboxのリスト（重複出力を防ぐため）
+            page_width: ページ幅（横長ページ検出用）
+            page_height: ページ高さ（横長ページ検出用）
             
         Returns:
             結合されたブロックのリスト
@@ -1356,7 +1364,14 @@ class _TextMixin:
         line_height = base_font_size * 1.2
         # 結合する最大ギャップ
         # 閾値を大きくしすぎると段落が過剰に結合されるため、0.8倍に設定
-        gap_threshold = line_height * 0.8
+        # 横長ページ（PPTスライド等）では改行を保持するため閾値を小さくする
+        is_landscape = (page_width is not None and page_height is not None 
+                       and page_width > page_height)
+        if is_landscape:
+            gap_threshold = line_height * 0.3
+            debug_print(f"[DEBUG] 横長ページ検出: 改行保持モード（gap_threshold={gap_threshold:.1f}）")
+        else:
+            gap_threshold = line_height * 0.8
         
         blocks = []
         current_block = None
