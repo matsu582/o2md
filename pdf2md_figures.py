@@ -280,6 +280,7 @@ class _FiguresMixin:
             (all_elements, all_bboxes) のタプル
         """
         all_elements = []
+        page_area = page.rect.width * page.rect.height
         
         try:
             drawings = page.get_drawings()
@@ -289,9 +290,17 @@ class _FiguresMixin:
                     bbox = (rect.x0, rect.y0, rect.x1, rect.y1)
                     area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
                     if area >= 200:
+                        # PPT由来の背景矩形を除外（ページ面積の90%以上を覆うdrawing）
+                        if area >= page_area * 0.9:
+                            debug_print(f"[DEBUG] page={page_num+1}: 背景矩形を除外（面積比={area/page_area:.2f}）")
+                            continue
                         all_elements.append({"bbox": bbox, "type": "drawing"})
         except Exception as e:
             debug_print(f"[DEBUG] 描画取得エラー: {e}")
+        
+        # 生テキストが存在するかどうかを確認（背景画像除外の判定に使用）
+        raw_text = page.get_text().strip()
+        has_raw_text = len(raw_text) > 0
         
         try:
             image_list = page.get_images(full=True)
@@ -301,6 +310,10 @@ class _FiguresMixin:
                     bbox = (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1)
                     area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
                     if area >= 100:
+                        # 生テキストが存在するページでは、全面画像を背景として除外
+                        if has_raw_text and area >= page_area * 0.9:
+                            debug_print(f"[DEBUG] page={page_num+1}: 背景画像を除外（面積比={area/page_area:.2f}）")
+                            continue
                         all_elements.append({"bbox": bbox, "type": "image"})
         except Exception as e:
             debug_print(f"[DEBUG] 画像取得エラー: {e}")
@@ -522,12 +535,22 @@ class _FiguresMixin:
             cluster_height = raw_y1 - raw_y0
             is_in_header = False
             is_in_footer = False
+            # 巨大クラスタ（ページの50%以上の高さ）は緩和判定
+            is_large_cluster = cluster_height > page_height * 0.5
             if header_y_max is not None:
                 overlap_with_header = max(0, min(raw_y1, header_y_max) - raw_y0)
-                is_in_header = overlap_with_header > cluster_height * 0.5 or raw_y0 < header_y_max * 0.5
+                if is_large_cluster:
+                    # 巨大クラスタはoverlap率のみで判定（緩和）
+                    is_in_header = overlap_with_header > cluster_height * 0.8
+                else:
+                    is_in_header = overlap_with_header > cluster_height * 0.5 or raw_y0 < header_y_max * 0.5
             if footer_y_min is not None:
                 overlap_with_footer = max(0, raw_y1 - max(raw_y0, footer_y_min))
-                is_in_footer = overlap_with_footer > cluster_height * 0.5 or raw_y1 > footer_y_min + (page_height - footer_y_min) * 0.5
+                if is_large_cluster:
+                    # 巨大クラスタはoverlap率のみで判定（緩和）
+                    is_in_footer = overlap_with_footer > cluster_height * 0.8
+                else:
+                    is_in_footer = overlap_with_footer > cluster_height * 0.5 or raw_y1 > footer_y_min + (page_height - footer_y_min) * 0.5
             if is_in_header or is_in_footer:
                 region = "ヘッダー" if is_in_header else "フッター"
                 debug_print(f"[DEBUG] page={page_num+1}: {region}領域内のクラスタを除外")
@@ -561,13 +584,29 @@ class _FiguresMixin:
             
             image_count = sum(1 for t in cluster_types if t == "image")
             
+            # 有意な画像数を計算（ページ面積の5%以上の画像のみカウント）
+            # 小さなロゴ等は「有意な画像」としてカウントしない
+            # また、埋め込み画像のbboxリストを収集（本文フィルタリング用）
+            page_area = page_width * page_height
+            significant_image_count = 0
+            image_bboxes = []
+            for idx in cluster:
+                if all_elements[idx]["type"] == "image":
+                    img_bbox = all_bboxes[idx]
+                    image_bboxes.append(img_bbox)
+                    img_area = (img_bbox[2] - img_bbox[0]) * (img_bbox[3] - img_bbox[1])
+                    if img_area >= page_area * 0.05:
+                        significant_image_count += 1
+            
             all_figure_candidates.append({
                 "union_bbox": union_bbox,
                 "raw_union_bbox": raw_union_bbox,
                 "cluster_size": len(cluster),
                 "column": column,
                 "is_embedded": is_embedded,
-                "image_count": image_count
+                "image_count": image_count,
+                "significant_image_count": significant_image_count,
+                "image_bboxes": image_bboxes
             })
 
         # 包含除去フィルタ
@@ -1096,14 +1135,39 @@ class _FiguresMixin:
         self, graphics_bbox: Tuple, text_lines: List[Dict], col_width: float,
         page_width: float, page_height: float, column: str, gutter_x: float,
         is_embedded_image: bool = False,
-        header_y_max: Optional[float] = None, footer_y_min: Optional[float] = None
+        header_y_max: Optional[float] = None, footer_y_min: Optional[float] = None,
+        is_slide_document: bool = False
     ) -> Tuple:
         """graphics_bboxからclip_bboxを計算（トリム処理）"""
-        padding = 1.0 if is_embedded_image else 20.0
+        # スライド文書では小さなマージン（5px）、通常文書では20px
+        if is_slide_document:
+            padding = 5.0
+        elif is_embedded_image:
+            padding = 1.0
+        else:
+            padding = 20.0
+        
         clip_x0 = max(0, graphics_bbox[0] - padding)
         clip_y0 = max(0, graphics_bbox[1] - padding)
         clip_x1 = min(page_width, graphics_bbox[2] + padding)
         clip_y1 = min(page_height, graphics_bbox[3] + padding)
+        
+        # スライド文書の場合、本文行と交差する場合は上端を広げない
+        if is_slide_document:
+            for line in text_lines:
+                line_bbox = line.get("bbox", (0, 0, 0, 0))
+                line_text = line.get("text", "").strip()
+                line_width = line_bbox[2] - line_bbox[0]
+                # 本文らしい行かどうかを判定
+                if not self._fig_is_body_text_line(line_text, line_width, col_width):
+                    continue
+                # 本文行がclip_bboxの上端付近にある場合、上端を詰める
+                if line_bbox[3] > clip_y0 and line_bbox[1] < graphics_bbox[1]:
+                    # 本文行の下端より下にclip_y0を設定
+                    new_clip_y0 = line_bbox[3] + 2.0
+                    if new_clip_y0 < graphics_bbox[1]:
+                        debug_print(f"[DEBUG] スライド文書: 本文行を避けてclip_y0を{clip_y0:.1f}→{new_clip_y0:.1f}に調整")
+                        clip_y0 = new_clip_y0
         
         if header_y_max is not None and clip_y0 < header_y_max:
             clip_y0 = header_y_max
@@ -1120,8 +1184,9 @@ class _FiguresMixin:
             clip_x0 = max(clip_x0, gutter_x + 5)
             debug_print(f"[DEBUG] 右カラム: clip_x0を{old_clip_x0:.1f}→{clip_x0:.1f}にクランプ")
         
-        if is_embedded_image:
-            debug_print(f"[DEBUG] 埋め込み画像: 上下トリムをスキップ")
+        # スライド文書または埋め込み画像の場合、上下トリムをスキップ
+        if is_embedded_image or is_slide_document:
+            debug_print(f"[DEBUG] {'スライド文書' if is_slide_document else '埋め込み画像'}: 上下トリムをスキップ")
             return (clip_x0, clip_y0, clip_x1, clip_y1)
         
         caption = self._fig_find_caption_below(graphics_bbox, text_lines)
@@ -1150,11 +1215,21 @@ class _FiguresMixin:
         self, page, page_num: int, all_figure_candidates: List[Dict],
         page_text_lines: List[Dict], col_width: float, page_width: float,
         gutter_x: float, header_y_max: Optional[float], footer_y_min: Optional[float],
-        line_based_table_bboxes: List[Tuple]
+        line_based_table_bboxes: List[Tuple], is_slide_document: bool = False
     ) -> List[Dict]:
         """図候補をレンダリングして図情報リストを生成"""
         figures = []
         page_height = page.rect.height
+        
+        # スライド文書用: ページ全体の本文テキスト文字数を事前計算
+        total_body_text_chars = 0
+        if is_slide_document:
+            for line in page_text_lines:
+                line_text = line.get("text", "").strip()
+                line_bbox = line.get("bbox", (0, 0, 0, 0))
+                line_width = line_bbox[2] - line_bbox[0]
+                if self._fig_is_body_text_line(line_text, line_width, col_width):
+                    total_body_text_chars += len(line_text)
         
         for fig_info in all_figure_candidates:
             try:
@@ -1176,8 +1251,39 @@ class _FiguresMixin:
                     clip_bbox = self._fig_compute_clip_bbox(
                         graphics_bbox, page_text_lines, col_width,
                         page_width, page_height, column, gutter_x,
-                        is_embedded_image, header_y_max, footer_y_min
+                        is_embedded_image, header_y_max, footer_y_min,
+                        is_slide_document
                     )
+                
+                # スライド文書: ページ全体を覆う図形（面積比50%以上）かつ本文テキスト比50%以上の場合のみ除外
+                # 図中ラベル（短いテキスト）は本文としてカウントしない
+                # ただし、有意な埋め込み画像（ページ面積の5%以上）が含まれるクラスタは除外しない
+                significant_image_count = fig_info.get("significant_image_count", 0)
+                if is_slide_document and total_body_text_chars > 0 and significant_image_count == 0:
+                    # 図形の面積比を計算
+                    page_area = page_width * page_height
+                    fig_area = (clip_bbox[2] - clip_bbox[0]) * (clip_bbox[3] - clip_bbox[1])
+                    area_ratio = fig_area / page_area if page_area > 0 else 0
+                    
+                    # 面積比が50%以上の大きな図形のみ本文テキスト比チェック
+                    if area_ratio >= 0.5:
+                        fig_body_text_chars = 0
+                        for line in page_text_lines:
+                            line_bbox = line.get("bbox", (0, 0, 0, 0))
+                            line_text = line.get("text", "").strip()
+                            line_width = line_bbox[2] - line_bbox[0]
+                            # 行がclip_bbox内に含まれているかチェック
+                            if (line_bbox[0] >= clip_bbox[0] - 5 and line_bbox[2] <= clip_bbox[2] + 5 and
+                                line_bbox[1] >= clip_bbox[1] - 5 and line_bbox[3] <= clip_bbox[3] + 5):
+                                # 本文らしい行のみカウント
+                                if self._fig_is_body_text_line(line_text, line_width, col_width):
+                                    fig_body_text_chars += len(line_text)
+                        
+                        body_text_ratio = fig_body_text_chars / total_body_text_chars
+                        debug_print(f"[DEBUG] page={page_num+1}: 大きな図形（面積比={area_ratio:.1%}）の本文テキスト比={body_text_ratio:.1%}")
+                        if body_text_ratio >= 0.5:
+                            debug_print(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, 本文テキスト比={body_text_ratio:.1%}）")
+                            continue
                 
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
@@ -1217,10 +1323,19 @@ class _FiguresMixin:
                             break
                 
                 exclude_tables = [] if figure_overlaps_table else line_based_table_bboxes
+                # スライド文書の場合はラベル拡張をしない（clip_bbox内のテキストのみ抽出）
+                expand_labels = not is_slide_document
+                # 埋め込み画像bboxを取得（スライド文書用の本文フィルタリング）
+                image_bboxes = fig_info.get("image_bboxes", [])
                 figure_texts, expanded_bbox = self._extract_text_in_bbox(
-                    page, clip_bbox, expand_for_labels=True, column=column, gutter_x=gutter_x,
-                    exclude_table_bboxes=exclude_tables
+                    page, clip_bbox, expand_for_labels=expand_labels, column=column, gutter_x=gutter_x,
+                    exclude_table_bboxes=exclude_tables, image_bboxes=image_bboxes,
+                    is_slide_document=is_slide_document
                 )
+                
+                # スライド文書: 本文テキストがない場合は除外しない（図中ラベルのみのページ）
+                # 本文テキストがある場合のみ、抽出されたテキスト量をチェック
+                # この除外ロジックは無効化（フェーズ7.5とレンダリング前チェックで十分）
                 
                 figures.append({
                     "path": image_path,
@@ -1241,18 +1356,21 @@ class _FiguresMixin:
         return figures
 
     def _extract_all_figures(
-        self, page, page_num: int, header_footer_patterns: Set[str] = None
+        self, page, page_num: int, header_footer_patterns: Set[str] = None,
+        is_slide_document: bool = False
     ) -> List[Dict[str, Any]]:
         """ベクター図形と埋め込み画像を統合して図を抽出（オーケストレータ）
         
         ベクター描画と埋め込み画像を統合してクラスタリングし、
         クラスタリング後にカラム判定を行う（先にクラスタリング、後でカラム判定）。
         ヘッダー/フッター領域内の図クラスタは除外する。
+        スライド文書の場合は小さな装飾要素を除外する。
         
         Args:
             page: PyMuPDFのページオブジェクト
             page_num: ページ番号
             header_footer_patterns: ヘッダ・フッタパターンのセット
+            is_slide_document: スライド文書フラグ
             
         Returns:
             抽出された図の情報リスト
@@ -1351,6 +1469,21 @@ class _FiguresMixin:
             filtered_candidates.append(cand)
         all_figure_candidates = filtered_candidates
         
+        # フェーズ5.6: スライド文書での小さな装飾要素のフィルタリング
+        # スライド文書の場合、ページ面積の5%未満の小さな図形を除外
+        if is_slide_document and all_figure_candidates:
+            page_area = page_width * page_height
+            min_area_threshold = page_area * 0.05
+            slide_filtered = []
+            for cand in all_figure_candidates:
+                bbox = cand.get("union_bbox", (0, 0, 0, 0))
+                cand_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                if cand_area < min_area_threshold:
+                    debug_print(f"[DEBUG] page={page_num+1}: スライド装飾要素を除外（面積比={cand_area/page_area:.2%}）")
+                    continue
+                slide_filtered.append(cand)
+            all_figure_candidates = slide_filtered
+        
         if not all_figure_candidates:
             return []
         
@@ -1367,18 +1500,94 @@ class _FiguresMixin:
         if not all_figure_candidates:
             return []
         
+        # フェーズ7.5: スライド文書での図形内テキスト量による除外
+        # マージ後の図形に対して、面積比70%以上かつ「本文テキスト比」50%以上の場合のみ除外
+        # 図中ラベル（短いテキスト）は本文としてカウントしない
+        if is_slide_document and all_figure_candidates:
+            page_area = page_width * page_height
+            # 本文テキストのみをカウント（図中ラベルは除外）
+            total_body_text_chars = 0
+            for line in page_text_lines:
+                line_text = line.get("text", "").strip()
+                line_bbox = line.get("bbox", (0, 0, 0, 0))
+                line_width = line_bbox[2] - line_bbox[0]
+                if self._fig_is_body_text_line(line_text, line_width, col_width):
+                    total_body_text_chars += len(line_text)
+            debug_print(f"[DEBUG] page={page_num+1}: フェーズ7.5開始 - 図形候補数={len(all_figure_candidates)}, 本文テキスト文字数={total_body_text_chars}")
+            slide_text_filtered = []
+            for cand_idx, cand in enumerate(all_figure_candidates):
+                bbox = cand.get("union_bbox", (0, 0, 0, 0))
+                fig_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                area_ratio = fig_area / page_area if page_area > 0 else 0
+                debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} bbox={bbox}, 面積比={area_ratio:.1%}")
+                
+                # 面積比が50%未満の図形は除外しない（小さな図形は保持）
+                if area_ratio < 0.5:
+                    slide_text_filtered.append(cand)
+                    continue
+                
+                # 有意な埋め込み画像（ページ面積の5%以上）が含まれるクラスタは除外しない
+                # 小さなロゴ等は「有意な画像」としてカウントしない
+                significant_image_count = cand.get("significant_image_count", 0)
+                if significant_image_count > 0:
+                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 有意な埋め込み画像{significant_image_count}個を含むため除外しない")
+                    slide_text_filtered.append(cand)
+                    continue
+                
+                # 面積比50%以上かつ有意な埋め込み画像なしの大きな図形のみ「本文テキスト比」をチェック
+                fig_body_text_chars = 0
+                for line in page_text_lines:
+                    line_bbox = line.get("bbox", (0, 0, 0, 0))
+                    line_text = line.get("text", "").strip()
+                    line_width = line_bbox[2] - line_bbox[0]
+                    # bbox内のテキスト行かどうかを判定
+                    if (line_bbox[0] >= bbox[0] - 5 and line_bbox[2] <= bbox[2] + 5 and
+                        line_bbox[1] >= bbox[1] - 5 and line_bbox[3] <= bbox[3] + 5):
+                        # 本文らしい行のみカウント
+                        if self._fig_is_body_text_line(line_text, line_width, col_width):
+                            fig_body_text_chars += len(line_text)
+                
+                if total_body_text_chars > 0:
+                    body_text_ratio = fig_body_text_chars / total_body_text_chars
+                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 本文テキスト比={body_text_ratio:.1%} ({fig_body_text_chars}/{total_body_text_chars})")
+                    if body_text_ratio >= 0.5:
+                        debug_print(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, 本文テキスト比={body_text_ratio:.1%}）")
+                        continue
+                else:
+                    # 本文テキストがない場合は除外しない（図中ラベルのみのページ）
+                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 本文テキストなし、除外しない")
+                
+                slide_text_filtered.append(cand)
+            all_figure_candidates = slide_text_filtered
+        
+        # スライド文書で全ての図形候補が除外された場合、個別の埋め込み画像を抽出
+        if not all_figure_candidates and is_slide_document:
+            debug_print(f"[DEBUG] page={page_num+1}: 図形候補が全て除外されたため、個別の埋め込み画像を抽出")
+            individual_images = self._extract_slide_individual_images(
+                page, page_num, page_text_lines, header_y_max, footer_y_min
+            )
+            if individual_images:
+                debug_print(f"[DEBUG] page={page_num+1}: 個別画像を{len(individual_images)}個抽出")
+                return individual_images
+            return []
+        
+        if not all_figure_candidates:
+            return []
+        
         debug_print(f"[DEBUG] ページ {page_num + 1}: {len(all_bboxes)}個の要素を{len(all_figure_candidates)}個の図にグループ化")
         
         # フェーズ8: 画像レンダリング
         figures = self._fig_render_candidates(
             page, page_num, all_figure_candidates, page_text_lines, col_width,
-            page_width, gutter_x, header_y_max, footer_y_min, line_based_table_bboxes
+            page_width, gutter_x, header_y_max, footer_y_min, line_based_table_bboxes,
+            is_slide_document
         )
         
         return figures
 
     def _extract_vector_figures(
-        self, page, page_num: int, header_footer_patterns: Set[str] = None
+        self, page, page_num: int, header_footer_patterns: Set[str] = None,
+        is_slide_document: bool = False
     ) -> List[Dict[str, Any]]:
         """ベクタ描画（図）を抽出（統合版を使用）
         
@@ -1386,24 +1595,28 @@ class _FiguresMixin:
             page: PyMuPDFのページオブジェクト
             page_num: ページ番号
             header_footer_patterns: ヘッダ・フッタパターンのセット
+            is_slide_document: スライド文書フラグ
             
         Returns:
             抽出された図の情報リスト
         """
-        return self._extract_all_figures(page, page_num, header_footer_patterns)
+        return self._extract_all_figures(page, page_num, header_footer_patterns, is_slide_document)
 
     def _extract_text_in_bbox(
         self, page, bbox: Tuple[float, float, float, float],
         expand_for_labels: bool = True,
         column: str = None,
         gutter_x: float = None,
-        exclude_table_bboxes: List[Tuple[float, float, float, float]] = None
+        exclude_table_bboxes: List[Tuple[float, float, float, float]] = None,
+        image_bboxes: List[Tuple[float, float, float, float]] = None,
+        is_slide_document: bool = False
     ) -> Tuple[List[str], Tuple[float, float, float, float]]:
         """指定されたbbox内のテキストを抽出
         
         図のラベルテキストを含めるため、bboxを近傍の短いテキストで拡張する。
         カラム境界を考慮して、隣のカラムのテキストを取り込まないようにする。
         罫線ベースの表領域内のテキストは除外する。
+        スライド文書の場合、埋め込み画像bbox外の本文テキストを除外する。
         
         Args:
             page: PyMuPDFのページオブジェクト
@@ -1412,6 +1625,8 @@ class _FiguresMixin:
             column: 図のカラム ("left", "right", "full")
             gutter_x: カラム境界のX座標
             exclude_table_bboxes: 除外する罫線ベースの表領域のリスト
+            image_bboxes: 埋め込み画像のbboxリスト（スライド文書用）
+            is_slide_document: スライド文書フラグ
             
         Returns:
             (抽出されたテキストのリスト, 拡張後のbbox)
@@ -1535,6 +1750,32 @@ class _FiguresMixin:
                         if re.match(r'^図\s*\d+', line_text_stripped) or re.match(r'^表\s*\d+', line_text_stripped):
                             continue
                         
+                        # スライド文書の場合、本文テキストを除外
+                        # 図形内テキストには短いラベルのみを含め、本文は含めない
+                        if is_slide_document:
+                            line_width = line_bbox[2] - line_bbox[0]
+                            col_width = page.rect.width * 0.4
+                            is_body = self._fig_is_body_text_line(line_text_stripped, line_width, col_width)
+                            if is_body:
+                                # 埋め込み画像がある場合、画像bboxの近傍にある本文のみ含める
+                                if image_bboxes:
+                                    # 本文行が埋め込み画像bboxの近傍にあるかチェック
+                                    # 上下方向: 画像bboxを20px拡張
+                                    # 左右方向: 画像bboxを50px拡張
+                                    near_image = False
+                                    for img_bbox in image_bboxes:
+                                        if (img_bbox[0] - 50 <= line_center_x <= img_bbox[2] + 50 and
+                                            img_bbox[1] - 20 <= line_center_y <= img_bbox[3] + 20):
+                                            near_image = True
+                                            break
+                                    if not near_image:
+                                        debug_print(f"[DEBUG] スライド文書: 本文行を除外（画像近傍外）: {line_text_stripped[:30]}...")
+                                        continue
+                                else:
+                                    # 埋め込み画像がない場合、本文テキストは全て除外
+                                    debug_print(f"[DEBUG] スライド文書: 本文行を除外（画像なし）: {line_text_stripped[:30]}...")
+                                    continue
+                        
                         if line_text_stripped:
                             # Y座標（上端）とX座標（左端）を記録
                             text_with_positions.append((line_bbox[1], line_bbox[0], line_text_stripped))
@@ -1657,6 +1898,226 @@ class _FiguresMixin:
             抽出された画像の情報リスト
         """
         return self._extract_all_figures(page, page_num, header_footer_patterns)
+
+    def _extract_slide_individual_images(
+        self, page, page_num: int, page_text_lines: List[Dict],
+        header_y_max: Optional[float], footer_y_min: Optional[float]
+    ) -> List[Dict[str, Any]]:
+        """スライド文書用のフォールバック画像抽出
+        
+        クラスタリングで大きな図形が除外された場合に発動する。
+        有意な埋め込み画像（ページ面積の5%以上）がある場合のみ画像を出力。
+        枠線のみのページ（テキストが主体）は画像を出力しない。
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            page_num: ページ番号
+            page_text_lines: ページ内のテキスト行リスト
+            header_y_max: ヘッダー領域の下端Y座標
+            footer_y_min: フッター領域の上端Y座標
+            
+        Returns:
+            抽出された画像の情報リスト
+        """
+        page_width = page.rect.width
+        page_height = page.rect.height
+        page_area = page_width * page_height
+        
+        # 埋め込み画像の総面積を計算
+        total_image_area = 0
+        image_count = 0
+        try:
+            images = page.get_images(full=True)
+            for img in images:
+                xref = img[0]
+                img_rects = page.get_image_rects(xref)
+                for rect in img_rects:
+                    img_area = (rect[2] - rect[0]) * (rect[3] - rect[1])
+                    # 小さなロゴ（1%未満）は除外
+                    if img_area >= page_area * 0.01:
+                        total_image_area += img_area
+                        image_count += 1
+        except Exception as e:
+            debug_print(f"[DEBUG] page={page_num+1}: 画像確認エラー: {e}")
+        
+        total_image_ratio = total_image_area / page_area if page_area > 0 else 0
+        
+        # 画像の総面積が5%未満の場合は画像を出力しない
+        # 枠線のみのページ（テキストが主体）は画像を出力しない
+        if total_image_ratio < 0.05:
+            debug_print(f"[DEBUG] page={page_num+1}: フォールバック - 画像総面積{total_image_ratio:.1%}、画像出力スキップ")
+            return []
+        
+        debug_print(f"[DEBUG] page={page_num+1}: フォールバック - 画像{image_count}個（総面積{total_image_ratio:.1%}）を抽出")
+        return self._extract_individual_embedded_images(
+            page, page_num, header_y_max, footer_y_min
+        )
+    
+    def _render_full_page_image(
+        self, page, page_num: int,
+        header_y_max: Optional[float], footer_y_min: Optional[float]
+    ) -> List[Dict[str, Any]]:
+        """ページ全体を1枚の画像としてレンダリング
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            page_num: ページ番号
+            header_y_max: ヘッダー領域の下端Y座標
+            footer_y_min: フッター領域の上端Y座標
+            
+        Returns:
+            抽出された画像の情報リスト（1要素）
+        """
+        page_width = page.rect.width
+        page_height = page.rect.height
+        
+        # クリップ領域を計算（ヘッダー/フッターを除外）
+        clip_y0 = header_y_max if header_y_max else 0
+        clip_y1 = footer_y_min if footer_y_min else page_height
+        
+        # マージンを追加（上下5px）
+        clip_y0 = max(0, clip_y0 - 5)
+        clip_y1 = min(page_height, clip_y1 + 5)
+        
+        clip_bbox = (0, clip_y0, page_width, clip_y1)
+        
+        try:
+            self.image_counter += 1
+            image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
+            
+            clip_rect = fitz.Rect(clip_bbox)
+            matrix = fitz.Matrix(2.0, 2.0)
+            pix = page.get_pixmap(matrix=matrix, clip=clip_rect)
+            
+            if self.output_format == 'svg':
+                image_path = os.path.join(self.images_dir, f"{image_filename}.svg")
+                temp_png = os.path.join(self.images_dir, f"temp_fig_{self.image_counter}.png")
+                pix.save(temp_png)
+                self._convert_png_to_svg(temp_png, image_path)
+                if os.path.exists(temp_png):
+                    os.remove(temp_png)
+            else:
+                image_path = os.path.join(self.images_dir, f"{image_filename}.png")
+                pix.save(image_path)
+            
+            debug_print(f"[DEBUG] page={page_num+1}: ページ全体画像を抽出 {image_filename}")
+            
+            return [{
+                "path": image_path,
+                "filename": os.path.basename(image_path),
+                "bbox": clip_bbox,
+                "y_position": clip_y0,
+                "texts": [],  # テキストは別途Markdownとして出力
+                "column": "full"
+            }]
+            
+        except Exception as e:
+            debug_print(f"[DEBUG] page={page_num+1}: ページ全体画像抽出エラー: {e}")
+            return []
+    
+    def _extract_individual_embedded_images(
+        self, page, page_num: int,
+        header_y_max: Optional[float], footer_y_min: Optional[float]
+    ) -> List[Dict[str, Any]]:
+        """個別の埋め込み画像を抽出
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            page_num: ページ番号
+            header_y_max: ヘッダー領域の下端Y座標
+            footer_y_min: フッター領域の上端Y座標
+            
+        Returns:
+            抽出された画像の情報リスト
+        """
+        images = []
+        page_width = page.rect.width
+        page_height = page.rect.height
+        page_area = page_width * page_height
+        
+        # 最小面積閾値（ページ面積の2%以上）
+        min_area = page_area * 0.02
+        
+        # 重複除外用のbboxリスト
+        accepted_bboxes = []
+        
+        try:
+            img_infos = page.get_image_info()
+            
+            for img_info in img_infos:
+                bbox = img_info.get('bbox')
+                if not bbox:
+                    continue
+                
+                area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                
+                # 小さすぎる画像は除外
+                if area < min_area:
+                    debug_print(f"[DEBUG] page={page_num+1}: 小さな画像を除外（面積={area:.0f}）")
+                    continue
+                
+                # ヘッダー領域の画像は除外
+                if header_y_max and bbox[3] < header_y_max:
+                    debug_print(f"[DEBUG] page={page_num+1}: ヘッダー領域の画像を除外")
+                    continue
+                
+                # フッター領域の画像は除外
+                if footer_y_min and bbox[1] > footer_y_min:
+                    debug_print(f"[DEBUG] page={page_num+1}: フッター領域の画像を除外")
+                    continue
+                
+                # 重複するbboxは除外（重なり率90%以上）
+                is_duplicate = False
+                for accepted_bbox in accepted_bboxes:
+                    overlap_ratio = self._fig_bbox_overlap_ratio(bbox, accepted_bbox)
+                    if overlap_ratio >= 0.9:
+                        debug_print(f"[DEBUG] page={page_num+1}: 重複画像を除外（重なり率={overlap_ratio:.1%}）")
+                        is_duplicate = True
+                        break
+                if is_duplicate:
+                    continue
+                
+                accepted_bboxes.append(bbox)
+                
+                self.image_counter += 1
+                image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
+                
+                clip_rect = fitz.Rect(bbox)
+                matrix = fitz.Matrix(2.0, 2.0)
+                pix = page.get_pixmap(matrix=matrix, clip=clip_rect)
+                
+                if self.output_format == 'svg':
+                    image_path = os.path.join(self.images_dir, f"{image_filename}.svg")
+                    temp_png = os.path.join(self.images_dir, f"temp_fig_{self.image_counter}.png")
+                    pix.save(temp_png)
+                    self._convert_png_to_svg(temp_png, image_path)
+                    if os.path.exists(temp_png):
+                        os.remove(temp_png)
+                else:
+                    image_path = os.path.join(self.images_dir, f"{image_filename}.png")
+                    pix.save(image_path)
+                
+                # 図形内テキストを抽出（ラベル拡張なし）
+                figure_texts, _ = self._extract_text_in_bbox(
+                    page, bbox, expand_for_labels=False
+                )
+                
+                images.append({
+                    "path": image_path,
+                    "filename": os.path.basename(image_path),
+                    "bbox": bbox,
+                    "y_position": bbox[1],
+                    "texts": figure_texts,
+                    "column": "full"
+                })
+                
+                debug_print(f"[DEBUG] page={page_num+1}: 個別画像を抽出 {image_filename}")
+                
+        except Exception as e:
+            debug_print(f"[DEBUG] page={page_num+1}: 個別画像抽出エラー: {e}")
+        
+        images.sort(key=lambda x: x["y_position"])
+        return images
 
     def _extract_individual_images(
         self, page, page_num: int
