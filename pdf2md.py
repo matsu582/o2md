@@ -1231,19 +1231,19 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 if not re.match(r'^第[\d０-９一二三四五六七八九十]+\s*(章|節|条)', text_stripped):
                     return "paragraph"
         
-        # スライド文書の場合、ページ上部のタイトルのみ見出しとして統一（全て##に）
-        # 条件: ページ上部20%以内 + フォントサイズが大きい（size_ratio >= 1.3）
+        # スライド文書の場合、ページ上部のタイトルを見出しとして統一（全て##に）
+        # それ以外は通常の見出し判定にフォールバック
         if is_slide_document:
             # bboxのy座標でページ上部かどうかを判定
             # bbox = (x0, y0, x1, y1) で、y0が小さいほど上部
             y0 = bbox[1] if bbox else 0
             page_height = 540  # PPTスライドの標準高さ
-            is_top_area = y0 < page_height * 0.20  # 上部20%以内
+            is_top_area = y0 < page_height * 0.30  # 上部30%以内
             
-            if is_top_area and size_ratio >= 1.3:
+            # ページ上部で、フォントサイズが大きい場合はタイトルとして##に統一
+            if is_top_area and size_ratio >= 1.15:
                 return "heading2"
-            # スライド文書では通常の見出し判定をスキップ
-            return "paragraph"
+            # それ以外は通常の見出し判定にフォールバック（paragraphに固定しない）
         
         if size_ratio >= 1.8 or (size_ratio >= 1.5 and is_bold):
             return "heading1"

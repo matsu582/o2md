@@ -1119,10 +1119,18 @@ class _FiguresMixin:
         self, graphics_bbox: Tuple, text_lines: List[Dict], col_width: float,
         page_width: float, page_height: float, column: str, gutter_x: float,
         is_embedded_image: bool = False,
-        header_y_max: Optional[float] = None, footer_y_min: Optional[float] = None
+        header_y_max: Optional[float] = None, footer_y_min: Optional[float] = None,
+        is_slide_document: bool = False
     ) -> Tuple:
         """graphics_bboxからclip_bboxを計算（トリム処理）"""
-        padding = 1.0 if is_embedded_image else 20.0
+        # スライド文書では小さなマージン（5px）、通常文書では20px
+        if is_slide_document:
+            padding = 5.0
+        elif is_embedded_image:
+            padding = 1.0
+        else:
+            padding = 20.0
+        
         clip_x0 = max(0, graphics_bbox[0] - padding)
         clip_y0 = max(0, graphics_bbox[1] - padding)
         clip_x1 = min(page_width, graphics_bbox[2] + padding)
@@ -1143,8 +1151,9 @@ class _FiguresMixin:
             clip_x0 = max(clip_x0, gutter_x + 5)
             debug_print(f"[DEBUG] 右カラム: clip_x0を{old_clip_x0:.1f}→{clip_x0:.1f}にクランプ")
         
-        if is_embedded_image:
-            debug_print(f"[DEBUG] 埋め込み画像: 上下トリムをスキップ")
+        # スライド文書または埋め込み画像の場合、上下トリムをスキップ
+        if is_embedded_image or is_slide_document:
+            debug_print(f"[DEBUG] {'スライド文書' if is_slide_document else '埋め込み画像'}: 上下トリムをスキップ")
             return (clip_x0, clip_y0, clip_x1, clip_y1)
         
         caption = self._fig_find_caption_below(graphics_bbox, text_lines)
@@ -1204,24 +1213,33 @@ class _FiguresMixin:
                     clip_bbox = self._fig_compute_clip_bbox(
                         graphics_bbox, page_text_lines, col_width,
                         page_width, page_height, column, gutter_x,
-                        is_embedded_image, header_y_max, footer_y_min
+                        is_embedded_image, header_y_max, footer_y_min,
+                        is_slide_document
                     )
                 
-                # スライド文書: clip_bbox内のテキスト量が50%以上の場合は図形を除外
+                # スライド文書: ページ全体を覆う図形（面積比50%以上）かつテキスト比30%以上の場合のみ除外
+                # これにより、小さな図形は除外されず、ページ全体吸い込み系のみを狙い撃ち
                 if is_slide_document and total_page_text_chars > 0:
-                    fig_text_chars = 0
-                    for line in page_text_lines:
-                        line_bbox = line.get("bbox", (0, 0, 0, 0))
-                        # 行がclip_bbox内に含まれているかチェック
-                        if (line_bbox[0] >= clip_bbox[0] - 5 and line_bbox[2] <= clip_bbox[2] + 5 and
-                            line_bbox[1] >= clip_bbox[1] - 5 and line_bbox[3] <= clip_bbox[3] + 5):
-                            fig_text_chars += len(line.get("text", ""))
+                    # 図形の面積比を計算
+                    page_area = page_width * page_height
+                    fig_area = (clip_bbox[2] - clip_bbox[0]) * (clip_bbox[3] - clip_bbox[1])
+                    area_ratio = fig_area / page_area if page_area > 0 else 0
                     
-                    text_ratio = fig_text_chars / total_page_text_chars
-                    debug_print(f"[DEBUG] page={page_num+1}: clip_bbox内テキスト比={text_ratio:.1%} ({fig_text_chars}/{total_page_text_chars})")
-                    if text_ratio >= 0.5:
-                        debug_print(f"[DEBUG] page={page_num+1}: テキスト量が多い図形を除外（テキスト比={text_ratio:.1%}）")
-                        continue
+                    # 面積比が50%以上の大きな図形のみテキスト比チェック
+                    if area_ratio >= 0.5:
+                        fig_text_chars = 0
+                        for line in page_text_lines:
+                            line_bbox = line.get("bbox", (0, 0, 0, 0))
+                            # 行がclip_bbox内に含まれているかチェック
+                            if (line_bbox[0] >= clip_bbox[0] - 5 and line_bbox[2] <= clip_bbox[2] + 5 and
+                                line_bbox[1] >= clip_bbox[1] - 5 and line_bbox[3] <= clip_bbox[3] + 5):
+                                fig_text_chars += len(line.get("text", ""))
+                        
+                        text_ratio = fig_text_chars / total_page_text_chars
+                        debug_print(f"[DEBUG] page={page_num+1}: 大きな図形（面積比={area_ratio:.1%}）のテキスト比={text_ratio:.1%}")
+                        if text_ratio >= 0.3:
+                            debug_print(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, テキスト比={text_ratio:.1%}）")
+                            continue
                 
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
