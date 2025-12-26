@@ -1393,6 +1393,24 @@ class _TextMixin:
             debug_print("[DEBUG] スライド文書: 段落結合をスキップ")
             blocks = []
             for line in lines:
+                text = line["text"].strip()
+                bbox = line["bbox"]
+                
+                # ページ番号のフィルタリング（スライド文書のみ）
+                # 条件: 数字のみ（1-3桁）、ページ下端（93%以上）、右端または左端（10%以内）、幅が小さい（5%未満）
+                if page_width and page_height and text.isdigit() and len(text) <= 3:
+                    x_center = (bbox[0] + bbox[2]) / 2
+                    y_top = bbox[1]
+                    width = bbox[2] - bbox[0]
+                    
+                    is_at_bottom = y_top > page_height * 0.93
+                    is_at_edge = (x_center > page_width * 0.9) or (x_center < page_width * 0.1)
+                    is_narrow = width < page_width * 0.05
+                    
+                    if is_at_bottom and is_at_edge and is_narrow:
+                        debug_print(f"[DEBUG] ページ番号を除外: text=\"{text}\", y={y_top:.1f}, x_center={x_center:.1f}")
+                        continue
+                
                 blocks.append({
                     "text": line["text"],
                     "bbox": line["bbox"],
