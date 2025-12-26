@@ -1136,6 +1136,23 @@ class _FiguresMixin:
         clip_x1 = min(page_width, graphics_bbox[2] + padding)
         clip_y1 = min(page_height, graphics_bbox[3] + padding)
         
+        # スライド文書の場合、本文行と交差する場合は上端を広げない
+        if is_slide_document:
+            for line in text_lines:
+                line_bbox = line.get("bbox", (0, 0, 0, 0))
+                line_text = line.get("text", "").strip()
+                line_width = line_bbox[2] - line_bbox[0]
+                # 本文らしい行かどうかを判定
+                if not self._fig_is_body_text_line(line_text, line_width, col_width):
+                    continue
+                # 本文行がclip_bboxの上端付近にある場合、上端を詰める
+                if line_bbox[3] > clip_y0 and line_bbox[1] < graphics_bbox[1]:
+                    # 本文行の下端より下にclip_y0を設定
+                    new_clip_y0 = line_bbox[3] + 2.0
+                    if new_clip_y0 < graphics_bbox[1]:
+                        debug_print(f"[DEBUG] スライド文書: 本文行を避けてclip_y0を{clip_y0:.1f}→{new_clip_y0:.1f}に調整")
+                        clip_y0 = new_clip_y0
+        
         if header_y_max is not None and clip_y0 < header_y_max:
             clip_y0 = header_y_max
             debug_print(f"[DEBUG] ヘッダー領域クリップ: clip_y0を{clip_y0:.1f}に設定")
@@ -1188,10 +1205,15 @@ class _FiguresMixin:
         figures = []
         page_height = page.rect.height
         
-        # スライド文書用: ページ全体のテキスト文字数を事前計算
-        total_page_text_chars = 0
+        # スライド文書用: ページ全体の本文テキスト文字数を事前計算
+        total_body_text_chars = 0
         if is_slide_document:
-            total_page_text_chars = sum(len(line.get("text", "")) for line in page_text_lines)
+            for line in page_text_lines:
+                line_text = line.get("text", "").strip()
+                line_bbox = line.get("bbox", (0, 0, 0, 0))
+                line_width = line_bbox[2] - line_bbox[0]
+                if self._fig_is_body_text_line(line_text, line_width, col_width):
+                    total_body_text_chars += len(line_text)
         
         for fig_info in all_figure_candidates:
             try:
@@ -1217,28 +1239,32 @@ class _FiguresMixin:
                         is_slide_document
                     )
                 
-                # スライド文書: ページ全体を覆う図形（面積比50%以上）かつテキスト比30%以上の場合のみ除外
-                # これにより、小さな図形は除外されず、ページ全体吸い込み系のみを狙い撃ち
-                if is_slide_document and total_page_text_chars > 0:
+                # スライド文書: ページ全体を覆う図形（面積比50%以上）かつ本文テキスト比50%以上の場合のみ除外
+                # 図中ラベル（短いテキスト）は本文としてカウントしない
+                if is_slide_document and total_body_text_chars > 0:
                     # 図形の面積比を計算
                     page_area = page_width * page_height
                     fig_area = (clip_bbox[2] - clip_bbox[0]) * (clip_bbox[3] - clip_bbox[1])
                     area_ratio = fig_area / page_area if page_area > 0 else 0
                     
-                    # 面積比が50%以上の大きな図形のみテキスト比チェック
+                    # 面積比が50%以上の大きな図形のみ本文テキスト比チェック
                     if area_ratio >= 0.5:
-                        fig_text_chars = 0
+                        fig_body_text_chars = 0
                         for line in page_text_lines:
                             line_bbox = line.get("bbox", (0, 0, 0, 0))
+                            line_text = line.get("text", "").strip()
+                            line_width = line_bbox[2] - line_bbox[0]
                             # 行がclip_bbox内に含まれているかチェック
                             if (line_bbox[0] >= clip_bbox[0] - 5 and line_bbox[2] <= clip_bbox[2] + 5 and
                                 line_bbox[1] >= clip_bbox[1] - 5 and line_bbox[3] <= clip_bbox[3] + 5):
-                                fig_text_chars += len(line.get("text", ""))
+                                # 本文らしい行のみカウント
+                                if self._fig_is_body_text_line(line_text, line_width, col_width):
+                                    fig_body_text_chars += len(line_text)
                         
-                        text_ratio = fig_text_chars / total_page_text_chars
-                        debug_print(f"[DEBUG] page={page_num+1}: 大きな図形（面積比={area_ratio:.1%}）のテキスト比={text_ratio:.1%}")
-                        if text_ratio >= 0.3:
-                            debug_print(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, テキスト比={text_ratio:.1%}）")
+                        body_text_ratio = fig_body_text_chars / total_body_text_chars
+                        debug_print(f"[DEBUG] page={page_num+1}: 大きな図形（面積比={area_ratio:.1%}）の本文テキスト比={body_text_ratio:.1%}")
+                        if body_text_ratio >= 0.5:
+                            debug_print(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, 本文テキスト比={body_text_ratio:.1%}）")
                             continue
                 
                 self.image_counter += 1
@@ -1286,17 +1312,9 @@ class _FiguresMixin:
                     exclude_table_bboxes=exclude_tables
                 )
                 
-                # スライド文書: 抽出されたテキスト量が30%以上の場合は図形を除外
-                if is_slide_document and total_page_text_chars > 0:
-                    fig_text_chars = sum(len(t) for t in figure_texts)
-                    text_ratio = fig_text_chars / total_page_text_chars
-                    debug_print(f"[DEBUG] page={page_num+1}: 図形内テキスト比={text_ratio:.1%} ({fig_text_chars}/{total_page_text_chars})")
-                    if text_ratio >= 0.3:
-                        debug_print(f"[DEBUG] page={page_num+1}: テキスト量が多い図形を除外（テキスト比={text_ratio:.1%}）")
-                        # 生成した画像ファイルを削除
-                        if os.path.exists(image_path):
-                            os.remove(image_path)
-                        continue
+                # スライド文書: 本文テキストがない場合は除外しない（図中ラベルのみのページ）
+                # 本文テキストがある場合のみ、抽出されたテキスト量をチェック
+                # この除外ロジックは無効化（フェーズ7.5とレンダリング前チェックで十分）
                 
                 figures.append({
                     "path": image_path,
@@ -1462,12 +1480,19 @@ class _FiguresMixin:
             return []
         
         # フェーズ7.5: スライド文書での図形内テキスト量による除外
-        # マージ後の図形に対して、面積比70%以上かつテキスト比50%以上の場合のみ除外
-        # これにより、ページ全体を覆う背景的な図形のみを除外し、小さな図形は保持
+        # マージ後の図形に対して、面積比70%以上かつ「本文テキスト比」50%以上の場合のみ除外
+        # 図中ラベル（短いテキスト）は本文としてカウントしない
         if is_slide_document and all_figure_candidates:
             page_area = page_width * page_height
-            total_page_text_chars = sum(len(line.get("text", "")) for line in page_text_lines)
-            debug_print(f"[DEBUG] page={page_num+1}: フェーズ7.5開始 - 図形候補数={len(all_figure_candidates)}, 総テキスト文字数={total_page_text_chars}")
+            # 本文テキストのみをカウント（図中ラベルは除外）
+            total_body_text_chars = 0
+            for line in page_text_lines:
+                line_text = line.get("text", "").strip()
+                line_bbox = line.get("bbox", (0, 0, 0, 0))
+                line_width = line_bbox[2] - line_bbox[0]
+                if self._fig_is_body_text_line(line_text, line_width, col_width):
+                    total_body_text_chars += len(line_text)
+            debug_print(f"[DEBUG] page={page_num+1}: フェーズ7.5開始 - 図形候補数={len(all_figure_candidates)}, 本文テキスト文字数={total_body_text_chars}")
             slide_text_filtered = []
             for cand_idx, cand in enumerate(all_figure_candidates):
                 bbox = cand.get("union_bbox", (0, 0, 0, 0))
@@ -1480,20 +1505,28 @@ class _FiguresMixin:
                     slide_text_filtered.append(cand)
                     continue
                 
-                # 面積比70%以上の大きな図形のみテキスト比をチェック
-                fig_text_chars = 0
+                # 面積比70%以上の大きな図形のみ「本文テキスト比」をチェック
+                fig_body_text_chars = 0
                 for line in page_text_lines:
                     line_bbox = line.get("bbox", (0, 0, 0, 0))
+                    line_text = line.get("text", "").strip()
+                    line_width = line_bbox[2] - line_bbox[0]
+                    # bbox内のテキスト行かどうかを判定
                     if (line_bbox[0] >= bbox[0] - 5 and line_bbox[2] <= bbox[2] + 5 and
                         line_bbox[1] >= bbox[1] - 5 and line_bbox[3] <= bbox[3] + 5):
-                        fig_text_chars += len(line.get("text", ""))
+                        # 本文らしい行のみカウント
+                        if self._fig_is_body_text_line(line_text, line_width, col_width):
+                            fig_body_text_chars += len(line_text)
                 
-                if total_page_text_chars > 0:
-                    text_ratio = fig_text_chars / total_page_text_chars
-                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} テキスト比={text_ratio:.1%} ({fig_text_chars}/{total_page_text_chars})")
-                    if text_ratio >= 0.5:
-                        debug_print(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, テキスト比={text_ratio:.1%}）")
+                if total_body_text_chars > 0:
+                    body_text_ratio = fig_body_text_chars / total_body_text_chars
+                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 本文テキスト比={body_text_ratio:.1%} ({fig_body_text_chars}/{total_body_text_chars})")
+                    if body_text_ratio >= 0.5:
+                        debug_print(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, 本文テキスト比={body_text_ratio:.1%}）")
                         continue
+                else:
+                    # 本文テキストがない場合は除外しない（図中ラベルのみのページ）
+                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 本文テキストなし、除外しない")
                 
                 slide_text_filtered.append(cand)
             all_figure_candidates = slide_text_filtered
@@ -1815,6 +1848,7 @@ class _FiguresMixin:
         クラスタリングで大きな図形が除外された場合に、
         個別の埋め込み画像を直接抽出する。
         ヘッダー/フッター領域の画像は除外する。
+        重複するbbox（重なり率90%以上）は除外する。
         
         Args:
             page: PyMuPDFのページオブジェクト
@@ -1833,6 +1867,9 @@ class _FiguresMixin:
         
         # 最小面積閾値（ページ面積の2%以上）
         min_area = page_area * 0.02
+        
+        # 重複除外用のbboxリスト
+        accepted_bboxes = []
         
         try:
             img_infos = page.get_image_info()
@@ -1858,6 +1895,19 @@ class _FiguresMixin:
                 if footer_y_min and bbox[1] > footer_y_min:
                     debug_print(f"[DEBUG] page={page_num+1}: フッター領域の画像を除外")
                     continue
+                
+                # 重複するbboxは除外（重なり率90%以上）
+                is_duplicate = False
+                for accepted_bbox in accepted_bboxes:
+                    overlap_ratio = self._fig_bbox_overlap_ratio(bbox, accepted_bbox)
+                    if overlap_ratio >= 0.9:
+                        debug_print(f"[DEBUG] page={page_num+1}: 重複画像を除外（重なり率={overlap_ratio:.1%}）")
+                        is_duplicate = True
+                        break
+                if is_duplicate:
+                    continue
+                
+                accepted_bboxes.append(bbox)
                 
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
