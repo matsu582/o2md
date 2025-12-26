@@ -140,18 +140,21 @@ class _TextMixin:
 
     def _extract_structured_text_v2(
         self, page, header_footer_patterns: Set[str],
-        exclude_bboxes: List[Tuple[float, float, float, float]] = None
+        exclude_bboxes: List[Tuple[float, float, float, float]] = None,
+        is_slide_document: bool = False
     ) -> List[Dict[str, Any]]:
         """PDFページから構造化されたテキストブロックを抽出（改良版）
         
         行単位で抽出し、カラム分割と段落リフローを行う。
         ヘッダ・フッタを除外する。
         図領域内のテキストも除外する。
+        スライド文書の場合は段落結合をスキップする。
         
         Args:
             page: PyMuPDFのページオブジェクト
             header_footer_patterns: ヘッダ・フッタパターンのセット
             exclude_bboxes: 除外するbboxのリスト（図領域など）
+            is_slide_document: スライド文書フラグ（Trueの場合、段落結合をスキップ）
             
         Returns:
             構造化されたテキストブロックのリスト
@@ -326,16 +329,19 @@ class _TextMixin:
         line_based_tables = self._detect_line_based_tables(page, lines_data)
         
         # カラムごとにソート（フル幅→左→右の順、各カラム内はY座標順）
-        sorted_lines = self._sort_lines_by_column(lines_data)
+        # スライド文書の場合は行クラスタリングをスキップ
+        sorted_lines = self._sort_lines_by_column(lines_data, is_slide_document=is_slide_document)
         
         # 段落リフロー（同一カラム内で近接する行を結合、表領域は除外）
         # exclude_bboxes（図形のbbox）を渡して、図形と重なるテーブルの重複出力を防ぐ
         # ページサイズを渡して横長ページ（PPTスライド等）での改行保持を有効化
+        # スライド文書フラグを渡して段落結合をスキップ
         reflowed_blocks = self._reflow_paragraphs_with_tables(
             sorted_lines, base_font_size, table_regions, line_based_tables,
             figure_bboxes=exclude_bboxes,
             page_width=page_width,
-            page_height=page_height
+            page_height=page_height,
+            is_slide_document=is_slide_document
         )
         
         # ブロックタイプを判定（カラム情報を保持）
@@ -389,7 +395,9 @@ class _TextMixin:
             blocks.append(block)
         
         # 番号付きリストの継続行を結合する後処理
-        blocks = self._merge_list_continuations(blocks)
+        # スライド文書の場合はスキップ（各行を独立に保持）
+        if not is_slide_document:
+            blocks = self._merge_list_continuations(blocks)
         
         return blocks
 
@@ -625,27 +633,41 @@ class _TextMixin:
         
         return result
 
-    def _sort_lines_by_column(self, lines_data: List[Dict]) -> List[Dict]:
+    def _sort_lines_by_column(
+        self, lines_data: List[Dict], is_slide_document: bool = False
+    ) -> List[Dict]:
         """行をカラムごとにソート
         
         フル幅要素を基準に、その間の区間で左→右の順に出力する。
         同じy座標（±フォントサイズの範囲内）にある行はx座標順にソートする。
+        スライド文書の場合はクラスタリングをスキップして各行を独立に保持する。
         
         Args:
             lines_data: 行データのリスト
+            is_slide_document: スライド文書フラグ
             
         Returns:
             ソートされた行データのリスト
         """
         import re
         
-        def cluster_and_sort_by_row(lines: List[Dict]) -> List[Dict]:
-            """同じy座標の行をクラスタリングし、クラスタ内はx座標順にソート"""
+        def cluster_and_sort_by_row(lines: List[Dict], skip_clustering: bool = False) -> List[Dict]:
+            """同じy座標の行をクラスタリングし、クラスタ内はx座標順にソート
+            
+            Args:
+                lines: 行データのリスト
+                skip_clustering: Trueの場合、クラスタリングをスキップしてy座標順のみでソート
+            """
             if not lines:
                 return []
             
             # y座標でソート
             sorted_by_y = sorted(lines, key=lambda x: x["y"])
+            
+            # スライド文書の場合はクラスタリングをスキップ
+            if skip_clustering:
+                debug_print("[DEBUG] スライド文書: 行クラスタリングをスキップ")
+                return sorted_by_y
             
             # 同じy座標（±フォントサイズの0.5倍以内）の行をクラスタリング
             clusters = []
@@ -731,12 +753,15 @@ class _TextMixin:
         right_lines = [l for l in lines_data if l["column"] == "right"]
         
         # 各グループをクラスタリング＆ソート
-        full_lines = cluster_and_sort_by_row(full_lines)
-        left_lines = cluster_and_sort_by_row(left_lines)
-        right_lines = cluster_and_sort_by_row(right_lines)
+        # スライド文書の場合はクラスタリングをスキップ
+        full_lines = cluster_and_sort_by_row(full_lines, skip_clustering=is_slide_document)
+        left_lines = cluster_and_sort_by_row(left_lines, skip_clustering=is_slide_document)
+        right_lines = cluster_and_sort_by_row(right_lines, skip_clustering=is_slide_document)
         
         # 番号+タイトルのマージ（fullカラムのみ、2カラムでは誤結合の可能性があるため）
-        full_lines = merge_number_title_lines(full_lines)
+        # スライド文書の場合はマージをスキップ
+        if not is_slide_document:
+            full_lines = merge_number_title_lines(full_lines)
         
         # フル幅行がない場合は単純に左→右
         if not full_lines:
@@ -1228,7 +1253,8 @@ class _TextMixin:
         line_based_tables: List[Dict] = None,
         figure_bboxes: List[Tuple[float, float, float, float]] = None,
         page_width: float = None,
-        page_height: float = None
+        page_height: float = None,
+        is_slide_document: bool = False
     ) -> List[Dict]:
         """段落リフロー（表領域を考慮）
         
@@ -1238,6 +1264,7 @@ class _TextMixin:
         番号付き箇条書きの後に続く非番号行は別ブロックとして分離する。
         図形として出力された領域と重なるテーブルはMarkdownテーブルとして出力しない。
         横長ページ（PPTスライド等）では改行を保持する。
+        スライド文書では段落結合をスキップし、各行を別々のブロックとして出力する。
         
         Args:
             lines: ソートされた行データのリスト
@@ -1247,6 +1274,7 @@ class _TextMixin:
             figure_bboxes: 図形として出力されたbboxのリスト（重複出力を防ぐため）
             page_width: ページ幅（横長ページ検出用）
             page_height: ページ高さ（横長ページ検出用）
+            is_slide_document: スライド文書フラグ（Trueの場合、段落結合をスキップ）
             
         Returns:
             結合されたブロックのリスト
@@ -1359,6 +1387,20 @@ class _TextMixin:
                         return True
             
             return False
+        
+        # スライド文書の場合は段落結合をスキップし、各行を別々のブロックとして出力
+        if is_slide_document:
+            debug_print("[DEBUG] スライド文書: 段落結合をスキップ")
+            blocks = []
+            for line in lines:
+                blocks.append({
+                    "text": line["text"],
+                    "bbox": line["bbox"],
+                    "font_size": line["font_size"],
+                    "is_bold": line["is_bold"],
+                    "column": line["column"]
+                })
+            return blocks
         
         # 行高の推定（フォントサイズの1.2倍程度）
         line_height = base_font_size * 1.2

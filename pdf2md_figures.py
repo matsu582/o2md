@@ -298,6 +298,10 @@ class _FiguresMixin:
         except Exception as e:
             debug_print(f"[DEBUG] 描画取得エラー: {e}")
         
+        # 生テキストが存在するかどうかを確認（背景画像除外の判定に使用）
+        raw_text = page.get_text().strip()
+        has_raw_text = len(raw_text) > 0
+        
         try:
             image_list = page.get_images(full=True)
             for img_info in image_list:
@@ -306,6 +310,10 @@ class _FiguresMixin:
                     bbox = (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1)
                     area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
                     if area >= 100:
+                        # 生テキストが存在するページでは、全面画像を背景として除外
+                        if has_raw_text and area >= page_area * 0.9:
+                            debug_print(f"[DEBUG] page={page_num+1}: 背景画像を除外（面積比={area/page_area:.2f}）")
+                            continue
                         all_elements.append({"bbox": bbox, "type": "image"})
         except Exception as e:
             debug_print(f"[DEBUG] 画像取得エラー: {e}")
@@ -1256,18 +1264,21 @@ class _FiguresMixin:
         return figures
 
     def _extract_all_figures(
-        self, page, page_num: int, header_footer_patterns: Set[str] = None
+        self, page, page_num: int, header_footer_patterns: Set[str] = None,
+        is_slide_document: bool = False
     ) -> List[Dict[str, Any]]:
         """ベクター図形と埋め込み画像を統合して図を抽出（オーケストレータ）
         
         ベクター描画と埋め込み画像を統合してクラスタリングし、
         クラスタリング後にカラム判定を行う（先にクラスタリング、後でカラム判定）。
         ヘッダー/フッター領域内の図クラスタは除外する。
+        スライド文書の場合は小さな装飾要素を除外する。
         
         Args:
             page: PyMuPDFのページオブジェクト
             page_num: ページ番号
             header_footer_patterns: ヘッダ・フッタパターンのセット
+            is_slide_document: スライド文書フラグ
             
         Returns:
             抽出された図の情報リスト
@@ -1366,6 +1377,21 @@ class _FiguresMixin:
             filtered_candidates.append(cand)
         all_figure_candidates = filtered_candidates
         
+        # フェーズ5.6: スライド文書での小さな装飾要素のフィルタリング
+        # スライド文書の場合、ページ面積の5%未満の小さな図形を除外
+        if is_slide_document and all_figure_candidates:
+            page_area = page_width * page_height
+            min_area_threshold = page_area * 0.05
+            slide_filtered = []
+            for cand in all_figure_candidates:
+                bbox = cand.get("union_bbox", (0, 0, 0, 0))
+                cand_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                if cand_area < min_area_threshold:
+                    debug_print(f"[DEBUG] page={page_num+1}: スライド装飾要素を除外（面積比={cand_area/page_area:.2%}）")
+                    continue
+                slide_filtered.append(cand)
+            all_figure_candidates = slide_filtered
+        
         if not all_figure_candidates:
             return []
         
@@ -1393,7 +1419,8 @@ class _FiguresMixin:
         return figures
 
     def _extract_vector_figures(
-        self, page, page_num: int, header_footer_patterns: Set[str] = None
+        self, page, page_num: int, header_footer_patterns: Set[str] = None,
+        is_slide_document: bool = False
     ) -> List[Dict[str, Any]]:
         """ベクタ描画（図）を抽出（統合版を使用）
         
@@ -1401,11 +1428,12 @@ class _FiguresMixin:
             page: PyMuPDFのページオブジェクト
             page_num: ページ番号
             header_footer_patterns: ヘッダ・フッタパターンのセット
+            is_slide_document: スライド文書フラグ
             
         Returns:
             抽出された図の情報リスト
         """
-        return self._extract_all_figures(page, page_num, header_footer_patterns)
+        return self._extract_all_figures(page, page_num, header_footer_patterns, is_slide_document)
 
     def _extract_text_in_bbox(
         self, page, bbox: Tuple[float, float, float, float],

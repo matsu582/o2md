@@ -134,6 +134,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         self._doc_header_y_max: Optional[float] = None
         self._doc_footer_y_min: Optional[float] = None
         
+        # スライド文書フラグ（PPT由来のPDFなど）
+        self._is_slide_document: bool = False
+        
         print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
     
     def _get_ocr(self):
@@ -177,13 +180,28 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             total_pages = len(doc)
             print(f"[INFO] 総ページ数: {total_pages}")
             
+            # スライド文書（PPT由来のPDFなど）かどうかを判定
+            self._is_slide_document = self._detect_slide_document(doc)
+            if self._is_slide_document:
+                print("[INFO] スライド文書として処理します")
+            
             # ヘッダ・フッタパターンを検出（全ページから収集）
-            header_footer_patterns = self._detect_header_footer_patterns(doc)
-            if header_footer_patterns:
-                debug_print(f"[DEBUG] ヘッダ・フッタパターン検出: {len(header_footer_patterns)}個")
+            # スライド文書の場合はヘッダ・フッタパターン検出をスキップ
+            if self._is_slide_document:
+                header_footer_patterns = set()
+                debug_print("[DEBUG] スライド文書のためヘッダ・フッタパターン検出をスキップ")
+            else:
+                header_footer_patterns = self._detect_header_footer_patterns(doc)
+                if header_footer_patterns:
+                    debug_print(f"[DEBUG] ヘッダ・フッタパターン検出: {len(header_footer_patterns)}個")
             
             # doc-wideのヘッダー/フッター領域を計算（フォールバック用）
-            self._compute_doc_wide_header_footer(doc, header_footer_patterns)
+            # スライド文書の場合はヘッダー/フッター領域を無効化
+            if self._is_slide_document:
+                self._doc_header_y_max = None
+                self._doc_footer_y_min = None
+            else:
+                self._compute_doc_wide_header_footer(doc, header_footer_patterns)
             
             for page_num in range(total_pages):
                 print(f"[INFO] ページ {page_num + 1}/{total_pages} を処理中...")
@@ -471,6 +489,57 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         return False
     
+    def _detect_slide_document(self, doc) -> bool:
+        """スライド文書（PPT由来のPDFなど）かどうかを判定
+        
+        以下の条件を満たす場合にスライド文書と判定:
+        - 90%以上のページが横長（幅 > 高さ）
+        - ページサイズがほぼ一定（標準偏差が小さい）
+        
+        Args:
+            doc: PyMuPDFのドキュメントオブジェクト
+            
+        Returns:
+            スライド文書の場合True
+        """
+        total_pages = len(doc)
+        if total_pages == 0:
+            return False
+        
+        landscape_count = 0
+        page_sizes = []
+        
+        for page_num in range(total_pages):
+            page = doc[page_num]
+            width = page.rect.width
+            height = page.rect.height
+            
+            if width > height:
+                landscape_count += 1
+            
+            page_sizes.append((width, height))
+        
+        landscape_ratio = landscape_count / total_pages
+        
+        if landscape_ratio < 0.9:
+            return False
+        
+        if total_pages >= 2:
+            widths = [s[0] for s in page_sizes]
+            heights = [s[1] for s in page_sizes]
+            
+            avg_width = sum(widths) / len(widths)
+            avg_height = sum(heights) / len(heights)
+            
+            width_variance = sum((w - avg_width) ** 2 for w in widths) / len(widths)
+            height_variance = sum((h - avg_height) ** 2 for h in heights) / len(heights)
+            
+            if width_variance > 100 or height_variance > 100:
+                return False
+        
+        debug_print(f"[DEBUG] スライド文書検出: 横長率={landscape_ratio:.1%}, ページ数={total_pages}")
+        return True
+    
     def _convert_page(self, page, page_num: int, header_footer_patterns: Set[str] = None):
         """PDFページを変換
         
@@ -485,12 +554,18 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         # 先にベクタ描画（図）を検出して、その領域を取得
         # 図領域内のテキストは本文から除外するため
         # ヘッダー/フッター領域内の装飾要素を除外するためにpatternsを渡す
-        vector_figures = self._extract_vector_figures(page, page_num, header_footer_patterns)
+        # スライド文書フラグを渡して小さな装飾要素を除外
+        vector_figures = self._extract_vector_figures(
+            page, page_num, header_footer_patterns,
+            is_slide_document=self._is_slide_document
+        )
         figure_bboxes = [fig["bbox"] for fig in vector_figures]
         
         # テキストベースのPDFかどうかを判定（図領域を除外）
+        # スライド文書フラグを渡して段落結合をスキップ
         text_blocks = self._extract_structured_text_v2(
-            page, header_footer_patterns, exclude_bboxes=figure_bboxes
+            page, header_footer_patterns, exclude_bboxes=figure_bboxes,
+            is_slide_document=self._is_slide_document
         )
         
         # スキャンページ（画像ベースPDF）かどうかを判定
@@ -569,8 +644,14 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     last_block_y = block_y
                     last_block_w = block_w
                     break
-        self.markdown_lines.append(f"<!--PAGE_BREAK first_y={first_block_y} last_y={last_block_y} last_w={last_block_w} page_h={page_height} page_w={page_width}-->")
-        self.markdown_lines.append("")
+        # スライド文書の場合はページ区切りを追加
+        if self._is_slide_document:
+            self.markdown_lines.append("")
+            self.markdown_lines.append("---")
+            self.markdown_lines.append("")
+        else:
+            self.markdown_lines.append(f"<!--PAGE_BREAK first_y={first_block_y} last_y={last_block_y} last_w={last_block_w} page_h={page_height} page_w={page_width}-->")
+            self.markdown_lines.append("")
     
     
     
