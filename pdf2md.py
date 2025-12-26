@@ -1225,7 +1225,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         # - 番号付き見出し形式（「N.N」「第N章」など）
         # - フォントサイズが非常に大きい場合（size_ratio >= 2.0）
         if len(text_stripped) <= 10 and size_ratio < 2.0:
-            if not re.match(r'^[\d０-９]+[\.\s]', text_stripped):
+            if not re.match(r'^[\d０-９]+[\.．\s]', text_stripped):
                 if not re.match(r'^第[\d０-９一二三四五六七八九十]+\s*(章|節|条)', text_stripped):
                     return "paragraph"
         

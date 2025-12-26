@@ -1173,11 +1173,16 @@ class _FiguresMixin:
         self, page, page_num: int, all_figure_candidates: List[Dict],
         page_text_lines: List[Dict], col_width: float, page_width: float,
         gutter_x: float, header_y_max: Optional[float], footer_y_min: Optional[float],
-        line_based_table_bboxes: List[Tuple]
+        line_based_table_bboxes: List[Tuple], is_slide_document: bool = False
     ) -> List[Dict]:
         """図候補をレンダリングして図情報リストを生成"""
         figures = []
         page_height = page.rect.height
+        
+        # スライド文書用: ページ全体のテキスト文字数を事前計算
+        total_page_text_chars = 0
+        if is_slide_document:
+            total_page_text_chars = sum(len(line.get("text", "")) for line in page_text_lines)
         
         for fig_info in all_figure_candidates:
             try:
@@ -1201,6 +1206,22 @@ class _FiguresMixin:
                         page_width, page_height, column, gutter_x,
                         is_embedded_image, header_y_max, footer_y_min
                     )
+                
+                # スライド文書: clip_bbox内のテキスト量が50%以上の場合は図形を除外
+                if is_slide_document and total_page_text_chars > 0:
+                    fig_text_chars = 0
+                    for line in page_text_lines:
+                        line_bbox = line.get("bbox", (0, 0, 0, 0))
+                        # 行がclip_bbox内に含まれているかチェック
+                        if (line_bbox[0] >= clip_bbox[0] - 5 and line_bbox[2] <= clip_bbox[2] + 5 and
+                            line_bbox[1] >= clip_bbox[1] - 5 and line_bbox[3] <= clip_bbox[3] + 5):
+                            fig_text_chars += len(line.get("text", ""))
+                    
+                    text_ratio = fig_text_chars / total_page_text_chars
+                    debug_print(f"[DEBUG] page={page_num+1}: clip_bbox内テキスト比={text_ratio:.1%} ({fig_text_chars}/{total_page_text_chars})")
+                    if text_ratio >= 0.5:
+                        debug_print(f"[DEBUG] page={page_num+1}: テキスト量が多い図形を除外（テキスト比={text_ratio:.1%}）")
+                        continue
                 
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
@@ -1244,6 +1265,18 @@ class _FiguresMixin:
                     page, clip_bbox, expand_for_labels=True, column=column, gutter_x=gutter_x,
                     exclude_table_bboxes=exclude_tables
                 )
+                
+                # スライド文書: 抽出されたテキスト量が30%以上の場合は図形を除外
+                if is_slide_document and total_page_text_chars > 0:
+                    fig_text_chars = sum(len(t) for t in figure_texts)
+                    text_ratio = fig_text_chars / total_page_text_chars
+                    debug_print(f"[DEBUG] page={page_num+1}: 図形内テキスト比={text_ratio:.1%} ({fig_text_chars}/{total_page_text_chars})")
+                    if text_ratio >= 0.3:
+                        debug_print(f"[DEBUG] page={page_num+1}: テキスト量が多い図形を除外（テキスト比={text_ratio:.1%}）")
+                        # 生成した画像ファイルを削除
+                        if os.path.exists(image_path):
+                            os.remove(image_path)
+                        continue
                 
                 figures.append({
                     "path": image_path,
@@ -1408,12 +1441,45 @@ class _FiguresMixin:
         if not all_figure_candidates:
             return []
         
+        # フェーズ7.5: スライド文書での図形内テキスト量による除外
+        # マージ後の図形に対して、テキストがページ全体の50%以上を占める場合は除外
+        if is_slide_document and all_figure_candidates:
+            total_page_text_chars = sum(len(line.get("text", "")) for line in page_text_lines)
+            debug_print(f"[DEBUG] page={page_num+1}: フェーズ7.5開始 - 図形候補数={len(all_figure_candidates)}, 総テキスト文字数={total_page_text_chars}")
+            slide_text_filtered = []
+            for cand_idx, cand in enumerate(all_figure_candidates):
+                bbox = cand.get("union_bbox", (0, 0, 0, 0))
+                debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} bbox={bbox}")
+                # 図形内のテキスト文字数をカウント
+                fig_text_chars = 0
+                for line in page_text_lines:
+                    line_bbox = line.get("bbox", (0, 0, 0, 0))
+                    # 行が図形内に含まれているかチェック
+                    if (line_bbox[0] >= bbox[0] - 5 and line_bbox[2] <= bbox[2] + 5 and
+                        line_bbox[1] >= bbox[1] - 5 and line_bbox[3] <= bbox[3] + 5):
+                        fig_text_chars += len(line.get("text", ""))
+                
+                # ページ全体のテキストの50%以上が図形内にある場合は除外
+                if total_page_text_chars > 0:
+                    text_ratio = fig_text_chars / total_page_text_chars
+                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} テキスト比={text_ratio:.1%} ({fig_text_chars}/{total_page_text_chars})")
+                    if text_ratio >= 0.5:
+                        debug_print(f"[DEBUG] page={page_num+1}: テキスト量が多い図形を除外（テキスト比={text_ratio:.1%}）")
+                        continue
+                
+                slide_text_filtered.append(cand)
+            all_figure_candidates = slide_text_filtered
+        
+        if not all_figure_candidates:
+            return []
+        
         debug_print(f"[DEBUG] ページ {page_num + 1}: {len(all_bboxes)}個の要素を{len(all_figure_candidates)}個の図にグループ化")
         
         # フェーズ8: 画像レンダリング
         figures = self._fig_render_candidates(
             page, page_num, all_figure_candidates, page_text_lines, col_width,
-            page_width, gutter_x, header_y_max, footer_y_min, line_based_table_bboxes
+            page_width, gutter_x, header_y_max, footer_y_min, line_based_table_bboxes,
+            is_slide_document
         )
         
         return figures
