@@ -1241,7 +1241,9 @@ class _FiguresMixin:
                 
                 # スライド文書: ページ全体を覆う図形（面積比50%以上）かつ本文テキスト比50%以上の場合のみ除外
                 # 図中ラベル（短いテキスト）は本文としてカウントしない
-                if is_slide_document and total_body_text_chars > 0:
+                # ただし、埋め込み画像が含まれるクラスタは除外しない（図形として成立している）
+                image_count = fig_info.get("image_count", 0)
+                if is_slide_document and total_body_text_chars > 0 and image_count == 0:
                     # 図形の面積比を計算
                     page_area = page_width * page_height
                     fig_area = (clip_bbox[2] - clip_bbox[0]) * (clip_bbox[3] - clip_bbox[1])
@@ -1505,7 +1507,14 @@ class _FiguresMixin:
                     slide_text_filtered.append(cand)
                     continue
                 
-                # 面積比70%以上の大きな図形のみ「本文テキスト比」をチェック
+                # 埋め込み画像が含まれるクラスタは除外しない（図形として成立している）
+                image_count = cand.get("image_count", 0)
+                if image_count > 0:
+                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 埋め込み画像{image_count}個を含むため除外しない")
+                    slide_text_filtered.append(cand)
+                    continue
+                
+                # 面積比70%以上かつ埋め込み画像なしの大きな図形のみ「本文テキスト比」をチェック
                 fig_body_text_chars = 0
                 for line in page_text_lines:
                     line_bbox = line.get("bbox", (0, 0, 0, 0))
@@ -1843,17 +1852,125 @@ class _FiguresMixin:
         self, page, page_num: int, page_text_lines: List[Dict],
         header_y_max: Optional[float], footer_y_min: Optional[float]
     ) -> List[Dict[str, Any]]:
-        """スライド文書用の個別埋め込み画像抽出
+        """スライド文書用のフォールバック画像抽出
         
-        クラスタリングで大きな図形が除外された場合に、
-        個別の埋め込み画像を直接抽出する。
-        ヘッダー/フッター領域の画像は除外する。
-        重複するbbox（重なり率90%以上）は除外する。
+        クラスタリングで大きな図形が除外された場合に発動する。
+        ページに背景以外のdrawing要素がある場合はページ全体を1枚の画像として出力。
+        drawing要素がない場合は個別の埋め込み画像を抽出する。
         
         Args:
             page: PyMuPDFのページオブジェクト
             page_num: ページ番号
             page_text_lines: ページ内のテキスト行リスト
+            header_y_max: ヘッダー領域の下端Y座標
+            footer_y_min: フッター領域の上端Y座標
+            
+        Returns:
+            抽出された画像の情報リスト
+        """
+        page_width = page.rect.width
+        page_height = page.rect.height
+        page_area = page_width * page_height
+        
+        # ページに背景以外のdrawing要素があるかを確認
+        has_non_background_drawings = False
+        try:
+            drawings = page.get_drawings()
+            for d in drawings:
+                if d.get("rect"):
+                    rect = d["rect"]
+                    draw_area = (rect[2] - rect[0]) * (rect[3] - rect[1])
+                    # 背景矩形（ページ面積の90%以上）以外のdrawingがあるか
+                    if draw_area < page_area * 0.9:
+                        has_non_background_drawings = True
+                        break
+        except Exception as e:
+            debug_print(f"[DEBUG] page={page_num+1}: drawing確認エラー: {e}")
+        
+        # drawing要素がある場合はページ全体を1枚の画像として出力
+        if has_non_background_drawings:
+            debug_print(f"[DEBUG] page={page_num+1}: フォールバック - ページ全体を画像として出力")
+            return self._render_full_page_image(
+                page, page_num, header_y_max, footer_y_min
+            )
+        
+        # drawing要素がない場合は個別の埋め込み画像を抽出
+        debug_print(f"[DEBUG] page={page_num+1}: フォールバック - 個別埋め込み画像を抽出")
+        return self._extract_individual_embedded_images(
+            page, page_num, header_y_max, footer_y_min
+        )
+    
+    def _render_full_page_image(
+        self, page, page_num: int,
+        header_y_max: Optional[float], footer_y_min: Optional[float]
+    ) -> List[Dict[str, Any]]:
+        """ページ全体を1枚の画像としてレンダリング
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            page_num: ページ番号
+            header_y_max: ヘッダー領域の下端Y座標
+            footer_y_min: フッター領域の上端Y座標
+            
+        Returns:
+            抽出された画像の情報リスト（1要素）
+        """
+        page_width = page.rect.width
+        page_height = page.rect.height
+        
+        # クリップ領域を計算（ヘッダー/フッターを除外）
+        clip_y0 = header_y_max if header_y_max else 0
+        clip_y1 = footer_y_min if footer_y_min else page_height
+        
+        # マージンを追加（上下5px）
+        clip_y0 = max(0, clip_y0 - 5)
+        clip_y1 = min(page_height, clip_y1 + 5)
+        
+        clip_bbox = (0, clip_y0, page_width, clip_y1)
+        
+        try:
+            self.image_counter += 1
+            image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
+            
+            clip_rect = fitz.Rect(clip_bbox)
+            matrix = fitz.Matrix(2.0, 2.0)
+            pix = page.get_pixmap(matrix=matrix, clip=clip_rect)
+            
+            if self.output_format == 'svg':
+                image_path = os.path.join(self.images_dir, f"{image_filename}.svg")
+                temp_png = os.path.join(self.images_dir, f"temp_fig_{self.image_counter}.png")
+                pix.save(temp_png)
+                self._convert_png_to_svg(temp_png, image_path)
+                if os.path.exists(temp_png):
+                    os.remove(temp_png)
+            else:
+                image_path = os.path.join(self.images_dir, f"{image_filename}.png")
+                pix.save(image_path)
+            
+            debug_print(f"[DEBUG] page={page_num+1}: ページ全体画像を抽出 {image_filename}")
+            
+            return [{
+                "path": image_path,
+                "filename": os.path.basename(image_path),
+                "bbox": clip_bbox,
+                "y_position": clip_y0,
+                "texts": [],  # テキストは別途Markdownとして出力
+                "column": "full"
+            }]
+            
+        except Exception as e:
+            debug_print(f"[DEBUG] page={page_num+1}: ページ全体画像抽出エラー: {e}")
+            return []
+    
+    def _extract_individual_embedded_images(
+        self, page, page_num: int,
+        header_y_max: Optional[float], footer_y_min: Optional[float]
+    ) -> List[Dict[str, Any]]:
+        """個別の埋め込み画像を抽出
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            page_num: ページ番号
             header_y_max: ヘッダー領域の下端Y座標
             footer_y_min: フッター領域の上端Y座標
             
