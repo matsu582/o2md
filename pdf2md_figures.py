@@ -584,13 +584,25 @@ class _FiguresMixin:
             
             image_count = sum(1 for t in cluster_types if t == "image")
             
+            # 有意な画像数を計算（ページ面積の5%以上の画像のみカウント）
+            # 小さなロゴ等は「有意な画像」としてカウントしない
+            page_area = page_width * page_height
+            significant_image_count = 0
+            for idx in cluster:
+                if all_elements[idx]["type"] == "image":
+                    img_bbox = all_bboxes[idx]
+                    img_area = (img_bbox[2] - img_bbox[0]) * (img_bbox[3] - img_bbox[1])
+                    if img_area >= page_area * 0.05:
+                        significant_image_count += 1
+            
             all_figure_candidates.append({
                 "union_bbox": union_bbox,
                 "raw_union_bbox": raw_union_bbox,
                 "cluster_size": len(cluster),
                 "column": column,
                 "is_embedded": is_embedded,
-                "image_count": image_count
+                "image_count": image_count,
+                "significant_image_count": significant_image_count
             })
 
         # 包含除去フィルタ
@@ -1241,9 +1253,9 @@ class _FiguresMixin:
                 
                 # スライド文書: ページ全体を覆う図形（面積比50%以上）かつ本文テキスト比50%以上の場合のみ除外
                 # 図中ラベル（短いテキスト）は本文としてカウントしない
-                # ただし、埋め込み画像が含まれるクラスタは除外しない（図形として成立している）
-                image_count = fig_info.get("image_count", 0)
-                if is_slide_document and total_body_text_chars > 0 and image_count == 0:
+                # ただし、有意な埋め込み画像（ページ面積の5%以上）が含まれるクラスタは除外しない
+                significant_image_count = fig_info.get("significant_image_count", 0)
+                if is_slide_document and total_body_text_chars > 0 and significant_image_count == 0:
                     # 図形の面積比を計算
                     page_area = page_width * page_height
                     fig_area = (clip_bbox[2] - clip_bbox[0]) * (clip_bbox[3] - clip_bbox[1])
@@ -1502,19 +1514,20 @@ class _FiguresMixin:
                 area_ratio = fig_area / page_area if page_area > 0 else 0
                 debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} bbox={bbox}, 面積比={area_ratio:.1%}")
                 
-                # 面積比が70%未満の図形は除外しない（小さな図形は保持）
-                if area_ratio < 0.7:
+                # 面積比が50%未満の図形は除外しない（小さな図形は保持）
+                if area_ratio < 0.5:
                     slide_text_filtered.append(cand)
                     continue
                 
-                # 埋め込み画像が含まれるクラスタは除外しない（図形として成立している）
-                image_count = cand.get("image_count", 0)
-                if image_count > 0:
-                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 埋め込み画像{image_count}個を含むため除外しない")
+                # 有意な埋め込み画像（ページ面積の5%以上）が含まれるクラスタは除外しない
+                # 小さなロゴ等は「有意な画像」としてカウントしない
+                significant_image_count = cand.get("significant_image_count", 0)
+                if significant_image_count > 0:
+                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 有意な埋め込み画像{significant_image_count}個を含むため除外しない")
                     slide_text_filtered.append(cand)
                     continue
                 
-                # 面積比70%以上かつ埋め込み画像なしの大きな図形のみ「本文テキスト比」をチェック
+                # 面積比50%以上かつ有意な埋め込み画像なしの大きな図形のみ「本文テキスト比」をチェック
                 fig_body_text_chars = 0
                 for line in page_text_lines:
                     line_bbox = line.get("bbox", (0, 0, 0, 0))
@@ -1855,8 +1868,8 @@ class _FiguresMixin:
         """スライド文書用のフォールバック画像抽出
         
         クラスタリングで大きな図形が除外された場合に発動する。
-        ページに背景以外のdrawing要素がある場合はページ全体を1枚の画像として出力。
-        drawing要素がない場合は個別の埋め込み画像を抽出する。
+        有意な埋め込み画像（ページ面積の5%以上）がある場合のみ画像を出力。
+        枠線のみのページ（テキストが主体）は画像を出力しない。
         
         Args:
             page: PyMuPDFのページオブジェクト
@@ -1872,30 +1885,32 @@ class _FiguresMixin:
         page_height = page.rect.height
         page_area = page_width * page_height
         
-        # ページに背景以外のdrawing要素があるかを確認
-        has_non_background_drawings = False
+        # 埋め込み画像の総面積を計算
+        total_image_area = 0
+        image_count = 0
         try:
-            drawings = page.get_drawings()
-            for d in drawings:
-                if d.get("rect"):
-                    rect = d["rect"]
-                    draw_area = (rect[2] - rect[0]) * (rect[3] - rect[1])
-                    # 背景矩形（ページ面積の90%以上）以外のdrawingがあるか
-                    if draw_area < page_area * 0.9:
-                        has_non_background_drawings = True
-                        break
+            images = page.get_images(full=True)
+            for img in images:
+                xref = img[0]
+                img_rects = page.get_image_rects(xref)
+                for rect in img_rects:
+                    img_area = (rect[2] - rect[0]) * (rect[3] - rect[1])
+                    # 小さなロゴ（1%未満）は除外
+                    if img_area >= page_area * 0.01:
+                        total_image_area += img_area
+                        image_count += 1
         except Exception as e:
-            debug_print(f"[DEBUG] page={page_num+1}: drawing確認エラー: {e}")
+            debug_print(f"[DEBUG] page={page_num+1}: 画像確認エラー: {e}")
         
-        # drawing要素がある場合はページ全体を1枚の画像として出力
-        if has_non_background_drawings:
-            debug_print(f"[DEBUG] page={page_num+1}: フォールバック - ページ全体を画像として出力")
-            return self._render_full_page_image(
-                page, page_num, header_y_max, footer_y_min
-            )
+        total_image_ratio = total_image_area / page_area if page_area > 0 else 0
         
-        # drawing要素がない場合は個別の埋め込み画像を抽出
-        debug_print(f"[DEBUG] page={page_num+1}: フォールバック - 個別埋め込み画像を抽出")
+        # 画像の総面積が5%未満の場合は画像を出力しない
+        # 枠線のみのページ（テキストが主体）は画像を出力しない
+        if total_image_ratio < 0.05:
+            debug_print(f"[DEBUG] page={page_num+1}: フォールバック - 画像総面積{total_image_ratio:.1%}、画像出力スキップ")
+            return []
+        
+        debug_print(f"[DEBUG] page={page_num+1}: フォールバック - 画像{image_count}個（総面積{total_image_ratio:.1%}）を抽出")
         return self._extract_individual_embedded_images(
             page, page_num, header_y_max, footer_y_min
         )
