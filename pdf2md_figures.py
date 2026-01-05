@@ -416,12 +416,19 @@ class _FiguresMixin:
                     col = "full" if (bbox[2] - bbox[0]) > page_width * 0.5 else (
                         "left" if (bbox[0] + bbox[2]) / 2 < page_width / 2 else "right"
                     )
+                    # 単独画像候補にdrawing_countとimage_bboxesを追加
+                    elem_type = all_elements[0]["type"]
+                    is_image = elem_type == "image"
                     single_image_candidate = {
                         "union_bbox": bbox,
                         "raw_union_bbox": bbox,
                         "column": col,
                         "cluster_size": 1,
-                        "is_embedded": all_elements[0]["type"] == "image",
+                        "is_embedded": is_image,
+                        "image_count": 1 if is_image else 0,
+                        "drawing_count": 0 if is_image else 1,
+                        "significant_image_count": 0,
+                        "image_bboxes": [bbox] if is_image else [],
                     }
                     debug_print(f"[DEBUG] page={page_num+1}: 単独画像を候補として追加")
                 else:
@@ -591,6 +598,7 @@ class _FiguresMixin:
                 column = "right"
             
             image_count = sum(1 for t in cluster_types if t == "image")
+            drawing_count = sum(1 for t in cluster_types if t == "drawing")
             
             # 有意な画像数を計算（ページ面積の5%以上の画像のみカウント）
             # 小さなロゴ等は「有意な画像」としてカウントしない
@@ -613,6 +621,7 @@ class _FiguresMixin:
                 "column": column,
                 "is_embedded": is_embedded,
                 "image_count": image_count,
+                "drawing_count": drawing_count,
                 "significant_image_count": significant_image_count,
                 "image_bboxes": image_bboxes
             })
@@ -1256,6 +1265,20 @@ class _FiguresMixin:
                     clip_bbox = fig_info["clip_bbox"]
                     debug_print(f"[DEBUG] 表画像: 既存のclip_bboxを使用")
                 else:
+                    # 画像のみクラスタ（drawing_count=0）の場合の処理
+                    drawing_count_for_clip = fig_info.get("drawing_count", 0)
+                    image_bboxes_for_clip = fig_info.get("image_bboxes", [])
+                    significant_image_count_for_clip = fig_info.get("significant_image_count", 0)
+                    image_count_for_clip = fig_info.get("image_count", 0)
+                    
+                    # スライド文書で、画像のみクラスタかつ有意な画像がない場合は図として出力しない
+                    # これにより、ページ27のような小さな画像は図として出力されず、テキストのみが出力される
+                    if is_slide_document and drawing_count_for_clip == 0:
+                        has_significant = significant_image_count_for_clip > 0 or image_count_for_clip >= 3
+                        if not has_significant:
+                            debug_print(f"[DEBUG] page={page_num+1}: 画像のみクラスタで有意な画像がないため除外")
+                            continue
+                    
                     clip_bbox = self._fig_compute_clip_bbox(
                         graphics_bbox, page_text_lines, col_width,
                         page_width, page_height, column, gutter_x,
@@ -1338,7 +1361,14 @@ class _FiguresMixin:
                 # スライド文書の場合はラベル拡張をしない（clip_bbox内のテキストのみ抽出）
                 expand_labels = not is_slide_document
                 # 埋め込み画像bboxを取得（スライド文書用の本文フィルタリング）
-                image_bboxes = fig_info.get("image_bboxes", [])
+                # 画像のみクラスタ（drawing_count=0）の場合は本文テキストを含めない
+                # これにより、ページ27のような画像のみのクラスタで本文が巻き込まれるのを防ぐ
+                drawing_count = fig_info.get("drawing_count", 0)
+                if drawing_count == 0:
+                    # 画像のみクラスタの場合、image_bboxesを空にして本文フィルタリングを無効化
+                    image_bboxes = []
+                else:
+                    image_bboxes = fig_info.get("image_bboxes", [])
                 figure_texts, expanded_bbox = self._extract_text_in_bbox(
                     page, clip_bbox, expand_for_labels=expand_labels, column=column, gutter_x=gutter_x,
                     exclude_table_bboxes=exclude_tables, image_bboxes=image_bboxes,
