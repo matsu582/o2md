@@ -419,6 +419,10 @@ class _FiguresMixin:
                     # 単独画像候補にdrawing_countとimage_bboxesを追加
                     elem_type = all_elements[0]["type"]
                     is_image = elem_type == "image"
+                    # 有意な画像かどうかを判定（ページ面積の5%以上）
+                    img_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                    page_area_for_single = page_width * page_height
+                    is_significant = is_image and img_area >= page_area_for_single * 0.05
                     single_image_candidate = {
                         "union_bbox": bbox,
                         "raw_union_bbox": bbox,
@@ -427,7 +431,7 @@ class _FiguresMixin:
                         "is_embedded": is_image,
                         "image_count": 1 if is_image else 0,
                         "drawing_count": 0 if is_image else 1,
-                        "significant_image_count": 0,
+                        "significant_image_count": 1 if is_significant else 0,
                         "image_bboxes": [bbox] if is_image else [],
                     }
                     debug_print(f"[DEBUG] page={page_num+1}: 単独画像を候補として追加")
@@ -969,11 +973,16 @@ class _FiguresMixin:
                     )
                     
                     debug_print(f"[DEBUG] クラスタ{i}と{best_merge}をマージ")
+                    # マージ時に重要なフィールドを保持
+                    merged_image_bboxes = cand1.get("image_bboxes", []) + cand2.get("image_bboxes", [])
                     new_candidates.append({
                         "union_bbox": merged_bbox,
                         "cluster_size": cand1["cluster_size"] + cand2["cluster_size"],
                         "column": cand1["column"],
-                        "image_count": cand1.get("image_count", 0) + cand2.get("image_count", 0)
+                        "image_count": cand1.get("image_count", 0) + cand2.get("image_count", 0),
+                        "drawing_count": cand1.get("drawing_count", 0) + cand2.get("drawing_count", 0),
+                        "significant_image_count": cand1.get("significant_image_count", 0) + cand2.get("significant_image_count", 0),
+                        "image_bboxes": merged_image_bboxes
                     })
                     used.add(i)
                     used.add(best_merge)
@@ -1063,11 +1072,16 @@ class _FiguresMixin:
                     )
                     
                     debug_print(f"[DEBUG] 左右クラスタ{left_idx}と{best_right_idx}をマージ (Y重なり={best_y_overlap:.2f})")
+                    # マージ時に重要なフィールドを保持
+                    merged_image_bboxes = left_cand.get("image_bboxes", []) + right_cand.get("image_bboxes", [])
                     new_candidates.append({
                         "union_bbox": merged_bbox,
                         "cluster_size": left_cand["cluster_size"] + right_cand["cluster_size"],
                         "column": "full",
-                        "image_count": left_cand.get("image_count", 0) + right_cand.get("image_count", 0)
+                        "image_count": left_cand.get("image_count", 0) + right_cand.get("image_count", 0),
+                        "drawing_count": left_cand.get("drawing_count", 0) + right_cand.get("drawing_count", 0),
+                        "significant_image_count": left_cand.get("significant_image_count", 0) + right_cand.get("significant_image_count", 0),
+                        "image_bboxes": merged_image_bboxes
                     })
                     used.add(left_idx)
                     used.add(best_right_idx)
@@ -1237,6 +1251,7 @@ class _FiguresMixin:
         """図候補をレンダリングして図情報リストを生成"""
         figures = []
         page_height = page.rect.height
+        page_area = page_width * page_height
         
         # スライド文書用: ページ全体の本文テキスト文字数を事前計算
         total_body_text_chars = 0
@@ -1271,12 +1286,56 @@ class _FiguresMixin:
                     significant_image_count_for_clip = fig_info.get("significant_image_count", 0)
                     image_count_for_clip = fig_info.get("image_count", 0)
                     
-                    # スライド文書で、画像のみクラスタかつ有意な画像がない場合は図として出力しない
-                    # これにより、ページ27のような小さな画像は図として出力されず、テキストのみが出力される
+                    # スライド文書で、画像のみクラスタかつ有意な画像がない場合
+                    # ページレンダリングではなく、埋め込み画像を直接抽出して出力
+                    # これにより、テキストを巻き込まない形で画像だけを出力できる
                     if is_slide_document and drawing_count_for_clip == 0:
                         has_significant = significant_image_count_for_clip > 0 or image_count_for_clip >= 3
-                        if not has_significant:
-                            debug_print(f"[DEBUG] page={page_num+1}: 画像のみクラスタで有意な画像がないため除外")
+                        if not has_significant and image_bboxes_for_clip:
+                            # 各埋め込み画像を個別に抽出
+                            for img_bbox in image_bboxes_for_clip:
+                                img_area = (img_bbox[2] - img_bbox[0]) * (img_bbox[3] - img_bbox[1])
+                                # 小さすぎる画像（ページ面積の0.5%未満）は除外
+                                if img_area < page_area * 0.005:
+                                    debug_print(f"[DEBUG] page={page_num+1}: 小さな画像を除外（面積比={img_area/page_area:.2%}）")
+                                    continue
+                                
+                                self.image_counter += 1
+                                image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
+                                
+                                # 画像bboxに5pxのマージンを追加
+                                margin = 5.0
+                                img_clip_bbox = (
+                                    max(0, img_bbox[0] - margin),
+                                    max(0, img_bbox[1] - margin),
+                                    min(page_width, img_bbox[2] + margin),
+                                    min(page_height, img_bbox[3] + margin)
+                                )
+                                
+                                clip_rect = fitz.Rect(img_clip_bbox)
+                                matrix = fitz.Matrix(2.0, 2.0)
+                                pix = page.get_pixmap(matrix=matrix, clip=clip_rect)
+                                
+                                if self.output_format == 'svg':
+                                    image_path = os.path.join(self.images_dir, f"{image_filename}.svg")
+                                    temp_png = os.path.join(self.images_dir, f"temp_fig_{self.image_counter}.png")
+                                    pix.save(temp_png)
+                                    self._convert_png_to_svg(temp_png, image_path)
+                                    if os.path.exists(temp_png):
+                                        os.remove(temp_png)
+                                else:
+                                    image_path = os.path.join(self.images_dir, f"{image_filename}.png")
+                                    pix.save(image_path)
+                                
+                                figures.append({
+                                    "path": image_path,
+                                    "filename": os.path.basename(image_path),
+                                    "bbox": img_clip_bbox,
+                                    "y_position": img_bbox[1],
+                                    "texts": [],
+                                    "column": column
+                                })
+                                debug_print(f"[DEBUG] page={page_num+1}: 埋め込み画像を直接抽出 {image_filename}")
                             continue
                     
                     clip_bbox = self._fig_compute_clip_bbox(
@@ -1513,6 +1572,7 @@ class _FiguresMixin:
         
         # フェーズ5.6: スライド文書での小さな装飾要素のフィルタリング
         # スライド文書の場合、ページ面積の5%未満の小さな図形を除外
+        # ただし、埋め込み画像のみのクラスタ（drawing_count=0）は除外しない
         if is_slide_document and all_figure_candidates:
             page_area = page_width * page_height
             min_area_threshold = page_area * 0.05
@@ -1520,6 +1580,11 @@ class _FiguresMixin:
             for cand in all_figure_candidates:
                 bbox = cand.get("union_bbox", (0, 0, 0, 0))
                 cand_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                drawing_count = cand.get("drawing_count", 0)
+                # 埋め込み画像のみのクラスタは除外しない（意図的に配置された画像）
+                if drawing_count == 0:
+                    slide_filtered.append(cand)
+                    continue
                 if cand_area < min_area_threshold:
                     debug_print(f"[DEBUG] page={page_num+1}: スライド装飾要素を除外（面積比={cand_area/page_area:.2%}）")
                     continue
