@@ -1287,56 +1287,219 @@ class _FiguresMixin:
                     image_count_for_clip = fig_info.get("image_count", 0)
                     
                     # スライド文書で、画像のみクラスタかつ有意な画像がない場合
-                    # ページレンダリングではなく、埋め込み画像を直接抽出して出力
-                    # これにより、テキストを巻き込まない形で画像だけを出力できる
+                    # 埋め込み画像を直接抽出して出力（テキストを巻き込まない）
+                    # ただし、タイル画像（表示サイズが元画像サイズとほぼ同じ）の場合は
+                    # ページレンダリングで図の領域を切り出す
                     if is_slide_document and drawing_count_for_clip == 0:
                         has_significant = significant_image_count_for_clip > 0 or image_count_for_clip >= 3
                         if not has_significant and image_bboxes_for_clip:
-                            # 各埋め込み画像を個別に抽出
+                            page_images = page.get_images(full=True)
+                            page_img_infos = page.get_image_info()
+                            
+                            # タイル画像かどうかを判定
+                            # 表示サイズが元画像サイズとほぼ同じ場合はタイル画像
+                            has_tile_image = False
                             for img_bbox in image_bboxes_for_clip:
-                                img_area = (img_bbox[2] - img_bbox[0]) * (img_bbox[3] - img_bbox[1])
-                                # 小さすぎる画像（ページ面積の0.5%未満）は除外
-                                if img_area < page_area * 0.005:
-                                    debug_print(f"[DEBUG] page={page_num+1}: 小さな画像を除外（面積比={img_area/page_area:.2%}）")
+                                display_w = img_bbox[2] - img_bbox[0]
+                                display_h = img_bbox[3] - img_bbox[1]
+                                for pi, pimg in enumerate(page_images):
+                                    if pi < len(page_img_infos):
+                                        info = page_img_infos[pi]
+                                        info_bbox = info.get("bbox", (0, 0, 0, 0))
+                                        if (abs(info_bbox[0] - img_bbox[0]) < 1 and
+                                            abs(info_bbox[1] - img_bbox[1]) < 1):
+                                            orig_w = info.get("width", 0)
+                                            orig_h = info.get("height", 0)
+                                            # 表示サイズと元サイズの比率を確認
+                                            if orig_w > 0 and orig_h > 0:
+                                                w_ratio = display_w / orig_w
+                                                h_ratio = display_h / orig_h
+                                                # 比率が0.8〜1.2の範囲ならタイル画像
+                                                if 0.8 <= w_ratio <= 1.2 and 0.8 <= h_ratio <= 1.2:
+                                                    has_tile_image = True
+                                                    debug_print(f"[DEBUG] page={page_num+1}: タイル画像を検出 ratio=({w_ratio:.2f}, {h_ratio:.2f})")
+                                            break
+                            
+                            # タイル画像がある場合はグレー領域を自動検出してレンダリング
+                            # テキストを巻き込まないように、グレー領域の境界を検出
+                            if has_tile_image:
+                                debug_print(f"[DEBUG] page={page_num+1}: タイル画像のためグレー領域を自動検出")
+                                
+                                # ページをレンダリングしてグレー領域の境界を検出
+                                detect_mat = fitz.Matrix(1.0, 1.0)
+                                detect_pix = page.get_pixmap(matrix=detect_mat)
+                                detect_w = detect_pix.width
+                                detect_h = detect_pix.height
+                                detect_n = detect_pix.n
+                                detect_samples = detect_pix.samples
+                                
+                                # 行ごとのグレーピクセル比率を計算
+                                def row_gray_ratio(y_pos):
+                                    gray_cnt = 0
+                                    for x_pos in range(detect_w):
+                                        idx = (y_pos * detect_w + x_pos) * detect_n
+                                        r_val = detect_samples[idx]
+                                        g_val = detect_samples[idx + 1]
+                                        b_val = detect_samples[idx + 2]
+                                        if abs(r_val - g_val) < 15 and abs(g_val - b_val) < 15 and 100 < r_val < 220:
+                                            gray_cnt += 1
+                                    return gray_cnt / detect_w
+                                
+                                # 列ごとのグレーピクセル比率を計算
+                                def col_gray_ratio(x_pos):
+                                    gray_cnt = 0
+                                    for y_pos in range(detect_h):
+                                        idx = (y_pos * detect_w + x_pos) * detect_n
+                                        r_val = detect_samples[idx]
+                                        g_val = detect_samples[idx + 1]
+                                        b_val = detect_samples[idx + 2]
+                                        if abs(r_val - g_val) < 15 and abs(g_val - b_val) < 15 and 100 < r_val < 220:
+                                            gray_cnt += 1
+                                    return gray_cnt / detect_h
+                                
+                                # y方向のグレー領域を検出（比率が0.5以上の連続区間）
+                                gray_y0, gray_y1 = None, None
+                                in_gray_region = False
+                                for y_pos in range(0, detect_h, 5):
+                                    ratio = row_gray_ratio(y_pos)
+                                    if ratio > 0.5 and not in_gray_region:
+                                        gray_y0 = y_pos
+                                        in_gray_region = True
+                                    elif ratio < 0.3 and in_gray_region:
+                                        gray_y1 = y_pos
+                                        break
+                                if in_gray_region and gray_y1 is None:
+                                    gray_y1 = detect_h
+                                
+                                # x方向のグレー領域を検出（比率が0.3以上の連続区間）
+                                gray_x0, gray_x1 = None, None
+                                in_gray_region = False
+                                for x_pos in range(0, detect_w, 5):
+                                    ratio = col_gray_ratio(x_pos)
+                                    if ratio > 0.3 and not in_gray_region:
+                                        gray_x0 = x_pos
+                                        in_gray_region = True
+                                    elif ratio < 0.2 and in_gray_region:
+                                        gray_x1 = x_pos
+                                        break
+                                if in_gray_region and gray_x1 is None:
+                                    gray_x1 = detect_w
+                                
+                                # グレー領域が検出された場合のみレンダリング
+                                if gray_x0 is not None and gray_y0 is not None:
+                                    debug_print(f"[DEBUG] page={page_num+1}: グレー領域検出 ({gray_x0}, {gray_y0}, {gray_x1}, {gray_y1})")
+                                    
+                                    self.image_counter += 1
+                                    image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
+                                    
+                                    # グレー領域のみをレンダリング
+                                    clip_rect = fitz.Rect(gray_x0, gray_y0, gray_x1, gray_y1)
+                                    mat = fitz.Matrix(2.0, 2.0)
+                                    pix = page.get_pixmap(matrix=mat, clip=clip_rect)
+                                    
+                                    if self.output_format == 'svg':
+                                        temp_img = os.path.join(self.images_dir, f"temp_fig_{self.image_counter}.png")
+                                        pix.save(temp_img)
+                                        image_path = os.path.join(self.images_dir, f"{image_filename}.svg")
+                                        self._convert_png_to_svg(temp_img, image_path)
+                                        if os.path.exists(temp_img):
+                                            os.remove(temp_img)
+                                    else:
+                                        image_path = os.path.join(self.images_dir, f"{image_filename}.png")
+                                        pix.save(image_path)
+                                    
+                                    figures.append({
+                                        "path": image_path,
+                                        "filename": os.path.basename(image_path),
+                                        "bbox": (gray_x0, gray_y0, gray_x1, gray_y1),
+                                        "y_position": gray_y0,
+                                        "texts": [],
+                                        "column": column
+                                    })
+                                    debug_print(f"[DEBUG] page={page_num+1}: グレー領域をレンダリング {image_filename}")
                                     continue
-                                
-                                self.image_counter += 1
-                                image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
-                                
-                                # 画像bboxに5pxのマージンを追加
-                                margin = 5.0
-                                img_clip_bbox = (
-                                    max(0, img_bbox[0] - margin),
-                                    max(0, img_bbox[1] - margin),
-                                    min(page_width, img_bbox[2] + margin),
-                                    min(page_height, img_bbox[3] + margin)
-                                )
-                                
-                                clip_rect = fitz.Rect(img_clip_bbox)
-                                matrix = fitz.Matrix(2.0, 2.0)
-                                pix = page.get_pixmap(matrix=matrix, clip=clip_rect)
-                                
-                                if self.output_format == 'svg':
-                                    image_path = os.path.join(self.images_dir, f"{image_filename}.svg")
-                                    temp_png = os.path.join(self.images_dir, f"temp_fig_{self.image_counter}.png")
-                                    pix.save(temp_png)
-                                    self._convert_png_to_svg(temp_png, image_path)
-                                    if os.path.exists(temp_png):
-                                        os.remove(temp_png)
-                                else:
-                                    image_path = os.path.join(self.images_dir, f"{image_filename}.png")
-                                    pix.save(image_path)
-                                
-                                figures.append({
-                                    "path": image_path,
-                                    "filename": os.path.basename(image_path),
-                                    "bbox": img_clip_bbox,
-                                    "y_position": img_bbox[1],
-                                    "texts": [],
-                                    "column": column
-                                })
-                                debug_print(f"[DEBUG] page={page_num+1}: 埋め込み画像を直接抽出 {image_filename}")
-                            continue
+                            else:
+                                # 各埋め込み画像を個別に抽出
+                                extracted_any = False
+                                for img_bbox in image_bboxes_for_clip:
+                                    img_area = (img_bbox[2] - img_bbox[0]) * (img_bbox[3] - img_bbox[1])
+                                    if img_area < page_area * 0.005:
+                                        debug_print(f"[DEBUG] page={page_num+1}: 小さな画像を除外（面積比={img_area/page_area:.2%}）")
+                                        continue
+                                    
+                                    xref = None
+                                    smask = 0
+                                    for pi, pimg in enumerate(page_images):
+                                        if pi < len(page_img_infos):
+                                            info_bbox = page_img_infos[pi].get("bbox", (0, 0, 0, 0))
+                                            if (abs(info_bbox[0] - img_bbox[0]) < 1 and
+                                                abs(info_bbox[1] - img_bbox[1]) < 1 and
+                                                abs(info_bbox[2] - img_bbox[2]) < 1 and
+                                                abs(info_bbox[3] - img_bbox[3]) < 1):
+                                                xref = pimg[0]
+                                                smask = pimg[1] if len(pimg) > 1 else 0
+                                                break
+                                    
+                                    if xref is None:
+                                        debug_print(f"[DEBUG] page={page_num+1}: 画像のxrefが見つからない bbox={img_bbox}")
+                                        continue
+                                    
+                                    self.image_counter += 1
+                                    image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
+                                    
+                                    try:
+                                        doc = page.parent
+                                        
+                                        if smask > 0:
+                                            pix = fitz.Pixmap(doc, xref)
+                                            mask_pix = fitz.Pixmap(doc, smask)
+                                            if pix.alpha == 0:
+                                                pix = fitz.Pixmap(pix, 1)
+                                            pix.set_alpha(mask_pix.samples)
+                                            
+                                            if self.output_format == 'svg':
+                                                temp_img = os.path.join(self.images_dir, f"temp_fig_{self.image_counter}.png")
+                                                pix.save(temp_img)
+                                                image_path = os.path.join(self.images_dir, f"{image_filename}.svg")
+                                                self._convert_png_to_svg(temp_img, image_path)
+                                                if os.path.exists(temp_img):
+                                                    os.remove(temp_img)
+                                            else:
+                                                image_path = os.path.join(self.images_dir, f"{image_filename}.png")
+                                                pix.save(image_path)
+                                        else:
+                                            base_image = doc.extract_image(xref)
+                                            img_ext = base_image["ext"]
+                                            img_data = base_image["image"]
+                                            
+                                            if self.output_format == 'svg':
+                                                temp_img = os.path.join(self.images_dir, f"temp_fig_{self.image_counter}.{img_ext}")
+                                                with open(temp_img, "wb") as f:
+                                                    f.write(img_data)
+                                                image_path = os.path.join(self.images_dir, f"{image_filename}.svg")
+                                                self._convert_png_to_svg(temp_img, image_path)
+                                                if os.path.exists(temp_img):
+                                                    os.remove(temp_img)
+                                            else:
+                                                image_path = os.path.join(self.images_dir, f"{image_filename}.{img_ext}")
+                                                with open(image_path, "wb") as f:
+                                                    f.write(img_data)
+                                        
+                                        figures.append({
+                                            "path": image_path,
+                                            "filename": os.path.basename(image_path),
+                                            "bbox": img_bbox,
+                                            "y_position": img_bbox[1],
+                                            "texts": [],
+                                            "column": column
+                                        })
+                                        extracted_any = True
+                                        debug_print(f"[DEBUG] page={page_num+1}: 埋め込み画像を直接抽出 {image_filename}")
+                                    except Exception as e:
+                                        debug_print(f"[DEBUG] page={page_num+1}: 画像抽出エラー xref={xref}: {e}")
+                                        continue
+                                if extracted_any:
+                                    continue
                     
                     clip_bbox = self._fig_compute_clip_bbox(
                         graphics_bbox, page_text_lines, col_width,
