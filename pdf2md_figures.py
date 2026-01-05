@@ -382,7 +382,8 @@ class _FiguresMixin:
         bbox_columns: List[str], figure_caption_lines: List[Dict],
         page_width: float, page_height: float, page_num: int,
         header_y_max: Optional[float], footer_y_min: Optional[float],
-        gutter_x: float, gutter_margin: float
+        gutter_x: float, gutter_margin: float,
+        is_slide_document: bool = False
     ) -> Tuple[List[Dict], Optional[Dict]]:
         """ガター制約付きクラスタリングと候補生成
         
@@ -398,6 +399,7 @@ class _FiguresMixin:
             footer_y_min: フッター領域の上端Y座標
             gutter_x: ガターのX座標
             gutter_margin: ガターマージン
+            is_slide_document: スライド文書フラグ
             
         Returns:
             (all_figure_candidates, single_image_candidate) のタプル
@@ -434,8 +436,10 @@ class _FiguresMixin:
             b1, b2 = all_bboxes[idx1], all_bboxes[idx2]
             col1, col2 = bbox_columns[idx1], bbox_columns[idx2]
             
-            if col1 != col2 and col1 != "full" and col2 != "full":
-                return False
+            # スライド文書の場合はカラム制約を無効化（図形が分割されるのを防ぐ）
+            if not is_slide_document:
+                if col1 != col2 and col1 != "full" and col2 != "full":
+                    return False
             
             if self._fig_has_caption_between(b1, b2, figure_caption_lines):
                 debug_print(f"[DEBUG] キャプション制約: bbox間にキャプションあり")
@@ -447,7 +451,9 @@ class _FiguresMixin:
             x_gap = max(0, max(x0_1, x0_2) - min(x1_1, x1_2))
             y_gap = max(0, max(y0_1, y0_2) - min(y1_1, y1_2))
             
-            return x_gap <= 100.0 and y_gap <= 40.0
+            # スライド文書の場合はy_gap閾値を緩和（図形が分割されるのを防ぐ）
+            y_gap_threshold = 150.0 if is_slide_document else 40.0
+            return x_gap <= 100.0 and y_gap <= y_gap_threshold
 
         # クラスタリング
         n = len(all_bboxes)
@@ -478,40 +484,42 @@ class _FiguresMixin:
 
         # 混在クラスタの分割処理
         # drawing要素とimage要素が混在し、y方向に離れている場合は分割
-        split_clusters = []
-        for cluster in clusters:
-            if len(cluster) < 2:
-                split_clusters.append(cluster)
-                continue
+        # スライド文書の場合は分割を無効化（図形が分割されるのを防ぐ）
+        if not is_slide_document:
+            split_clusters = []
+            for cluster in clusters:
+                if len(cluster) < 2:
+                    split_clusters.append(cluster)
+                    continue
+                
+                # クラスタ内の要素タイプを確認
+                drawing_indices = [i for i in cluster if all_elements[i]["type"] == "drawing"]
+                image_indices = [i for i in cluster if all_elements[i]["type"] == "image"]
+                
+                # drawing要素とimage要素が両方存在する場合のみ分割を検討
+                if not drawing_indices or not image_indices:
+                    split_clusters.append(cluster)
+                    continue
+                
+                # drawing要素のy座標範囲を取得
+                drawing_y_max = max(all_bboxes[i][3] for i in drawing_indices)
+                drawing_y_min = min(all_bboxes[i][1] for i in drawing_indices)
+                
+                # image要素のy座標範囲を取得
+                image_y_min = min(all_bboxes[i][1] for i in image_indices)
+                image_y_max = max(all_bboxes[i][3] for i in image_indices)
+                
+                # drawing要素とimage要素がy方向に離れている場合（20px以上）は分割
+                y_gap = image_y_min - drawing_y_max
+                if y_gap > 20.0:
+                    # drawingクラスタとimageクラスタに分割
+                    split_clusters.append(drawing_indices)
+                    split_clusters.append(image_indices)
+                    debug_print(f"[DEBUG] page={page_num+1}: 混在クラスタを分割（y_gap={y_gap:.1f}）")
+                else:
+                    split_clusters.append(cluster)
             
-            # クラスタ内の要素タイプを確認
-            drawing_indices = [i for i in cluster if all_elements[i]["type"] == "drawing"]
-            image_indices = [i for i in cluster if all_elements[i]["type"] == "image"]
-            
-            # drawing要素とimage要素が両方存在する場合のみ分割を検討
-            if not drawing_indices or not image_indices:
-                split_clusters.append(cluster)
-                continue
-            
-            # drawing要素のy座標範囲を取得
-            drawing_y_max = max(all_bboxes[i][3] for i in drawing_indices)
-            drawing_y_min = min(all_bboxes[i][1] for i in drawing_indices)
-            
-            # image要素のy座標範囲を取得
-            image_y_min = min(all_bboxes[i][1] for i in image_indices)
-            image_y_max = max(all_bboxes[i][3] for i in image_indices)
-            
-            # drawing要素とimage要素がy方向に離れている場合（20px以上）は分割
-            y_gap = image_y_min - drawing_y_max
-            if y_gap > 20.0:
-                # drawingクラスタとimageクラスタに分割
-                split_clusters.append(drawing_indices)
-                split_clusters.append(image_indices)
-                debug_print(f"[DEBUG] page={page_num+1}: 混在クラスタを分割（y_gap={y_gap:.1f}）")
-            else:
-                split_clusters.append(cluster)
-        
-        clusters = split_clusters
+            clusters = split_clusters
 
         # 候補生成
         all_figure_candidates = []
@@ -1257,9 +1265,13 @@ class _FiguresMixin:
                 
                 # スライド文書: ページ全体を覆う図形（面積比50%以上）かつ本文テキスト比50%以上の場合のみ除外
                 # 図中ラベル（短いテキスト）は本文としてカウントしない
-                # ただし、有意な埋め込み画像（ページ面積の5%以上）が含まれるクラスタは除外しない
+                # ただし、埋め込み画像が含まれるクラスタは除外しない
+                # 条件1: 有意な埋め込み画像（ページ面積の5%以上）が1個以上
+                # 条件2: 埋め込み画像が3個以上（小さな画像でも複数あれば図形として扱う）
                 significant_image_count = fig_info.get("significant_image_count", 0)
-                if is_slide_document and total_body_text_chars > 0 and significant_image_count == 0:
+                image_count = fig_info.get("image_count", 0)
+                has_significant_images = significant_image_count > 0 or image_count >= 3
+                if is_slide_document and total_body_text_chars > 0 and not has_significant_images:
                     # 図形の面積比を計算
                     page_area = page_width * page_height
                     fig_area = (clip_bbox[2] - clip_bbox[0]) * (clip_bbox[3] - clip_bbox[1])
@@ -1429,7 +1441,7 @@ class _FiguresMixin:
         all_figure_candidates, _ = self._fig_cluster_elements(
             all_bboxes, all_elements, bbox_columns, figure_caption_lines,
             page_width, page_height, page_num, header_y_max, footer_y_min,
-            gutter_x, gutter_margin
+            gutter_x, gutter_margin, is_slide_document
         )
         
         # テキスト行を取得（表検出用）
@@ -1526,11 +1538,13 @@ class _FiguresMixin:
                     slide_text_filtered.append(cand)
                     continue
                 
-                # 有意な埋め込み画像（ページ面積の5%以上）が含まれるクラスタは除外しない
-                # 小さなロゴ等は「有意な画像」としてカウントしない
+                # 埋め込み画像が含まれるクラスタは除外しない
+                # 条件1: 有意な埋め込み画像（ページ面積の5%以上）が1個以上
+                # 条件2: 埋め込み画像が3個以上（小さな画像でも複数あれば図形として扱う）
                 significant_image_count = cand.get("significant_image_count", 0)
-                if significant_image_count > 0:
-                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 有意な埋め込み画像{significant_image_count}個を含むため除外しない")
+                image_count = cand.get("image_count", 0)
+                if significant_image_count > 0 or image_count >= 3:
+                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 埋め込み画像{image_count}個（有意={significant_image_count}個）を含むため除外しない")
                     slide_text_filtered.append(cand)
                     continue
                 
