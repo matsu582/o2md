@@ -184,6 +184,10 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             self._is_slide_document = self._detect_slide_document(doc)
             if self._is_slide_document:
                 print("[INFO] スライド文書として処理します")
+                # スライド文書の場合、繰り返し出現する画像xrefを収集（ヘッダ装飾除外用）
+                self._repeated_image_xrefs = self._collect_repeated_image_xrefs(doc)
+            else:
+                self._repeated_image_xrefs = set()
             
             # ヘッダ・フッタパターンを検出（全ページから収集）
             # スライド文書の場合はヘッダ・フッタパターン検出をスキップ
@@ -539,6 +543,60 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         debug_print(f"[DEBUG] スライド文書検出: 横長率={landscape_ratio:.1%}, ページ数={total_pages}")
         return True
+    
+    def _collect_repeated_image_xrefs(self, doc) -> Set[int]:
+        """文書全体で繰り返し出現する画像xrefを収集（ヘッダ装飾除外用）
+        
+        同一xrefの画像が5ページ以上で出現し、かつページ上部（y < 70）にある
+        小さな画像（面積比2%未満）をヘッダ装飾として検出する。
+        
+        Args:
+            doc: PyMuPDFのドキュメントオブジェクト
+            
+        Returns:
+            繰り返し出現する画像xrefのセット
+        """
+        from collections import defaultdict
+        
+        # 各xrefの出現ページと位置情報を収集
+        xref_info = defaultdict(list)
+        
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            page_area = page.rect.width * page.rect.height
+            
+            for img in page.get_images():
+                xref = img[0]
+                for img_rect in page.get_image_rects(xref):
+                    bbox = (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1)
+                    area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                    area_ratio = area / page_area if page_area > 0 else 0
+                    xref_info[xref].append({
+                        'page': page_num,
+                        'bbox': bbox,
+                        'area_ratio': area_ratio,
+                        'y_top': bbox[1]
+                    })
+        
+        # 繰り返し出現する画像xrefを特定
+        repeated_xrefs = set()
+        for xref, infos in xref_info.items():
+            # 5ページ以上で出現
+            unique_pages = set(info['page'] for info in infos)
+            if len(unique_pages) < 5:
+                continue
+            
+            # 全ての出現がページ上部（y < 70）かつ小さい（面積比2%未満）
+            all_header_decoration = all(
+                info['y_top'] < 70 and info['area_ratio'] < 0.02
+                for info in infos
+            )
+            
+            if all_header_decoration:
+                repeated_xrefs.add(xref)
+                debug_print(f"[DEBUG] ヘッダ装飾画像検出: xref={xref}, 出現ページ数={len(unique_pages)}")
+        
+        return repeated_xrefs
     
     def _convert_page(self, page, page_num: int, header_footer_patterns: Set[str] = None):
         """PDFページを変換

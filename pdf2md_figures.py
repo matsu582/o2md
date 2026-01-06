@@ -302,10 +302,17 @@ class _FiguresMixin:
         raw_text = page.get_text().strip()
         has_raw_text = len(raw_text) > 0
         
+        # 繰り返し出現するヘッダ装飾画像のxrefセットを取得
+        repeated_xrefs = getattr(self, '_repeated_image_xrefs', set())
+        
         try:
             image_list = page.get_images(full=True)
             for img_info in image_list:
                 xref = img_info[0]
+                # ヘッダ装飾画像を除外（繰り返し出現する小さな上部画像）
+                if xref in repeated_xrefs:
+                    debug_print(f"[DEBUG] page={page_num+1}: ヘッダ装飾画像を除外（xref={xref}）")
+                    continue
                 for img_rect in page.get_image_rects(xref):
                     bbox = (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1)
                     area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
@@ -2218,9 +2225,10 @@ class _FiguresMixin:
         
         total_image_ratio = total_image_area / page_area if page_area > 0 else 0
         
-        # 画像の総面積が5%未満の場合は画像を出力しない
+        # 画像の総面積が3%未満の場合は画像を出力しない
         # 枠線のみのページ（テキストが主体）は画像を出力しない
-        if total_image_ratio < 0.05:
+        # 閾値を3%に下げて、ページ24のような4.5%の画像も出力できるようにする
+        if total_image_ratio < 0.03:
             debug_print(f"[DEBUG] page={page_num+1}: フォールバック - 画像総面積{total_image_ratio:.1%}、画像出力スキップ")
             return []
         
