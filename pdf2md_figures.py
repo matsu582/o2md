@@ -1345,18 +1345,6 @@ class _FiguresMixin:
                                             gray_cnt += 1
                                     return gray_cnt / detect_w
                                 
-                                # 列ごとのグレーピクセル比率を計算
-                                def col_gray_ratio(x_pos):
-                                    gray_cnt = 0
-                                    for y_pos in range(detect_h):
-                                        idx = (y_pos * detect_w + x_pos) * detect_n
-                                        r_val = detect_samples[idx]
-                                        g_val = detect_samples[idx + 1]
-                                        b_val = detect_samples[idx + 2]
-                                        if abs(r_val - g_val) < 15 and abs(g_val - b_val) < 15 and 100 < r_val < 220:
-                                            gray_cnt += 1
-                                    return gray_cnt / detect_h
-                                
                                 # y方向のグレー領域を検出（比率が0.5以上の連続区間）
                                 gray_y0, gray_y1 = None, None
                                 in_gray_region = False
@@ -1371,19 +1359,35 @@ class _FiguresMixin:
                                 if in_gray_region and gray_y1 is None:
                                     gray_y1 = detect_h
                                 
-                                # x方向のグレー領域を検出（比率が0.3以上の連続区間）
+                                # 列ごとのグレーピクセル比率を計算（帯の範囲内で）
+                                def col_gray_ratio_in_band(x_pos, band_y0, band_y1):
+                                    gray_cnt = 0
+                                    band_height = band_y1 - band_y0
+                                    if band_height <= 0:
+                                        return 0
+                                    for y_pos in range(band_y0, band_y1):
+                                        idx = (y_pos * detect_w + x_pos) * detect_n
+                                        r_val = detect_samples[idx]
+                                        g_val = detect_samples[idx + 1]
+                                        b_val = detect_samples[idx + 2]
+                                        if abs(r_val - g_val) < 15 and abs(g_val - b_val) < 15 and 100 < r_val < 220:
+                                            gray_cnt += 1
+                                    return gray_cnt / band_height
+                                
+                                # x方向のグレー領域を検出（帯の範囲内で、比率が0.5以上の連続区間）
                                 gray_x0, gray_x1 = None, None
                                 in_gray_region = False
-                                for x_pos in range(0, detect_w, 5):
-                                    ratio = col_gray_ratio(x_pos)
-                                    if ratio > 0.3 and not in_gray_region:
-                                        gray_x0 = x_pos
-                                        in_gray_region = True
-                                    elif ratio < 0.2 and in_gray_region:
-                                        gray_x1 = x_pos
-                                        break
-                                if in_gray_region and gray_x1 is None:
-                                    gray_x1 = detect_w
+                                if gray_y0 is not None and gray_y1 is not None:
+                                    for x_pos in range(0, detect_w, 5):
+                                        ratio = col_gray_ratio_in_band(x_pos, gray_y0, gray_y1)
+                                        if ratio > 0.5 and not in_gray_region:
+                                            gray_x0 = x_pos
+                                            in_gray_region = True
+                                        elif ratio < 0.3 and in_gray_region:
+                                            gray_x1 = x_pos
+                                            break
+                                    if in_gray_region and gray_x1 is None:
+                                        gray_x1 = detect_w
                                 
                                 # グレー領域が検出された場合のみレンダリング
                                 if gray_x0 is not None and gray_y0 is not None:
