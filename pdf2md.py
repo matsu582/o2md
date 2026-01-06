@@ -134,6 +134,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         self._doc_header_y_max: Optional[float] = None
         self._doc_footer_y_min: Optional[float] = None
         
+        # スライド文書フラグ（PPT由来のPDFなど）
+        self._is_slide_document: bool = False
+        
         print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
     
     def _get_ocr(self):
@@ -177,13 +180,32 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             total_pages = len(doc)
             print(f"[INFO] 総ページ数: {total_pages}")
             
+            # スライド文書（PPT由来のPDFなど）かどうかを判定
+            self._is_slide_document = self._detect_slide_document(doc)
+            if self._is_slide_document:
+                print("[INFO] スライド文書として処理します")
+                # スライド文書の場合、繰り返し出現する画像xrefを収集（ヘッダ装飾除外用）
+                self._repeated_image_xrefs = self._collect_repeated_image_xrefs(doc)
+            else:
+                self._repeated_image_xrefs = set()
+            
             # ヘッダ・フッタパターンを検出（全ページから収集）
-            header_footer_patterns = self._detect_header_footer_patterns(doc)
-            if header_footer_patterns:
-                debug_print(f"[DEBUG] ヘッダ・フッタパターン検出: {len(header_footer_patterns)}個")
+            # スライド文書の場合はヘッダ・フッタパターン検出をスキップ
+            if self._is_slide_document:
+                header_footer_patterns = set()
+                debug_print("[DEBUG] スライド文書のためヘッダ・フッタパターン検出をスキップ")
+            else:
+                header_footer_patterns = self._detect_header_footer_patterns(doc)
+                if header_footer_patterns:
+                    debug_print(f"[DEBUG] ヘッダ・フッタパターン検出: {len(header_footer_patterns)}個")
             
             # doc-wideのヘッダー/フッター領域を計算（フォールバック用）
-            self._compute_doc_wide_header_footer(doc, header_footer_patterns)
+            # スライド文書の場合はヘッダー/フッター領域を無効化
+            if self._is_slide_document:
+                self._doc_header_y_max = None
+                self._doc_footer_y_min = None
+            else:
+                self._compute_doc_wide_header_footer(doc, header_footer_patterns)
             
             for page_num in range(total_pages):
                 print(f"[INFO] ページ {page_num + 1}/{total_pages} を処理中...")
@@ -419,6 +441,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         - テキストブロックが空
         - 図が1つだけ
         - その図がページの大部分（80%以上）を覆っている
+        - 埋め込み画像が存在する（PPT由来の背景矩形のみの場合は除外）
+        - 生テキストが存在しない
         
         Args:
             page: PyMuPDFのページオブジェクト
@@ -434,6 +458,18 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         # 図が1つだけの場合のみチェック
         if len(vector_figures) != 1:
+            return False
+        
+        # 生テキストが存在する場合はスキャンページではない（PPTスライドなど）
+        raw_text = page.get_text().strip()
+        if raw_text:
+            debug_print(f"[DEBUG] 生テキストが存在するためスキャン判定をスキップ: {len(raw_text)}文字")
+            return False
+        
+        # 埋め込み画像が存在しない場合はスキャンページではない（背景矩形のみ）
+        images = page.get_images(full=True)
+        if not images:
+            debug_print(f"[DEBUG] 埋め込み画像がないためスキャン判定をスキップ")
             return False
         
         # ページサイズを取得
@@ -457,6 +493,111 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         return False
     
+    def _detect_slide_document(self, doc) -> bool:
+        """スライド文書（PPT由来のPDFなど）かどうかを判定
+        
+        以下の条件を満たす場合にスライド文書と判定:
+        - 90%以上のページが横長（幅 > 高さ）
+        - ページサイズがほぼ一定（標準偏差が小さい）
+        
+        Args:
+            doc: PyMuPDFのドキュメントオブジェクト
+            
+        Returns:
+            スライド文書の場合True
+        """
+        total_pages = len(doc)
+        if total_pages == 0:
+            return False
+        
+        landscape_count = 0
+        page_sizes = []
+        
+        for page_num in range(total_pages):
+            page = doc[page_num]
+            width = page.rect.width
+            height = page.rect.height
+            
+            if width > height:
+                landscape_count += 1
+            
+            page_sizes.append((width, height))
+        
+        landscape_ratio = landscape_count / total_pages
+        
+        if landscape_ratio < 0.9:
+            return False
+        
+        if total_pages >= 2:
+            widths = [s[0] for s in page_sizes]
+            heights = [s[1] for s in page_sizes]
+            
+            avg_width = sum(widths) / len(widths)
+            avg_height = sum(heights) / len(heights)
+            
+            width_variance = sum((w - avg_width) ** 2 for w in widths) / len(widths)
+            height_variance = sum((h - avg_height) ** 2 for h in heights) / len(heights)
+            
+            if width_variance > 100 or height_variance > 100:
+                return False
+        
+        debug_print(f"[DEBUG] スライド文書検出: 横長率={landscape_ratio:.1%}, ページ数={total_pages}")
+        return True
+    
+    def _collect_repeated_image_xrefs(self, doc) -> Set[int]:
+        """文書全体で繰り返し出現する画像xrefを収集（ヘッダ装飾除外用）
+        
+        同一xrefの画像が5ページ以上で出現し、かつページ上部（y < 70）にある
+        小さな画像（面積比2%未満）をヘッダ装飾として検出する。
+        
+        Args:
+            doc: PyMuPDFのドキュメントオブジェクト
+            
+        Returns:
+            繰り返し出現する画像xrefのセット
+        """
+        from collections import defaultdict
+        
+        # 各xrefの出現ページと位置情報を収集
+        xref_info = defaultdict(list)
+        
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            page_area = page.rect.width * page.rect.height
+            
+            for img in page.get_images():
+                xref = img[0]
+                for img_rect in page.get_image_rects(xref):
+                    bbox = (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1)
+                    area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                    area_ratio = area / page_area if page_area > 0 else 0
+                    xref_info[xref].append({
+                        'page': page_num,
+                        'bbox': bbox,
+                        'area_ratio': area_ratio,
+                        'y_top': bbox[1]
+                    })
+        
+        # 繰り返し出現する画像xrefを特定
+        repeated_xrefs = set()
+        for xref, infos in xref_info.items():
+            # 5ページ以上で出現
+            unique_pages = set(info['page'] for info in infos)
+            if len(unique_pages) < 5:
+                continue
+            
+            # 全ての出現がページ上部（y < 70）かつ小さい（面積比2%未満）
+            all_header_decoration = all(
+                info['y_top'] < 70 and info['area_ratio'] < 0.02
+                for info in infos
+            )
+            
+            if all_header_decoration:
+                repeated_xrefs.add(xref)
+                debug_print(f"[DEBUG] ヘッダ装飾画像検出: xref={xref}, 出現ページ数={len(unique_pages)}")
+        
+        return repeated_xrefs
+    
     def _convert_page(self, page, page_num: int, header_footer_patterns: Set[str] = None):
         """PDFページを変換
         
@@ -471,12 +612,18 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         # 先にベクタ描画（図）を検出して、その領域を取得
         # 図領域内のテキストは本文から除外するため
         # ヘッダー/フッター領域内の装飾要素を除外するためにpatternsを渡す
-        vector_figures = self._extract_vector_figures(page, page_num, header_footer_patterns)
+        # スライド文書フラグを渡して小さな装飾要素を除外
+        vector_figures = self._extract_vector_figures(
+            page, page_num, header_footer_patterns,
+            is_slide_document=self._is_slide_document
+        )
         figure_bboxes = [fig["bbox"] for fig in vector_figures]
         
         # テキストベースのPDFかどうかを判定（図領域を除外）
+        # スライド文書フラグを渡して段落結合をスキップ
         text_blocks = self._extract_structured_text_v2(
-            page, header_footer_patterns, exclude_bboxes=figure_bboxes
+            page, header_footer_patterns, exclude_bboxes=figure_bboxes,
+            is_slide_document=self._is_slide_document
         )
         
         # スキャンページ（画像ベースPDF）かどうかを判定
@@ -555,8 +702,14 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     last_block_y = block_y
                     last_block_w = block_w
                     break
-        self.markdown_lines.append(f"<!--PAGE_BREAK first_y={first_block_y} last_y={last_block_y} last_w={last_block_w} page_h={page_height} page_w={page_width}-->")
-        self.markdown_lines.append("")
+        # スライド文書の場合はページ区切りを追加
+        if self._is_slide_document:
+            self.markdown_lines.append("")
+            self.markdown_lines.append("---")
+            self.markdown_lines.append("")
+        else:
+            self.markdown_lines.append(f"<!--PAGE_BREAK first_y={first_block_y} last_y={last_block_y} last_w={last_block_w} page_h={page_height} page_w={page_width}-->")
+            self.markdown_lines.append("")
     
     
     
@@ -1073,7 +1226,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
     
     def _classify_block_type(
         self, text: str, font_size: float, base_size: float, 
-        is_bold: bool, bbox: Tuple[float, float, float, float]
+        is_bold: bool, bbox: Tuple[float, float, float, float],
+        is_slide_document: bool = False
     ) -> str:
         """テキストブロックのタイプを分類
         
@@ -1083,6 +1237,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             base_size: 基準フォントサイズ
             is_bold: 太字かどうか
             bbox: バウンディングボックス
+            is_slide_document: スライド文書フラグ
             
         Returns:
             ブロックタイプ ('heading1', 'heading2', 'heading3', 'paragraph', 'list_item')
@@ -1130,9 +1285,31 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         # - 番号付き見出し形式（「N.N」「第N章」など）
         # - フォントサイズが非常に大きい場合（size_ratio >= 2.0）
         if len(text_stripped) <= 10 and size_ratio < 2.0:
-            if not re.match(r'^[\d０-９]+[\.\s]', text_stripped):
+            if not re.match(r'^[\d０-９]+[\.．\s]', text_stripped):
                 if not re.match(r'^第[\d０-９一二三四五六七八九十]+\s*(章|節|条)', text_stripped):
                     return "paragraph"
+        
+        # スライド文書の場合、ページタイトルのみを見出しとして許可
+        # 条件: ページ上部15%以内 + フォントサイズが非常に大きい（size_ratio >= 1.8）
+        # または番号付き見出し形式（「N．タイトル」など）
+        if is_slide_document:
+            # bboxのy座標でページ上部かどうかを判定
+            y0 = bbox[1] if bbox else 0
+            page_height = 540  # PPTスライドの標準高さ
+            is_top_area = y0 < page_height * 0.15  # 上部15%以内（より厳格に）
+            
+            # ページ上部で、フォントサイズが非常に大きい場合のみタイトルとして##に統一
+            if is_top_area and size_ratio >= 1.8:
+                return "heading2"
+            
+            # 番号付き見出し形式（「N．タイトル」「N.N タイトル」など）は見出しとして許可
+            if re.match(r'^[0-9０-９]+[．.]\s*[^0-9０-９]', text_stripped):
+                return "heading2"
+            if re.match(r'^[0-9０-９]+(\.[0-9０-９]+)+\s+', text_stripped):
+                return "heading3"
+            
+            # スライド文書ではそれ以外は全てparagraphに固定
+            return "paragraph"
         
         if size_ratio >= 1.8 or (size_ratio >= 1.5 and is_bold):
             return "heading1"
