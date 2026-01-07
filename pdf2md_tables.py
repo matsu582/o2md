@@ -35,6 +35,48 @@ class _TablesMixin:
     PDFToMarkdownConverterクラスと組み合わせて使用してください。
     """
 
+    def _format_markdown_table(self, rows: List[List[str]]) -> str:
+        """表データをMarkdown形式に整形（列幅調整付き）
+        
+        Args:
+            rows: 表データ（2次元リスト、最初の行がヘッダー）
+            
+        Returns:
+            Markdown形式の表文字列
+        """
+        if not rows or len(rows) < 2:
+            return ""
+        
+        col_count = len(rows[0])
+        if col_count == 0:
+            return ""
+        
+        # 各列の最大幅を計算（日本語文字は2文字分としてカウント）
+        col_widths = [3] * col_count  # 最小幅は3（---）
+        for row in rows:
+            for i, cell in enumerate(row):
+                if i < col_count:
+                    # 日本語文字（マルチバイト）は2文字分
+                    width = sum(2 if ord(c) > 127 else 1 for c in cell)
+                    col_widths[i] = max(col_widths[i], width)
+        
+        md_lines = []
+        
+        # ヘッダー行
+        md_lines.append("| " + " | ".join(rows[0]) + " |")
+        
+        # 区切り行（列幅に応じた長さ）
+        separator_cells = ["-" * w for w in col_widths]
+        md_lines.append("|" + "|".join(separator_cells) + "|")
+        
+        # データ行
+        for row in rows[1:]:
+            # 列数を揃える
+            padded_row = row + [""] * (col_count - len(row))
+            md_lines.append("| " + " | ".join(padded_row[:col_count]) + " |")
+        
+        return "\n".join(md_lines)
+
     def _detect_table_regions(
         self, lines_data: List[Dict], page_center: float
     ) -> List[Dict]:
@@ -136,11 +178,43 @@ class _TablesMixin:
         
         return table_regions
 
+    def _calc_table_quality_score(self, tables_list) -> float:
+        """表検出結果の品質スコアを計算
+        
+        Args:
+            tables_list: 検出された表のリスト
+            
+        Returns:
+            品質スコア（高いほど良い）
+        """
+        score = 0.0
+        for table in tables_list:
+            rows = table.extract()
+            if not rows:
+                continue
+            
+            # 行数・列数が多いほど高スコア
+            row_count = len(rows)
+            col_count = len(rows[0]) if rows else 0
+            score += row_count * col_count
+            
+            # 空セル比率が低いほど高スコア
+            total_cells = row_count * col_count
+            empty_cells = sum(
+                1 for row in rows for cell in row
+                if cell is None or str(cell).strip() == ""
+            )
+            if total_cells > 0:
+                score *= (1 - empty_cells / total_cells)
+        
+        return score
+
     def _detect_line_based_tables(
         self, page, lines_data: List[Dict]
     ) -> List[Dict]:
         """罫線ベースの表検出（PyMuPDFのfind_tables()を使用）
         
+        複数の検出戦略を試行し、最適な結果を選択する。
         テキストベースの検出で見逃した表を補完する。
         検出された表領域内のテキストを除外し、Markdownテーブルを生成する。
         
@@ -154,11 +228,36 @@ class _TablesMixin:
         detected_tables = []
         
         try:
-            tables = page.find_tables()
-            if not tables.tables:
+            # 複数の戦略を試行して最適な結果を選択
+            best_tables = None
+            best_score = 0
+            
+            strategies = [
+                {},  # デフォルト
+                {"strategy": "lines_strict"},  # 厳密な罫線検出
+                {"strategy": "text"},  # テキストベース検出
+            ]
+            
+            for params in strategies:
+                try:
+                    tables = page.find_tables(**params)
+                    if tables.tables:
+                        score = self._calc_table_quality_score(tables.tables)
+                        if score > best_score:
+                            best_score = score
+                            best_tables = tables.tables
+                            debug_print(
+                                f"[DEBUG] find_tables戦略: {params}, "
+                                f"score={score:.1f}, tables={len(tables.tables)}"
+                            )
+                except Exception as e:
+                    debug_print(f"[DEBUG] find_tables戦略エラー: {params}, {e}")
+                    continue
+            
+            if not best_tables:
                 return []
             
-            for table in tables.tables:
+            for table in best_tables:
                 bbox = table.bbox
                 rows = table.extract()
                 
@@ -188,59 +287,33 @@ class _TablesMixin:
                         debug_print(f"[DEBUG] 罫線ベース表スキップ（空セル多/高さ小）: bbox={bbox}, empty_ratio={empty_ratio:.2f}, height={table_height:.1f}")
                         continue
                 
-                # 各行を処理（改行を含むセルを処理）
-                # セル内に改行がある場合は、複数行に展開する
+                # 各行を処理（改行を含むセルはスペースで結合）
+                # doclingと同様に、セル内改行を展開せず1セル1行として出力
                 processed_rows = []
                 for row in rows:
-                    # 各セルの改行で分割した行数を取得
-                    cell_lines_list = []
-                    max_lines = 1
+                    processed_row = []
                     for cell in row:
                         if cell is None:
-                            cell_lines_list.append([""])
+                            cell_text = ""
                         else:
+                            # 改行をスペースで結合（論理的な表構造を維持）
                             lines = str(cell).split("\n")
-                            cell_lines_list.append([l.strip() for l in lines])
-                            max_lines = max(max_lines, len(lines))
-                    
-                    # 複数行に展開
-                    for line_idx in range(max_lines):
-                        expanded_row = []
-                        for cell_lines in cell_lines_list:
-                            if line_idx < len(cell_lines):
-                                cell_text = cell_lines[line_idx]
-                            else:
-                                cell_text = ""
-                            # パイプ文字をエスケープ
-                            cell_text = cell_text.replace("|", "\\|")
-                            expanded_row.append(cell_text)
-                        processed_rows.append(expanded_row)
+                            cell_text = " ".join(
+                                line.strip() for line in lines if line.strip()
+                            )
+                        # パイプ文字をエスケープ
+                        cell_text = cell_text.replace("|", "\\|")
+                        processed_row.append(cell_text)
+                    processed_rows.append(processed_row)
                 
-                # 展開後の行数を確認（最低2行以上）
+                # 行数を確認（最低2行以上）
                 if len(processed_rows) < 2:
                     continue
                 
-                # Markdownテーブルを生成
-                md_lines = []
-                
-                # ヘッダー行
-                if processed_rows:
-                    header = "| " + " | ".join(processed_rows[0]) + " |"
-                    md_lines.append(header)
-                    
-                    # 区切り行
-                    separator = "| " + " | ".join(["---"] * len(processed_rows[0])) + " |"
-                    md_lines.append(separator)
-                    
-                    # データ行
-                    for row in processed_rows[1:]:
-                        # 列数を揃える
-                        while len(row) < len(processed_rows[0]):
-                            row.append("")
-                        data_row = "| " + " | ".join(row) + " |"
-                        md_lines.append(data_row)
-                
-                markdown = "\n".join(md_lines)
+                # 共通メソッドでMarkdownテーブルを生成
+                markdown = self._format_markdown_table(processed_rows)
+                if not markdown:
+                    continue
                 
                 # 表領域内の行を除外対象としてマーク
                 for line in lines_data:
@@ -469,7 +542,25 @@ class _TablesMixin:
         
         page_width = text_dict.get("width", 612)
         
-        # Y座標でグループ化
+        # 行の高さを収集して動的許容値を計算
+        line_heights = []
+        for block in text_dict.get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                bbox = line.get("bbox", (0, 0, 0, 0))
+                height = bbox[3] - bbox[1]
+                if height > 0:
+                    line_heights.append(height)
+        
+        # 動的許容値: 行の高さの中央値の半分（最小3、最大10）
+        if line_heights:
+            median_height = sorted(line_heights)[len(line_heights) // 2]
+            y_tolerance = max(3, min(10, median_height / 2))
+        else:
+            y_tolerance = 5
+        
+        # Y座標でグループ化（動的許容値を使用）
         y_groups: Dict[int, List[Dict]] = {}
         
         for block in text_dict.get("blocks", []):
@@ -478,7 +569,7 @@ class _TablesMixin:
             
             for line in block.get("lines", []):
                 bbox = line.get("bbox", (0, 0, 0, 0))
-                y_key = round(bbox[1] / 5) * 5  # 5ピクセル単位でグループ化
+                y_key = round(bbox[1] / y_tolerance) * int(y_tolerance)
                 
                 line_text = ""
                 for span in line.get("spans", []):
@@ -536,23 +627,16 @@ class _TablesMixin:
         if not table_rows:
             return blocks
         
-        # 表のMarkdownを生成
-        table_md_lines = []
-        
-        # ヘッダー行
-        header_cells = [cell["text"] for cell in table_rows[0]]
-        table_md_lines.append("| " + " | ".join(header_cells) + " |")
-        table_md_lines.append("|" + "|".join(["---"] * len(header_cells)) + "|")
-        
-        # データ行
-        for row in table_rows[1:]:
+        # 表データを2次元リストに変換
+        rows_data = []
+        for row in table_rows:
             row_cells = [cell["text"] for cell in row]
-            # セル数を揃える
-            while len(row_cells) < len(header_cells):
-                row_cells.append("")
-            table_md_lines.append("| " + " | ".join(row_cells[:len(header_cells)]) + " |")
+            rows_data.append(row_cells)
         
-        table_text = "\n".join(table_md_lines)
+        # 共通メソッドでMarkdownテーブルを生成
+        table_text = self._format_markdown_table(rows_data)
+        if not table_text:
+            return blocks
         
         # 表ブロックを追加（既存ブロックの最後に）
         # 表に含まれるテキストを持つブロックを除外
