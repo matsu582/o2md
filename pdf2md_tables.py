@@ -232,10 +232,11 @@ class _TablesMixin:
             best_tables = None
             best_score = 0
             
+            # 罫線ベースの戦略のみ使用
+            # strategy="text"は段組みテキストを表として誤検出するため除外
             strategies = [
                 {},  # デフォルト
                 {"strategy": "lines_strict"},  # 厳密な罫線検出
-                {"strategy": "text"},  # テキストベース検出
             ]
             
             for params in strategies:
