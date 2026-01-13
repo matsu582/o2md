@@ -1518,7 +1518,14 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             all_items.sort(key=lambda x: (x["column_order"], x["y_position"]))
         else:
             # 単一カラム: Y座標を優先してソート
-            all_items.sort(key=lambda x: (x["y_position"], x["column_order"]))
+            # ただし、Y座標が近い場合（±30pt以内）は同一行とみなしてX座標（左→右）を優先
+            def row_based_sort_key(item):
+                y_pos = item["y_position"]
+                col_order = item["column_order"]
+                # Y座標を30pt単位で丸めて同一行判定
+                row_group = int(y_pos / 30)
+                return (row_group, col_order, y_pos)
+            all_items.sort(key=row_based_sort_key)
         
         prev_type = None
         list_active = False
