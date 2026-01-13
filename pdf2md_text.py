@@ -400,6 +400,9 @@ class _TextMixin:
         if not is_slide_document:
             blocks = self._merge_list_continuations(blocks)
         
+        # リストの途中で見出しになっているブロックをlist_itemに降格
+        blocks = self._demote_heading_in_list_context(blocks)
+        
         return blocks
 
     def _merge_list_continuations(
@@ -530,6 +533,65 @@ class _TextMixin:
             return self._merge_list_continuations(merged)
         
         return merged
+
+    def _demote_heading_in_list_context(
+        self, blocks: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """リストの途中で見出しになっているブロックをlist_itemに降格
+        
+        直前がlist_itemで、y_gapが小さく、x0が近い場合は
+        headingをlist_itemに降格する。これにより、リストの途中で
+        見出しが挿入される問題を防ぐ。
+        
+        Args:
+            blocks: ブロックのリスト
+            
+        Returns:
+            降格後のブロックのリスト
+        """
+        import re
+        
+        if len(blocks) < 2:
+            return blocks
+        
+        # 番号付き見出しパターン（「N. タイトル」形式）
+        numbered_heading_pattern = re.compile(
+            r'^[\d０-９]+[\.．\)）]\s+'
+        )
+        
+        result = []
+        for i, block in enumerate(blocks):
+            block_type = block.get("type", "")
+            text = block.get("text", "").strip()
+            
+            # headingで、番号付きパターンに一致する場合のみチェック
+            if block_type.startswith("heading") and numbered_heading_pattern.match(text):
+                # 直前のブロックを探す
+                prev_block = result[-1] if result else None
+                
+                if prev_block:
+                    prev_type = prev_block.get("type", "")
+                    prev_bbox = prev_block.get("bbox", (0, 0, 0, 0))
+                    curr_bbox = block.get("bbox", (0, 0, 0, 0))
+                    
+                    # 直前がlist_itemの場合
+                    if prev_type == "list_item":
+                        # y_gap（縦方向の距離）を計算
+                        y_gap = curr_bbox[1] - prev_bbox[3]
+                        # x0の差（インデントの差）を計算
+                        x_diff = abs(curr_bbox[0] - prev_bbox[0])
+                        
+                        # y_gapが小さく（30pt以下）、x0が近い（20pt以下）場合は降格
+                        if y_gap <= 30 and x_diff <= 20:
+                            # headingをlist_itemに降格
+                            demoted_block = block.copy()
+                            demoted_block["type"] = "list_item"
+                            result.append(demoted_block)
+                            continue
+            
+            result.append(block)
+        
+        return result
 
     def _merge_superscript_lines(
         self, lines_data: List[Dict], base_font_size: float

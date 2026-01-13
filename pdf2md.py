@@ -1260,8 +1260,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         # 番号付きリストの検出（区切り記号の後に空白が必須）
         # ただし、番号付き見出しパターン（「N. タイトル」形式）は見出しとして扱う
+        # 後処理でリストの途中の見出しは降格される
         if re.match(r'^[\d０-９]+[\.．\)）]\s+', text_stripped):
-            # _is_numbered_headingで見出しかどうかを判定
             is_heading, heading_level, _ = self._is_numbered_heading(text_stripped)
             if is_heading:
                 return f"heading{heading_level}"
