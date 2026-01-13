@@ -307,6 +307,16 @@ class _TablesMixin:
                         processed_row.append(cell_text)
                     processed_rows.append(processed_row)
                 
+                # ヘッダー行が全て空白の場合、次の行をヘッダーとして使用
+                if processed_rows and all(
+                    cell.strip() == "" for cell in processed_rows[0]
+                ):
+                    if len(processed_rows) >= 2:
+                        processed_rows = processed_rows[1:]
+                        debug_print(
+                            "[DEBUG] 空白ヘッダー行をスキップ"
+                        )
+                
                 # 行数を確認（最低2行以上）
                 if len(processed_rows) < 2:
                     continue

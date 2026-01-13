@@ -664,6 +664,13 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             
             # 構造化テキストと画像を出力
             self._output_structured_markdown_with_images(text_blocks, all_images)
+            
+            # スライド文書の場合、罫線ベースの表を追加検出・出力
+            if self._is_slide_document:
+                slide_tables = self._detect_slide_tables(page)
+                for table_md in slide_tables:
+                    self.markdown_lines.append("")
+                    self.markdown_lines.append(table_md)
         else:
             # 画像ベースのPDF: 従来の画像+OCR処理
             debug_print(f"[DEBUG] ページ {page_num + 1}: 画像ベースPDFとして処理")
@@ -715,14 +722,68 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             self.markdown_lines.append(f"<!--PAGE_BREAK first_y={first_block_y} last_y={last_block_y} last_w={last_block_w} page_h={page_height} page_w={page_width}-->")
             self.markdown_lines.append("")
     
-    
-    
-    
-    
-    
-    
-    
-    
+    def _detect_slide_tables(self, page) -> List[str]:
+        """スライドPDFから罫線ベースの表を検出してMarkdown形式で返す
+        
+        PyMuPDFのfind_tables()を使用して罫線ベースの表のみを検出。
+        罫線のない表は検出しない。
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            
+        Returns:
+            Markdown形式の表文字列のリスト
+        """
+        tables_md = []
+        try:
+            tables = page.find_tables()
+            if tables.tables:
+                for table in tables.tables:
+                    rows = table.extract()
+                    if not rows or len(rows) < 2:
+                        continue
+                    col_count = len(rows[0]) if rows[0] else 0
+                    if col_count < 2:
+                        continue
+                    
+                    # セル内改行をスペースで結合し、パイプ文字をエスケープ
+                    processed_rows = []
+                    for row in rows:
+                        processed_row = []
+                        for cell in row:
+                            if cell is None:
+                                cell_text = ""
+                            else:
+                                lines = str(cell).split("\n")
+                                cell_text = " ".join(
+                                    line.strip() for line in lines if line.strip()
+                                )
+                            cell_text = cell_text.replace("|", "\\|")
+                            processed_row.append(cell_text)
+                        processed_rows.append(processed_row)
+                    
+                    # ヘッダー行が全て空白の場合、次の行をヘッダーとして使用
+                    if processed_rows and all(
+                        cell.strip() == "" for cell in processed_rows[0]
+                    ):
+                        if len(processed_rows) >= 2:
+                            processed_rows = processed_rows[1:]
+                    
+                    # 行数を再確認（最低2行以上）
+                    if len(processed_rows) < 2:
+                        continue
+                    
+                    # Markdown形式に変換
+                    md = self._format_markdown_table(processed_rows)
+                    if md:
+                        tables_md.append(md)
+                        debug_print(
+                            f"[DEBUG] スライド表検出: "
+                            f"rows={len(processed_rows)}, cols={col_count}"
+                        )
+        except Exception as e:
+            debug_print(f"[DEBUG] スライド表検出エラー: {e}")
+        return tables_md
     
     def _merge_across_page_breaks(self, content: str) -> str:
         """ページ跨ぎの文章を結合する後処理
