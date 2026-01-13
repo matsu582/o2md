@@ -390,6 +390,10 @@ class _TextMixin:
                 "font_size": block_data["font_size"],
                 "bbox": block_data["bbox"]
             }
+            # リストマーカー種別を設定（_finalize_blockで設定済みの場合はそれを使用）
+            marker_kind = block_data.get("list_marker_kind")
+            if marker_kind:
+                block["list_marker_kind"] = marker_kind
             # カラム情報を保持（2段組みの順序維持に必要）
             if "column" in block_data:
                 block["column"] = block_data["column"]
@@ -402,6 +406,9 @@ class _TextMixin:
         
         # リストの途中で見出しになっているブロックをlist_itemに降格
         blocks = self._demote_heading_in_list_context(blocks)
+        
+        # リスト項目にネストレベルを割り当て
+        blocks = self._assign_list_levels(blocks)
         
         return blocks
 
@@ -522,6 +529,9 @@ class _TextMixin:
                     }
                     if "column" in block:
                         merged_block["column"] = block["column"]
+                    # リストマーカー種別を保持
+                    if "list_marker_kind" in block:
+                        merged_block["list_marker_kind"] = block["list_marker_kind"]
                     merged.append(merged_block)
                     skip_next = True
                     continue
@@ -590,6 +600,63 @@ class _TextMixin:
                             continue
             
             result.append(block)
+        
+        return result
+
+    def _assign_list_levels(
+        self, blocks: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """リスト項目にネストレベルを割り当て
+        
+        丸数字（circled）で始まるリスト項目で、直前に親リスト
+        （fullwidth/arabic）がある場合はネストレベルを1に設定。
+        
+        Args:
+            blocks: ブロックのリスト
+            
+        Returns:
+            list_levelが設定されたブロックのリスト
+        """
+        if len(blocks) < 2:
+            return blocks
+        
+        # 親リストのマーカー種別
+        parent_markers = {"fullwidth", "arabic"}
+        # 子リストのマーカー種別
+        child_markers = {"circled", "paren"}
+        
+        result = []
+        # 親リストが走っているかどうかのフラグ
+        parent_list_active = False
+        
+        for block in blocks:
+            block_type = block.get("type", "")
+            marker_kind = block.get("list_marker_kind")
+            
+            # list_item以外のブロックで親リストをリセット
+            if block_type != "list_item":
+                if block_type.startswith("heading") or block_type == "paragraph":
+                    parent_list_active = False
+                result.append(block)
+                continue
+            
+            # list_itemの場合
+            if marker_kind in parent_markers:
+                # 親リストマーカーの場合、親リストを開始
+                parent_list_active = True
+                block_copy = block.copy()
+                block_copy["list_level"] = 0
+                result.append(block_copy)
+            elif marker_kind in child_markers and parent_list_active:
+                # 子リストマーカーで、親リストが走っている場合はネスト
+                block_copy = block.copy()
+                block_copy["list_level"] = 1
+                result.append(block_copy)
+            else:
+                # その他の場合はレベル0
+                block_copy = block.copy()
+                block_copy["list_level"] = 0
+                result.append(block_copy)
         
         return result
 
@@ -1052,7 +1119,10 @@ class _TextMixin:
         """ブロックデータを最終形式に変換
         
         span情報を使って太字・斜体の書式を適用する。
+        リストマーカー種別（list_marker_kind）を判定して保存する。
         """
+        import re
+        
         # span情報を使って書式付きテキストを生成
         spans_list = block_data.get("spans_list", [])
         if spans_list and any(spans_list):
@@ -1060,6 +1130,9 @@ class _TextMixin:
         else:
             # span情報がない場合は従来通り
             text = "".join(block_data["texts"]).strip()
+        
+        # リストマーカー種別を判定（変換前のテキストで判定）
+        list_marker_kind = self._detect_list_marker_kind(text)
         
         # 番号付き箇条書きの検出と変換
         text = self._convert_numbered_bullets(text)
@@ -1072,11 +1145,52 @@ class _TextMixin:
             "is_italic": block_data.get("is_italic", False)
         }
         
+        # リストマーカー種別を保存
+        if list_marker_kind:
+            result["list_marker_kind"] = list_marker_kind
+        
         # カラム情報を保持（2段組みの順序維持に必要）
         if "column" in block_data:
             result["column"] = block_data["column"]
         
         return result
+    
+    def _detect_list_marker_kind(self, text: str) -> str:
+        """テキストの行頭からリストマーカー種別を判定
+        
+        Args:
+            text: 判定するテキスト
+            
+        Returns:
+            マーカー種別（"circled", "fullwidth", "arabic", "paren", "bullet", None）
+        """
+        import re
+        
+        text = text.strip()
+        if not text:
+            return None
+        
+        # 丸数字（①②③...）
+        if re.match(r'^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]', text):
+            return "circled"
+        
+        # 全角数字+区切り（１．２．など）
+        if re.match(r'^[０-９]+[．.)）]', text):
+            return "fullwidth"
+        
+        # 半角数字+区切り（1. 2) など）
+        if re.match(r'^[0-9]+[.)）]', text):
+            return "arabic"
+        
+        # 括弧付き番号（(1) （１）など）
+        if re.match(r'^[(（][0-9０-９]+[)）]', text):
+            return "paren"
+        
+        # 箇条書きマーカー（•, ・, ○, ● など）
+        if re.match(r'^[•・○●◆◇▪▫－―＊\-\*]', text):
+            return "bullet"
+        
+        return None
 
     def _is_footnote_reference(self, text: str) -> bool:
         """テキストが注釈参照かどうかを判定

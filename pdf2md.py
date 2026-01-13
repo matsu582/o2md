@@ -137,6 +137,10 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         # スライド文書フラグ（PPT由来のPDFなど）
         self._is_slide_document: bool = False
         
+        # ページをまたいだリストのネストレベル計算用
+        # 親リスト（全角数字、半角数字）がアクティブかどうかを保持
+        self._parent_list_active: bool = False
+        
         print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
     
     def _get_ocr(self):
@@ -1368,11 +1372,83 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         return 1
     
-    
-    
-    
-    
-    
+    def _reassign_list_levels_across_pages(
+        self, blocks: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """ページをまたいだリストのネストレベルを再計算
+        
+        各ページで_assign_list_levelsが呼ばれているが、ページをまたいで
+        リストが続いている場合、parent_list_activeフラグがリセットされる
+        ため、インスタンス変数を使用してページ間の状態を保持する。
+        
+        Args:
+            blocks: 現在のページのブロックリスト
+            
+        Returns:
+            list_levelが再計算されたブロックのリスト
+        """
+        import re
+        
+        if not blocks:
+            return blocks
+        
+        # 親リストのマーカー種別
+        parent_markers = {"fullwidth", "arabic"}
+        # 子リストのマーカー種別
+        child_markers = {"circled", "paren"}
+        
+        # ヘッダー/フッターパターン（リストの継続を中断しない）
+        header_footer_patterns = [
+            re.compile(r'^WEB\s*契約用$'),  # WEB契約用
+            re.compile(r'^[/／]?\s*\d+\s*[/／]?\s*\d*$'),  # ページ番号
+        ]
+        
+        result = []
+        # インスタンス変数から前のページの状態を取得
+        parent_list_active = self._parent_list_active
+        
+        for block in blocks:
+            block_type = block.get("type", "")
+            marker_kind = block.get("list_marker_kind")
+            text = block.get("text", "").strip()
+            
+            # list_item以外のブロックで親リストをリセット
+            if block_type != "list_item":
+                # ページ番号やヘッダー/フッターのようなテキストはリストの継続を中断しない
+                is_ignorable = False
+                if len(text) <= 15:
+                    for pattern in header_footer_patterns:
+                        if pattern.match(text):
+                            is_ignorable = True
+                            break
+                if not is_ignorable:
+                    if block_type.startswith("heading") or block_type == "paragraph":
+                        parent_list_active = False
+                result.append(block)
+                continue
+            
+            # list_itemの場合
+            if marker_kind in parent_markers:
+                # 親リストマーカーの場合、親リストを開始
+                parent_list_active = True
+                block_copy = block.copy()
+                block_copy["list_level"] = 0
+                result.append(block_copy)
+            elif marker_kind in child_markers and parent_list_active:
+                # 子リストマーカーで、親リストが走っている場合はネスト
+                block_copy = block.copy()
+                block_copy["list_level"] = 1
+                result.append(block_copy)
+            else:
+                # その他の場合はレベル0
+                block_copy = block.copy()
+                block_copy["list_level"] = 0
+                result.append(block_copy)
+        
+        # インスタンス変数を更新して次のページに引き継ぐ
+        self._parent_list_active = parent_list_active
+        
+        return result
     
     def _output_structured_markdown_with_images(
         self, blocks: List[Dict[str, Any]], images: List[Dict[str, Any]]
@@ -1384,6 +1460,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             images: 抽出された画像情報のリスト
         """
         import re
+        
+        # ページをまたいだリストのネストレベルを再計算
+        # 各ページで_assign_list_levelsが呼ばれているが、ページをまたいで
+        # リストが続いている場合、parent_list_activeフラグがリセットされる
+        # ため、全ブロックに対して再計算する
+        blocks = self._reassign_list_levels_across_pages(blocks)
         
         # 脚注番号セットを抽出（インライン参照変換に使用）
         self._extract_footnote_nums_from_blocks(blocks)
@@ -1634,7 +1716,10 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                         # 空白不要のマーカー（•, ・, ○, ● など）
                         cleaned_text = re.sub(r'^[•・○●◆◇▪▫－―＊]\s*', '', cleaned_text)
                     
-                    self.markdown_lines.append(f"{output_marker} {cleaned_text}")
+                    # リストレベルに応じたインデントを追加（4スペース×level）
+                    list_level = block.get("list_level", 0)
+                    indent = "    " * list_level
+                    self.markdown_lines.append(f"{indent}{output_marker} {cleaned_text}")
                     
                 elif block_type == "table":
                     if prev_type:
@@ -1725,7 +1810,10 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     # 空白不要のマーカー（•, ・, ○, ● など）
                     cleaned_text = re.sub(r'^[•・○●◆◇▪▫－―＊]\s*', '', cleaned_text)
                 
-                self.markdown_lines.append(f"{output_marker} {cleaned_text}")
+                # リストレベルに応じたインデントを追加（4スペース×level）
+                list_level = block.get("list_level", 0)
+                indent = "    " * list_level
+                self.markdown_lines.append(f"{indent}{output_marker} {cleaned_text}")
                 
             elif block_type == "table":
                 if prev_type:
