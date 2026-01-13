@@ -2010,6 +2010,13 @@ class _FiguresMixin:
                         if re.match(r'^図\d+', line_text) or re.match(r'^表\d+', line_text):
                             continue
                         
+                        # 見出しパターンはラベル候補から除外（expanded_bboxに含めない）
+                        # これにより、見出しは本文側に残り、図形内テキストには含まれない
+                        if re.match(r'^\d+\.\s+', line_text):
+                            continue
+                        if re.match(r'^第[一二三四五六七八九十0-9]+', line_text):
+                            continue
+                        
                         is_label = (
                             line_text and
                             len(line_text) <= 30 and
