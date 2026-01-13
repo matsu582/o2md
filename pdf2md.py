@@ -1490,9 +1490,10 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 column = "left" if img_center_x < 297.64 else "right"
             column_order = {"left": 0, "full": 1, "right": 2}.get(column, 1)
             
-            # Y座標はbboxのy_min（上端）を使用（正確な位置で順序を決定）
+            # Y座標は元のunion_bbox（y_position）を優先的に使用
+            # expanded_bbox（bbox）はラベル探索で上方向に広がるため、出力順序には不適
             # 上キャプションがあればそのY座標を使用（順序を正しくするため）
-            y_position = bbox[1]  # bboxのy_minを使用
+            y_position = img.get("y_position", bbox[1])  # 元のunion_bboxを優先
             caption_above = img.get("_caption_above")
             if caption_above:
                 caption_bbox = caption_above.get("bbox", (0, 0, 0, 0))
@@ -1518,14 +1519,15 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             all_items.sort(key=lambda x: (x["column_order"], x["y_position"]))
         else:
             # 単一カラム: Y座標を優先してソート
-            # ただし、Y座標が近い場合（±30pt以内）は同一行とみなしてX座標（左→右）を優先
-            def row_based_sort_key(item):
-                y_pos = item["y_position"]
-                col_order = item["column_order"]
-                # Y座標を30pt単位で丸めて同一行判定
-                row_group = int(y_pos / 30)
-                return (row_group, col_order, y_pos)
-            all_items.sort(key=row_based_sort_key)
+            # X座標（bbox[0]）を副キーとして使用し、同一Y座標の場合は左から右へ
+            def get_x_position(item):
+                """アイテムのX座標を取得"""
+                if item["type"] == "block":
+                    bbox = item["data"].get("bbox", (0, 0, 0, 0))
+                else:
+                    bbox = item["data"].get("bbox", (0, 0, 0, 0))
+                return bbox[0] if bbox else 0
+            all_items.sort(key=lambda x: (x["y_position"], get_x_position(x)))
         
         prev_type = None
         list_active = False
