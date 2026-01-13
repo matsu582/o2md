@@ -37,6 +37,9 @@ from pdf2md_figures import _FiguresMixin
 from pdf2md_tables import _TablesMixin
 from pdf2md_text import _TextMixin
 
+# docling統合モジュール（オプショナル）
+from pdf2md_docling import is_docling_available, extract_slide_tables_with_docling
+
 # 設定
 LIBREOFFICE_PATH = get_libreoffice_path()
 
@@ -665,9 +668,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             # 構造化テキストと画像を出力
             self._output_structured_markdown_with_images(text_blocks, all_images)
             
-            # スライド文書の場合、罫線ベースの表を追加検出・出力
+            # スライド文書の場合、doclingで表を検出・出力
             if self._is_slide_document:
-                slide_tables = self._detect_slide_tables(page)
+                slide_tables = self._detect_slide_tables_with_docling(page_num)
                 for table_md in slide_tables:
                     self.markdown_lines.append("")
                     self.markdown_lines.append(table_md)
@@ -783,6 +786,48 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                         )
         except Exception as e:
             debug_print(f"[DEBUG] スライド表検出エラー: {e}")
+        return tables_md
+    
+    def _detect_slide_tables_with_docling(self, page_num: int) -> List[str]:
+        """doclingを使用してスライドPDFから表を検出してMarkdown形式で返す
+        
+        doclingのTableFormerモデルを使用して、罫線のない表も含めて
+        高精度な表検出・テキスト抽出を行う。
+        
+        Args:
+            page_num: ページ番号（0始まり）
+            
+        Returns:
+            Markdown形式の表文字列のリスト
+        """
+        if not is_docling_available():
+            debug_print("[DEBUG] doclingが利用不可のため、罫線ベース検出にフォールバック")
+            # doclingが利用不可の場合は空リストを返す
+            return []
+        
+        tables_md = []
+        try:
+            # doclingはページ番号が1始まり
+            docling_page_num = page_num + 1
+            
+            debug_print(f"[DEBUG] doclingで表検出開始: ページ {docling_page_num}")
+            
+            # doclingで表を抽出
+            docling_tables = extract_slide_tables_with_docling(
+                self.pdf_file,
+                docling_page_num,
+                verbose=is_verbose()
+            )
+            
+            if docling_tables:
+                debug_print(f"[DEBUG] docling表検出: {len(docling_tables)}個の表を検出")
+                tables_md.extend(docling_tables)
+            else:
+                debug_print(f"[DEBUG] docling表検出: 表なし")
+                
+        except Exception as e:
+            debug_print(f"[DEBUG] docling表検出エラー: {e}")
+        
         return tables_md
     
     def _merge_across_page_breaks(self, content: str) -> str:
