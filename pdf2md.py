@@ -1506,8 +1506,19 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 "column_order": column_order
             })
         
-        # カラム順（左→フル→右）、次にY座標でソート
-        all_items.sort(key=lambda x: (x["column_order"], x["y_position"]))
+        # テキストブロックのカラム分布を確認して、ソート方法を決定
+        # 2段組みの場合はカラム順を優先、単一カラムの場合はY座標を優先
+        text_blocks = [item for item in all_items if item["type"] == "block"]
+        left_count = sum(1 for item in text_blocks if item["column"] == "left")
+        right_count = sum(1 for item in text_blocks if item["column"] == "right")
+        is_two_column = left_count >= 3 and right_count >= 3
+        
+        if is_two_column:
+            # 2段組み: カラム順（左→フル→右）、次にY座標でソート
+            all_items.sort(key=lambda x: (x["column_order"], x["y_position"]))
+        else:
+            # 単一カラム: Y座標を優先してソート
+            all_items.sort(key=lambda x: (x["y_position"], x["column_order"]))
         
         prev_type = None
         list_active = False
