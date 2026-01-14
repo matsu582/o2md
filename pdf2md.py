@@ -1881,6 +1881,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         # 最後のリストの終了処理
         if list_active:
             self.markdown_lines.append("")
+        
+        # 未出力のdoclingの表があれば出力（スライド文書など、is_table_imageがない場合）
+        if docling_tables:
+            for table_md in docling_tables:
+                self.markdown_lines.append("")
+                self.markdown_lines.append(table_md)
 
     def _output_structured_markdown(self, blocks: List[Dict[str, Any]]):
         """構造化されたテキストブロックをMarkdownとして出力
