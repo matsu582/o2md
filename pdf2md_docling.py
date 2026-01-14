@@ -88,6 +88,8 @@ class DoclingTableExtractor:
             
             # 表を抽出
             doc = result.document
+            if self.verbose:
+                print(f"[DEBUG] docling検出: {len(doc.tables)}個の表要素を検出")
             for table in doc.tables:
                 try:
                     # Markdown形式でエクスポート（doc引数を渡す）
