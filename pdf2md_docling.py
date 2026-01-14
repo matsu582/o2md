@@ -151,22 +151,36 @@ class DoclingTableExtractor:
                     # 方法1: export_to_markdown(doc=doc)を試行
                     try:
                         md = table.export_to_markdown(doc=doc)
-                    except TypeError:
-                        pass
+                        if self.verbose:
+                            print(f"[DEBUG] 表{i+1} 方法1結果: {repr(md[:50]) if md else 'None/空'}")
+                    except TypeError as e:
+                        if self.verbose:
+                            print(f"[DEBUG] 表{i+1} 方法1エラー: {e}")
                     
                     # 方法2: export_to_markdown()を試行（doc引数なし）
                     if not md or not md.strip():
                         try:
                             md = table.export_to_markdown()
-                        except Exception:
-                            pass
+                            if self.verbose:
+                                print(f"[DEBUG] 表{i+1} 方法2結果: {repr(md[:50]) if md else 'None/空'}")
+                        except Exception as e:
+                            if self.verbose:
+                                print(f"[DEBUG] 表{i+1} 方法2エラー: {e}")
                     
                     # 方法3: table.dataから直接Markdownを生成
                     if not md or not md.strip():
+                        if self.verbose:
+                            has_data = hasattr(table, 'data') and table.data is not None
+                            has_grid = has_data and hasattr(table.data, 'grid') and table.data.grid
+                            print(f"[DEBUG] 表{i+1} 方法3: has_data={has_data}, has_grid={has_grid}")
+                            if has_grid:
+                                print(f"[DEBUG] 表{i+1} grid行数: {len(table.data.grid)}")
                         md = self._table_data_to_markdown(table.data)
+                        if self.verbose:
+                            print(f"[DEBUG] 表{i+1} 方法3結果: {repr(md[:50]) if md else 'None/空'}")
                     
                     if self.verbose:
-                        print(f"[DEBUG] 表{i+1} 結果: {repr(md[:100]) if md else 'None/空'}")
+                        print(f"[DEBUG] 表{i+1} 最終結果: {repr(md[:100]) if md else 'None/空'}")
                     
                     if md and md.strip():
                         tables_md.append(md.strip())
