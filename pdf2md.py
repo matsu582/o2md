@@ -1780,11 +1780,16 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                         self.markdown_lines.append(f"### {caption_text}")
                         self.markdown_lines.append("")
                 
-                # 表画像の場合、doclingで検出した表を直後に出力
+                # 表画像の場合、doclingで検出した表を<details>タグで囲んで直後に出力
                 if img_data.get("is_table_image", False) and docling_tables:
+                    self.markdown_lines.append("")
+                    self.markdown_lines.append("<details>")
+                    self.markdown_lines.append("<summary>表データ</summary>")
+                    self.markdown_lines.append("")
                     for table_md in docling_tables:
-                        self.markdown_lines.append("")
                         self.markdown_lines.append(table_md)
+                        self.markdown_lines.append("")
+                    self.markdown_lines.append("</details>")
                     # 出力済みの表をクリア（同じ表を複数回出力しない）
                     docling_tables = []
                 
