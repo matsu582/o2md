@@ -567,6 +567,7 @@ class _FiguresMixin:
                 overlap_with_header = max(0, min(raw_y1, header_y_max) - raw_y0)
                 if is_large_cluster:
                     # 巨大クラスタはoverlap率のみで判定（緩和）
+                    # raw_y0の条件は適用しない（表画像などがヘッダー領域から始まる場合がある）
                     is_in_header = overlap_with_header > cluster_height * 0.8
                 else:
                     is_in_header = overlap_with_header > cluster_height * 0.5 or raw_y0 < header_y_max * 0.5
@@ -1370,7 +1371,17 @@ class _FiguresMixin:
                 
                 if is_table_image and "clip_bbox" in fig_info:
                     clip_bbox = fig_info["clip_bbox"]
-                    debug_print(f"[DEBUG] 表画像: 既存のclip_bboxを使用")
+                    # 表画像でも本文テキストを除外するロジックを適用
+                    body_line = self._fig_find_body_text_above(
+                        clip_bbox, page_text_lines, col_width
+                    )
+                    if body_line:
+                        body_bottom = body_line["bbox"][3]
+                        new_clip_y0 = body_bottom + 5.0
+                        if new_clip_y0 > clip_bbox[1] and new_clip_y0 < clip_bbox[3]:
+                            debug_print(f"[DEBUG] 表画像: 本文検出によりclip_y0を{clip_bbox[1]:.1f}→{new_clip_y0:.1f}にトリム")
+                            clip_bbox = (clip_bbox[0], new_clip_y0, clip_bbox[2], clip_bbox[3])
+                    debug_print(f"[DEBUG] 表画像: clip_bboxを使用")
                 else:
                     # 画像のみクラスタ（drawing_count=0）の場合の処理
                     drawing_count_for_clip = fig_info.get("drawing_count", 0)
