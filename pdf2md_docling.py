@@ -56,6 +56,60 @@ class DoclingTableExtractor:
                 print("[INFO] docling DocumentConverterを初期化しました")
         return self._converter
     
+    def _table_data_to_markdown(self, table_data) -> str:
+        """TableDataオブジェクトからMarkdown形式の表を生成
+        
+        doclingのexport_to_markdown()が空を返す場合のフォールバック
+        
+        Args:
+            table_data: doclingのTableDataオブジェクト
+            
+        Returns:
+            Markdown形式の表文字列
+        """
+        if not table_data or not hasattr(table_data, 'grid'):
+            return ""
+        
+        grid = table_data.grid
+        if not grid:
+            return ""
+        
+        rows = []
+        for row in grid:
+            cells = []
+            for cell in row:
+                text = cell.text if hasattr(cell, 'text') else ""
+                text = text.replace("|", "\\|").replace("\n", " ")
+                cells.append(text.strip())
+            rows.append(cells)
+        
+        if not rows:
+            return ""
+        
+        # 列数を統一
+        max_cols = max(len(row) for row in rows)
+        for row in rows:
+            while len(row) < max_cols:
+                row.append("")
+        
+        # Markdown表を生成
+        lines = []
+        
+        # ヘッダー行
+        header = "| " + " | ".join(rows[0]) + " |"
+        lines.append(header)
+        
+        # 区切り行
+        separator = "| " + " | ".join(["---"] * max_cols) + " |"
+        lines.append(separator)
+        
+        # データ行
+        for row in rows[1:]:
+            line = "| " + " | ".join(row) + " |"
+            lines.append(line)
+        
+        return "\n".join(lines)
+    
     def extract_tables_from_page(
         self, 
         pdf_path: str, 
@@ -92,15 +146,27 @@ class DoclingTableExtractor:
                 print(f"[DEBUG] docling検出: {len(doc.tables)}個の表要素を検出")
             for i, table in enumerate(doc.tables):
                 try:
-                    # Markdown形式でエクスポート（doc引数を渡す）
+                    md = None
+                    
+                    # 方法1: export_to_markdown(doc=doc)を試行
                     try:
                         md = table.export_to_markdown(doc=doc)
                     except TypeError:
-                        # 古いバージョンのdoclingではdoc引数がない
-                        md = table.export_to_markdown()
+                        pass
+                    
+                    # 方法2: export_to_markdown()を試行（doc引数なし）
+                    if not md or not md.strip():
+                        try:
+                            md = table.export_to_markdown()
+                        except Exception:
+                            pass
+                    
+                    # 方法3: table.dataから直接Markdownを生成
+                    if not md or not md.strip():
+                        md = self._table_data_to_markdown(table.data)
                     
                     if self.verbose:
-                        print(f"[DEBUG] 表{i+1} export_to_markdown結果: {repr(md[:100]) if md else 'None/空'}")
+                        print(f"[DEBUG] 表{i+1} 結果: {repr(md[:100]) if md else 'None/空'}")
                     
                     if md and md.strip():
                         tables_md.append(md.strip())
@@ -110,8 +176,6 @@ class DoclingTableExtractor:
                 except Exception as e:
                     if self.verbose:
                         print(f"[DEBUG] 表エクスポートエラー: {e}")
-                        import traceback
-                        traceback.print_exc()
                     continue
                     
         except Exception as e:
@@ -160,12 +224,25 @@ class DoclingTableExtractor:
                     if page_nums is not None and table_page not in page_nums:
                         continue
                     
-                    # Markdown形式でエクスポート（doc引数を渡す）
+                    md = None
+                    
+                    # 方法1: export_to_markdown(doc=doc)を試行
                     try:
                         md = table.export_to_markdown(doc=doc)
                     except TypeError:
-                        # 古いバージョンのdoclingではdoc引数がない
-                        md = table.export_to_markdown()
+                        pass
+                    
+                    # 方法2: export_to_markdown()を試行（doc引数なし）
+                    if not md or not md.strip():
+                        try:
+                            md = table.export_to_markdown()
+                        except Exception:
+                            pass
+                    
+                    # 方法3: table.dataから直接Markdownを生成
+                    if not md or not md.strip():
+                        md = self._table_data_to_markdown(table.data)
+                    
                     if md and md.strip():
                         if table_page not in result_dict:
                             result_dict[table_page] = []
