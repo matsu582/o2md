@@ -48,12 +48,30 @@ class DoclingTableExtractor:
                 print("[WARNING] インストール: pip install docling")
     
     def _get_converter(self):
-        """DocumentConverterインスタンスを取得（遅延初期化）"""
+        """DocumentConverterインスタンスを取得（遅延初期化）
+        
+        MPS（Apple Silicon GPU）環境では表データが空になる問題があるため、
+        CPUを強制使用する設定を適用
+        """
         if self._converter is None and is_docling_available():
-            from docling.document_converter import DocumentConverter
-            self._converter = DocumentConverter()
+            from docling.document_converter import DocumentConverter, PdfFormatOption
+            from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
+            from docling.datamodel.pipeline_options import PdfPipelineOptions
+            from docling.datamodel.base_models import InputFormat
+            
+            # CPUを強制使用（MPS環境での表データ空問題を回避）
+            pipeline_options = PdfPipelineOptions()
+            pipeline_options.accelerator_options = AcceleratorOptions(
+                device=AcceleratorDevice.CPU
+            )
+            
+            self._converter = DocumentConverter(
+                format_options={
+                    InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+                }
+            )
             if self.verbose:
-                print("[INFO] docling DocumentConverterを初期化しました")
+                print("[INFO] docling DocumentConverterを初期化しました（CPU強制使用）")
         return self._converter
     
     def _table_data_to_markdown(self, table_data) -> str:
