@@ -55,7 +55,7 @@
 | 基盤ライブラリ | pypdfium2 + DocLayNet | pdfminer | PyMuPDF (fitz) |
 | テキスト抽出 | 対応 | 対応 | 対応 |
 | 段組みレイアウト | 対応 | なし | 対応 |
-| 表検出 | 対応 (TableFormer) | なし | 対応 (テキスト位置ベース) |
+| 表検出 | 対応 (TableFormer) | なし | 対応 (テキスト位置ベース + docling TableFormer) |
 | 図抽出 | 対応 | なし | 対応 (SVG/PNG) |
 | OCR | 対応 (EasyOCR/Tesseract) | なし | 対応 (Tesseract/manga-ocr選択可) |
 | 書式 (太字/斜体等) | 対応 | なし | 対応 |
