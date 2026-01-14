@@ -680,7 +680,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 docling_tables = self._detect_slide_tables_with_docling(page_num)
             
             # 構造化テキストと画像を出力（docling表は表画像の直後に出力）
-            self._output_structured_markdown_with_images(text_blocks, all_images, docling_tables)
+            self._output_structured_markdown_with_images(
+                text_blocks, all_images, docling_tables, self._is_slide_document
+            )
         else:
             # 画像ベースのPDF: 従来の画像+OCR処理
             debug_print(f"[DEBUG] ページ {page_num + 1}: 画像ベースPDFとして処理")
@@ -1571,14 +1573,15 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
     
     def _output_structured_markdown_with_images(
         self, blocks: List[Dict[str, Any]], images: List[Dict[str, Any]],
-        docling_tables: List[str] = None
+        docling_tables: List[str] = None, is_slide_document: bool = False
     ):
         """構造化されたテキストブロックと画像をMarkdownとして出力
         
         Args:
             blocks: 構造化されたテキストブロックのリスト
             images: 抽出された画像情報のリスト
-            docling_tables: doclingで検出した表のMarkdown文字列リスト（表画像の直後に出力）
+            docling_tables: doclingで検出した表のMarkdown文字列リスト
+            is_slide_document: スライド文書かどうか（Trueの場合、最後の画像の後に表を出力）
         """
         if docling_tables is None:
             docling_tables = []
@@ -1780,8 +1783,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                         self.markdown_lines.append(f"### {caption_text}")
                         self.markdown_lines.append("")
                 
-                # 表画像の場合、doclingで検出した表を<details>タグで囲んで直後に出力
-                if img_data.get("is_table_image", False) and docling_tables:
+                # 表画像の場合（スライドPDF以外）、doclingで検出した表を<details>タグで囲んで直後に出力
+                if not is_slide_document and img_data.get("is_table_image", False) and docling_tables:
                     self.markdown_lines.append("")
                     self.markdown_lines.append("<details>")
                     self.markdown_lines.append("<summary>表データ</summary>")
@@ -1882,11 +1885,16 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         if list_active:
             self.markdown_lines.append("")
         
-        # 未出力のdoclingの表があれば出力（スライド文書など、is_table_imageがない場合）
-        if docling_tables:
+        # スライド文書の場合、doclingで検出した表を<details>タグで囲んで出力
+        if is_slide_document and docling_tables:
+            self.markdown_lines.append("")
+            self.markdown_lines.append("<details>")
+            self.markdown_lines.append("<summary>表データ</summary>")
+            self.markdown_lines.append("")
             for table_md in docling_tables:
-                self.markdown_lines.append("")
                 self.markdown_lines.append(table_md)
+                self.markdown_lines.append("")
+            self.markdown_lines.append("</details>")
 
     def _output_structured_markdown(self, blocks: List[Dict[str, Any]]):
         """構造化されたテキストブロックをMarkdownとして出力
