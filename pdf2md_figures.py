@@ -1306,7 +1306,10 @@ class _FiguresMixin:
                 is_embedded_image = fig_info.get("is_embedded", False)
                 is_table_image = fig_info.get("is_table_image", False)
                 
-                if is_embedded_image:
+                # スライド文書または埋め込み画像の場合はraw_union_bboxを使用
+                # これにより、クラスタリング時に追加されたパディングを除外し、
+                # 本文テキストが図形領域に巻き込まれるのを防ぐ
+                if is_embedded_image or is_slide_document:
                     graphics_bbox = fig_info.get("raw_union_bbox", fig_info["union_bbox"])
                 else:
                     graphics_bbox = fig_info["union_bbox"]
