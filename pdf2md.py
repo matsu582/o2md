@@ -671,18 +671,16 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             # vector_figuresは既に_extract_all_figuresで統合処理済み
             all_images = vector_figures
             
-            # 構造化テキストと画像を出力
-            self._output_structured_markdown_with_images(text_blocks, all_images)
-            
-            # スライド文書の場合、または表画像として出力される図がある場合、doclingで表を検出・出力
+            # スライド文書の場合、または表画像として出力される図がある場合、doclingで表を事前に検出
             has_table_image = any(img.get("is_table_image", False) for img in all_images) if all_images else False
+            docling_tables = []
             if self._is_slide_document or has_table_image:
                 if has_table_image:
                     debug_print(f"[DEBUG] ページ {page_num + 1}: 表画像を検出、doclingで表を抽出")
-                slide_tables = self._detect_slide_tables_with_docling(page_num)
-                for table_md in slide_tables:
-                    self.markdown_lines.append("")
-                    self.markdown_lines.append(table_md)
+                docling_tables = self._detect_slide_tables_with_docling(page_num)
+            
+            # 構造化テキストと画像を出力（docling表は表画像の直後に出力）
+            self._output_structured_markdown_with_images(text_blocks, all_images, docling_tables)
         else:
             # 画像ベースのPDF: 従来の画像+OCR処理
             debug_print(f"[DEBUG] ページ {page_num + 1}: 画像ベースPDFとして処理")
@@ -1572,14 +1570,18 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         return result
     
     def _output_structured_markdown_with_images(
-        self, blocks: List[Dict[str, Any]], images: List[Dict[str, Any]]
+        self, blocks: List[Dict[str, Any]], images: List[Dict[str, Any]],
+        docling_tables: List[str] = None
     ):
         """構造化されたテキストブロックと画像をMarkdownとして出力
         
         Args:
             blocks: 構造化されたテキストブロックのリスト
             images: 抽出された画像情報のリスト
+            docling_tables: doclingで検出した表のMarkdown文字列リスト（表画像の直後に出力）
         """
+        if docling_tables is None:
+            docling_tables = []
         import re
         
         # ページをまたいだリストのネストレベルを再計算
@@ -1777,6 +1779,14 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     if caption_text:
                         self.markdown_lines.append(f"### {caption_text}")
                         self.markdown_lines.append("")
+                
+                # 表画像の場合、doclingで検出した表を直後に出力
+                if img_data.get("is_table_image", False) and docling_tables:
+                    for table_md in docling_tables:
+                        self.markdown_lines.append("")
+                        self.markdown_lines.append(table_md)
+                    # 出力済みの表をクリア（同じ表を複数回出力しない）
+                    docling_tables = []
                 
                 prev_type = "image"
                 
