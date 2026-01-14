@@ -87,10 +87,15 @@ class DoclingTableExtractor:
             )
             
             # 表を抽出
-            for table in result.document.tables:
+            doc = result.document
+            for table in doc.tables:
                 try:
-                    # Markdown形式でエクスポート
-                    md = table.export_to_markdown()
+                    # Markdown形式でエクスポート（doc引数を渡す）
+                    try:
+                        md = table.export_to_markdown(doc=doc)
+                    except TypeError:
+                        # 古いバージョンのdoclingではdoc引数がない
+                        md = table.export_to_markdown()
                     if md and md.strip():
                         tables_md.append(md.strip())
                         if self.verbose:
@@ -135,7 +140,8 @@ class DoclingTableExtractor:
             result = converter.convert(pdf_path)
             
             # 表を抽出してページごとに分類
-            for table in result.document.tables:
+            doc = result.document
+            for table in doc.tables:
                 try:
                     # ページ番号を取得
                     table_page = 1
@@ -146,8 +152,12 @@ class DoclingTableExtractor:
                     if page_nums is not None and table_page not in page_nums:
                         continue
                     
-                    # Markdown形式でエクスポート
-                    md = table.export_to_markdown()
+                    # Markdown形式でエクスポート（doc引数を渡す）
+                    try:
+                        md = table.export_to_markdown(doc=doc)
+                    except TypeError:
+                        # 古いバージョンのdoclingではdoc引数がない
+                        md = table.export_to_markdown()
                     if md and md.strip():
                         if table_page not in result_dict:
                             result_dict[table_page] = []
