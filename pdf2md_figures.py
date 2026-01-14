@@ -1197,6 +1197,15 @@ class _FiguresMixin:
         clip_x1 = min(page_width, graphics_bbox[2] + padding)
         clip_y1 = min(page_height, graphics_bbox[3] + padding)
         
+        # スライド文書の場合、raw_graphics_bboxを基準にclip_y1を制限
+        # これにより、クラスタリングで拡張されたbboxがフッタ領域を含まないようにする
+        if is_slide_document and raw_graphics_bbox:
+            # raw_graphics_bboxの下端 + パディング + マージン（10px）を上限とする
+            max_clip_y1 = raw_graphics_bbox[3] + padding + 10.0
+            if clip_y1 > max_clip_y1:
+                debug_print(f"[DEBUG] スライド文書: clip_y1を{clip_y1:.1f}→{max_clip_y1:.1f}に制限（フッタ除外）")
+                clip_y1 = max_clip_y1
+        
         # スライド文書の場合、本文行と交差する場合は上端を詰める
         # raw_graphics_bbox（パディング前の元のbbox）を使用して判定
         if is_slide_document:
@@ -1251,9 +1260,17 @@ class _FiguresMixin:
                     if self._fig_is_body_text_line(line_text, line_width, col_width):
                         continue
                     
+                    # フッタ領域のテキストはスキップ（clip_y1より下）
+                    if line_bbox[1] >= clip_y1:
+                        continue
+                    
+                    # ヘッダ領域のテキストはスキップ（clip_y0より上）
+                    if line_bbox[3] <= clip_y0:
+                        continue
+                    
                     # テキストが図形領域内またはその近くにあるかチェック
-                    # Y方向: 図形の上端から下端の範囲内
-                    if line_bbox[1] < ref_bbox[1] - 10 or line_bbox[3] > ref_bbox[3] + 10:
+                    # Y方向: 図形の上端から下端の範囲内（厳密に）
+                    if line_bbox[1] < ref_bbox[1] - 10 or line_bbox[3] > ref_bbox[3]:
                         continue
                     
                     # X方向: 図形と重なっているか、図形の右側にある
