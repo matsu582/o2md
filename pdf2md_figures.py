@@ -1664,6 +1664,19 @@ class _FiguresMixin:
                             debug_print(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, 本文テキスト比={body_text_ratio:.1%}）")
                             continue
                 
+                # 小さすぎる図形を除外（高さが60ピクセル未満）
+                # 表のヘッダーラベルなど、図として出力すべきでない小さな要素を除外
+                clip_height = clip_bbox[3] - clip_bbox[1]
+                clip_width = clip_bbox[2] - clip_bbox[0]
+                if clip_height < 60:
+                    debug_print(f"[DEBUG] page={page_num+1}: 小さすぎる図形を除外（高さ={clip_height:.1f}px < 60px）")
+                    continue
+                
+                # 幅が狭すぎる図形も除外（幅が100ピクセル未満）
+                if clip_width < 100:
+                    debug_print(f"[DEBUG] page={page_num+1}: 幅が狭すぎる図形を除外（幅={clip_width:.1f}px < 100px）")
+                    continue
+                
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
                 
