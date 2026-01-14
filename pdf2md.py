@@ -657,6 +657,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     if line.strip():
                         self.markdown_lines.append(line.strip())
                 self.markdown_lines.append("")
+            
+            # スキャンページでもdoclingで表を検出・出力
+            scan_tables = self._detect_slide_tables_with_docling(page_num)
+            for table_md in scan_tables:
+                self.markdown_lines.append("")
+                self.markdown_lines.append(table_md)
         elif text_blocks or vector_figures:
             # テキストベースのPDF: 構造化されたMarkdownを出力
             debug_print(f"[DEBUG] ページ {page_num + 1}: テキストベースPDFとして処理")
@@ -692,6 +698,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     if line.strip():
                         self.markdown_lines.append(line.strip())
                 self.markdown_lines.append("")
+            
+            # 画像ベースPDFでもdoclingで表を検出・出力
+            image_tables = self._detect_slide_tables_with_docling(page_num)
+            for table_md in image_tables:
+                self.markdown_lines.append("")
+                self.markdown_lines.append(table_md)
         
         # ページ境界マーカーを挿入（後処理でページ跨ぎの結合に使用）
         # 先頭ブロックのy座標を埋め込む（ヘッダ帯判定用）
