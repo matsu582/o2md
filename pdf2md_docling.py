@@ -90,7 +90,7 @@ class DoclingTableExtractor:
             doc = result.document
             if self.verbose:
                 print(f"[DEBUG] docling検出: {len(doc.tables)}個の表要素を検出")
-            for table in doc.tables:
+            for i, table in enumerate(doc.tables):
                 try:
                     # Markdown形式でエクスポート（doc引数を渡す）
                     try:
@@ -98,6 +98,10 @@ class DoclingTableExtractor:
                     except TypeError:
                         # 古いバージョンのdoclingではdoc引数がない
                         md = table.export_to_markdown()
+                    
+                    if self.verbose:
+                        print(f"[DEBUG] 表{i+1} export_to_markdown結果: {repr(md[:100]) if md else 'None/空'}")
+                    
                     if md and md.strip():
                         tables_md.append(md.strip())
                         if self.verbose:
@@ -106,6 +110,8 @@ class DoclingTableExtractor:
                 except Exception as e:
                     if self.verbose:
                         print(f"[DEBUG] 表エクスポートエラー: {e}")
+                        import traceback
+                        traceback.print_exc()
                     continue
                     
         except Exception as e:
