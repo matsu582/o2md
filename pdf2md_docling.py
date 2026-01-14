@@ -67,10 +67,25 @@ class DoclingTableExtractor:
         Returns:
             Markdown形式の表文字列
         """
-        if not table_data or not hasattr(table_data, 'grid'):
+        if not table_data:
             return ""
         
-        grid = table_data.grid
+        # 方法A: gridから生成（docling 2.67.0以前）
+        if hasattr(table_data, 'grid') and table_data.grid:
+            return self._grid_to_markdown(table_data.grid)
+        
+        # 方法B: table_cellsから生成（docling 2.68.0）
+        if hasattr(table_data, 'table_cells') and table_data.table_cells:
+            return self._table_cells_to_markdown(
+                table_data.table_cells,
+                getattr(table_data, 'num_rows', 0),
+                getattr(table_data, 'num_cols', 0)
+            )
+        
+        return ""
+    
+    def _grid_to_markdown(self, grid) -> str:
+        """gridデータからMarkdownを生成"""
         if not grid:
             return ""
         
@@ -86,25 +101,58 @@ class DoclingTableExtractor:
         if not rows:
             return ""
         
-        # 列数を統一
         max_cols = max(len(row) for row in rows)
         for row in rows:
             while len(row) < max_cols:
                 row.append("")
         
-        # Markdown表を生成
         lines = []
-        
-        # ヘッダー行
         header = "| " + " | ".join(rows[0]) + " |"
         lines.append(header)
-        
-        # 区切り行
         separator = "| " + " | ".join(["---"] * max_cols) + " |"
         lines.append(separator)
-        
-        # データ行
         for row in rows[1:]:
+            line = "| " + " | ".join(row) + " |"
+            lines.append(line)
+        
+        return "\n".join(lines)
+    
+    def _table_cells_to_markdown(self, table_cells, num_rows: int, num_cols: int) -> str:
+        """table_cellsデータからMarkdownを生成（docling 2.68.0対応）"""
+        if not table_cells:
+            return ""
+        
+        # num_rowsとnum_colsが0の場合、table_cellsから推定
+        if num_rows == 0 or num_cols == 0:
+            for cell in table_cells:
+                if hasattr(cell, 'end_row_offset_idx'):
+                    num_rows = max(num_rows, cell.end_row_offset_idx)
+                if hasattr(cell, 'end_col_offset_idx'):
+                    num_cols = max(num_cols, cell.end_col_offset_idx)
+        
+        if num_rows == 0 or num_cols == 0:
+            return ""
+        
+        # グリッドを初期化
+        grid = [["" for _ in range(num_cols)] for _ in range(num_rows)]
+        
+        # セルデータをグリッドに配置
+        for cell in table_cells:
+            row_idx = getattr(cell, 'start_row_offset_idx', 0)
+            col_idx = getattr(cell, 'start_col_offset_idx', 0)
+            text = getattr(cell, 'text', "") or ""
+            text = text.replace("|", "\\|").replace("\n", " ").strip()
+            
+            if 0 <= row_idx < num_rows and 0 <= col_idx < num_cols:
+                grid[row_idx][col_idx] = text
+        
+        # Markdown生成
+        lines = []
+        header = "| " + " | ".join(grid[0]) + " |"
+        lines.append(header)
+        separator = "| " + " | ".join(["---"] * num_cols) + " |"
+        lines.append(separator)
+        for row in grid[1:]:
             line = "| " + " | ".join(row) + " |"
             lines.append(line)
         
@@ -172,9 +220,10 @@ class DoclingTableExtractor:
                         if self.verbose:
                             has_data = hasattr(table, 'data') and table.data is not None
                             has_grid = has_data and hasattr(table.data, 'grid') and table.data.grid
-                            print(f"[DEBUG] 表{i+1} 方法3: has_data={has_data}, has_grid={has_grid}")
-                            if has_grid:
-                                print(f"[DEBUG] 表{i+1} grid行数: {len(table.data.grid)}")
+                            has_cells = has_data and hasattr(table.data, 'table_cells') and table.data.table_cells
+                            num_rows = getattr(table.data, 'num_rows', 0) if has_data else 0
+                            num_cols = getattr(table.data, 'num_cols', 0) if has_data else 0
+                            print(f"[DEBUG] 表{i+1} 方法3: has_grid={has_grid}, has_cells={has_cells}, rows={num_rows}, cols={num_cols}")
                         md = self._table_data_to_markdown(table.data)
                         if self.verbose:
                             print(f"[DEBUG] 表{i+1} 方法3結果: {repr(md[:50]) if md else 'None/空'}")
