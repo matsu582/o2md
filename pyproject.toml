@@ -24,7 +24,7 @@ dev = [
     "pytest-cov>=4.1.0",
 ]
 docling = [
-    "docling>=2.0.0",
+    "docling==2.67.0",
 ]
 
 [tool.setuptools]
