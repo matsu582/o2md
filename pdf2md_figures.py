@@ -1180,7 +1180,8 @@ class _FiguresMixin:
         is_embedded_image: bool = False,
         header_y_max: Optional[float] = None, footer_y_min: Optional[float] = None,
         is_slide_document: bool = False,
-        is_two_column: bool = True
+        is_two_column: bool = True,
+        raw_graphics_bbox: Optional[Tuple] = None
     ) -> Tuple:
         """graphics_bboxからclip_bboxを計算（トリム処理）"""
         # スライド文書では小さなマージン（5px）、通常文書では20px
@@ -1196,8 +1197,10 @@ class _FiguresMixin:
         clip_x1 = min(page_width, graphics_bbox[2] + padding)
         clip_y1 = min(page_height, graphics_bbox[3] + padding)
         
-        # スライド文書の場合、本文行と交差する場合は上端を広げない
+        # スライド文書の場合、本文行と交差する場合は上端を詰める
+        # raw_graphics_bbox（パディング前の元のbbox）を使用して判定
         if is_slide_document:
+            ref_bbox = raw_graphics_bbox if raw_graphics_bbox else graphics_bbox
             for line in text_lines:
                 line_bbox = line.get("bbox", (0, 0, 0, 0))
                 line_text = line.get("text", "").strip()
@@ -1205,11 +1208,12 @@ class _FiguresMixin:
                 # 本文らしい行かどうかを判定
                 if not self._fig_is_body_text_line(line_text, line_width, col_width):
                     continue
-                # 本文行がclip_bboxの上端付近にある場合、上端を詰める
-                if line_bbox[3] > clip_y0 and line_bbox[1] < graphics_bbox[1]:
+                # 本文行が図形の上端より上にある場合、clip_y0を詰める
+                # ref_bbox[1]（パディング前の図形上端）を基準に判定
+                if line_bbox[3] > clip_y0 and line_bbox[1] < ref_bbox[1]:
                     # 本文行の下端より下にclip_y0を設定
                     new_clip_y0 = line_bbox[3] + 2.0
-                    if new_clip_y0 < graphics_bbox[1]:
+                    if new_clip_y0 < ref_bbox[1]:
                         debug_print(f"[DEBUG] スライド文書: 本文行を避けてclip_y0を{clip_y0:.1f}→{new_clip_y0:.1f}に調整")
                         clip_y0 = new_clip_y0
         
@@ -1234,6 +1238,36 @@ class _FiguresMixin:
         # スライド文書または埋め込み画像の場合、上下トリムをスキップ
         if is_embedded_image or is_slide_document:
             debug_print(f"[DEBUG] {'スライド文書' if is_slide_document else '埋め込み画像'}: 上下トリムをスキップ")
+            
+            # スライド文書の場合、図形内テキスト（本文ではないテキスト）を含めるようにclip_bboxを拡張
+            if is_slide_document:
+                ref_bbox = raw_graphics_bbox if raw_graphics_bbox else graphics_bbox
+                for line in text_lines:
+                    line_bbox = line.get("bbox", (0, 0, 0, 0))
+                    line_text = line.get("text", "").strip()
+                    line_width = line_bbox[2] - line_bbox[0]
+                    
+                    # 本文行はスキップ（図形に含めない）
+                    if self._fig_is_body_text_line(line_text, line_width, col_width):
+                        continue
+                    
+                    # テキストが図形領域内またはその近くにあるかチェック
+                    # Y方向: 図形の上端から下端の範囲内
+                    if line_bbox[1] < ref_bbox[1] - 10 or line_bbox[3] > ref_bbox[3] + 10:
+                        continue
+                    
+                    # X方向: 図形と重なっているか、図形の右側にある
+                    if line_bbox[2] < ref_bbox[0] - 10:
+                        continue
+                    
+                    # 図形内テキストを含めるようにclip_bboxを拡張
+                    if line_bbox[2] > clip_x1:
+                        debug_print(f"[DEBUG] 図形内テキスト検出: clip_x1を{clip_x1:.1f}→{line_bbox[2] + padding:.1f}に拡張（テキスト: {line_text[:20]}）")
+                        clip_x1 = min(page_width, line_bbox[2] + padding)
+                    if line_bbox[0] < clip_x0:
+                        debug_print(f"[DEBUG] 図形内テキスト検出: clip_x0を{clip_x0:.1f}→{line_bbox[0] - padding:.1f}に拡張（テキスト: {line_text[:20]}）")
+                        clip_x0 = max(0, line_bbox[0] - padding)
+            
             return (clip_x0, clip_y0, clip_x1, clip_y1)
         
         caption = self._fig_find_caption_below(graphics_bbox, text_lines)
@@ -1306,13 +1340,13 @@ class _FiguresMixin:
                 is_embedded_image = fig_info.get("is_embedded", False)
                 is_table_image = fig_info.get("is_table_image", False)
                 
-                # スライド文書または埋め込み画像の場合はraw_union_bboxを使用
-                # これにより、クラスタリング時に追加されたパディングを除外し、
-                # 本文テキストが図形領域に巻き込まれるのを防ぐ
-                if is_embedded_image or is_slide_document:
+                if is_embedded_image:
                     graphics_bbox = fig_info.get("raw_union_bbox", fig_info["union_bbox"])
                 else:
                     graphics_bbox = fig_info["union_bbox"]
+                
+                # スライド文書の場合、raw_union_bboxを保持して本文テキスト除外に使用
+                raw_graphics_bbox = fig_info.get("raw_union_bbox", graphics_bbox)
                 
                 column = fig_info["column"]
                 union_bbox = graphics_bbox
@@ -1550,7 +1584,8 @@ class _FiguresMixin:
                         graphics_bbox, page_text_lines, col_width,
                         page_width, page_height, column, gutter_x,
                         is_embedded_image, header_y_max, footer_y_min,
-                        is_slide_document, is_two_column
+                        is_slide_document, is_two_column,
+                        raw_graphics_bbox=raw_graphics_bbox
                     )
                 
                 # スライド文書: ページ全体を覆う図形（面積比50%以上）かつ本文テキスト比50%以上の場合のみ除外
