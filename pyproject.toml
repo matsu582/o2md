@@ -2,7 +2,7 @@
 name = "o2md"
 version = "0.0.1"
 description = "Office document to Markdown converter"
-readme = "README_ollama.md"
+readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "python-docx>=1.2.0",
@@ -26,6 +26,9 @@ dev = [
 docling = [
     "docling>=2.0.0",
 ]
+
+[tool.setuptools]
+packages = []
 
 [tool.pytest.ini_options]
 filterwarnings = [
