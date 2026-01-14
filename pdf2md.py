@@ -83,7 +83,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         output_dir: Optional[str] = None,
         output_format: str = 'png',
         ocr_engine: str = 'tesseract',
-        tessdata_dir: Optional[str] = None
+        tessdata_dir: Optional[str] = None,
+        use_docling: bool = False
     ):
         """コンバータインスタンスの初期化
         
@@ -93,6 +94,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             output_format: 出力画像形式 ('png' または 'svg')
             ocr_engine: OCRエンジン ('manga-ocr' または 'tesseract')
             tessdata_dir: tessdataディレクトリのパス（tessdata_best使用時に指定）
+            use_docling: doclingによる表検出を有効にするかどうか
         """
         self.pdf_file = pdf_file_path
         self.base_name = Path(pdf_file_path).stem
@@ -144,7 +146,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         # 親リスト（全角数字、半角数字）がアクティブかどうかを保持
         self._parent_list_active: bool = False
         
+        # doclingによる表検出を有効にするかどうか
+        self._use_docling: bool = use_docling
+        
         print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
+        if self._use_docling:
+            print("[INFO] doclingによる表検出が有効です")
     
     def _get_ocr(self):
         """manga-ocrインスタンスを取得（遅延初期化）"""
@@ -658,11 +665,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                         self.markdown_lines.append(line.strip())
                 self.markdown_lines.append("")
             
-            # スキャンページでもdoclingで表を検出・出力
-            scan_tables = self._detect_slide_tables_with_docling(page_num)
-            for table_md in scan_tables:
-                self.markdown_lines.append("")
-                self.markdown_lines.append(table_md)
+            # スキャンページでもdoclingで表を検出・出力（doclingが有効な場合のみ）
+            if self._use_docling:
+                scan_tables = self._detect_slide_tables_with_docling(page_num)
+                for table_md in scan_tables:
+                    self.markdown_lines.append("")
+                    self.markdown_lines.append(table_md)
         elif text_blocks or vector_figures:
             # テキストベースのPDF: 構造化されたMarkdownを出力
             debug_print(f"[DEBUG] ページ {page_num + 1}: テキストベースPDFとして処理")
@@ -671,10 +679,10 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             # vector_figuresは既に_extract_all_figuresで統合処理済み
             all_images = vector_figures
             
-            # スライド文書の場合、または表画像として出力される図がある場合、doclingで表を事前に検出
+            # スライド文書の場合、または表画像として出力される図がある場合、doclingで表を事前に検出（doclingが有効な場合のみ）
             has_table_image = any(img.get("is_table_image", False) for img in all_images) if all_images else False
             docling_tables = []
-            if self._is_slide_document or has_table_image:
+            if self._use_docling and (self._is_slide_document or has_table_image):
                 if has_table_image:
                     debug_print(f"[DEBUG] ページ {page_num + 1}: 表画像を検出、doclingで表を抽出")
                 docling_tables = self._detect_slide_tables_with_docling(page_num)
@@ -702,11 +710,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                         self.markdown_lines.append(line.strip())
                 self.markdown_lines.append("")
             
-            # 画像ベースPDFでもdoclingで表を検出・出力
-            image_tables = self._detect_slide_tables_with_docling(page_num)
-            for table_md in image_tables:
-                self.markdown_lines.append("")
-                self.markdown_lines.append(table_md)
+            # 画像ベースPDFでもdoclingで表を検出・出力（doclingが有効な場合のみ）
+            if self._use_docling:
+                image_tables = self._detect_slide_tables_with_docling(page_num)
+                for table_md in image_tables:
+                    self.markdown_lines.append("")
+                    self.markdown_lines.append(table_md)
         
         # ページ境界マーカーを挿入（後処理でページ跨ぎの結合に使用）
         # 先頭ブロックのy座標を埋め込む（ヘッダ帯判定用）
@@ -2195,6 +2204,8 @@ def main():
                        help='tessdataディレクトリを指定（tessdata_best使用時）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力')
+    parser.add_argument('--docling', action='store_true',
+                       help='doclingによる表検出を有効にする')
     
     args = parser.parse_args()
     
@@ -2214,7 +2225,8 @@ def main():
             output_dir=args.output_dir,
             output_format=args.format,
             ocr_engine=args.ocr_engine,
-            tessdata_dir=args.tessdata_dir
+            tessdata_dir=args.tessdata_dir,
+            use_docling=args.docling
         )
         output_file = converter.convert()
         print("\n変換完了!")
