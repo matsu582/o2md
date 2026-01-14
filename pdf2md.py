@@ -37,6 +37,9 @@ from pdf2md_figures import _FiguresMixin
 from pdf2md_tables import _TablesMixin
 from pdf2md_text import _TextMixin
 
+# docling統合モジュール（オプショナル）
+from pdf2md_docling import is_docling_available, extract_slide_tables_with_docling
+
 # 設定
 LIBREOFFICE_PATH = get_libreoffice_path()
 
@@ -80,7 +83,8 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         output_dir: Optional[str] = None,
         output_format: str = 'png',
         ocr_engine: str = 'tesseract',
-        tessdata_dir: Optional[str] = None
+        tessdata_dir: Optional[str] = None,
+        use_docling: bool = False
     ):
         """コンバータインスタンスの初期化
         
@@ -90,6 +94,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             output_format: 出力画像形式 ('png' または 'svg')
             ocr_engine: OCRエンジン ('manga-ocr' または 'tesseract')
             tessdata_dir: tessdataディレクトリのパス（tessdata_best使用時に指定）
+            use_docling: doclingによる表検出を有効にするかどうか
         """
         self.pdf_file = pdf_file_path
         self.base_name = Path(pdf_file_path).stem
@@ -141,7 +146,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         # 親リスト（全角数字、半角数字）がアクティブかどうかを保持
         self._parent_list_active: bool = False
         
+        # doclingによる表検出を有効にするかどうか
+        self._use_docling: bool = use_docling
+        
         print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
+        if self._use_docling:
+            print("[INFO] doclingによる表検出が有効です")
     
     def _get_ocr(self):
         """manga-ocrインスタンスを取得（遅延初期化）"""
@@ -654,6 +664,13 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     if line.strip():
                         self.markdown_lines.append(line.strip())
                 self.markdown_lines.append("")
+            
+            # スキャンページでもdoclingで表を検出・出力（doclingが有効な場合のみ）
+            if self._use_docling:
+                scan_tables = self._detect_slide_tables_with_docling(page_num)
+                for table_md in scan_tables:
+                    self.markdown_lines.append("")
+                    self.markdown_lines.append(table_md)
         elif text_blocks or vector_figures:
             # テキストベースのPDF: 構造化されたMarkdownを出力
             debug_print(f"[DEBUG] ページ {page_num + 1}: テキストベースPDFとして処理")
@@ -662,8 +679,18 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             # vector_figuresは既に_extract_all_figuresで統合処理済み
             all_images = vector_figures
             
-            # 構造化テキストと画像を出力
-            self._output_structured_markdown_with_images(text_blocks, all_images)
+            # スライド文書の場合、または表画像として出力される図がある場合、doclingで表を事前に検出（doclingが有効な場合のみ）
+            has_table_image = any(img.get("is_table_image", False) for img in all_images) if all_images else False
+            docling_tables = []
+            if self._use_docling and (self._is_slide_document or has_table_image):
+                if has_table_image:
+                    debug_print(f"[DEBUG] ページ {page_num + 1}: 表画像を検出、doclingで表を抽出")
+                docling_tables = self._detect_slide_tables_with_docling(page_num)
+            
+            # 構造化テキストと画像を出力（docling表は表画像の直後に出力）
+            self._output_structured_markdown_with_images(
+                text_blocks, all_images, docling_tables, self._is_slide_document
+            )
         else:
             # 画像ベースのPDF: 従来の画像+OCR処理
             debug_print(f"[DEBUG] ページ {page_num + 1}: 画像ベースPDFとして処理")
@@ -682,6 +709,13 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     if line.strip():
                         self.markdown_lines.append(line.strip())
                 self.markdown_lines.append("")
+            
+            # 画像ベースPDFでもdoclingで表を検出・出力（doclingが有効な場合のみ）
+            if self._use_docling:
+                image_tables = self._detect_slide_tables_with_docling(page_num)
+                for table_md in image_tables:
+                    self.markdown_lines.append("")
+                    self.markdown_lines.append(table_md)
         
         # ページ境界マーカーを挿入（後処理でページ跨ぎの結合に使用）
         # 先頭ブロックのy座標を埋め込む（ヘッダ帯判定用）
@@ -715,14 +749,110 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             self.markdown_lines.append(f"<!--PAGE_BREAK first_y={first_block_y} last_y={last_block_y} last_w={last_block_w} page_h={page_height} page_w={page_width}-->")
             self.markdown_lines.append("")
     
+    def _detect_slide_tables(self, page) -> List[str]:
+        """スライドPDFから罫線ベースの表を検出してMarkdown形式で返す
+        
+        PyMuPDFのfind_tables()を使用して罫線ベースの表のみを検出。
+        罫線のない表は検出しない。
+        
+        Args:
+            page: PyMuPDFのページオブジェクト
+            
+        Returns:
+            Markdown形式の表文字列のリスト
+        """
+        tables_md = []
+        try:
+            tables = page.find_tables()
+            if tables.tables:
+                for table in tables.tables:
+                    rows = table.extract()
+                    if not rows or len(rows) < 2:
+                        continue
+                    col_count = len(rows[0]) if rows[0] else 0
+                    if col_count < 2:
+                        continue
+                    
+                    # セル内改行をスペースで結合し、パイプ文字をエスケープ
+                    processed_rows = []
+                    for row in rows:
+                        processed_row = []
+                        for cell in row:
+                            if cell is None:
+                                cell_text = ""
+                            else:
+                                lines = str(cell).split("\n")
+                                cell_text = " ".join(
+                                    line.strip() for line in lines if line.strip()
+                                )
+                            cell_text = cell_text.replace("|", "\\|")
+                            processed_row.append(cell_text)
+                        processed_rows.append(processed_row)
+                    
+                    # ヘッダー行が全て空白の場合、次の行をヘッダーとして使用
+                    if processed_rows and all(
+                        cell.strip() == "" for cell in processed_rows[0]
+                    ):
+                        if len(processed_rows) >= 2:
+                            processed_rows = processed_rows[1:]
+                    
+                    # 行数を再確認（最低2行以上）
+                    if len(processed_rows) < 2:
+                        continue
+                    
+                    # Markdown形式に変換
+                    md = self._format_markdown_table(processed_rows)
+                    if md:
+                        tables_md.append(md)
+                        debug_print(
+                            f"[DEBUG] スライド表検出: "
+                            f"rows={len(processed_rows)}, cols={col_count}"
+                        )
+        except Exception as e:
+            debug_print(f"[DEBUG] スライド表検出エラー: {e}")
+        return tables_md
     
-    
-    
-    
-    
-    
-    
-    
+    def _detect_slide_tables_with_docling(self, page_num: int) -> List[str]:
+        """doclingを使用してスライドPDFから表を検出してMarkdown形式で返す
+        
+        doclingのTableFormerモデルを使用して、罫線のない表も含めて
+        高精度な表検出・テキスト抽出を行う。
+        
+        Args:
+            page_num: ページ番号（0始まり）
+            
+        Returns:
+            Markdown形式の表文字列のリスト
+        """
+        if not is_docling_available():
+            debug_print("[DEBUG] doclingが利用不可のため、罫線ベース検出にフォールバック")
+            # doclingが利用不可の場合は空リストを返す
+            return []
+        
+        tables_md = []
+        try:
+            # doclingはページ番号が1始まり
+            docling_page_num = page_num + 1
+            
+            debug_print(f"[DEBUG] doclingで表検出開始: ページ {docling_page_num}")
+            
+            # doclingで表を抽出
+            docling_tables = extract_slide_tables_with_docling(
+                self.pdf_file,
+                docling_page_num,
+                verbose=is_verbose()
+            )
+            
+            if docling_tables:
+                debug_print(f"[DEBUG] docling表検出: {len(docling_tables)}個の表を検出")
+                tables_md.extend(docling_tables)
+            else:
+                debug_print(f"[DEBUG] docling表検出: 表なし")
+                
+        except Exception as e:
+            debug_print(f"[DEBUG] docling表検出エラー: {e}")
+        
+        return tables_md
     
     def _merge_across_page_breaks(self, content: str) -> str:
         """ページ跨ぎの文章を結合する後処理
@@ -1451,14 +1581,19 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         return result
     
     def _output_structured_markdown_with_images(
-        self, blocks: List[Dict[str, Any]], images: List[Dict[str, Any]]
+        self, blocks: List[Dict[str, Any]], images: List[Dict[str, Any]],
+        docling_tables: List[str] = None, is_slide_document: bool = False
     ):
         """構造化されたテキストブロックと画像をMarkdownとして出力
         
         Args:
             blocks: 構造化されたテキストブロックのリスト
             images: 抽出された画像情報のリスト
+            docling_tables: doclingで検出した表のMarkdown文字列リスト
+            is_slide_document: スライド文書かどうか（Trueの場合、最後の画像の後に表を出力）
         """
+        if docling_tables is None:
+            docling_tables = []
         import re
         
         # ページをまたいだリストのネストレベルを再計算
@@ -1657,6 +1792,19 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                         self.markdown_lines.append(f"### {caption_text}")
                         self.markdown_lines.append("")
                 
+                # 表画像の場合（スライドPDF以外）、doclingで検出した表を<details>タグで囲んで直後に出力
+                if not is_slide_document and img_data.get("is_table_image", False) and docling_tables:
+                    self.markdown_lines.append("")
+                    self.markdown_lines.append("<details>")
+                    self.markdown_lines.append("<summary>表データ</summary>")
+                    self.markdown_lines.append("")
+                    for table_md in docling_tables:
+                        self.markdown_lines.append(table_md)
+                        self.markdown_lines.append("")
+                    self.markdown_lines.append("</details>")
+                    # 出力済みの表をクリア（同じ表を複数回出力しない）
+                    docling_tables = []
+                
                 prev_type = "image"
                 
             else:
@@ -1745,6 +1893,17 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         # 最後のリストの終了処理
         if list_active:
             self.markdown_lines.append("")
+        
+        # スライド文書の場合、doclingで検出した表を<details>タグで囲んで出力
+        if is_slide_document and docling_tables:
+            self.markdown_lines.append("")
+            self.markdown_lines.append("<details>")
+            self.markdown_lines.append("<summary>表データ</summary>")
+            self.markdown_lines.append("")
+            for table_md in docling_tables:
+                self.markdown_lines.append(table_md)
+                self.markdown_lines.append("")
+            self.markdown_lines.append("</details>")
 
     def _output_structured_markdown(self, blocks: List[Dict[str, Any]]):
         """構造化されたテキストブロックをMarkdownとして出力
@@ -2045,6 +2204,8 @@ def main():
                        help='tessdataディレクトリを指定（tessdata_best使用時）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力')
+    parser.add_argument('--docling', action='store_true',
+                       help='doclingによる表検出を有効にする')
     
     args = parser.parse_args()
     
@@ -2064,7 +2225,8 @@ def main():
             output_dir=args.output_dir,
             output_format=args.format,
             ocr_engine=args.ocr_engine,
-            tessdata_dir=args.tessdata_dir
+            tessdata_dir=args.tessdata_dir,
+            use_docling=args.docling
         )
         output_file = converter.convert()
         print("\n変換完了!")

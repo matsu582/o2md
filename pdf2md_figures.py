@@ -1649,7 +1649,8 @@ class _FiguresMixin:
                     "bbox": expanded_bbox,
                     "y_position": union_bbox[1],
                     "texts": figure_texts,
-                    "column": column
+                    "column": column,
+                    "is_table_image": is_table_image
                 })
                 
                 debug_print(f"[DEBUG] 図を抽出: {image_path} ({fig_info['cluster_size']}要素, {len(figure_texts)}テキスト, {column})")
