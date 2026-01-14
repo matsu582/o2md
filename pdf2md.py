@@ -674,8 +674,11 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             # 構造化テキストと画像を出力
             self._output_structured_markdown_with_images(text_blocks, all_images)
             
-            # スライド文書の場合、doclingで表を検出・出力
-            if self._is_slide_document:
+            # スライド文書の場合、または表画像として出力される図がある場合、doclingで表を検出・出力
+            has_table_image = any(img.get("is_table_image", False) for img in all_images) if all_images else False
+            if self._is_slide_document or has_table_image:
+                if has_table_image:
+                    debug_print(f"[DEBUG] ページ {page_num + 1}: 表画像を検出、doclingで表を抽出")
                 slide_tables = self._detect_slide_tables_with_docling(page_num)
                 for table_md in slide_tables:
                     self.markdown_lines.append("")
