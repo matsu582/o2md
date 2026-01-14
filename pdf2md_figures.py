@@ -869,6 +869,20 @@ class _FiguresMixin:
                                 debug_print(f"[DEBUG] 表画像: 下キャプション検出 '{line_text[:20]}'")
                                 break
                     
+                    # 注釈テキスト（※で始まるテキスト）を検出してclip_y1を調整
+                    for line in page_text_lines:
+                        line_bbox = line["bbox"]
+                        line_text = line["text"]
+                        # union_bottom付近（-30〜+50）にある注釈テキストを検出
+                        if line_bbox[1] >= union_bottom - 30 and line_bbox[1] <= union_bottom + 50:
+                            if re.match(r'^※\d', line_text):
+                                # 注釈テキストの上端をclip_y1として使用
+                                new_clip_y1 = line_bbox[1] - 2
+                                if new_clip_y1 < clip_y1:
+                                    clip_y1 = new_clip_y1
+                                    debug_print(f"[DEBUG] 表画像: 注釈テキスト検出 '{line_text[:30]}', clip_y1={clip_y1:.1f}")
+                                break
+                    
                     debug_print(f"[DEBUG] 表画像: clip_bbox=({clip_x0:.1f}, {clip_y0:.1f}, {clip_x1:.1f}, {clip_y1:.1f})")
                     
                     table_clip_bbox = (clip_x0, clip_y0, clip_x1, clip_y1)
@@ -1699,11 +1713,18 @@ class _FiguresMixin:
                     image_bboxes = []
                 else:
                     image_bboxes = fig_info.get("image_bboxes", [])
-                figure_texts, expanded_bbox = self._extract_text_in_bbox(
-                    page, clip_bbox, expand_for_labels=expand_labels, column=column, gutter_x=gutter_x,
-                    exclude_table_bboxes=exclude_tables, image_bboxes=image_bboxes,
-                    is_slide_document=is_slide_document
-                )
+                
+                # 表画像の場合はテキスト抽出を無効化（テキストは表の一部としてレンダリングされている）
+                if is_table_image:
+                    figure_texts = []
+                    expanded_bbox = clip_bbox
+                    debug_print(f"[DEBUG] 表画像: テキスト抽出を無効化")
+                else:
+                    figure_texts, expanded_bbox = self._extract_text_in_bbox(
+                        page, clip_bbox, expand_for_labels=expand_labels, column=column, gutter_x=gutter_x,
+                        exclude_table_bboxes=exclude_tables, image_bboxes=image_bboxes,
+                        is_slide_document=is_slide_document
+                    )
                 
                 # スライド文書: 本文テキストがない場合は除外しない（図中ラベルのみのページ）
                 # 本文テキストがある場合のみ、抽出されたテキスト量をチェック
