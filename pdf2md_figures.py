@@ -296,8 +296,8 @@ class _FiguresMixin:
                         if area >= page_area * 0.9:
                             debug_print(f"[DEBUG] page={page_num+1}: 背景矩形を除外（面積比={area/page_area:.2f}）")
                             continue
-                        # 小さなラベル背景を除外（高さ15px未満の細長い描画要素）
-                        # これらは表のヘッダーラベルの背景であり、図として出力すべきではない
+                        # 小さなラベル背景を除外（高さ15px未満かつ幅100px未満）
+                        # これらは通常、テキストラベルの背景として使用される装飾要素
                         if height < 15 and width < 100:
                             debug_print(f"[DEBUG] page={page_num+1}: 小さなラベル背景を除外（{width:.1f}x{height:.1f}）")
                             continue
@@ -625,7 +625,12 @@ class _FiguresMixin:
             page_area = page_width * page_height
             significant_image_count = 0
             image_bboxes = []
+            all_elements_small = True  # すべての要素が小さいかどうか
             for idx in cluster:
+                elem_bbox = all_bboxes[idx]
+                elem_height = elem_bbox[3] - elem_bbox[1]
+                if elem_height >= 15:
+                    all_elements_small = False
                 if all_elements[idx]["type"] == "image":
                     img_bbox = all_bboxes[idx]
                     image_bboxes.append(img_bbox)
@@ -642,7 +647,8 @@ class _FiguresMixin:
                 "image_count": image_count,
                 "drawing_count": drawing_count,
                 "significant_image_count": significant_image_count,
-                "image_bboxes": image_bboxes
+                "image_bboxes": image_bboxes,
+                "all_elements_small": all_elements_small  # 小さな要素のみのクラスタフラグ
             })
 
         # 包含除去フィルタ
@@ -1209,9 +1215,14 @@ class _FiguresMixin:
         header_y_max: Optional[float] = None, footer_y_min: Optional[float] = None,
         is_slide_document: bool = False,
         is_two_column: bool = True,
-        raw_graphics_bbox: Optional[Tuple] = None
+        raw_graphics_bbox: Optional[Tuple] = None,
+        all_elements_small: bool = False
     ) -> Tuple:
-        """graphics_bboxからclip_bboxを計算（トリム処理）"""
+        """graphics_bboxからclip_bboxを計算（トリム処理）
+        
+        Args:
+            all_elements_small: クラスタ内のすべての要素が小さい（高さ15px未満）場合True
+        """
         # スライド文書では小さなマージン（5px）、通常文書では20px
         if is_slide_document:
             padding = 5.0
@@ -1359,10 +1370,14 @@ class _FiguresMixin:
                         clip_y0 = max(clip_y0, new_clip_y0)
                         debug_print(f"[DEBUG] 見出し検出: clip_y0を{clip_y0:.1f}にトリム（見出し: {line_text[:20]}）")
         
-        # 小さな描画要素（高さ < 30px）の場合、clip_bboxをraw_graphics_bboxに近い値に制限
+        # 小さな描画要素の場合、clip_bboxをraw_graphics_bboxに近い値に制限
         # これにより、ラベルの背景などの小さな描画要素が周りのテキストを巻き込まない
+        # 判定条件:
+        # 1. raw_union_bboxの高さが30px未満、または
+        # 2. クラスタ内のすべての要素が小さい（高さ15px未満）
         raw_height = raw_graphics_bbox[3] - raw_graphics_bbox[1] if raw_graphics_bbox else graphics_bbox[3] - graphics_bbox[1]
-        if raw_height < 30 and raw_graphics_bbox:
+        is_small_element_cluster = (raw_height < 30) or all_elements_small
+        if is_small_element_cluster and raw_graphics_bbox:
             # 小さな描画要素の場合、clip_bboxをraw_graphics_bboxの範囲に制限
             # パディングは最小限（5px）に抑える
             small_padding = 5.0
@@ -1370,7 +1385,8 @@ class _FiguresMixin:
             new_clip_y1 = min(clip_y1, raw_graphics_bbox[3] + small_padding)
             new_clip_x0 = max(clip_x0, raw_graphics_bbox[0] - small_padding)
             new_clip_x1 = min(clip_x1, raw_graphics_bbox[2] + small_padding)
-            debug_print(f"[DEBUG] 小さな描画要素（高さ={raw_height:.1f}px）: clip_bboxを制限")
+            reason = "all_elements_small" if all_elements_small else f"高さ={raw_height:.1f}px"
+            debug_print(f"[DEBUG] 小さな描画要素クラスタ（{reason}）: clip_bboxを制限")
             debug_print(f"[DEBUG]   clip_y0: {clip_y0:.1f} → {new_clip_y0:.1f}")
             debug_print(f"[DEBUG]   clip_y1: {clip_y1:.1f} → {new_clip_y1:.1f}")
             debug_print(f"[DEBUG]   clip_x0: {clip_x0:.1f} → {new_clip_x0:.1f}")
@@ -1665,12 +1681,16 @@ class _FiguresMixin:
                                 if extracted_any:
                                     continue
                     
+                    # クラスタ内のすべての要素が小さいかどうかを取得
+                    all_elements_small = fig_info.get("all_elements_small", False)
+                    
                     clip_bbox = self._fig_compute_clip_bbox(
                         graphics_bbox, page_text_lines, col_width,
                         page_width, page_height, column, gutter_x,
                         is_embedded_image, header_y_max, footer_y_min,
                         is_slide_document, is_two_column,
-                        raw_graphics_bbox=raw_graphics_bbox
+                        raw_graphics_bbox=raw_graphics_bbox,
+                        all_elements_small=all_elements_small
                     )
                 
                 # スライド文書: ページ全体を覆う図形（面積比50%以上）かつ本文テキスト比50%以上の場合のみ除外

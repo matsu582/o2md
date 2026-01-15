@@ -191,11 +191,9 @@ class _TextMixin:
             
             for line in block.get("lines", []):
                 line_bbox = line.get("bbox", (0, 0, 0, 0))
-                line_text = ""
-                line_font_size = 0
-                line_is_bold = False
-                line_spans = []
                 
+                # span情報を収集
+                all_spans = []
                 for span in line.get("spans", []):
                     text = span.get("text", "")
                     if text:
@@ -226,7 +224,7 @@ class _TextMixin:
                         # 打消し線の検出（PDFでは直接検出困難、フォント名で推定）
                         span_is_strikethrough = "strikeout" in font_name or "strike" in font_name
                         
-                        line_spans.append({
+                        all_spans.append({
                             "text": text,
                             "size": span_size,
                             "bbox": span_bbox,
@@ -236,80 +234,147 @@ class _TextMixin:
                             "is_subscript": span_is_subscript,
                             "is_strikethrough": span_is_strikethrough
                         })
-                        line_text += text
-                        line_font_size = max(line_font_size, span_size)
                         font_sizes.append(span_size)
-                        if span_is_bold:
-                            line_is_bold = True
                 
-                if not line_text.strip():
+                if not all_spans:
                     continue
                 
-                # ヘッダ・フッタを除外（Y座標とページ高さを渡す）
-                if self._is_header_footer(
-                    line_text, header_footer_patterns,
-                    y_pos=line_bbox[1], page_height=page_height, font_size=line_font_size
-                ):
-                    debug_print(f"[DEBUG] ヘッダ・フッタ除外: {line_text.strip()[:30]}...")
-                    continue
+                # X座標の距離が大きいspanを別の行として分離
+                # 同じPDF行内でも、X座標の距離がフォントサイズの1.5倍以上の場合は別の行として扱う
+                # 空白のみのspanはスキップして、実際のテキストspanの間の距離を計算
+                span_groups = []
+                current_group = [all_spans[0]]
                 
-                # 視覚的に見えないテキストを除外
-                # ページ中央付近の単独数字（装飾的な要素）を除外
-                line_text_stripped = line_text.strip()
-                line_center_x = (line_bbox[0] + line_bbox[2]) / 2
-                relative_x = line_center_x / page_width
-                is_centered = 0.4 < relative_x < 0.6
-                is_single_digit = re.match(r'^[0-9０-９]$', line_text_stripped)
-                if is_centered and is_single_digit:
-                    debug_print(f"[DEBUG] 装飾的テキスト除外: '{line_text_stripped}' at x={line_center_x:.1f}")
-                    continue
-                
-                # 図領域内のテキストを除外（中心点が図領域内にある場合）
-                # ただし、キャプションパターン（図X、表X）は除外しない
-                line_center_x = (line_bbox[0] + line_bbox[2]) / 2
-                line_center_y = (line_bbox[1] + line_bbox[3]) / 2
-                line_text_stripped = line_text.strip()
-                is_caption = re.match(r'^図\s*\d+', line_text_stripped) or re.match(r'^表\s*\d+', line_text_stripped)
-                in_figure = False
-                if not is_caption:
-                    for fig_bbox in exclude_bboxes:
-                        if (fig_bbox[0] <= line_center_x <= fig_bbox[2] and
-                            fig_bbox[1] <= line_center_y <= fig_bbox[3]):
-                            in_figure = True
+                for i in range(1, len(all_spans)):
+                    curr_span = all_spans[i]
+                    
+                    # 空白のみのspanは現在のグループに追加して次へ
+                    if curr_span["text"].strip() == "":
+                        current_group.append(curr_span)
+                        continue
+                    
+                    # 現在のグループの最後の非空白spanを探す
+                    prev_span = None
+                    for j in range(len(current_group) - 1, -1, -1):
+                        if current_group[j]["text"].strip() != "":
+                            prev_span = current_group[j]
                             break
-                if in_figure:
-                    debug_print(f"[DEBUG] 図領域内テキスト除外: {line_text_stripped[:30]}...")
-                    continue
+                    
+                    if prev_span is None:
+                        # グループに非空白spanがない場合は現在のspanを追加
+                        current_group.append(curr_span)
+                        continue
+                    
+                    prev_x_end = prev_span["bbox"][2]
+                    curr_x_start = curr_span["bbox"][0]
+                    x_gap = curr_x_start - prev_x_end
+                    font_size = min(prev_span["size"], curr_span["size"])
+                    
+                    # X座標の距離がフォントサイズの1.5倍以上の場合は別グループ
+                    if x_gap > font_size * 1.5:
+                        span_groups.append(current_group)
+                        current_group = [curr_span]
+                    else:
+                        current_group.append(curr_span)
                 
-                line_width = line_bbox[2] - line_bbox[0]
-                x_center = (line_bbox[0] + line_bbox[2]) / 2
+                span_groups.append(current_group)
                 
-                # カラム判定: フル幅、左カラム、右カラム
-                # 1段組みページでは全行をfullにして、誤った段落分割を防ぐ
-                if is_single_column:
-                    column = "full"
-                elif line_width > page_width * 0.6:
-                    column = "full"
-                elif x_center < page_center:
-                    column = "left"
-                else:
-                    column = "right"
-                
-                # 行全体の斜体フラグを計算
-                line_is_italic = any(s.get("is_italic", False) for s in line_spans)
-                
-                lines_data.append({
-                    "text": line_text,
-                    "bbox": line_bbox,
-                    "font_size": line_font_size,
-                    "is_bold": line_is_bold,
-                    "is_italic": line_is_italic,
-                    "column": column,
-                    "y": line_bbox[1],
-                    "x": line_bbox[0],
-                    "width": line_width,
-                    "spans": line_spans
-                })
+                # 各グループを別の行として処理
+                for line_spans in span_groups:
+                    line_text = ""
+                    line_font_size = 0
+                    line_is_bold = False
+                    
+                    # グループのbboxを計算（空白のみのspanを除外）
+                    # 空白spanを含めるとbboxが広がり、_sort_lines_by_columnで
+                    # 再度クラスタリングされて結合されてしまう
+                    non_whitespace_spans = [s for s in line_spans if s["text"].strip()]
+                    if non_whitespace_spans:
+                        group_x0 = min(s["bbox"][0] for s in non_whitespace_spans)
+                        group_y0 = min(s["bbox"][1] for s in non_whitespace_spans)
+                        group_x1 = max(s["bbox"][2] for s in non_whitespace_spans)
+                        group_y1 = max(s["bbox"][3] for s in non_whitespace_spans)
+                    else:
+                        group_x0 = min(s["bbox"][0] for s in line_spans)
+                        group_y0 = min(s["bbox"][1] for s in line_spans)
+                        group_x1 = max(s["bbox"][2] for s in line_spans)
+                        group_y1 = max(s["bbox"][3] for s in line_spans)
+                    group_bbox = (group_x0, group_y0, group_x1, group_y1)
+                    
+                    for span in line_spans:
+                        line_text += span["text"]
+                        line_font_size = max(line_font_size, span["size"])
+                        if span["is_bold"]:
+                            line_is_bold = True
+                    
+                    if not line_text.strip():
+                        continue
+                    
+                    # ヘッダ・フッタを除外（Y座標とページ高さを渡す）
+                    if self._is_header_footer(
+                        line_text, header_footer_patterns,
+                        y_pos=group_bbox[1], page_height=page_height, font_size=line_font_size
+                    ):
+                        debug_print(f"[DEBUG] ヘッダ・フッタ除外: {line_text.strip()[:30]}...")
+                        continue
+                    
+                    # 視覚的に見えないテキストを除外
+                    # ページ中央付近の単独数字（装飾的な要素）を除外
+                    line_text_stripped = line_text.strip()
+                    line_center_x = (group_bbox[0] + group_bbox[2]) / 2
+                    relative_x = line_center_x / page_width
+                    is_centered = 0.4 < relative_x < 0.6
+                    is_single_digit = re.match(r'^[0-9０-９]$', line_text_stripped)
+                    if is_centered and is_single_digit:
+                        debug_print(f"[DEBUG] 装飾的テキスト除外: '{line_text_stripped}' at x={line_center_x:.1f}")
+                        continue
+                    
+                    # 図領域内のテキストを除外（中心点が図領域内にある場合）
+                    # ただし、キャプションパターン（図X、表X）は除外しない
+                    line_center_x = (group_bbox[0] + group_bbox[2]) / 2
+                    line_center_y = (group_bbox[1] + group_bbox[3]) / 2
+                    line_text_stripped = line_text.strip()
+                    is_caption = re.match(r'^図\s*\d+', line_text_stripped) or re.match(r'^表\s*\d+', line_text_stripped)
+                    in_figure = False
+                    if not is_caption:
+                        for fig_bbox in exclude_bboxes:
+                            if (fig_bbox[0] <= line_center_x <= fig_bbox[2] and
+                                fig_bbox[1] <= line_center_y <= fig_bbox[3]):
+                                in_figure = True
+                                break
+                    if in_figure:
+                        debug_print(f"[DEBUG] 図領域内テキスト除外: {line_text_stripped[:30]}...")
+                        continue
+                    
+                    line_width = group_bbox[2] - group_bbox[0]
+                    x_center = (group_bbox[0] + group_bbox[2]) / 2
+                    
+                    # カラム判定: フル幅、左カラム、右カラム
+                    # 1段組みページでは全行をfullにして、誤った段落分割を防ぐ
+                    if is_single_column:
+                        column = "full"
+                    elif line_width > page_width * 0.6:
+                        column = "full"
+                    elif x_center < page_center:
+                        column = "left"
+                    else:
+                        column = "right"
+                    
+                    # 行全体の斜体フラグを計算
+                    line_is_italic = any(s.get("is_italic", False) for s in line_spans)
+                    
+                    lines_data.append({
+                        "text": line_text,
+                        "bbox": group_bbox,
+                        "font_size": line_font_size,
+                        "is_bold": line_is_bold,
+                        "is_italic": line_is_italic,
+                        "column": column,
+                        "y": group_bbox[1],
+                        "x": group_bbox[0],
+                        "width": line_width,
+                        "spans": line_spans
+                    })
         
         if not lines_data:
             return []
@@ -494,12 +559,18 @@ class _TextMixin:
                 
                 # 結合条件を判定
                 # 短い継続行（8文字以下）の場合はdelta_x制限を緩和
+                # ただし、X座標の距離が大きい場合は結合しない（同じ行の別要素を誤結合しないため）
+                # 前のブロックの右端と次のブロックの左端の距離を計算
+                x_gap = next_bbox[0] - curr_bbox[2]
+                large_x_gap = x_gap > 10  # 10px以上離れている場合は別要素とみなす
+                
                 if next_text_len <= 8:
-                    # 短い継続行: delta_x制限なし、gap_y制限のみ
+                    # 短い継続行: delta_x制限緩和、ただしX座標の距離が大きい場合は除外
                     should_merge = (
                         gap_y <= 15 and
                         not ends_with_period and
-                        not starts_with_list_marker
+                        not starts_with_list_marker and
+                        not large_x_gap
                     )
                 else:
                     # 通常の継続行: ハングインデント範囲内
@@ -816,11 +887,32 @@ class _TextMixin:
             
             clusters.append(current_cluster)
             
-            # 各クラスタ内をx座標順にソート
+            # 各クラスタ内をx座標順にソートし、X座標の距離が大きい場合は分離
             result = []
             for cluster in clusters:
                 cluster_sorted = sorted(cluster, key=lambda x: x.get("x", 0))
-                result.extend(cluster_sorted)
+                # X座標の距離が大きい行を分離
+                if len(cluster_sorted) > 1:
+                    separated = []
+                    current_group = [cluster_sorted[0]]
+                    for i in range(1, len(cluster_sorted)):
+                        prev = cluster_sorted[i - 1]
+                        curr = cluster_sorted[i]
+                        # 前の行の右端と現在の行の左端の距離を計算
+                        prev_x_end = prev.get("bbox", (0, 0, 0, 0))[2]
+                        curr_x_start = curr.get("bbox", (0, 0, 0, 0))[0]
+                        x_gap = curr_x_start - prev_x_end
+                        font_size = min(prev.get("font_size", 12), curr.get("font_size", 12))
+                        # X方向のギャップがフォントサイズの1倍以上の場合は分離
+                        if x_gap > font_size * 1.0:
+                            separated.extend(current_group)
+                            current_group = [curr]
+                        else:
+                            current_group.append(curr)
+                    separated.extend(current_group)
+                    result.extend(separated)
+                else:
+                    result.extend(cluster_sorted)
             
             return result
         
@@ -1809,6 +1901,7 @@ class _TextMixin:
                         # 3. フォントサイズが同等
                         # 4. 次の行が番号付き見出しではない
                         # 5. 次の行が短い（折り返しの続き）
+                        # 6. X座標の距離が小さい（同じ行の折り返しのみ）
                         if next_line.get("column") != line.get("column"):
                             break
                         y_gap = next_line["y"] - merged_bbox[3]
@@ -1822,6 +1915,10 @@ class _TextMixin:
                         # 次の行が短い場合のみマージ（長い本文は除外）
                         next_text = next_line["text"].strip()
                         if len(next_text) > 30:
+                            break
+                        # X座標の距離をチェック（同じY座標でも離れている場合はマージしない）
+                        x_gap = next_line["bbox"][0] - merged_bbox[2]
+                        if x_gap > base_font_size * 1.0:
                             break
                         # マージ
                         merged_heading_text += next_text
@@ -1861,6 +1958,27 @@ class _TextMixin:
                 # 結合条件をチェック
                 y_gap = line["y"] - current_block["last_y"]
                 same_column = line["column"] == current_block["column"]
+                
+                # X座標の距離をチェック（同じY座標でも離れている場合は別段落）
+                # 前の行の右端と現在の行の左端の距離を計算
+                prev_x_end = current_block["bbox"][2]
+                curr_x_start = line["bbox"][0]
+                x_gap = curr_x_start - prev_x_end
+                # X方向のギャップがフォントサイズの1倍以上の場合は別段落
+                # （同じY座標にある別々のテキスト要素を分離するため）
+                x_gap_threshold = base_font_size * 1.0
+                large_x_gap = x_gap > x_gap_threshold
+                
+                # 左端の位置が大きく異なる場合も別段落として扱う
+                # （異なるX位置にある行を誤って結合しないため）
+                prev_x_start = current_block["bbox"][0]
+                x_start_diff = abs(curr_x_start - prev_x_start)
+                # 左端の差がフォントサイズの3倍以上の場合は別段落
+                # ただし、インデントされた継続行は除外（curr_x_start > prev_x_startの場合）
+                large_x_start_diff = (
+                    x_start_diff > base_font_size * 3.0 and
+                    curr_x_start < prev_x_start  # 現在の行が前の行より左にある場合のみ
+                )
                 
                 # 箇条書きブロックの終了判定
                 # 現在のブロックが箇条書きで、次の行が番号付きでない場合
@@ -1915,7 +2033,9 @@ class _TextMixin:
                     list_boundary or
                     curr_is_numbered or  # 新しい番号付き行は常に新しいブロック
                     prev_is_caption or  # 図表キャプションの後は新しいブロック
-                    curr_is_caption  # 図表キャプションは新しいブロックとして開始
+                    curr_is_caption or  # 図表キャプションは新しいブロックとして開始
+                    large_x_gap or  # X方向のギャップが大きい場合は別段落
+                    large_x_start_diff  # 左端の位置が大きく異なる場合は別段落
                 )
                 
                 if is_new_paragraph:
