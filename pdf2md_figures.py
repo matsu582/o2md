@@ -288,11 +288,18 @@ class _FiguresMixin:
                 rect = d.get("rect")
                 if rect:
                     bbox = (rect.x0, rect.y0, rect.x1, rect.y1)
-                    area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                    width = bbox[2] - bbox[0]
+                    height = bbox[3] - bbox[1]
+                    area = width * height
                     if area >= 200:
                         # PPT由来の背景矩形を除外（ページ面積の90%以上を覆うdrawing）
                         if area >= page_area * 0.9:
                             debug_print(f"[DEBUG] page={page_num+1}: 背景矩形を除外（面積比={area/page_area:.2f}）")
+                            continue
+                        # 小さなラベル背景を除外（高さ15px未満の細長い描画要素）
+                        # これらは表のヘッダーラベルの背景であり、図として出力すべきではない
+                        if height < 15 and width < 100:
+                            debug_print(f"[DEBUG] page={page_num+1}: 小さなラベル背景を除外（{width:.1f}x{height:.1f}）")
                             continue
                         all_elements.append({"bbox": bbox, "type": "drawing"})
         except Exception as e:
