@@ -1164,17 +1164,23 @@ class _FiguresMixin:
     def _fig_find_body_text_above(
         self, graphics_bbox: Tuple, text_lines: List[Dict], col_width: float
     ) -> Optional[Dict]:
-        """図の上部付近にある本文行を探す"""
+        """図の上部付近にある本文行を探す
+        
+        本文行は図の上端（graphics_bbox[1]）よりも上にある必要がある。
+        図の内部にあるテキストは本文として検出しない。
+        """
         best_body = None
         best_y = 0
         
-        search_y_end = (graphics_bbox[1] + graphics_bbox[3]) / 2
+        # 図の上端を基準に検索（図の内部にあるテキストは除外）
+        search_y_end = graphics_bbox[1]
         
         for line in text_lines:
             line_bbox = line["bbox"]
             line_text = line["text"].strip()
             line_width = line_bbox[2] - line_bbox[0]
             
+            # 本文行の下端が図の上端よりも下にある場合はスキップ
             if line_bbox[3] > search_y_end:
                 continue
             
@@ -1207,10 +1213,15 @@ class _FiguresMixin:
         else:
             padding = 20.0
         
-        clip_x0 = max(0, graphics_bbox[0] - padding)
-        clip_y0 = max(0, graphics_bbox[1] - padding)
-        clip_x1 = min(page_width, graphics_bbox[2] + padding)
-        clip_y1 = min(page_height, graphics_bbox[3] + padding)
+        # 非スライド文書でraw_graphics_bboxが提供されている場合、
+        # clip_bboxの初期化にraw_graphics_bboxを使用する
+        # これにより、パディングで拡張された領域を含まないようにする
+        init_bbox = raw_graphics_bbox if (raw_graphics_bbox and not is_slide_document) else graphics_bbox
+        
+        clip_x0 = max(0, init_bbox[0] - padding)
+        clip_y0 = max(0, init_bbox[1] - padding)
+        clip_x1 = min(page_width, init_bbox[2] + padding)
+        clip_y1 = min(page_height, init_bbox[3] + padding)
         
         # スライド文書の場合、raw_graphics_bboxを基準にclip_y1を制限
         # これにより、クラスタリングで拡張されたbboxがフッタ領域を含まないようにする
@@ -1302,14 +1313,18 @@ class _FiguresMixin:
             
             return (clip_x0, clip_y0, clip_x1, clip_y1)
         
-        caption = self._fig_find_caption_below(graphics_bbox, text_lines)
+        # キャプション・本文検出にはraw_graphics_bboxを使用（パディング前の元のbbox）
+        # これにより、パディングで拡張された領域内のテキストを誤検出しない
+        search_bbox = raw_graphics_bbox if raw_graphics_bbox else graphics_bbox
+        
+        caption = self._fig_find_caption_below(search_bbox, text_lines)
         if caption:
             caption_y0 = caption["bbox"][1]
             new_clip_y1 = caption_y0 - 5.0
             clip_y1 = min(clip_y1, new_clip_y1)
             debug_print(f"[DEBUG] キャプション検出: clip_y1を{clip_y1:.1f}にトリム")
         
-        body_above = self._fig_find_body_text_above(graphics_bbox, text_lines, col_width)
+        body_above = self._fig_find_body_text_above(search_bbox, text_lines, col_width)
         if body_above:
             body_y1 = body_above["bbox"][3]
             new_clip_y0 = body_y1 + 5.0
@@ -1337,7 +1352,28 @@ class _FiguresMixin:
                         clip_y0 = max(clip_y0, new_clip_y0)
                         debug_print(f"[DEBUG] 見出し検出: clip_y0を{clip_y0:.1f}にトリム（見出し: {line_text[:20]}）")
         
-        if clip_y1 - clip_y0 < 50:
+        # 小さな描画要素（高さ < 30px）の場合、clip_bboxをraw_graphics_bboxに近い値に制限
+        # これにより、ラベルの背景などの小さな描画要素が周りのテキストを巻き込まない
+        raw_height = raw_graphics_bbox[3] - raw_graphics_bbox[1] if raw_graphics_bbox else graphics_bbox[3] - graphics_bbox[1]
+        if raw_height < 30 and raw_graphics_bbox:
+            # 小さな描画要素の場合、clip_bboxをraw_graphics_bboxの範囲に制限
+            # パディングは最小限（5px）に抑える
+            small_padding = 5.0
+            new_clip_y0 = max(clip_y0, raw_graphics_bbox[1] - small_padding)
+            new_clip_y1 = min(clip_y1, raw_graphics_bbox[3] + small_padding)
+            new_clip_x0 = max(clip_x0, raw_graphics_bbox[0] - small_padding)
+            new_clip_x1 = min(clip_x1, raw_graphics_bbox[2] + small_padding)
+            debug_print(f"[DEBUG] 小さな描画要素（高さ={raw_height:.1f}px）: clip_bboxを制限")
+            debug_print(f"[DEBUG]   clip_y0: {clip_y0:.1f} → {new_clip_y0:.1f}")
+            debug_print(f"[DEBUG]   clip_y1: {clip_y1:.1f} → {new_clip_y1:.1f}")
+            debug_print(f"[DEBUG]   clip_x0: {clip_x0:.1f} → {new_clip_x0:.1f}")
+            debug_print(f"[DEBUG]   clip_x1: {clip_x1:.1f} → {new_clip_x1:.1f}")
+            return (new_clip_x0, new_clip_y0, new_clip_x1, new_clip_y1)
+        
+        # 最小高さ確保ロジック
+        # ただし、元の描画要素が非常に小さい場合（高さ < 30px）は適用しない
+        # これにより、小さな描画要素（ラベルの背景など）が周りのテキストを巻き込まない
+        if clip_y1 - clip_y0 < 50 and raw_height >= 30:
             center_y = (clip_y0 + clip_y1) / 2
             clip_y0 = center_y - 25
             clip_y1 = center_y + 25
@@ -1663,19 +1699,6 @@ class _FiguresMixin:
                         if body_text_ratio >= 0.5:
                             debug_print(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, 本文テキスト比={body_text_ratio:.1%}）")
                             continue
-                
-                # 小さすぎる図形を除外（高さが60ピクセル未満）
-                # 表のヘッダーラベルなど、図として出力すべきでない小さな要素を除外
-                clip_height = clip_bbox[3] - clip_bbox[1]
-                clip_width = clip_bbox[2] - clip_bbox[0]
-                if clip_height < 60:
-                    debug_print(f"[DEBUG] page={page_num+1}: 小さすぎる図形を除外（高さ={clip_height:.1f}px < 60px）")
-                    continue
-                
-                # 幅が狭すぎる図形も除外（幅が100ピクセル未満）
-                if clip_width < 100:
-                    debug_print(f"[DEBUG] page={page_num+1}: 幅が狭すぎる図形を除外（幅={clip_width:.1f}px < 100px）")
-                    continue
                 
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
