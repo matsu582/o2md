@@ -1749,10 +1749,16 @@ class _TextMixin:
         blocks = []
         current_block = None
         processed_table_regions = set()
+        processed_line_indices = set()  # 先行処理済みの行インデックスを追跡
         
         i = 0
         while i < len(lines):
             line = lines[i]
+            
+            # 先行処理済みの行はスキップ
+            if i in processed_line_indices:
+                i += 1
+                continue
             
             # 罫線ベースの表領域をチェック
             line_table = get_line_based_table_by_y(line)
@@ -1764,6 +1770,38 @@ class _TextMixin:
                 if table_id not in processed_line_tables:
                     # 図形と重なるテーブルはMarkdownテーブルとして出力しない
                     if not table_overlaps_with_figure(line_table):
+                        # 表を出力する前に、表のY範囲より上にある未処理の行を先に出力
+                        # これにより、2段組表の上にあるテキストが正しい位置に出力される
+                        table_y_start = line_table["y_start"]
+                        pending_lines_above = []
+                        for j in range(i + 1, len(lines)):
+                            if j not in processed_line_indices:
+                                future_line = lines[j]
+                                future_y = future_line.get("y", 0)
+                                # 表のY範囲より上にある行を収集
+                                if future_y < table_y_start - 5:
+                                    # この行が別の表の範囲内でないことを確認
+                                    future_table = get_line_based_table_by_y(future_line)
+                                    if not future_table:
+                                        pending_lines_above.append((j, future_line))
+                        
+                        # 収集した行をY座標順にソートして先に処理
+                        pending_lines_above.sort(key=lambda x: x[1].get("y", 0))
+                        for pending_idx, pending_line in pending_lines_above:
+                            pending_text = pending_line["text"].strip()
+                            if pending_text:
+                                if current_block:
+                                    blocks.append(self._finalize_block(current_block))
+                                    current_block = None
+                                blocks.append({
+                                    "text": pending_line["text"],
+                                    "bbox": pending_line["bbox"],
+                                    "font_size": pending_line["font_size"],
+                                    "is_bold": pending_line["is_bold"],
+                                    "column": pending_line["column"]
+                                })
+                                processed_line_indices.add(pending_idx)
+                        
                         # 現在のブロックを確定
                         if current_block:
                             blocks.append(self._finalize_block(current_block))
