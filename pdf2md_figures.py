@@ -829,10 +829,22 @@ class _FiguresMixin:
 
     def _fig_filter_table_regions(
         self, all_figure_candidates: List[Dict], table_bboxes: List[Tuple],
-        page_text_lines: List[Dict], column_count: int, page_num: int
+        page_text_lines: List[Dict], column_count: int, page_num: int,
+        pymupdf_table_bboxes: List[Tuple] = None
     ) -> List[Dict]:
-        """表領域と重なる図候補をフィルタリング"""
-        debug_print(f"[DEBUG] page={page_num+1}: 表フィルタ前の候補数={len(all_figure_candidates)}")
+        """表領域と重なる図候補をフィルタリング
+        
+        Args:
+            all_figure_candidates: 図候補リスト
+            table_bboxes: テキストベースで検出した表領域
+            page_text_lines: ページのテキスト行
+            column_count: 段組み数
+            page_num: ページ番号
+            pymupdf_table_bboxes: PyMuPDFで検出した表領域（Markdownテーブル出力可能）
+        """
+        if pymupdf_table_bboxes is None:
+            pymupdf_table_bboxes = []
+        debug_print(f"[DEBUG] page={page_num+1}: 表フィルタ前の候補数={len(all_figure_candidates)}, PyMuPDF表数={len(pymupdf_table_bboxes)}")
         table_filtered = []
         table_image_candidates = []
         
@@ -840,18 +852,33 @@ class _FiguresMixin:
             is_table = False
             cand_bbox = cand["union_bbox"]
             matched_table_bbox = None
+            is_pymupdf_table = False
             
-            for table_bbox in table_bboxes:
+            # PyMuPDFで検出された表との重なりを確認
+            for table_bbox in pymupdf_table_bboxes:
                 overlap = self._fig_bbox_overlap_ratio(cand_bbox, table_bbox)
                 if overlap >= 0.7:
                     matched_table_bbox = table_bbox
                     is_table = True
+                    is_pymupdf_table = True
+                    debug_print(f"[DEBUG] page={page_num+1}: PyMuPDF表と重なり検出 overlap={overlap:.2f}")
                     break
             
+            # テキストベースで検出された表との重なりを確認
+            if not is_table:
+                for table_bbox in table_bboxes:
+                    overlap = self._fig_bbox_overlap_ratio(cand_bbox, table_bbox)
+                    if overlap >= 0.7:
+                        matched_table_bbox = table_bbox
+                        is_table = True
+                        break
+            
             if is_table and matched_table_bbox:
+                # PyMuPDFで検出された表は常にMarkdownテーブルとして出力可能
                 is_two_col = (column_count >= 2)
-                if self._fig_can_output_as_markdown_table(matched_table_bbox, page_text_lines, is_two_col):
-                    debug_print(f"[DEBUG] page={page_num+1}: 図候補をMarkdown表として除外")
+                can_output_as_markdown = is_pymupdf_table or self._fig_can_output_as_markdown_table(matched_table_bbox, page_text_lines, is_two_col)
+                if can_output_as_markdown:
+                    debug_print(f"[DEBUG] page={page_num+1}: 図候補をMarkdown表として除外 (PyMuPDF={is_pymupdf_table})")
                 else:
                     debug_print(f"[DEBUG] page={page_num+1}: 図候補を表画像として出力")
                     union = cand_bbox
@@ -2006,7 +2033,8 @@ class _FiguresMixin:
             debug_print(f"[DEBUG] page={page_num+1}: 表領域を{len(table_bboxes)}個検出")
         
         all_figure_candidates = self._fig_filter_table_regions(
-            all_figure_candidates, table_bboxes, page_text_lines, column_count, page_num
+            all_figure_candidates, table_bboxes, page_text_lines, column_count, page_num,
+            pymupdf_table_bboxes=line_based_table_bboxes
         )
         
         # フェーズ5.5: 囲み記事（テキストボックス）のフィルタリング
