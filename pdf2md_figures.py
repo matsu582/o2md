@@ -859,6 +859,7 @@ class _FiguresMixin:
                     union_top = union[1]
                     clip_y0 = union_top - 2
                     
+                    # 表キャプション（「表 N」パターン）を検出
                     for line in page_text_lines:
                         line_bbox = line["bbox"]
                         line_text = line["text"]
@@ -867,6 +868,45 @@ class _FiguresMixin:
                                 clip_y0 = line_bbox[3] + 2
                                 debug_print(f"[DEBUG] 表画像: キャプション検出 '{line_text[:20]}'")
                                 break
+                    
+                    # 見出しテキスト（「1. 」「第1条」など）を検出してclip_y0を調整
+                    # 図形の上端から100px上までの範囲で見出しを検索
+                    heading_pattern = re.compile(r'^(\d+\.\s+|第[一二三四五六七八九十0-9]+)')
+                    heading_bottom_y = None
+                    for line in page_text_lines:
+                        line_bbox = line["bbox"]
+                        line_text = line["text"].strip()
+                        # 見出しが図形の上端付近（-100px〜+50px）にあるかチェック
+                        if line_bbox[1] >= union_top - 100 and line_bbox[3] <= union_top + 50:
+                            if heading_pattern.match(line_text):
+                                # X方向のオーバーラップを確認
+                                x_overlap = max(0, min(union[2], line_bbox[2]) - max(union[0], line_bbox[0]))
+                                if x_overlap > 20:
+                                    heading_bottom_y = line_bbox[3]
+                                    debug_print(f"[DEBUG] 表画像: 見出し検出 '{line_text[:30]}' y={line_bbox[1]:.1f}-{line_bbox[3]:.1f}")
+                    
+                    # 見出しが検出された場合、見出しの下にある本文テキストも除外する
+                    if heading_bottom_y is not None:
+                        # 見出しの下端から図形の上端+100pxまでの範囲にある本文テキストを検出
+                        # 図形の上端が描画要素の最上端（見出し背景など）を含む場合があるため、
+                        # 検索範囲を広げて本文テキストを確実に除外する
+                        for line in page_text_lines:
+                            line_bbox = line["bbox"]
+                            line_text = line["text"].strip()
+                            line_width = line_bbox[2] - line_bbox[0]
+                            # 見出しの下端から図形の上端+100pxまでの範囲
+                            if line_bbox[1] > heading_bottom_y and line_bbox[3] < union_top + 100:
+                                # X方向のオーバーラップを確認
+                                x_overlap = max(0, min(union[2], line_bbox[2]) - max(union[0], line_bbox[0]))
+                                if x_overlap > 20:
+                                    # 本文らしい行（幅が広い、または短いラベルでない）の場合、clip_y0を調整
+                                    page_width = union[2] - union[0]
+                                    # 幅が30%以上、または特定のパターン（SGPなど）の場合
+                                    if line_width > page_width * 0.3 or len(line_text) > 10:
+                                        new_clip_y0 = line_bbox[3] + 2
+                                        if new_clip_y0 > clip_y0:
+                                            clip_y0 = new_clip_y0
+                                            debug_print(f"[DEBUG] 表画像: 本文検出 '{line_text[:30]}' clip_y0={clip_y0:.1f}")
                     
                     clip_x0 = union[0] - 2
                     clip_x1 = union[2] + 2
@@ -1223,6 +1263,7 @@ class _FiguresMixin:
         Args:
             all_elements_small: クラスタ内のすべての要素が小さい（高さ15px未満）場合True
         """
+        
         # スライド文書では小さなマージン（5px）、通常文書では20px
         if is_slide_document:
             padding = 5.0
@@ -1352,15 +1393,17 @@ class _FiguresMixin:
         # 見出しテキストを検出してclip_y0を調整
         # 見出しパターン: "1. ", "2. ", "第1条" など
         heading_pattern = re.compile(r'^(\d+\.\s+|第[一二三四五六七八九十0-9]+)')
-        # clip_bboxの上端付近（padding分上）から図形の上端までの範囲で見出しを検索
+        # clip_bboxの上端付近（padding分上）から図形の上端+50pxまでの範囲で見出しを検索
+        # 見出しが図形の背景と重なっている場合も検出するため、search_y_endを拡張
         search_y_start = clip_y0 - padding - 10  # paddingより少し上から検索
-        search_y_end = graphics_bbox[1] + 10
+        search_y_end = graphics_bbox[1] + 50  # 図形の上端から50px下まで検索
+        heading_detected_y = None  # 検出された見出しの下端Y座標
         for line in text_lines:
             line_bbox = line.get("bbox", (0, 0, 0, 0))
             line_text = line.get("text", "").strip()
             # 見出しパターンに一致し、clip_bbox付近にある場合
             if heading_pattern.match(line_text):
-                # 見出しがclip_bboxの上端付近から図形の上端の間にあるかチェック
+                # 見出しがclip_bboxの上端付近から図形の上端+50pxの間にあるかチェック
                 if line_bbox[1] >= search_y_start and line_bbox[3] <= search_y_end:
                     # X方向のオーバーラップを確認
                     x_overlap = max(0, min(graphics_bbox[2], line_bbox[2]) - max(graphics_bbox[0], line_bbox[0]))
@@ -1368,7 +1411,29 @@ class _FiguresMixin:
                         # 見出しの下端より下にclip_y0を設定
                         new_clip_y0 = line_bbox[3] + 5.0
                         clip_y0 = max(clip_y0, new_clip_y0)
+                        heading_detected_y = line_bbox[3]
                         debug_print(f"[DEBUG] 見出し検出: clip_y0を{clip_y0:.1f}にトリム（見出し: {line_text[:20]}）")
+        
+        # 見出しが検出された場合、見出しの下にある本文テキストも除外する
+        # これにより、見出しと図形本体の間にある本文テキストが図形に含まれないようにする
+        if heading_detected_y is not None:
+            # 図形本体の上端を推定（graphics_bboxの上端から100px下を基準）
+            figure_body_y_start = graphics_bbox[1] + 100
+            for line in text_lines:
+                line_bbox = line.get("bbox", (0, 0, 0, 0))
+                line_text = line.get("text", "").strip()
+                line_width = line_bbox[2] - line_bbox[0]
+                # 見出しの下端から図形本体の上端までの範囲にある本文テキストを検出
+                if line_bbox[1] > heading_detected_y and line_bbox[3] < figure_body_y_start:
+                    # X方向のオーバーラップを確認
+                    x_overlap = max(0, min(graphics_bbox[2], line_bbox[2]) - max(graphics_bbox[0], line_bbox[0]))
+                    if x_overlap > 20:
+                        # 本文らしい行かどうかを判定（幅が広い、または本文パターンに一致）
+                        if line_width > col_width * 0.3 or self._fig_is_body_text_line(line_text, line_width, col_width):
+                            new_clip_y0 = line_bbox[3] + 5.0
+                            if new_clip_y0 > clip_y0:
+                                debug_print(f"[DEBUG] 見出し下の本文検出: clip_y0を{clip_y0:.1f}→{new_clip_y0:.1f}に調整（テキスト: {line_text[:30]}）")
+                                clip_y0 = new_clip_y0
         
         # 小さな描画要素の場合、clip_bboxをraw_graphics_bboxに近い値に制限
         # これにより、ラベルの背景などの小さな描画要素が周りのテキストを巻き込まない
@@ -1385,6 +1450,30 @@ class _FiguresMixin:
             new_clip_y1 = min(clip_y1, raw_graphics_bbox[3] + small_padding)
             new_clip_x0 = max(clip_x0, raw_graphics_bbox[0] - small_padding)
             new_clip_x1 = min(clip_x1, raw_graphics_bbox[2] + small_padding)
+            
+            # 描画要素と重なるテキストを検出し、clip_bboxを調整
+            # これにより、見出しの背景などの描画要素がテキストを切り取らない
+            for line in text_lines:
+                line_bbox = line.get("bbox", (0, 0, 0, 0))
+                line_text = line.get("text", "").strip()
+                # テキストが描画要素と重なっているかチェック
+                x_overlap = max(0, min(raw_graphics_bbox[2], line_bbox[2]) - max(raw_graphics_bbox[0], line_bbox[0]))
+                y_overlap = max(0, min(raw_graphics_bbox[3], line_bbox[3]) - max(raw_graphics_bbox[1], line_bbox[1]))
+                if x_overlap > 20 and y_overlap > 0:
+                    # テキストが描画要素と重なっている場合、clip_y0をテキストの下端より下に設定
+                    if line_bbox[1] < raw_graphics_bbox[1] + 5:
+                        # テキストの上端が描画要素の上端付近にある場合
+                        adjusted_y0 = line_bbox[3] + 2.0
+                        if adjusted_y0 > new_clip_y0:
+                            debug_print(f"[DEBUG] 重なるテキスト検出: clip_y0を{new_clip_y0:.1f}→{adjusted_y0:.1f}に調整（テキスト: {line_text[:20]}）")
+                            new_clip_y0 = adjusted_y0
+                    # テキストの下端が描画要素の下端付近にある場合
+                    if line_bbox[3] > raw_graphics_bbox[3] - 5:
+                        adjusted_y1 = line_bbox[1] - 2.0
+                        if adjusted_y1 < new_clip_y1:
+                            debug_print(f"[DEBUG] 重なるテキスト検出: clip_y1を{new_clip_y1:.1f}→{adjusted_y1:.1f}に調整（テキスト: {line_text[:20]}）")
+                            new_clip_y1 = adjusted_y1
+            
             reason = "all_elements_small" if all_elements_small else f"高さ={raw_height:.1f}px"
             debug_print(f"[DEBUG] 小さな描画要素クラスタ（{reason}）: clip_bboxを制限")
             debug_print(f"[DEBUG]   clip_y0: {clip_y0:.1f} → {new_clip_y0:.1f}")
@@ -1692,6 +1781,7 @@ class _FiguresMixin:
                         raw_graphics_bbox=raw_graphics_bbox,
                         all_elements_small=all_elements_small
                     )
+                    
                 
                 # スライド文書: ページ全体を覆う図形（面積比50%以上）かつ本文テキスト比50%以上の場合のみ除外
                 # 図中ラベル（短いテキスト）は本文としてカウントしない
