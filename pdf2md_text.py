@@ -908,7 +908,13 @@ class _TextMixin:
                 )
                 
                 # X座標が連続している（距離がフォントサイズの1.5倍以内、または重なっている）
-                if x_gap <= font_size * 1.5:
+                # ただし、左カラムと右カラムの行は結合しない（2段組の場合）
+                prev_column = prev.get("column", "full")
+                curr_column = curr.get("column", "full")
+                is_cross_column = (prev_column == "left" and curr_column == "right") or \
+                                  (prev_column == "right" and curr_column == "left")
+                
+                if x_gap <= font_size * 1.5 and not is_cross_column:
                     # 結合
                     merged_text = prev["text"] + curr["text"]
                     merged_bbox = (
@@ -1170,15 +1176,24 @@ class _TextMixin:
                         result.append(fl)
                         added_indices.add(idx)
             
-            # この区間の左カラム行を追加
-            for ll in left_lines:
-                if y_start < ll["y"] < y_end:
-                    result.append(ll)
+            # この区間の左カラム行を収集してY座標順にソート
+            section_left = [ll for ll in left_lines if y_start < ll["y"] < y_end]
+            section_left.sort(key=lambda x: x["y"])
             
-            # この区間の右カラム行を追加
-            for rl in right_lines:
-                if y_start < rl["y"] < y_end:
-                    result.append(rl)
+            # この区間の右カラム行を収集してY座標順にソート
+            section_right = [rl for rl in right_lines if y_start < rl["y"] < y_end]
+            section_right.sort(key=lambda x: x["y"])
+            
+            # 2段組セクションの場合、左カラムをすべて出力してから右カラムを出力
+            # これにより、左右のテキストが混在しないようにする
+            if section_left and section_right:
+                # 左カラムと右カラムの両方がある場合は2段組として処理
+                result.extend(section_left)
+                result.extend(section_right)
+            else:
+                # 片方のカラムのみの場合はそのまま追加
+                result.extend(section_left)
+                result.extend(section_right)
         
         # 最後のフル幅行を追加（まだ追加されていない場合）
         if full_lines:
