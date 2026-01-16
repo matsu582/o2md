@@ -874,9 +874,26 @@ class _FiguresMixin:
                         break
             
             if is_table and matched_table_bbox:
-                # PyMuPDFで検出された表は常にMarkdownテーブルとして出力可能
+                # PyMuPDFで検出された表の場合、図候補に描画要素や画像が含まれているかどうかをチェック
+                # 描画要素や画像が含まれている場合は図として出力（グラフや図形が誤って表として検出された場合）
+                # 描画要素や画像が含まれていない場合はMarkdownテーブルとして出力
                 is_two_col = (column_count >= 2)
-                can_output_as_markdown = is_pymupdf_table or self._fig_can_output_as_markdown_table(matched_table_bbox, page_text_lines, is_two_col)
+                drawing_count = cand.get("drawing_count", 0)
+                image_count = cand.get("image_count", 0)
+                # 描画要素が3個以上、または画像が1個以上ある場合は図として判定
+                has_significant_graphics = drawing_count >= 3 or image_count >= 1
+                
+                if is_pymupdf_table and has_significant_graphics:
+                    # PyMuPDFで表として検出されたが、描画要素や画像が多い場合は図として出力
+                    can_output_as_markdown = False
+                    debug_print(f"[DEBUG] page={page_num+1}: PyMuPDF表だが描画要素({drawing_count}個)/画像({image_count}個)があるため図として出力")
+                elif is_pymupdf_table:
+                    # PyMuPDFで表として検出され、描画要素や画像が少ない場合はMarkdownテーブルとして出力
+                    can_output_as_markdown = True
+                else:
+                    # テキストベースで検出された表の場合は従来のチェックを行う
+                    can_output_as_markdown = self._fig_can_output_as_markdown_table(matched_table_bbox, page_text_lines, is_two_col)
+                
                 if can_output_as_markdown:
                     debug_print(f"[DEBUG] page={page_num+1}: 図候補をMarkdown表として除外 (PyMuPDF={is_pymupdf_table})")
                 else:
@@ -1077,8 +1094,18 @@ class _FiguresMixin:
                     debug_print(f"[DEBUG] クラスタ{i}と{best_merge}をマージ")
                     # マージ時に重要なフィールドを保持
                     merged_image_bboxes = cand1.get("image_bboxes", []) + cand2.get("image_bboxes", [])
+                    # raw_union_bboxもマージ（元の描画要素のbboxを結合）
+                    raw_bbox1 = cand1.get("raw_union_bbox", bbox1)
+                    raw_bbox2 = cand2.get("raw_union_bbox", bbox2)
+                    merged_raw_bbox = (
+                        min(raw_bbox1[0], raw_bbox2[0]),
+                        min(raw_bbox1[1], raw_bbox2[1]),
+                        max(raw_bbox1[2], raw_bbox2[2]),
+                        max(raw_bbox1[3], raw_bbox2[3])
+                    )
                     new_candidates.append({
                         "union_bbox": merged_bbox,
+                        "raw_union_bbox": merged_raw_bbox,
                         "cluster_size": cand1["cluster_size"] + cand2["cluster_size"],
                         "column": cand1["column"],
                         "image_count": cand1.get("image_count", 0) + cand2.get("image_count", 0),
@@ -1181,8 +1208,18 @@ class _FiguresMixin:
                     debug_print(f"[DEBUG] 左右クラスタ{left_idx}と{best_right_idx}をマージ (Y重なり={best_y_overlap:.2f})")
                     # マージ時に重要なフィールドを保持
                     merged_image_bboxes = left_cand.get("image_bboxes", []) + right_cand.get("image_bboxes", [])
+                    # raw_union_bboxもマージ（元の描画要素のbboxを結合）
+                    left_raw_bbox = left_cand.get("raw_union_bbox", left_bbox)
+                    right_raw_bbox = right_cand.get("raw_union_bbox", right_bbox)
+                    merged_raw_bbox = (
+                        min(left_raw_bbox[0], right_raw_bbox[0]),
+                        min(left_raw_bbox[1], right_raw_bbox[1]),
+                        max(left_raw_bbox[2], right_raw_bbox[2]),
+                        max(left_raw_bbox[3], right_raw_bbox[3])
+                    )
                     new_candidates.append({
                         "union_bbox": merged_bbox,
+                        "raw_union_bbox": merged_raw_bbox,
                         "cluster_size": left_cand["cluster_size"] + right_cand["cluster_size"],
                         "column": "full",
                         "image_count": left_cand.get("image_count", 0) + right_cand.get("image_count", 0),
@@ -1345,9 +1382,36 @@ class _FiguresMixin:
             clip_y1 = footer_y_min
             debug_print(f"[DEBUG] フッター領域クリップ: clip_y1を{clip_y1:.1f}に設定")
         
-        # 2段組み文書の場合のみカラム制約を適用
-        # 単一カラム文書では図形が中央付近に配置されることがあるため、制約を適用しない
-        if is_two_column:
+        # 図形の右側にあるテキストを検出
+        # 単一カラム文書でも2段組み文書でも、図形の右側にテキストがある場合は除外する
+        ref_bbox = raw_graphics_bbox if raw_graphics_bbox else graphics_bbox
+        has_text_on_right = False
+        min_text_x0_on_right = page_width  # 右側テキストの最小X座標
+        for line in text_lines:
+            line_bbox = line.get("bbox", (0, 0, 0, 0))
+            line_text = line.get("text", "").strip()
+            if not line_text:
+                continue
+            # テキストが図形のY範囲内にあるかチェック
+            y_overlap = max(0, min(ref_bbox[3], line_bbox[3]) - max(ref_bbox[1], line_bbox[1]))
+            if y_overlap < 10:
+                continue
+            # テキストが図形の右側にあるかチェック（図形の右端より右に始まる）
+            if line_bbox[0] > ref_bbox[2] - 20:
+                has_text_on_right = True
+                if line_bbox[0] < min_text_x0_on_right:
+                    min_text_x0_on_right = line_bbox[0]
+                    debug_print(f"[DEBUG] 図形右側のテキスト検出: x0={line_bbox[0]:.1f}（テキスト: {line_text[:20]}）")
+        
+        if has_text_on_right:
+            # 図形の右側にテキストがある場合、clip_x1をテキストの左端に制限
+            # テキストを図形に含めないようにする
+            new_clip_x1 = min_text_x0_on_right - 5.0
+            if new_clip_x1 < clip_x1:
+                debug_print(f"[DEBUG] 図形右側にテキストあり: clip_x1を{clip_x1:.1f}→{new_clip_x1:.1f}に制限（テキスト除外）")
+                clip_x1 = new_clip_x1
+        elif is_two_column:
+            # 2段組み文書の場合のみカラム制約を適用
             if column == "left":
                 clip_x1 = min(clip_x1, gutter_x - 5)
                 debug_print(f"[DEBUG] 左カラム: clip_x1を{clip_x1:.1f}にクランプ")
