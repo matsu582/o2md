@@ -1867,11 +1867,15 @@ class _FiguresMixin:
                 else:
                     image_bboxes = fig_info.get("image_bboxes", [])
                 
-                # 表画像の場合はテキスト抽出を無効化（テキストは表の一部としてレンダリングされている）
+                # 表画像の場合もテキスト抽出を行う（図形内テキストとして<details>で出力）
+                # ただし、ラベル拡張はしない（clip_bbox内のテキストのみ抽出）
                 if is_table_image:
-                    figure_texts = []
-                    expanded_bbox = clip_bbox
-                    debug_print(f"[DEBUG] 表画像: テキスト抽出を無効化")
+                    figure_texts, expanded_bbox = self._extract_text_in_bbox(
+                        page, clip_bbox, expand_for_labels=False, column=column, gutter_x=gutter_x,
+                        exclude_table_bboxes=exclude_tables, image_bboxes=image_bboxes,
+                        is_slide_document=is_slide_document
+                    )
+                    debug_print(f"[DEBUG] 表画像: テキスト抽出 {len(figure_texts)}個")
                 else:
                     figure_texts, expanded_bbox = self._extract_text_in_bbox(
                         page, clip_bbox, expand_for_labels=expand_labels, column=column, gutter_x=gutter_x,
