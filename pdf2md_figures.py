@@ -288,18 +288,11 @@ class _FiguresMixin:
                 rect = d.get("rect")
                 if rect:
                     bbox = (rect.x0, rect.y0, rect.x1, rect.y1)
-                    width = bbox[2] - bbox[0]
-                    height = bbox[3] - bbox[1]
-                    area = width * height
+                    area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
                     if area >= 200:
                         # PPT由来の背景矩形を除外（ページ面積の90%以上を覆うdrawing）
                         if area >= page_area * 0.9:
                             debug_print(f"[DEBUG] page={page_num+1}: 背景矩形を除外（面積比={area/page_area:.2f}）")
-                            continue
-                        # 小さなラベル背景を除外（高さ15px未満かつ幅100px未満）
-                        # これらは通常、テキストラベルの背景として使用される装飾要素
-                        if height < 15 and width < 100:
-                            debug_print(f"[DEBUG] page={page_num+1}: 小さなラベル背景を除外（{width:.1f}x{height:.1f}）")
                             continue
                         all_elements.append({"bbox": bbox, "type": "drawing"})
         except Exception as e:
@@ -336,22 +329,17 @@ class _FiguresMixin:
         return all_elements, all_bboxes
 
     def _fig_detect_figure_captions(self, page) -> List[Dict]:
-        """図キャプションと見出しテキストの位置を検出
-        
-        図キャプション（「図 1.」など）と見出しテキスト（「●」「■」などで始まるテキスト）を
-        検出し、クラスタリング時のバリアとして使用する。
+        """図キャプションの位置を検出
         
         Args:
             page: PyMuPDFのページオブジェクト
             
         Returns:
-            図キャプション・見出し情報のリスト
+            図キャプション情報のリスト
         """
         figure_caption_lines = []
         try:
             caption_pattern = re.compile(r'^図\s*\d+[\.\:．：]')
-            # 見出しパターン（●、■、◆、▼、▲、○、◎、★、☆で始まるテキスト）
-            heading_pattern = re.compile(r'^[●■◆▼▲○◎★☆]')
             text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
             for block in text_dict.get("blocks", []):
                 if block.get("type") != 0:
@@ -361,8 +349,7 @@ class _FiguresMixin:
                     for span in line.get("spans", []):
                         line_text += span.get("text", "")
                     line_text = line_text.strip()
-                    # 図キャプションまたは見出しテキストを検出
-                    if caption_pattern.match(line_text) or heading_pattern.match(line_text):
+                    if caption_pattern.match(line_text):
                         line_bbox = line.get("bbox", (0, 0, 0, 0))
                         figure_caption_lines.append({
                             "text": line_text,
@@ -376,11 +363,7 @@ class _FiguresMixin:
     def _fig_has_caption_between(
         self, bbox1: Tuple, bbox2: Tuple, figure_caption_lines: List[Dict]
     ) -> bool:
-        """2つのbbox間に図キャプション・見出しがあるかどうかを判定
-        
-        見出しテキストは図形の直後に配置されることが多いため、
-        gap_bottomを少し拡張して検出範囲を広げる。
-        """
+        """2つのbbox間に図キャプションがあるかどうかを判定"""
         y1_bottom = bbox1[3]
         y2_top = bbox2[1]
         y1_top = bbox1[1]
@@ -395,14 +378,9 @@ class _FiguresMixin:
         else:
             return False
         
-        # 見出しテキストは図形の直後に配置されることが多いため、
-        # 検出範囲を少し拡張する（上下に15px）
-        extended_gap_top = gap_top - 15
-        extended_gap_bottom = gap_bottom + 15
-        
         for cap in figure_caption_lines:
             cap_y = cap["y_center"]
-            if extended_gap_top <= cap_y <= extended_gap_bottom:
+            if gap_top <= cap_y <= gap_bottom:
                 return True
         return False
 
@@ -589,7 +567,6 @@ class _FiguresMixin:
                 overlap_with_header = max(0, min(raw_y1, header_y_max) - raw_y0)
                 if is_large_cluster:
                     # 巨大クラスタはoverlap率のみで判定（緩和）
-                    # raw_y0の条件は適用しない（表画像などがヘッダー領域から始まる場合がある）
                     is_in_header = overlap_with_header > cluster_height * 0.8
                 else:
                     is_in_header = overlap_with_header > cluster_height * 0.5 or raw_y0 < header_y_max * 0.5
@@ -640,12 +617,7 @@ class _FiguresMixin:
             page_area = page_width * page_height
             significant_image_count = 0
             image_bboxes = []
-            all_elements_small = True  # すべての要素が小さいかどうか
             for idx in cluster:
-                elem_bbox = all_bboxes[idx]
-                elem_height = elem_bbox[3] - elem_bbox[1]
-                if elem_height >= 15:
-                    all_elements_small = False
                 if all_elements[idx]["type"] == "image":
                     img_bbox = all_bboxes[idx]
                     image_bboxes.append(img_bbox)
@@ -662,8 +634,7 @@ class _FiguresMixin:
                 "image_count": image_count,
                 "drawing_count": drawing_count,
                 "significant_image_count": significant_image_count,
-                "image_bboxes": image_bboxes,
-                "all_elements_small": all_elements_small  # 小さな要素のみのクラスタフラグ
+                "image_bboxes": image_bboxes
             })
 
         # 包含除去フィルタ
@@ -844,22 +815,10 @@ class _FiguresMixin:
 
     def _fig_filter_table_regions(
         self, all_figure_candidates: List[Dict], table_bboxes: List[Tuple],
-        page_text_lines: List[Dict], column_count: int, page_num: int,
-        pymupdf_table_bboxes: List[Tuple] = None
+        page_text_lines: List[Dict], column_count: int, page_num: int
     ) -> List[Dict]:
-        """表領域と重なる図候補をフィルタリング
-        
-        Args:
-            all_figure_candidates: 図候補リスト
-            table_bboxes: テキストベースで検出した表領域
-            page_text_lines: ページのテキスト行
-            column_count: 段組み数
-            page_num: ページ番号
-            pymupdf_table_bboxes: PyMuPDFで検出した表領域（Markdownテーブル出力可能）
-        """
-        if pymupdf_table_bboxes is None:
-            pymupdf_table_bboxes = []
-        debug_print(f"[DEBUG] page={page_num+1}: 表フィルタ前の候補数={len(all_figure_candidates)}, PyMuPDF表数={len(pymupdf_table_bboxes)}")
+        """表領域と重なる図候補をフィルタリング"""
+        debug_print(f"[DEBUG] page={page_num+1}: 表フィルタ前の候補数={len(all_figure_candidates)}")
         table_filtered = []
         table_image_candidates = []
         
@@ -867,50 +826,27 @@ class _FiguresMixin:
             is_table = False
             cand_bbox = cand["union_bbox"]
             matched_table_bbox = None
-            is_pymupdf_table = False
             
-            # PyMuPDFで検出された表との重なりを確認
-            for table_bbox in pymupdf_table_bboxes:
+            for table_bbox in table_bboxes:
                 overlap = self._fig_bbox_overlap_ratio(cand_bbox, table_bbox)
                 if overlap >= 0.7:
                     matched_table_bbox = table_bbox
                     is_table = True
-                    is_pymupdf_table = True
-                    debug_print(f"[DEBUG] page={page_num+1}: PyMuPDF表と重なり検出 overlap={overlap:.2f}")
                     break
             
-            # テキストベースで検出された表との重なりを確認
-            if not is_table:
-                for table_bbox in table_bboxes:
-                    overlap = self._fig_bbox_overlap_ratio(cand_bbox, table_bbox)
-                    if overlap >= 0.7:
-                        matched_table_bbox = table_bbox
-                        is_table = True
-                        break
-            
             if is_table and matched_table_bbox:
-                # PyMuPDFで検出された表の場合、図候補に描画要素や画像が含まれているかどうかをチェック
-                # 描画要素や画像が含まれている場合は図として出力（グラフや図形が誤って表として検出された場合）
-                # 描画要素や画像が含まれていない場合はMarkdownテーブルとして出力
                 is_two_col = (column_count >= 2)
+                # 描画要素が3個以上、または画像が1個以上ある場合は図として判定
                 drawing_count = cand.get("drawing_count", 0)
                 image_count = cand.get("image_count", 0)
-                # 描画要素が3個以上、または画像が1個以上ある場合は図として判定
                 has_significant_graphics = drawing_count >= 3 or image_count >= 1
                 
-                if is_pymupdf_table and has_significant_graphics:
-                    # PyMuPDFで表として検出されたが、描画要素や画像が多い場合は図として出力
-                    can_output_as_markdown = False
-                    debug_print(f"[DEBUG] page={page_num+1}: PyMuPDF表だが描画要素({drawing_count}個)/画像({image_count}個)があるため図として出力")
-                elif is_pymupdf_table:
-                    # PyMuPDFで表として検出され、描画要素や画像が少ない場合はMarkdownテーブルとして出力
-                    can_output_as_markdown = True
-                else:
-                    # テキストベースで検出された表の場合は従来のチェックを行う
-                    can_output_as_markdown = self._fig_can_output_as_markdown_table(matched_table_bbox, page_text_lines, is_two_col)
-                
-                if can_output_as_markdown:
-                    debug_print(f"[DEBUG] page={page_num+1}: 図候補をMarkdown表として除外 (PyMuPDF={is_pymupdf_table})")
+                if has_significant_graphics:
+                    # 描画要素や画像が多い場合は図として出力
+                    debug_print(f"[DEBUG] page={page_num+1}: 表領域だが描画要素({drawing_count}個)/画像({image_count}個)があるため図として出力")
+                    table_filtered.append(cand)
+                elif self._fig_can_output_as_markdown_table(matched_table_bbox, page_text_lines, is_two_col):
+                    debug_print(f"[DEBUG] page={page_num+1}: 図候補をMarkdown表として除外")
                 else:
                     debug_print(f"[DEBUG] page={page_num+1}: 図候補を表画像として出力")
                     union = cand_bbox
@@ -918,7 +854,6 @@ class _FiguresMixin:
                     union_top = union[1]
                     clip_y0 = union_top - 2
                     
-                    # 表キャプション（「表 N」パターン）を検出
                     for line in page_text_lines:
                         line_bbox = line["bbox"]
                         line_text = line["text"]
@@ -927,45 +862,6 @@ class _FiguresMixin:
                                 clip_y0 = line_bbox[3] + 2
                                 debug_print(f"[DEBUG] 表画像: キャプション検出 '{line_text[:20]}'")
                                 break
-                    
-                    # 見出しテキスト（「1. 」「第1条」など）を検出してclip_y0を調整
-                    # 図形の上端から100px上までの範囲で見出しを検索
-                    heading_pattern = re.compile(r'^(\d+\.\s+|第[一二三四五六七八九十0-9]+)')
-                    heading_bottom_y = None
-                    for line in page_text_lines:
-                        line_bbox = line["bbox"]
-                        line_text = line["text"].strip()
-                        # 見出しが図形の上端付近（-100px〜+50px）にあるかチェック
-                        if line_bbox[1] >= union_top - 100 and line_bbox[3] <= union_top + 50:
-                            if heading_pattern.match(line_text):
-                                # X方向のオーバーラップを確認
-                                x_overlap = max(0, min(union[2], line_bbox[2]) - max(union[0], line_bbox[0]))
-                                if x_overlap > 20:
-                                    heading_bottom_y = line_bbox[3]
-                                    debug_print(f"[DEBUG] 表画像: 見出し検出 '{line_text[:30]}' y={line_bbox[1]:.1f}-{line_bbox[3]:.1f}")
-                    
-                    # 見出しが検出された場合、見出しの下にある本文テキストも除外する
-                    if heading_bottom_y is not None:
-                        # 見出しの下端から図形の上端+100pxまでの範囲にある本文テキストを検出
-                        # 図形の上端が描画要素の最上端（見出し背景など）を含む場合があるため、
-                        # 検索範囲を広げて本文テキストを確実に除外する
-                        for line in page_text_lines:
-                            line_bbox = line["bbox"]
-                            line_text = line["text"].strip()
-                            line_width = line_bbox[2] - line_bbox[0]
-                            # 見出しの下端から図形の上端+100pxまでの範囲
-                            if line_bbox[1] > heading_bottom_y and line_bbox[3] < union_top + 100:
-                                # X方向のオーバーラップを確認
-                                x_overlap = max(0, min(union[2], line_bbox[2]) - max(union[0], line_bbox[0]))
-                                if x_overlap > 20:
-                                    # 本文らしい行（幅が広い、または短いラベルでない）の場合、clip_y0を調整
-                                    page_width = union[2] - union[0]
-                                    # 幅が30%以上、または特定のパターン（SGPなど）の場合
-                                    if line_width > page_width * 0.3 or len(line_text) > 10:
-                                        new_clip_y0 = line_bbox[3] + 2
-                                        if new_clip_y0 > clip_y0:
-                                            clip_y0 = new_clip_y0
-                                            debug_print(f"[DEBUG] 表画像: 本文検出 '{line_text[:30]}' clip_y0={clip_y0:.1f}")
                     
                     clip_x0 = union[0] - 2
                     clip_x1 = union[2] + 2
@@ -979,20 +875,6 @@ class _FiguresMixin:
                             if re.match(r'^(図|表)\s*\d', line_text):
                                 clip_y1 = line_bbox[1] - 2
                                 debug_print(f"[DEBUG] 表画像: 下キャプション検出 '{line_text[:20]}'")
-                                break
-                    
-                    # 注釈テキスト（※で始まるテキスト）を検出してclip_y1を調整
-                    for line in page_text_lines:
-                        line_bbox = line["bbox"]
-                        line_text = line["text"]
-                        # union_bottom付近（-30〜+50）にある注釈テキストを検出
-                        if line_bbox[1] >= union_bottom - 30 and line_bbox[1] <= union_bottom + 50:
-                            if re.match(r'^※\d', line_text):
-                                # 注釈テキストの上端をclip_y1として使用
-                                new_clip_y1 = line_bbox[1] - 2
-                                if new_clip_y1 < clip_y1:
-                                    clip_y1 = new_clip_y1
-                                    debug_print(f"[DEBUG] 表画像: 注釈テキスト検出 '{line_text[:30]}', clip_y1={clip_y1:.1f}")
                                 break
                     
                     debug_print(f"[DEBUG] 表画像: clip_bbox=({clip_x0:.1f}, {clip_y0:.1f}, {clip_x1:.1f}, {clip_y1:.1f})")
@@ -1010,82 +892,39 @@ class _FiguresMixin:
     def _fig_has_body_barrier(
         self, bbox1: Tuple, bbox2: Tuple, text_lines: List[Dict], col_width: float
     ) -> bool:
-        """2つのbbox間に本文バリアがあるか判定
-        
-        重なっているクラスタの場合も、重なり領域内に見出しテキストがあれば
-        バリアとして検出する。
-        """
-        # X方向は和集合を使用（両方のクラスタの範囲内にあるテキストを検出）
-        x_union_start = min(bbox1[0], bbox2[0])
-        x_union_end = max(bbox1[2], bbox2[2])
+        """2つのbbox間に本文バリアがあるか判定"""
+        y_min = min(bbox1[3], bbox2[3])
+        y_max = max(bbox1[1], bbox2[1])
+        x_overlap_start = max(bbox1[0], bbox2[0])
+        x_overlap_end = min(bbox1[2], bbox2[2])
         
         caption_pattern = re.compile(r'^図\s*\d+[\.\:．：]')
-        # 見出しパターン（●、■、◆、▼、▲、○、◎、★、☆で始まるテキスト）
-        heading_pattern = re.compile(r'^[●■◆▼▲○◎★☆]')
         
-        # 2つのbboxのY方向の関係を判定
         if bbox1[3] < bbox2[1]:
-            # bbox1が上、bbox2が下（重なりなし）
             gap_top = bbox1[3]
             gap_bottom = bbox2[1]
-            overlap_top = None
-            overlap_bottom = None
         elif bbox2[3] < bbox1[1]:
-            # bbox2が上、bbox1が下（重なりなし）
             gap_top = bbox2[3]
             gap_bottom = bbox1[1]
-            overlap_top = None
-            overlap_bottom = None
         else:
-            # 重なりあり
-            gap_top = None
-            gap_bottom = None
-            overlap_top = max(bbox1[1], bbox2[1])
-            overlap_bottom = min(bbox1[3], bbox2[3])
+            gap_top = y_min
+            gap_bottom = y_max
         
         for line in text_lines:
             line_bbox = line["bbox"]
             line_center_y = (line_bbox[1] + line_bbox[3]) / 2
             line_center_x = (line_bbox[0] + line_bbox[2]) / 2
             line_width = line_bbox[2] - line_bbox[0]
-            line_text = line["text"].strip()
             
-            # X方向のチェック（両方のクラスタの範囲内にあるテキストを検出）
-            if not (x_union_start - 20 < line_center_x < x_union_end + 20):
-                continue
-            
-            # 図キャプションのチェック
-            if caption_pattern.match(line_text):
-                if gap_top is not None and gap_bottom is not None:
-                    if gap_top - 30 <= line_center_y <= gap_bottom + 30:
-                        debug_print(f"[DEBUG] 図キャプションバリア検出: '{line_text[:30]}...'")
-                        return True
-                elif overlap_top is not None and overlap_bottom is not None:
-                    if overlap_top - 30 <= line_center_y <= overlap_bottom + 30:
-                        debug_print(f"[DEBUG] 図キャプションバリア検出（重なり領域）: '{line_text[:30]}...'")
+            if caption_pattern.match(line["text"]):
+                if gap_top - 30 <= line_center_y <= gap_bottom + 30:
+                    if x_overlap_start - 20 < line_center_x < x_overlap_end + 20:
+                        debug_print(f"[DEBUG] 図キャプションバリア検出: '{line['text'][:30]}...'")
                         return True
             
-            # 見出しテキストのチェック
-            if heading_pattern.match(line_text):
-                if gap_top is not None and gap_bottom is not None:
-                    if gap_top - 10 <= line_center_y <= gap_bottom + 10:
-                        debug_print(f"[DEBUG] 見出しバリア検出: '{line_text[:30]}...'")
-                        return True
-                elif overlap_top is not None and overlap_bottom is not None:
-                    if overlap_top - 10 <= line_center_y <= overlap_bottom + 10:
-                        debug_print(f"[DEBUG] 見出しバリア検出（重なり領域）: '{line_text[:30]}...'")
-                        return True
-            
-            # 本文テキストのチェック
-            if gap_top is not None and gap_bottom is not None:
-                y_min = min(bbox1[3], bbox2[3])
-                y_max = max(bbox1[1], bbox2[1])
-                if y_min < line_center_y < y_max:
-                    if self._fig_is_body_text_line(line_text, line_width, col_width):
-                        return True
-            elif overlap_top is not None and overlap_bottom is not None:
-                if overlap_top < line_center_y < overlap_bottom:
-                    if self._fig_is_body_text_line(line_text, line_width, col_width):
+            if y_min < line_center_y < y_max:
+                if x_overlap_start - 20 < line_center_x < x_overlap_end + 20:
+                    if self._fig_is_body_text_line(line["text"], line_width, col_width):
                         return True
         return False
 
@@ -1152,18 +991,8 @@ class _FiguresMixin:
                     debug_print(f"[DEBUG] クラスタ{i}と{best_merge}をマージ")
                     # マージ時に重要なフィールドを保持
                     merged_image_bboxes = cand1.get("image_bboxes", []) + cand2.get("image_bboxes", [])
-                    # raw_union_bboxもマージ（元の描画要素のbboxを結合）
-                    raw_bbox1 = cand1.get("raw_union_bbox", bbox1)
-                    raw_bbox2 = cand2.get("raw_union_bbox", bbox2)
-                    merged_raw_bbox = (
-                        min(raw_bbox1[0], raw_bbox2[0]),
-                        min(raw_bbox1[1], raw_bbox2[1]),
-                        max(raw_bbox1[2], raw_bbox2[2]),
-                        max(raw_bbox1[3], raw_bbox2[3])
-                    )
                     new_candidates.append({
                         "union_bbox": merged_bbox,
-                        "raw_union_bbox": merged_raw_bbox,
                         "cluster_size": cand1["cluster_size"] + cand2["cluster_size"],
                         "column": cand1["column"],
                         "image_count": cand1.get("image_count", 0) + cand2.get("image_count", 0),
@@ -1211,15 +1040,10 @@ class _FiguresMixin:
                     if right_idx in used:
                         continue
                     
-                    # 画像またはdrawing要素が両方に存在する場合のみマージ対象
                     left_image_count = left_cand.get("image_count", 0)
                     right_image_count = right_cand.get("image_count", 0)
-                    left_drawing_count = left_cand.get("drawing_count", 0)
-                    right_drawing_count = right_cand.get("drawing_count", 0)
-                    left_has_elements = left_image_count > 0 or left_drawing_count > 0
-                    right_has_elements = right_image_count > 0 or right_drawing_count > 0
-                    if not left_has_elements or not right_has_elements:
-                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 要素なし")
+                    if left_image_count == 0 or right_image_count == 0:
+                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 画像なし")
                         continue
                     
                     left_bbox = left_cand["union_bbox"]
@@ -1266,18 +1090,8 @@ class _FiguresMixin:
                     debug_print(f"[DEBUG] 左右クラスタ{left_idx}と{best_right_idx}をマージ (Y重なり={best_y_overlap:.2f})")
                     # マージ時に重要なフィールドを保持
                     merged_image_bboxes = left_cand.get("image_bboxes", []) + right_cand.get("image_bboxes", [])
-                    # raw_union_bboxもマージ（元の描画要素のbboxを結合）
-                    left_raw_bbox = left_cand.get("raw_union_bbox", left_bbox)
-                    right_raw_bbox = right_cand.get("raw_union_bbox", right_bbox)
-                    merged_raw_bbox = (
-                        min(left_raw_bbox[0], right_raw_bbox[0]),
-                        min(left_raw_bbox[1], right_raw_bbox[1]),
-                        max(left_raw_bbox[2], right_raw_bbox[2]),
-                        max(left_raw_bbox[3], right_raw_bbox[3])
-                    )
                     new_candidates.append({
                         "union_bbox": merged_bbox,
-                        "raw_union_bbox": merged_raw_bbox,
                         "cluster_size": left_cand["cluster_size"] + right_cand["cluster_size"],
                         "column": "full",
                         "image_count": left_cand.get("image_count", 0) + right_cand.get("image_count", 0),
@@ -1339,23 +1153,17 @@ class _FiguresMixin:
     def _fig_find_body_text_above(
         self, graphics_bbox: Tuple, text_lines: List[Dict], col_width: float
     ) -> Optional[Dict]:
-        """図の上部付近にある本文行を探す
-        
-        本文行は図の上端（graphics_bbox[1]）よりも上にある必要がある。
-        図の内部にあるテキストは本文として検出しない。
-        """
+        """図の上部付近にある本文行を探す"""
         best_body = None
         best_y = 0
         
-        # 図の上端を基準に検索（図の内部にあるテキストは除外）
-        search_y_end = graphics_bbox[1]
+        search_y_end = (graphics_bbox[1] + graphics_bbox[3]) / 2
         
         for line in text_lines:
             line_bbox = line["bbox"]
             line_text = line["text"].strip()
             line_width = line_bbox[2] - line_bbox[0]
             
-            # 本文行の下端が図の上端よりも下にある場合はスキップ
             if line_bbox[3] > search_y_end:
                 continue
             
@@ -1375,17 +1183,9 @@ class _FiguresMixin:
         page_width: float, page_height: float, column: str, gutter_x: float,
         is_embedded_image: bool = False,
         header_y_max: Optional[float] = None, footer_y_min: Optional[float] = None,
-        is_slide_document: bool = False,
-        is_two_column: bool = True,
-        raw_graphics_bbox: Optional[Tuple] = None,
-        all_elements_small: bool = False
+        is_slide_document: bool = False
     ) -> Tuple:
-        """graphics_bboxからclip_bboxを計算（トリム処理）
-        
-        Args:
-            all_elements_small: クラスタ内のすべての要素が小さい（高さ15px未満）場合True
-        """
-        
+        """graphics_bboxからclip_bboxを計算（トリム処理）"""
         # スライド文書では小さなマージン（5px）、通常文書では20px
         if is_slide_document:
             padding = 5.0
@@ -1394,29 +1194,13 @@ class _FiguresMixin:
         else:
             padding = 20.0
         
-        # 非スライド文書でraw_graphics_bboxが提供されている場合、
-        # clip_bboxの初期化にraw_graphics_bboxを使用する
-        # これにより、パディングで拡張された領域を含まないようにする
-        init_bbox = raw_graphics_bbox if (raw_graphics_bbox and not is_slide_document) else graphics_bbox
+        clip_x0 = max(0, graphics_bbox[0] - padding)
+        clip_y0 = max(0, graphics_bbox[1] - padding)
+        clip_x1 = min(page_width, graphics_bbox[2] + padding)
+        clip_y1 = min(page_height, graphics_bbox[3] + padding)
         
-        clip_x0 = max(0, init_bbox[0] - padding)
-        clip_y0 = max(0, init_bbox[1] - padding)
-        clip_x1 = min(page_width, init_bbox[2] + padding)
-        clip_y1 = min(page_height, init_bbox[3] + padding)
-        
-        # スライド文書の場合、raw_graphics_bboxを基準にclip_y1を制限
-        # これにより、クラスタリングで拡張されたbboxがフッタ領域を含まないようにする
-        if is_slide_document and raw_graphics_bbox:
-            # raw_graphics_bboxの下端 + パディング + マージン（10px）を上限とする
-            max_clip_y1 = raw_graphics_bbox[3] + padding + 10.0
-            if clip_y1 > max_clip_y1:
-                debug_print(f"[DEBUG] スライド文書: clip_y1を{clip_y1:.1f}→{max_clip_y1:.1f}に制限（フッタ除外）")
-                clip_y1 = max_clip_y1
-        
-        # スライド文書の場合、本文行と交差する場合は上端を詰める
-        # raw_graphics_bbox（パディング前の元のbbox）を使用して判定
+        # スライド文書の場合、本文行と交差する場合は上端を広げない
         if is_slide_document:
-            ref_bbox = raw_graphics_bbox if raw_graphics_bbox else graphics_bbox
             for line in text_lines:
                 line_bbox = line.get("bbox", (0, 0, 0, 0))
                 line_text = line.get("text", "").strip()
@@ -1424,12 +1208,11 @@ class _FiguresMixin:
                 # 本文らしい行かどうかを判定
                 if not self._fig_is_body_text_line(line_text, line_width, col_width):
                     continue
-                # 本文行が図形の上端より上にある場合、clip_y0を詰める
-                # ref_bbox[1]（パディング前の図形上端）を基準に判定
-                if line_bbox[3] > clip_y0 and line_bbox[1] < ref_bbox[1]:
+                # 本文行がclip_bboxの上端付近にある場合、上端を詰める
+                if line_bbox[3] > clip_y0 and line_bbox[1] < graphics_bbox[1]:
                     # 本文行の下端より下にclip_y0を設定
                     new_clip_y0 = line_bbox[3] + 2.0
-                    if new_clip_y0 < ref_bbox[1]:
+                    if new_clip_y0 < graphics_bbox[1]:
                         debug_print(f"[DEBUG] スライド文書: 本文行を避けてclip_y0を{clip_y0:.1f}→{new_clip_y0:.1f}に調整")
                         clip_y0 = new_clip_y0
         
@@ -1440,22 +1223,20 @@ class _FiguresMixin:
             clip_y1 = footer_y_min
             debug_print(f"[DEBUG] フッター領域クリップ: clip_y1を{clip_y1:.1f}に設定")
         
-        # 図形の右側にあるテキストを検出
-        # 単一カラム文書でも2段組み文書でも、図形の右側にテキストがある場合は除外する
-        ref_bbox = raw_graphics_bbox if raw_graphics_bbox else graphics_bbox
+        # 図形の右側にあるテキストを検出して除外
         has_text_on_right = False
-        min_text_x0_on_right = page_width  # 右側テキストの最小X座標
+        min_text_x0_on_right = page_width
         for line in text_lines:
             line_bbox = line.get("bbox", (0, 0, 0, 0))
             line_text = line.get("text", "").strip()
             if not line_text:
                 continue
             # テキストが図形のY範囲内にあるかチェック
-            y_overlap = max(0, min(ref_bbox[3], line_bbox[3]) - max(ref_bbox[1], line_bbox[1]))
+            y_overlap = max(0, min(graphics_bbox[3], line_bbox[3]) - max(graphics_bbox[1], line_bbox[1]))
             if y_overlap < 10:
                 continue
             # テキストが図形の右側にあるかチェック（図形の右端より右に始まる）
-            if line_bbox[0] > ref_bbox[2] - 20:
+            if line_bbox[0] > graphics_bbox[2] - 20:
                 has_text_on_right = True
                 if line_bbox[0] < min_text_x0_on_right:
                     min_text_x0_on_right = line_bbox[0]
@@ -1463,178 +1244,38 @@ class _FiguresMixin:
         
         if has_text_on_right:
             # 図形の右側にテキストがある場合、clip_x1をテキストの左端に制限
-            # テキストを図形に含めないようにする
             new_clip_x1 = min_text_x0_on_right - 5.0
             if new_clip_x1 < clip_x1:
-                debug_print(f"[DEBUG] 図形右側にテキストあり: clip_x1を{clip_x1:.1f}→{new_clip_x1:.1f}に制限（テキスト除外）")
+                debug_print(f"[DEBUG] 図形右側にテキストあり: clip_x1を{clip_x1:.1f}→{new_clip_x1:.1f}に制限")
                 clip_x1 = new_clip_x1
-        elif is_two_column:
-            # 2段組み文書の場合のみカラム制約を適用
-            if column == "left":
-                clip_x1 = min(clip_x1, gutter_x - 5)
-                debug_print(f"[DEBUG] 左カラム: clip_x1を{clip_x1:.1f}にクランプ")
-            elif column == "right":
-                old_clip_x0 = clip_x0
-                clip_x0 = max(clip_x0, gutter_x + 5)
-                debug_print(f"[DEBUG] 右カラム: clip_x0を{old_clip_x0:.1f}→{clip_x0:.1f}にクランプ")
+        elif column == "left":
+            clip_x1 = min(clip_x1, gutter_x - 5)
+            debug_print(f"[DEBUG] 左カラム: clip_x1を{clip_x1:.1f}にクランプ")
+        elif column == "right":
+            old_clip_x0 = clip_x0
+            clip_x0 = max(clip_x0, gutter_x + 5)
+            debug_print(f"[DEBUG] 右カラム: clip_x0を{old_clip_x0:.1f}→{clip_x0:.1f}にクランプ")
         
         # スライド文書または埋め込み画像の場合、上下トリムをスキップ
         if is_embedded_image or is_slide_document:
             debug_print(f"[DEBUG] {'スライド文書' if is_slide_document else '埋め込み画像'}: 上下トリムをスキップ")
-            
-            # スライド文書の場合、図形内テキスト（本文ではないテキスト）を含めるようにclip_bboxを拡張
-            if is_slide_document:
-                ref_bbox = raw_graphics_bbox if raw_graphics_bbox else graphics_bbox
-                for line in text_lines:
-                    line_bbox = line.get("bbox", (0, 0, 0, 0))
-                    line_text = line.get("text", "").strip()
-                    line_width = line_bbox[2] - line_bbox[0]
-                    
-                    # 本文行はスキップ（図形に含めない）
-                    if self._fig_is_body_text_line(line_text, line_width, col_width):
-                        continue
-                    
-                    # フッタ領域のテキストはスキップ（clip_y1より下）
-                    if line_bbox[1] >= clip_y1:
-                        continue
-                    
-                    # ヘッダ領域のテキストはスキップ（clip_y0より上）
-                    if line_bbox[3] <= clip_y0:
-                        continue
-                    
-                    # テキストが図形領域内またはその近くにあるかチェック
-                    # Y方向: 図形の上端から下端の範囲内（厳密に）
-                    if line_bbox[1] < ref_bbox[1] - 10 or line_bbox[3] > ref_bbox[3]:
-                        continue
-                    
-                    # X方向: 図形と重なっているか、図形の右側にある
-                    if line_bbox[2] < ref_bbox[0] - 10:
-                        continue
-                    
-                    # 図形内テキストを含めるようにclip_bboxを拡張
-                    if line_bbox[2] > clip_x1:
-                        debug_print(f"[DEBUG] 図形内テキスト検出: clip_x1を{clip_x1:.1f}→{line_bbox[2] + padding:.1f}に拡張（テキスト: {line_text[:20]}）")
-                        clip_x1 = min(page_width, line_bbox[2] + padding)
-                    if line_bbox[0] < clip_x0:
-                        debug_print(f"[DEBUG] 図形内テキスト検出: clip_x0を{clip_x0:.1f}→{line_bbox[0] - padding:.1f}に拡張（テキスト: {line_text[:20]}）")
-                        clip_x0 = max(0, line_bbox[0] - padding)
-            
             return (clip_x0, clip_y0, clip_x1, clip_y1)
         
-        # キャプション・本文検出にはraw_graphics_bboxを使用（パディング前の元のbbox）
-        # これにより、パディングで拡張された領域内のテキストを誤検出しない
-        search_bbox = raw_graphics_bbox if raw_graphics_bbox else graphics_bbox
-        
-        caption = self._fig_find_caption_below(search_bbox, text_lines)
+        caption = self._fig_find_caption_below(graphics_bbox, text_lines)
         if caption:
             caption_y0 = caption["bbox"][1]
             new_clip_y1 = caption_y0 - 5.0
             clip_y1 = min(clip_y1, new_clip_y1)
             debug_print(f"[DEBUG] キャプション検出: clip_y1を{clip_y1:.1f}にトリム")
         
-        body_above = self._fig_find_body_text_above(search_bbox, text_lines, col_width)
+        body_above = self._fig_find_body_text_above(graphics_bbox, text_lines, col_width)
         if body_above:
             body_y1 = body_above["bbox"][3]
             new_clip_y0 = body_y1 + 5.0
             clip_y0 = max(clip_y0, new_clip_y0)
             debug_print(f"[DEBUG] 本文検出: clip_y0を{clip_y0:.1f}にトリム")
         
-        # 見出しテキストを検出してclip_y0を調整
-        # 見出しパターン: "1. ", "2. ", "第1条" など
-        heading_pattern = re.compile(r'^(\d+\.\s+|第[一二三四五六七八九十0-9]+)')
-        # clip_bboxの上端付近（padding分上）から図形の上端+50pxまでの範囲で見出しを検索
-        # 見出しが図形の背景と重なっている場合も検出するため、search_y_endを拡張
-        search_y_start = clip_y0 - padding - 10  # paddingより少し上から検索
-        search_y_end = graphics_bbox[1] + 50  # 図形の上端から50px下まで検索
-        heading_detected_y = None  # 検出された見出しの下端Y座標
-        for line in text_lines:
-            line_bbox = line.get("bbox", (0, 0, 0, 0))
-            line_text = line.get("text", "").strip()
-            # 見出しパターンに一致し、clip_bbox付近にある場合
-            if heading_pattern.match(line_text):
-                # 見出しがclip_bboxの上端付近から図形の上端+50pxの間にあるかチェック
-                if line_bbox[1] >= search_y_start and line_bbox[3] <= search_y_end:
-                    # X方向のオーバーラップを確認
-                    x_overlap = max(0, min(graphics_bbox[2], line_bbox[2]) - max(graphics_bbox[0], line_bbox[0]))
-                    if x_overlap > 20:
-                        # 見出しの下端より下にclip_y0を設定
-                        new_clip_y0 = line_bbox[3] + 5.0
-                        clip_y0 = max(clip_y0, new_clip_y0)
-                        heading_detected_y = line_bbox[3]
-                        debug_print(f"[DEBUG] 見出し検出: clip_y0を{clip_y0:.1f}にトリム（見出し: {line_text[:20]}）")
-        
-        # 見出しが検出された場合、見出しの下にある本文テキストも除外する
-        # これにより、見出しと図形本体の間にある本文テキストが図形に含まれないようにする
-        if heading_detected_y is not None:
-            # 図形本体の上端を推定（graphics_bboxの上端から100px下を基準）
-            figure_body_y_start = graphics_bbox[1] + 100
-            for line in text_lines:
-                line_bbox = line.get("bbox", (0, 0, 0, 0))
-                line_text = line.get("text", "").strip()
-                line_width = line_bbox[2] - line_bbox[0]
-                # 見出しの下端から図形本体の上端までの範囲にある本文テキストを検出
-                if line_bbox[1] > heading_detected_y and line_bbox[3] < figure_body_y_start:
-                    # X方向のオーバーラップを確認
-                    x_overlap = max(0, min(graphics_bbox[2], line_bbox[2]) - max(graphics_bbox[0], line_bbox[0]))
-                    if x_overlap > 20:
-                        # 本文らしい行かどうかを判定（幅が広い、または本文パターンに一致）
-                        if line_width > col_width * 0.3 or self._fig_is_body_text_line(line_text, line_width, col_width):
-                            new_clip_y0 = line_bbox[3] + 5.0
-                            if new_clip_y0 > clip_y0:
-                                debug_print(f"[DEBUG] 見出し下の本文検出: clip_y0を{clip_y0:.1f}→{new_clip_y0:.1f}に調整（テキスト: {line_text[:30]}）")
-                                clip_y0 = new_clip_y0
-        
-        # 小さな描画要素の場合、clip_bboxをraw_graphics_bboxに近い値に制限
-        # これにより、ラベルの背景などの小さな描画要素が周りのテキストを巻き込まない
-        # 判定条件:
-        # 1. raw_union_bboxの高さが30px未満、または
-        # 2. クラスタ内のすべての要素が小さい（高さ15px未満）
-        raw_height = raw_graphics_bbox[3] - raw_graphics_bbox[1] if raw_graphics_bbox else graphics_bbox[3] - graphics_bbox[1]
-        is_small_element_cluster = (raw_height < 30) or all_elements_small
-        if is_small_element_cluster and raw_graphics_bbox:
-            # 小さな描画要素の場合、clip_bboxをraw_graphics_bboxの範囲に制限
-            # パディングは最小限（5px）に抑える
-            small_padding = 5.0
-            new_clip_y0 = max(clip_y0, raw_graphics_bbox[1] - small_padding)
-            new_clip_y1 = min(clip_y1, raw_graphics_bbox[3] + small_padding)
-            new_clip_x0 = max(clip_x0, raw_graphics_bbox[0] - small_padding)
-            new_clip_x1 = min(clip_x1, raw_graphics_bbox[2] + small_padding)
-            
-            # 描画要素と重なるテキストを検出し、clip_bboxを調整
-            # これにより、見出しの背景などの描画要素がテキストを切り取らない
-            for line in text_lines:
-                line_bbox = line.get("bbox", (0, 0, 0, 0))
-                line_text = line.get("text", "").strip()
-                # テキストが描画要素と重なっているかチェック
-                x_overlap = max(0, min(raw_graphics_bbox[2], line_bbox[2]) - max(raw_graphics_bbox[0], line_bbox[0]))
-                y_overlap = max(0, min(raw_graphics_bbox[3], line_bbox[3]) - max(raw_graphics_bbox[1], line_bbox[1]))
-                if x_overlap > 20 and y_overlap > 0:
-                    # テキストが描画要素と重なっている場合、clip_y0をテキストの下端より下に設定
-                    if line_bbox[1] < raw_graphics_bbox[1] + 5:
-                        # テキストの上端が描画要素の上端付近にある場合
-                        adjusted_y0 = line_bbox[3] + 2.0
-                        if adjusted_y0 > new_clip_y0:
-                            debug_print(f"[DEBUG] 重なるテキスト検出: clip_y0を{new_clip_y0:.1f}→{adjusted_y0:.1f}に調整（テキスト: {line_text[:20]}）")
-                            new_clip_y0 = adjusted_y0
-                    # テキストの下端が描画要素の下端付近にある場合
-                    if line_bbox[3] > raw_graphics_bbox[3] - 5:
-                        adjusted_y1 = line_bbox[1] - 2.0
-                        if adjusted_y1 < new_clip_y1:
-                            debug_print(f"[DEBUG] 重なるテキスト検出: clip_y1を{new_clip_y1:.1f}→{adjusted_y1:.1f}に調整（テキスト: {line_text[:20]}）")
-                            new_clip_y1 = adjusted_y1
-            
-            reason = "all_elements_small" if all_elements_small else f"高さ={raw_height:.1f}px"
-            debug_print(f"[DEBUG] 小さな描画要素クラスタ（{reason}）: clip_bboxを制限")
-            debug_print(f"[DEBUG]   clip_y0: {clip_y0:.1f} → {new_clip_y0:.1f}")
-            debug_print(f"[DEBUG]   clip_y1: {clip_y1:.1f} → {new_clip_y1:.1f}")
-            debug_print(f"[DEBUG]   clip_x0: {clip_x0:.1f} → {new_clip_x0:.1f}")
-            debug_print(f"[DEBUG]   clip_x1: {clip_x1:.1f} → {new_clip_x1:.1f}")
-            return (new_clip_x0, new_clip_y0, new_clip_x1, new_clip_y1)
-        
-        # 最小高さ確保ロジック
-        # ただし、元の描画要素が非常に小さい場合（高さ < 30px）は適用しない
-        # これにより、小さな描画要素（ラベルの背景など）が周りのテキストを巻き込まない
-        if clip_y1 - clip_y0 < 50 and raw_height >= 30:
+        if clip_y1 - clip_y0 < 50:
             center_y = (clip_y0 + clip_y1) / 2
             clip_y0 = center_y - 25
             clip_y1 = center_y + 25
@@ -1646,8 +1287,7 @@ class _FiguresMixin:
         self, page, page_num: int, all_figure_candidates: List[Dict],
         page_text_lines: List[Dict], col_width: float, page_width: float,
         gutter_x: float, header_y_max: Optional[float], footer_y_min: Optional[float],
-        line_based_table_bboxes: List[Tuple], is_slide_document: bool = False,
-        is_two_column: bool = True
+        line_based_table_bboxes: List[Tuple], is_slide_document: bool = False
     ) -> List[Dict]:
         """図候補をレンダリングして図情報リストを生成"""
         figures = []
@@ -1674,25 +1314,12 @@ class _FiguresMixin:
                 else:
                     graphics_bbox = fig_info["union_bbox"]
                 
-                # スライド文書の場合、raw_union_bboxを保持して本文テキスト除外に使用
-                raw_graphics_bbox = fig_info.get("raw_union_bbox", graphics_bbox)
-                
                 column = fig_info["column"]
                 union_bbox = graphics_bbox
                 
                 if is_table_image and "clip_bbox" in fig_info:
                     clip_bbox = fig_info["clip_bbox"]
-                    # 表画像でも本文テキストを除外するロジックを適用
-                    body_line = self._fig_find_body_text_above(
-                        clip_bbox, page_text_lines, col_width
-                    )
-                    if body_line:
-                        body_bottom = body_line["bbox"][3]
-                        new_clip_y0 = body_bottom + 5.0
-                        if new_clip_y0 > clip_bbox[1] and new_clip_y0 < clip_bbox[3]:
-                            debug_print(f"[DEBUG] 表画像: 本文検出によりclip_y0を{clip_bbox[1]:.1f}→{new_clip_y0:.1f}にトリム")
-                            clip_bbox = (clip_bbox[0], new_clip_y0, clip_bbox[2], clip_bbox[3])
-                    debug_print(f"[DEBUG] 表画像: clip_bboxを使用")
+                    debug_print(f"[DEBUG] 表画像: 既存のclip_bboxを使用")
                 else:
                     # 画像のみクラスタ（drawing_count=0）の場合の処理
                     drawing_count_for_clip = fig_info.get("drawing_count", 0)
@@ -1919,18 +1546,12 @@ class _FiguresMixin:
                                 if extracted_any:
                                     continue
                     
-                    # クラスタ内のすべての要素が小さいかどうかを取得
-                    all_elements_small = fig_info.get("all_elements_small", False)
-                    
                     clip_bbox = self._fig_compute_clip_bbox(
                         graphics_bbox, page_text_lines, col_width,
                         page_width, page_height, column, gutter_x,
                         is_embedded_image, header_y_max, footer_y_min,
-                        is_slide_document, is_two_column,
-                        raw_graphics_bbox=raw_graphics_bbox,
-                        all_elements_small=all_elements_small
+                        is_slide_document
                     )
-                    
                 
                 # スライド文書: ページ全体を覆う図形（面積比50%以上）かつ本文テキスト比50%以上の場合のみ除外
                 # 図中ラベル（短いテキスト）は本文としてカウントしない
@@ -1969,7 +1590,7 @@ class _FiguresMixin:
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
                 
-                debug_print(f"[DEBUG] 図候補出力: page={page_num+1}, column={column}, graphics_bbox={graphics_bbox}, clip_bbox={clip_bbox}")
+                debug_print(f"[DEBUG] 図候補出力: page={page_num+1}, column={column}")
                 
                 clip_rect = fitz.Rect(clip_bbox)
                 matrix = fitz.Matrix(2.0, 2.0)
@@ -2015,22 +1636,11 @@ class _FiguresMixin:
                     image_bboxes = []
                 else:
                     image_bboxes = fig_info.get("image_bboxes", [])
-                
-                # 表画像の場合もテキスト抽出を行う（図形内テキストとして<details>で出力）
-                # ただし、ラベル拡張はしない（clip_bbox内のテキストのみ抽出）
-                if is_table_image:
-                    figure_texts, expanded_bbox = self._extract_text_in_bbox(
-                        page, clip_bbox, expand_for_labels=False, column=column, gutter_x=gutter_x,
-                        exclude_table_bboxes=exclude_tables, image_bboxes=image_bboxes,
-                        is_slide_document=is_slide_document
-                    )
-                    debug_print(f"[DEBUG] 表画像: テキスト抽出 {len(figure_texts)}個")
-                else:
-                    figure_texts, expanded_bbox = self._extract_text_in_bbox(
-                        page, clip_bbox, expand_for_labels=expand_labels, column=column, gutter_x=gutter_x,
-                        exclude_table_bboxes=exclude_tables, image_bboxes=image_bboxes,
-                        is_slide_document=is_slide_document
-                    )
+                figure_texts, expanded_bbox = self._extract_text_in_bbox(
+                    page, clip_bbox, expand_for_labels=expand_labels, column=column, gutter_x=gutter_x,
+                    exclude_table_bboxes=exclude_tables, image_bboxes=image_bboxes,
+                    is_slide_document=is_slide_document
+                )
                 
                 # スライド文書: 本文テキストがない場合は除外しない（図中ラベルのみのページ）
                 # 本文テキストがある場合のみ、抽出されたテキスト量をチェック
@@ -2042,8 +1652,7 @@ class _FiguresMixin:
                     "bbox": expanded_bbox,
                     "y_position": union_bbox[1],
                     "texts": figure_texts,
-                    "column": column,
-                    "is_table_image": is_table_image
+                    "column": column
                 })
                 
                 debug_print(f"[DEBUG] 図を抽出: {image_path} ({fig_info['cluster_size']}要素, {len(figure_texts)}テキスト, {column})")
@@ -2155,8 +1764,7 @@ class _FiguresMixin:
             debug_print(f"[DEBUG] page={page_num+1}: 表領域を{len(table_bboxes)}個検出")
         
         all_figure_candidates = self._fig_filter_table_regions(
-            all_figure_candidates, table_bboxes, page_text_lines, column_count, page_num,
-            pymupdf_table_bboxes=line_based_table_bboxes
+            all_figure_candidates, table_bboxes, page_text_lines, column_count, page_num
         )
         
         # フェーズ5.5: 囲み記事（テキストボックス）のフィルタリング
@@ -2286,12 +1894,10 @@ class _FiguresMixin:
         debug_print(f"[DEBUG] ページ {page_num + 1}: {len(all_bboxes)}個の要素を{len(all_figure_candidates)}個の図にグループ化")
         
         # フェーズ8: 画像レンダリング
-        # 2段組みかどうかを判定（column_count >= 2 の場合は2段組み）
-        is_two_column = column_count >= 2
         figures = self._fig_render_candidates(
             page, page_num, all_figure_candidates, page_text_lines, col_width,
             page_width, gutter_x, header_y_max, footer_y_min, line_based_table_bboxes,
-            is_slide_document, is_two_column
+            is_slide_document
         )
         
         return figures
@@ -2405,13 +2011,6 @@ class _FiguresMixin:
                         if re.match(r'^図\d+', line_text) or re.match(r'^表\d+', line_text):
                             continue
                         
-                        # 見出しパターンはラベル候補から除外（expanded_bboxに含めない）
-                        # これにより、見出しは本文側に残り、図形内テキストには含まれない
-                        if re.match(r'^\d+\.\s+', line_text):
-                            continue
-                        if re.match(r'^第[一二三四五六七八九十0-9]+', line_text):
-                            continue
-                        
                         is_label = (
                             line_text and
                             len(line_text) <= 30 and
@@ -2466,19 +2065,6 @@ class _FiguresMixin:
                         
                         # キャプションパターンをフィルタリング（図形内テキストから除外）
                         if re.match(r'^図\s*\d+', line_text_stripped) or re.match(r'^表\s*\d+', line_text_stripped):
-                            continue
-                        
-                        # 見出しパターンをフィルタリング（図形内テキストから除外）
-                        # 例: "1. 近接した図形群", "4. 重なり合う図形", "第1条"
-                        if re.match(r'^\d+\.\s+', line_text_stripped):
-                            continue
-                        if re.match(r'^第[一二三四五六七八九十0-9]+', line_text_stripped):
-                            continue
-                        # 長い説明文も除外（図形内ラベルは通常短い）
-                        # 20文字以上で句読点を含む場合、または「。」で終わる場合は説明文とみなす
-                        if len(line_text_stripped) > 20 and ('。' in line_text_stripped or '、' in line_text_stripped):
-                            continue
-                        if line_text_stripped.endswith('。'):
                             continue
                         
                         # スライド文書の場合、本文テキストを除外
