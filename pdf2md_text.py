@@ -386,6 +386,9 @@ class _TextMixin:
         # 傍注（上付き文字）を検出して結合
         lines_data = self._merge_superscript_lines(lines_data, base_font_size)
         
+        # 同じY座標にある行を結合（列の分類を修正）
+        lines_data = self._merge_same_y_lines(lines_data, page_width)
+        
         # カラム内の表を検出（リフロー前に行う）
         table_regions = self._detect_table_regions(lines_data, page_center)
         
@@ -831,6 +834,128 @@ class _TextMixin:
         for i, line in enumerate(lines_data):
             if i not in skip_indices:
                 result.append(line)
+        
+        return result
+
+    def _merge_same_y_lines(
+        self, lines_data: List[Dict], page_width: float
+    ) -> List[Dict]:
+        """同じY座標にある行を結合
+        
+        同じY座標（±フォントサイズの0.5倍以内）にある行で、
+        X座標が連続している（前の行の右端と現在の行の左端の距離が
+        フォントサイズの1.5倍以内、または重なっている）場合は結合する。
+        結合後の行の列を再計算する。
+        
+        Args:
+            lines_data: 行データのリスト
+            page_width: ページ幅
+            
+        Returns:
+            結合後の行データのリスト
+        """
+        if len(lines_data) < 2:
+            return lines_data
+        
+        page_center = page_width / 2
+        
+        # Y座標でソート
+        sorted_lines = sorted(lines_data, key=lambda x: (x["y"], x["x"]))
+        
+        # 同じY座標の行をグループ化
+        y_groups = []
+        current_group = [sorted_lines[0]]
+        
+        for line in sorted_lines[1:]:
+            prev_line = current_group[-1]
+            y_diff = abs(line["y"] - prev_line["y"])
+            threshold = min(
+                line.get("font_size", 12),
+                prev_line.get("font_size", 12)
+            ) * 0.5
+            
+            if y_diff <= threshold:
+                current_group.append(line)
+            else:
+                y_groups.append(current_group)
+                current_group = [line]
+        
+        y_groups.append(current_group)
+        
+        # 各グループ内でX座標が連続している行を結合
+        result = []
+        for group in y_groups:
+            if len(group) == 1:
+                result.append(group[0])
+                continue
+            
+            # X座標でソート
+            group_sorted = sorted(group, key=lambda x: x["x"])
+            
+            # X座標が連続している行を結合
+            merged_lines = [group_sorted[0]]
+            for i in range(1, len(group_sorted)):
+                prev = merged_lines[-1]
+                curr = group_sorted[i]
+                
+                # 前の行の右端と現在の行の左端の距離を計算
+                prev_x_end = prev["bbox"][2]
+                curr_x_start = curr["bbox"][0]
+                x_gap = curr_x_start - prev_x_end
+                font_size = min(
+                    prev.get("font_size", 12),
+                    curr.get("font_size", 12)
+                )
+                
+                # X座標が連続している（距離がフォントサイズの1.5倍以内、または重なっている）
+                if x_gap <= font_size * 1.5:
+                    # 結合
+                    merged_text = prev["text"] + curr["text"]
+                    merged_bbox = (
+                        min(prev["bbox"][0], curr["bbox"][0]),
+                        min(prev["bbox"][1], curr["bbox"][1]),
+                        max(prev["bbox"][2], curr["bbox"][2]),
+                        max(prev["bbox"][3], curr["bbox"][3])
+                    )
+                    merged_font_size = max(
+                        prev.get("font_size", 12),
+                        curr.get("font_size", 12)
+                    )
+                    merged_is_bold = prev.get("is_bold", False) or curr.get("is_bold", False)
+                    merged_is_italic = prev.get("is_italic", False) or curr.get("is_italic", False)
+                    
+                    # 結合後の行の列を再計算
+                    merged_width = merged_bbox[2] - merged_bbox[0]
+                    merged_x_center = (merged_bbox[0] + merged_bbox[2]) / 2
+                    
+                    if merged_width > page_width * 0.6:
+                        merged_column = "full"
+                    elif merged_x_center < page_center:
+                        merged_column = "left"
+                    else:
+                        merged_column = "right"
+                    
+                    # spansを結合
+                    merged_spans = prev.get("spans", []) + curr.get("spans", [])
+                    
+                    merged_line = {
+                        "text": merged_text,
+                        "bbox": merged_bbox,
+                        "font_size": merged_font_size,
+                        "is_bold": merged_is_bold,
+                        "is_italic": merged_is_italic,
+                        "column": merged_column,
+                        "y": merged_bbox[1],
+                        "x": merged_bbox[0],
+                        "width": merged_width,
+                        "spans": merged_spans
+                    }
+                    merged_lines[-1] = merged_line
+                    debug_print(f"[DEBUG] 同一Y行結合: {prev['text'][:20]}... + {curr['text'][:20]}...")
+                else:
+                    merged_lines.append(curr)
+            
+            result.extend(merged_lines)
         
         return result
 
