@@ -844,8 +844,31 @@ class _FiguresMixin:
                 if has_significant_graphics:
                     # 描画要素や画像が多い場合は図として出力
                     # ただし、表領域と重なっているため、is_table_imageフラグを設定
+                    # clip_bboxを表領域に制限して、表外の本文テキストを含めないようにする
                     debug_print(f"[DEBUG] page={page_num+1}: 表領域だが描画要素({drawing_count}個)/画像({image_count}個)があるため図として出力")
                     cand["is_table_image"] = True
+                    
+                    # clip_bboxを表領域に制限
+                    table_x0, table_y0, table_x1, table_y1 = matched_table_bbox
+                    clip_x0 = table_x0 - 5
+                    clip_y0 = table_y0 - 5
+                    clip_x1 = table_x1 + 5
+                    clip_y1 = table_y1 + 5
+                    
+                    # 表のキャプションを検出して上端を調整
+                    for line in page_text_lines:
+                        line_bbox = line["bbox"]
+                        line_text = line["text"]
+                        # 表の上端付近にあるキャプションをチェック
+                        if line_bbox[1] >= table_y0 - 30 and line_bbox[3] <= table_y0 + 5:
+                            if re.match(r'^表\s*\d', line_text):
+                                # キャプションの下端より下にclip_y0を設定
+                                clip_y0 = line_bbox[3] + 2
+                                debug_print(f"[DEBUG] 表画像: キャプション検出 '{line_text[:20]}'")
+                                break
+                    
+                    cand["clip_bbox"] = (clip_x0, clip_y0, clip_x1, clip_y1)
+                    debug_print(f"[DEBUG] 表画像: clip_bbox=({clip_x0:.1f}, {clip_y0:.1f}, {clip_x1:.1f}, {clip_y1:.1f})")
                     table_filtered.append(cand)
                 elif self._fig_can_output_as_markdown_table(matched_table_bbox, page_text_lines, is_two_col):
                     debug_print(f"[DEBUG] page={page_num+1}: 図候補をMarkdown表として除外")
