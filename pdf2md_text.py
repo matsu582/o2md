@@ -1760,10 +1760,35 @@ class _TextMixin:
             return bool(re.match(r'^\S{1,6}[\u3000 ]{2,}\S+', t))
         
         def is_in_table_region(line: Dict) -> Optional[Dict]:
-            """行が表領域内にあるかチェック"""
+            """行が表領域内にあるかチェック
+            
+            罫線ベースの表と重なる場合はNoneを返す（重複出力を防止）
+            """
+            line_y = line.get("y", 0)
+            
+            # 罫線ベースの表と重なる場合はスキップ
+            for line_table in line_based_tables:
+                table_y_start = line_table.get("y_start", 0)
+                table_y_end = line_table.get("y_end", 0)
+                if table_y_start - 10 <= line_y <= table_y_end + 10:
+                    return None
+            
             for region in table_regions:
                 if (line["column"] == region["column"] and
                     region["y_start"] - 10 <= line["y"] <= region["y_end"] + 10):
+                    # テキストベースの表領域が罫線ベースの表と重なる場合はスキップ
+                    region_y_start = region["y_start"]
+                    region_y_end = region["y_end"]
+                    overlaps_with_line_table = False
+                    for line_table in line_based_tables:
+                        lt_y_start = line_table.get("y_start", 0)
+                        lt_y_end = line_table.get("y_end", 0)
+                        # Y範囲が重なるかチェック
+                        if not (region_y_end < lt_y_start - 10 or region_y_start > lt_y_end + 10):
+                            overlaps_with_line_table = True
+                            break
+                    if overlaps_with_line_table:
+                        return None
                     return region
             return None
         
