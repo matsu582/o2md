@@ -1632,14 +1632,24 @@ class _TextMixin:
         processed_line_tables = set()
         
         def get_line_based_table_by_y(line: Dict) -> Optional[Dict]:
-            """行のy座標が罫線ベースの表領域内にあるかチェック（テーブル出力トリガ用）
+            """行のy座標とx座標が罫線ベースの表領域内にあるかチェック（テーブル出力トリガ用）
             
-            y座標のみで判定し、テーブルの出力タイミングを決定する。
+            y座標とx座標の両方で判定し、テーブルの出力タイミングを決定する。
+            2段組の場合、同じY範囲に複数の表がある可能性があるため、
+            x座標も考慮して正しい表を返す。
             """
             line_y = line.get("y", 0)
+            line_x = line.get("x", 0)
             for table in sorted_line_tables:
                 if table["y_start"] - 5 <= line_y <= table["y_end"] + 5:
-                    return table
+                    # x座標もチェックして、行が表の範囲内にあるか確認
+                    table_bbox = table.get("bbox", (0, 0, 0, 0))
+                    table_x_start = table_bbox[0]
+                    table_x_end = table_bbox[2]
+                    table_width = table_x_end - table_x_start
+                    margin = max(table_width * 0.2, 30)
+                    if table_x_start - margin <= line_x <= table_x_end + margin:
+                        return table
             return None
         
         def should_skip_line_for_table(line: Dict, table: Dict) -> bool:
@@ -1747,8 +1757,10 @@ class _TextMixin:
             # 罫線ベースの表領域をチェック
             line_table = get_line_based_table_by_y(line)
             if line_table:
-                table_id = (line_table["y_start"], line_table["y_end"])
-                # テーブルがまだ出力されていない場合、出力する（y座標のみで判定）
+                # table_idにx座標も含めて、2段組の表を区別する
+                table_bbox = line_table.get("bbox", (0, 0, 0, 0))
+                table_id = (table_bbox[0], line_table["y_start"], table_bbox[2], line_table["y_end"])
+                # テーブルがまだ出力されていない場合、出力する
                 if table_id not in processed_line_tables:
                     # 図形と重なるテーブルはMarkdownテーブルとして出力しない
                     if not table_overlaps_with_figure(line_table):
