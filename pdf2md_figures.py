@@ -336,17 +336,22 @@ class _FiguresMixin:
         return all_elements, all_bboxes
 
     def _fig_detect_figure_captions(self, page) -> List[Dict]:
-        """図キャプションの位置を検出
+        """図キャプションと見出しテキストの位置を検出
+        
+        図キャプション（「図 1.」など）と見出しテキスト（「●」「■」などで始まるテキスト）を
+        検出し、クラスタリング時のバリアとして使用する。
         
         Args:
             page: PyMuPDFのページオブジェクト
             
         Returns:
-            図キャプション情報のリスト
+            図キャプション・見出し情報のリスト
         """
         figure_caption_lines = []
         try:
             caption_pattern = re.compile(r'^図\s*\d+[\.\:．：]')
+            # 見出しパターン（●、■、◆、▼、▲、○、◎、★、☆で始まるテキスト）
+            heading_pattern = re.compile(r'^[●■◆▼▲○◎★☆]')
             text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
             for block in text_dict.get("blocks", []):
                 if block.get("type") != 0:
@@ -356,7 +361,8 @@ class _FiguresMixin:
                     for span in line.get("spans", []):
                         line_text += span.get("text", "")
                     line_text = line_text.strip()
-                    if caption_pattern.match(line_text):
+                    # 図キャプションまたは見出しテキストを検出
+                    if caption_pattern.match(line_text) or heading_pattern.match(line_text):
                         line_bbox = line.get("bbox", (0, 0, 0, 0))
                         figure_caption_lines.append({
                             "text": line_text,
@@ -370,7 +376,11 @@ class _FiguresMixin:
     def _fig_has_caption_between(
         self, bbox1: Tuple, bbox2: Tuple, figure_caption_lines: List[Dict]
     ) -> bool:
-        """2つのbbox間に図キャプションがあるかどうかを判定"""
+        """2つのbbox間に図キャプション・見出しがあるかどうかを判定
+        
+        見出しテキストは図形の直後に配置されることが多いため、
+        gap_bottomを少し拡張して検出範囲を広げる。
+        """
         y1_bottom = bbox1[3]
         y2_top = bbox2[1]
         y1_top = bbox1[1]
@@ -385,9 +395,14 @@ class _FiguresMixin:
         else:
             return False
         
+        # 見出しテキストは図形の直後に配置されることが多いため、
+        # 検出範囲を少し拡張する（上下に15px）
+        extended_gap_top = gap_top - 15
+        extended_gap_bottom = gap_bottom + 15
+        
         for cap in figure_caption_lines:
             cap_y = cap["y_center"]
-            if gap_top <= cap_y <= gap_bottom:
+            if extended_gap_top <= cap_y <= extended_gap_bottom:
                 return True
         return False
 
@@ -995,39 +1010,82 @@ class _FiguresMixin:
     def _fig_has_body_barrier(
         self, bbox1: Tuple, bbox2: Tuple, text_lines: List[Dict], col_width: float
     ) -> bool:
-        """2つのbbox間に本文バリアがあるか判定"""
-        y_min = min(bbox1[3], bbox2[3])
-        y_max = max(bbox1[1], bbox2[1])
-        x_overlap_start = max(bbox1[0], bbox2[0])
-        x_overlap_end = min(bbox1[2], bbox2[2])
+        """2つのbbox間に本文バリアがあるか判定
+        
+        重なっているクラスタの場合も、重なり領域内に見出しテキストがあれば
+        バリアとして検出する。
+        """
+        # X方向は和集合を使用（両方のクラスタの範囲内にあるテキストを検出）
+        x_union_start = min(bbox1[0], bbox2[0])
+        x_union_end = max(bbox1[2], bbox2[2])
         
         caption_pattern = re.compile(r'^図\s*\d+[\.\:．：]')
+        # 見出しパターン（●、■、◆、▼、▲、○、◎、★、☆で始まるテキスト）
+        heading_pattern = re.compile(r'^[●■◆▼▲○◎★☆]')
         
+        # 2つのbboxのY方向の関係を判定
         if bbox1[3] < bbox2[1]:
+            # bbox1が上、bbox2が下（重なりなし）
             gap_top = bbox1[3]
             gap_bottom = bbox2[1]
+            overlap_top = None
+            overlap_bottom = None
         elif bbox2[3] < bbox1[1]:
+            # bbox2が上、bbox1が下（重なりなし）
             gap_top = bbox2[3]
             gap_bottom = bbox1[1]
+            overlap_top = None
+            overlap_bottom = None
         else:
-            gap_top = y_min
-            gap_bottom = y_max
+            # 重なりあり
+            gap_top = None
+            gap_bottom = None
+            overlap_top = max(bbox1[1], bbox2[1])
+            overlap_bottom = min(bbox1[3], bbox2[3])
         
         for line in text_lines:
             line_bbox = line["bbox"]
             line_center_y = (line_bbox[1] + line_bbox[3]) / 2
             line_center_x = (line_bbox[0] + line_bbox[2]) / 2
             line_width = line_bbox[2] - line_bbox[0]
+            line_text = line["text"].strip()
             
-            if caption_pattern.match(line["text"]):
-                if gap_top - 30 <= line_center_y <= gap_bottom + 30:
-                    if x_overlap_start - 20 < line_center_x < x_overlap_end + 20:
-                        debug_print(f"[DEBUG] 図キャプションバリア検出: '{line['text'][:30]}...'")
+            # X方向のチェック（両方のクラスタの範囲内にあるテキストを検出）
+            if not (x_union_start - 20 < line_center_x < x_union_end + 20):
+                continue
+            
+            # 図キャプションのチェック
+            if caption_pattern.match(line_text):
+                if gap_top is not None and gap_bottom is not None:
+                    if gap_top - 30 <= line_center_y <= gap_bottom + 30:
+                        debug_print(f"[DEBUG] 図キャプションバリア検出: '{line_text[:30]}...'")
+                        return True
+                elif overlap_top is not None and overlap_bottom is not None:
+                    if overlap_top - 30 <= line_center_y <= overlap_bottom + 30:
+                        debug_print(f"[DEBUG] 図キャプションバリア検出（重なり領域）: '{line_text[:30]}...'")
                         return True
             
-            if y_min < line_center_y < y_max:
-                if x_overlap_start - 20 < line_center_x < x_overlap_end + 20:
-                    if self._fig_is_body_text_line(line["text"], line_width, col_width):
+            # 見出しテキストのチェック
+            if heading_pattern.match(line_text):
+                if gap_top is not None and gap_bottom is not None:
+                    if gap_top - 10 <= line_center_y <= gap_bottom + 10:
+                        debug_print(f"[DEBUG] 見出しバリア検出: '{line_text[:30]}...'")
+                        return True
+                elif overlap_top is not None and overlap_bottom is not None:
+                    if overlap_top - 10 <= line_center_y <= overlap_bottom + 10:
+                        debug_print(f"[DEBUG] 見出しバリア検出（重なり領域）: '{line_text[:30]}...'")
+                        return True
+            
+            # 本文テキストのチェック
+            if gap_top is not None and gap_bottom is not None:
+                y_min = min(bbox1[3], bbox2[3])
+                y_max = max(bbox1[1], bbox2[1])
+                if y_min < line_center_y < y_max:
+                    if self._fig_is_body_text_line(line_text, line_width, col_width):
+                        return True
+            elif overlap_top is not None and overlap_bottom is not None:
+                if overlap_top < line_center_y < overlap_bottom:
+                    if self._fig_is_body_text_line(line_text, line_width, col_width):
                         return True
         return False
 
