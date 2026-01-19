@@ -1043,15 +1043,10 @@ class _FiguresMixin:
                     if right_idx in used:
                         continue
                     
-                    # 画像またはdrawing要素が両方に存在する場合のみマージ対象
                     left_image_count = left_cand.get("image_count", 0)
                     right_image_count = right_cand.get("image_count", 0)
-                    left_drawing_count = left_cand.get("drawing_count", 0)
-                    right_drawing_count = right_cand.get("drawing_count", 0)
-                    left_has_elements = left_image_count > 0 or left_drawing_count > 0
-                    right_has_elements = right_image_count > 0 or right_drawing_count > 0
-                    if not left_has_elements or not right_has_elements:
-                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 要素なし")
+                    if left_image_count == 0 or right_image_count == 0:
+                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 画像なし")
                         continue
                     
                     left_bbox = left_cand["union_bbox"]
@@ -1191,7 +1186,8 @@ class _FiguresMixin:
         page_width: float, page_height: float, column: str, gutter_x: float,
         is_embedded_image: bool = False,
         header_y_max: Optional[float] = None, footer_y_min: Optional[float] = None,
-        is_slide_document: bool = False
+        is_slide_document: bool = False,
+        is_two_column: bool = True
     ) -> Tuple:
         """graphics_bboxからclip_bboxを計算（トリム処理）"""
         # スライド文書では小さなマージン（5px）、通常文書では20px
@@ -1231,38 +1227,16 @@ class _FiguresMixin:
             clip_y1 = footer_y_min
             debug_print(f"[DEBUG] フッター領域クリップ: clip_y1を{clip_y1:.1f}に設定")
         
-        # 図形の右側にあるテキストを検出して除外
-        has_text_on_right = False
-        min_text_x0_on_right = page_width
-        for line in text_lines:
-            line_bbox = line.get("bbox", (0, 0, 0, 0))
-            line_text = line.get("text", "").strip()
-            if not line_text:
-                continue
-            # テキストが図形のY範囲内にあるかチェック
-            y_overlap = max(0, min(graphics_bbox[3], line_bbox[3]) - max(graphics_bbox[1], line_bbox[1]))
-            if y_overlap < 10:
-                continue
-            # テキストが図形の右側にあるかチェック（図形の右端より右に始まる）
-            if line_bbox[0] > graphics_bbox[2] - 20:
-                has_text_on_right = True
-                if line_bbox[0] < min_text_x0_on_right:
-                    min_text_x0_on_right = line_bbox[0]
-                    debug_print(f"[DEBUG] 図形右側のテキスト検出: x0={line_bbox[0]:.1f}（テキスト: {line_text[:20]}）")
-        
-        if has_text_on_right:
-            # 図形の右側にテキストがある場合、clip_x1をテキストの左端に制限
-            new_clip_x1 = min_text_x0_on_right - 5.0
-            if new_clip_x1 < clip_x1:
-                debug_print(f"[DEBUG] 図形右側にテキストあり: clip_x1を{clip_x1:.1f}→{new_clip_x1:.1f}に制限")
-                clip_x1 = new_clip_x1
-        elif column == "left":
-            clip_x1 = min(clip_x1, gutter_x - 5)
-            debug_print(f"[DEBUG] 左カラム: clip_x1を{clip_x1:.1f}にクランプ")
-        elif column == "right":
-            old_clip_x0 = clip_x0
-            clip_x0 = max(clip_x0, gutter_x + 5)
-            debug_print(f"[DEBUG] 右カラム: clip_x0を{old_clip_x0:.1f}→{clip_x0:.1f}にクランプ")
+        # 2段組み文書の場合のみカラム制約を適用
+        # 単一カラム文書では図形が中央付近に配置されることがあるため、制約を適用しない
+        if is_two_column:
+            if column == "left":
+                clip_x1 = min(clip_x1, gutter_x - 5)
+                debug_print(f"[DEBUG] 左カラム: clip_x1を{clip_x1:.1f}にクランプ")
+            elif column == "right":
+                old_clip_x0 = clip_x0
+                clip_x0 = max(clip_x0, gutter_x + 5)
+                debug_print(f"[DEBUG] 右カラム: clip_x0を{old_clip_x0:.1f}→{clip_x0:.1f}にクランプ")
         
         # スライド文書または埋め込み画像の場合、上下トリムをスキップ
         if is_embedded_image or is_slide_document:
@@ -1310,7 +1284,8 @@ class _FiguresMixin:
         self, page, page_num: int, all_figure_candidates: List[Dict],
         page_text_lines: List[Dict], col_width: float, page_width: float,
         gutter_x: float, header_y_max: Optional[float], footer_y_min: Optional[float],
-        line_based_table_bboxes: List[Tuple], is_slide_document: bool = False
+        line_based_table_bboxes: List[Tuple], is_slide_document: bool = False,
+        is_two_column: bool = True
     ) -> List[Dict]:
         """図候補をレンダリングして図情報リストを生成"""
         figures = []
@@ -1573,7 +1548,7 @@ class _FiguresMixin:
                         graphics_bbox, page_text_lines, col_width,
                         page_width, page_height, column, gutter_x,
                         is_embedded_image, header_y_max, footer_y_min,
-                        is_slide_document
+                        is_slide_document, is_two_column
                     )
                 
                 # スライド文書: ページ全体を覆う図形（面積比50%以上）かつ本文テキスト比50%以上の場合のみ除外
@@ -1918,10 +1893,11 @@ class _FiguresMixin:
         debug_print(f"[DEBUG] ページ {page_num + 1}: {len(all_bboxes)}個の要素を{len(all_figure_candidates)}個の図にグループ化")
         
         # フェーズ8: 画像レンダリング
+        is_two_column = (column_count >= 2)
         figures = self._fig_render_candidates(
             page, page_num, all_figure_candidates, page_text_lines, col_width,
             page_width, gutter_x, header_y_max, footer_y_min, line_based_table_bboxes,
-            is_slide_document
+            is_slide_document, is_two_column
         )
         
         return figures
