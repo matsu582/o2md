@@ -1820,17 +1820,37 @@ class _TextMixin:
         def should_skip_line_for_table(line: Dict, table: Dict) -> bool:
             """行がテーブルの一部としてスキップすべきかチェック（行除外判定用）
             
-            2段組の場合、テーブルのx範囲と行のx座標を比較して、
-            同じカラム内の行のみをスキップする。
+            2段組の場合、テーブルと行が同じカラムにある場合のみスキップする。
+            ページの中央（gutter_x）を基準にカラムを判定する。
             """
             line_x = line.get("x", 0)
+            line_y = line.get("y", 0)
             table_bbox = table.get("bbox", (0, 0, 0, 0))
             table_x_start = table_bbox[0]
             table_x_end = table_bbox[2]
-            # 行のx座標がテーブルのx範囲内にあるかチェック
-            # 許容範囲を広めに設定（テーブル幅の20%程度）
+            table_y_start = table.get("y_start", 0)
+            table_y_end = table.get("y_end", 0)
+            
+            # 行のY座標がテーブルのY範囲内にあるかチェック
+            if not (table_y_start - 5 <= line_y <= table_y_end + 5):
+                return False
+            
+            # ページの中央を基準にカラムを判定
+            gutter_x = page_width / 2 if page_width else 300
+            
+            # テーブルと行が同じカラムにあるかチェック
+            table_center_x = (table_x_start + table_x_end) / 2
+            table_in_left = table_center_x < gutter_x
+            line_in_left = line_x < gutter_x
+            
+            # 異なるカラムにある場合はスキップしない
+            if table_in_left != line_in_left:
+                return False
+            
+            # 同じカラム内で、行のx座標がテーブルのx範囲内にあるかチェック
+            # 許容範囲を設定（テーブル幅の10%程度、最大20px）
             table_width = table_x_end - table_x_start
-            margin = max(table_width * 0.2, 30)
+            margin = min(table_width * 0.1, 20)
             return table_x_start - margin <= line_x <= table_x_end + margin
         
         def table_overlaps_with_figure(table: Dict) -> bool:
