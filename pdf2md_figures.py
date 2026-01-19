@@ -836,41 +836,7 @@ class _FiguresMixin:
             
             if is_table and matched_table_bbox:
                 is_two_col = (column_count >= 2)
-                # 描画要素が3個以上、または画像が1個以上ある場合は図として判定
-                drawing_count = cand.get("drawing_count", 0)
-                image_count = cand.get("image_count", 0)
-                has_significant_graphics = drawing_count >= 3 or image_count >= 1
-                
-                if has_significant_graphics:
-                    # 描画要素や画像が多い場合は図として出力
-                    # ただし、表領域と重なっているため、is_table_imageフラグを設定
-                    # clip_bboxを表領域に制限して、表外の本文テキストを含めないようにする
-                    debug_print(f"[DEBUG] page={page_num+1}: 表領域だが描画要素({drawing_count}個)/画像({image_count}個)があるため図として出力")
-                    cand["is_table_image"] = True
-                    
-                    # clip_bboxを表領域に制限
-                    table_x0, table_y0, table_x1, table_y1 = matched_table_bbox
-                    clip_x0 = table_x0 - 5
-                    clip_y0 = table_y0 - 5
-                    clip_x1 = table_x1 + 5
-                    clip_y1 = table_y1 + 5
-                    
-                    # 表のキャプションを検出して上端を調整
-                    for line in page_text_lines:
-                        line_bbox = line["bbox"]
-                        line_text = line["text"]
-                        # 表の上端付近にあるキャプションをチェック
-                        if line_bbox[1] >= table_y0 - 30 and line_bbox[3] <= table_y0 + 5:
-                            if re.match(r'^表\s*\d', line_text):
-                                # キャプションの下端より下にclip_y0を設定
-                                clip_y0 = line_bbox[3] + 2
-                                debug_print(f"[DEBUG] 表画像: キャプション検出 '{line_text[:20]}'")
-                                break
-                    
-                    cand["clip_bbox"] = (clip_x0, clip_y0, clip_x1, clip_y1)
-                    debug_print(f"[DEBUG] 表画像: clip_bbox=({clip_x0:.1f}, {clip_y0:.1f}, {clip_x1:.1f}, {clip_y1:.1f})")
-                    table_filtered.append(cand)
-                elif self._fig_can_output_as_markdown_table(matched_table_bbox, page_text_lines, is_two_col):
+                if self._fig_can_output_as_markdown_table(matched_table_bbox, page_text_lines, is_two_col):
                     debug_print(f"[DEBUG] page={page_num+1}: 図候補をMarkdown表として除外")
                 else:
                     debug_print(f"[DEBUG] page={page_num+1}: 図候補を表画像として出力")
@@ -1673,12 +1639,10 @@ class _FiguresMixin:
                     image_bboxes = []
                 else:
                     image_bboxes = fig_info.get("image_bboxes", [])
-                # 表画像フラグを取得
-                is_table_image = fig_info.get("is_table_image", False)
                 figure_texts, expanded_bbox = self._extract_text_in_bbox(
                     page, clip_bbox, expand_for_labels=expand_labels, column=column, gutter_x=gutter_x,
                     exclude_table_bboxes=exclude_tables, image_bboxes=image_bboxes,
-                    is_slide_document=is_slide_document, is_table_image=is_table_image
+                    is_slide_document=is_slide_document
                 )
                 
                 # スライド文書: 本文テキストがない場合は除外しない（図中ラベルのみのページ）
@@ -1965,8 +1929,7 @@ class _FiguresMixin:
         gutter_x: float = None,
         exclude_table_bboxes: List[Tuple[float, float, float, float]] = None,
         image_bboxes: List[Tuple[float, float, float, float]] = None,
-        is_slide_document: bool = False,
-        is_table_image: bool = False
+        is_slide_document: bool = False
     ) -> Tuple[List[str], Tuple[float, float, float, float]]:
         """指定されたbbox内のテキストを抽出
         
@@ -1974,7 +1937,6 @@ class _FiguresMixin:
         カラム境界を考慮して、隣のカラムのテキストを取り込まないようにする。
         罫線ベースの表領域内のテキストは除外する。
         スライド文書の場合、埋め込み画像bbox外の本文テキストを除外する。
-        表画像の場合、本文テキストを除外する。
         
         Args:
             page: PyMuPDFのページオブジェクト
@@ -1985,7 +1947,6 @@ class _FiguresMixin:
             exclude_table_bboxes: 除外する罫線ベースの表領域のリスト
             image_bboxes: 埋め込み画像のbboxリスト（スライド文書用）
             is_slide_document: スライド文書フラグ
-            is_table_image: 表画像フラグ
             
         Returns:
             (抽出されたテキストのリスト, 拡張後のbbox)
@@ -2108,16 +2069,6 @@ class _FiguresMixin:
                         # キャプションパターンをフィルタリング（図形内テキストから除外）
                         if re.match(r'^図\s*\d+', line_text_stripped) or re.match(r'^表\s*\d+', line_text_stripped):
                             continue
-                        
-                        # 表画像の場合、本文テキストを除外
-                        # 表の内部テキストのみを含め、表の下にある本文は含めない
-                        if is_table_image:
-                            line_width = line_bbox[2] - line_bbox[0]
-                            col_width = page.rect.width * 0.4
-                            is_body = self._fig_is_body_text_line(line_text_stripped, line_width, col_width)
-                            if is_body:
-                                debug_print(f"[DEBUG] 表画像: 本文行を除外: {line_text_stripped[:30]}...")
-                                continue
                         
                         # スライド文書の場合、本文テキストを除外
                         # 図形内テキストには短いラベルのみを含め、本文は含めない
