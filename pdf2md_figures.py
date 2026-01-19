@@ -1079,6 +1079,13 @@ class _FiguresMixin:
                         debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 本文バリアあり")
                         continue
                     
+                    # 両方のクラスタにキャプションがある場合はマージしない（別々の図）
+                    left_caption = self._fig_find_caption_below(left_bbox, page_text_lines)
+                    right_caption = self._fig_find_caption_below(right_bbox, page_text_lines)
+                    if left_caption and right_caption:
+                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 両方にキャプションあり")
+                        continue
+                    
                     if y_overlap_ratio > best_y_overlap:
                         best_y_overlap = y_overlap_ratio
                         best_right_idx = right_idx
