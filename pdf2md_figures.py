@@ -1043,10 +1043,15 @@ class _FiguresMixin:
                     if right_idx in used:
                         continue
                     
+                    # 画像またはdrawing要素が両方に存在する場合のみマージ対象
                     left_image_count = left_cand.get("image_count", 0)
                     right_image_count = right_cand.get("image_count", 0)
-                    if left_image_count == 0 or right_image_count == 0:
-                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 画像なし")
+                    left_drawing_count = left_cand.get("drawing_count", 0)
+                    right_drawing_count = right_cand.get("drawing_count", 0)
+                    left_has_elements = left_image_count > 0 or left_drawing_count > 0
+                    right_has_elements = right_image_count > 0 or right_drawing_count > 0
+                    if not left_has_elements or not right_has_elements:
+                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 要素なし")
                         continue
                     
                     left_bbox = left_cand["union_bbox"]
@@ -1277,6 +1282,21 @@ class _FiguresMixin:
             new_clip_y0 = body_y1 + 5.0
             clip_y0 = max(clip_y0, new_clip_y0)
             debug_print(f"[DEBUG] 本文検出: clip_y0を{clip_y0:.1f}にトリム")
+        
+        # 見出しテキストを検出してclip_y0を調整
+        heading_pattern = re.compile(r'^(\d+\.\s+|第[一二三四五六七八九十0-9]+)')
+        search_y_start = clip_y0 - padding - 10
+        search_y_end = graphics_bbox[1] + 10
+        for line in text_lines:
+            line_bbox = line.get("bbox", (0, 0, 0, 0))
+            line_text = line.get("text", "").strip()
+            if heading_pattern.match(line_text):
+                if line_bbox[1] >= search_y_start and line_bbox[3] <= search_y_end:
+                    x_overlap = max(0, min(graphics_bbox[2], line_bbox[2]) - max(graphics_bbox[0], line_bbox[0]))
+                    if x_overlap > 20:
+                        new_clip_y0 = line_bbox[3] + 5.0
+                        clip_y0 = max(clip_y0, new_clip_y0)
+                        debug_print(f"[DEBUG] 見出し検出: clip_y0を{clip_y0:.1f}にトリム（見出し: {line_text[:20]}）")
         
         if clip_y1 - clip_y0 < 50:
             center_y = (clip_y0 + clip_y1) / 2
@@ -1975,7 +1995,7 @@ class _FiguresMixin:
         try:
             text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
             
-            label_margin = 50.0
+            label_margin = 10.0
             
             def is_in_same_column(line_center_x):
                 if column == "full":
