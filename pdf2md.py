@@ -1734,7 +1734,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         text_blocks = [item for item in all_items if item["type"] == "block"]
         left_count = sum(1 for item in text_blocks if item["column"] == "left")
         right_count = sum(1 for item in text_blocks if item["column"] == "right")
-        is_two_column = left_count >= 3 and right_count >= 3
+        # どちらかのカラムに3つ以上のブロックがあり、もう一方に1つ以上あれば2段組み
+        # ヘッダー/フッター除外後にブロック数が減っても正しく判定できるようにする
+        is_two_column = (left_count >= 3 and right_count >= 1) or (left_count >= 1 and right_count >= 3)
         
         if is_two_column:
             # 2段組み: カラム順（左→フル→右）、次にY座標でソート
