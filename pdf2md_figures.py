@@ -1043,10 +1043,15 @@ class _FiguresMixin:
                     if right_idx in used:
                         continue
                     
+                    # 画像またはdrawing要素が両方に存在する場合のみマージ対象
                     left_image_count = left_cand.get("image_count", 0)
                     right_image_count = right_cand.get("image_count", 0)
-                    if left_image_count == 0 or right_image_count == 0:
-                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 画像なし")
+                    left_drawing_count = left_cand.get("drawing_count", 0)
+                    right_drawing_count = right_cand.get("drawing_count", 0)
+                    left_has_elements = left_image_count > 0 or left_drawing_count > 0
+                    right_has_elements = right_image_count > 0 or right_drawing_count > 0
+                    if not left_has_elements or not right_has_elements:
+                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 要素なし")
                         continue
                     
                     left_bbox = left_cand["union_bbox"]
