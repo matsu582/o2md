@@ -689,6 +689,11 @@ class _TextMixin:
             else:
                 result.append(block)
         
+        # 降格が発生した場合は再帰的に呼び出し
+        # （連続するheadingブロックを順次降格するため）
+        if demote_indices:
+            return self._demote_heading_in_list_context(result)
+        
         return result
 
     def _assign_list_levels(
