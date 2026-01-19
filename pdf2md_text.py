@@ -623,9 +623,9 @@ class _TextMixin:
     ) -> List[Dict[str, Any]]:
         """リストの途中で見出しになっているブロックをlist_itemに降格
         
-        直前がlist_itemで、y_gapが小さく、x0が近い場合は
-        headingをlist_itemに降格する。これにより、リストの途中で
-        見出しが挿入される問題を防ぐ。
+        直前または直後がlist_itemで、y_gapが小さく、x0が近い場合は
+        headingをlist_itemに降格する。これにより、リストの途中や
+        リストの先頭で見出しが挿入される問題を防ぐ。
         
         Args:
             blocks: ブロックのリスト
@@ -643,37 +643,51 @@ class _TextMixin:
             r'^[\d０-９]+[\.．\)）]\s+'
         )
         
-        result = []
+        # 降格対象のインデックスを収集
+        demote_indices = set()
+        
         for i, block in enumerate(blocks):
             block_type = block.get("type", "")
             text = block.get("text", "").strip()
             
             # headingで、番号付きパターンに一致する場合のみチェック
             if block_type.startswith("heading") and numbered_heading_pattern.match(text):
-                # 直前のブロックを探す
-                prev_block = result[-1] if result else None
+                curr_bbox = block.get("bbox", (0, 0, 0, 0))
                 
-                if prev_block:
+                # 直前のブロックをチェック
+                if i > 0:
+                    prev_block = blocks[i - 1]
                     prev_type = prev_block.get("type", "")
                     prev_bbox = prev_block.get("bbox", (0, 0, 0, 0))
-                    curr_bbox = block.get("bbox", (0, 0, 0, 0))
                     
-                    # 直前がlist_itemの場合
                     if prev_type == "list_item":
-                        # y_gap（縦方向の距離）を計算
                         y_gap = curr_bbox[1] - prev_bbox[3]
-                        # x0の差（インデントの差）を計算
                         x_diff = abs(curr_bbox[0] - prev_bbox[0])
-                        
-                        # y_gapが小さく（30pt以下）、x0が近い（20pt以下）場合は降格
                         if y_gap <= 30 and x_diff <= 20:
-                            # headingをlist_itemに降格
-                            demoted_block = block.copy()
-                            demoted_block["type"] = "list_item"
-                            result.append(demoted_block)
+                            demote_indices.add(i)
                             continue
-            
-            result.append(block)
+                
+                # 直後のブロックをチェック（リストの先頭の場合）
+                if i < len(blocks) - 1:
+                    next_block = blocks[i + 1]
+                    next_type = next_block.get("type", "")
+                    next_bbox = next_block.get("bbox", (0, 0, 0, 0))
+                    
+                    if next_type == "list_item":
+                        y_gap = next_bbox[1] - curr_bbox[3]
+                        x_diff = abs(next_bbox[0] - curr_bbox[0])
+                        if y_gap <= 30 and x_diff <= 20:
+                            demote_indices.add(i)
+        
+        # 降格を適用
+        result = []
+        for i, block in enumerate(blocks):
+            if i in demote_indices:
+                demoted_block = block.copy()
+                demoted_block["type"] = "list_item"
+                result.append(demoted_block)
+            else:
+                result.append(block)
         
         return result
 
