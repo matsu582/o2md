@@ -2071,6 +2071,11 @@ class _FiguresMixin:
                         if re.match(r'^図\s*\d+', line_text_stripped) or re.match(r'^表\s*\d+', line_text_stripped):
                             continue
                         
+                        # 章タイトルパターンをフィルタリング（図形内テキストから除外）
+                        # 例: "第1 章", "第2 章", "第1章 序論"
+                        if re.match(r'^第\s*[一二三四五六七八九十0-9]+\s*章', line_text_stripped):
+                            continue
+                        
                         # スライド文書の場合、本文テキストを除外
                         # 図形内テキストには短いラベルのみを含め、本文は含めない
                         if is_slide_document:
