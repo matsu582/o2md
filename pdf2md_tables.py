@@ -258,9 +258,66 @@ class _TablesMixin:
             if not best_tables:
                 return []
             
-            for table in best_tables:
-                bbox = table.bbox
-                rows = table.extract()
+            # 近接する表を結合するための前処理
+            # Y座標でソートして、近接する表をグループ化
+            sorted_tables = sorted(best_tables, key=lambda t: t.bbox[1])
+            merged_table_groups = []
+            current_group = []
+            
+            for table in sorted_tables:
+                if not current_group:
+                    current_group.append(table)
+                else:
+                    # 前の表のy_endと現在の表のy_startの差をチェック
+                    prev_table = current_group[-1]
+                    y_gap = table.bbox[1] - prev_table.bbox[3]
+                    # X座標の重なりもチェック（同じ表の一部かどうか）
+                    x_overlap = (
+                        min(table.bbox[2], prev_table.bbox[2]) -
+                        max(table.bbox[0], prev_table.bbox[0])
+                    )
+                    # Y方向のギャップが10px以下かつX方向の重なりが50%以上の場合は結合
+                    prev_width = prev_table.bbox[2] - prev_table.bbox[0]
+                    if y_gap <= 10 and x_overlap > prev_width * 0.5:
+                        current_group.append(table)
+                    else:
+                        merged_table_groups.append(current_group)
+                        current_group = [table]
+            
+            if current_group:
+                merged_table_groups.append(current_group)
+            
+            for group in merged_table_groups:
+                # グループ内の表を結合
+                if len(group) == 1:
+                    table = group[0]
+                    bbox = table.bbox
+                    rows = table.extract()
+                else:
+                    # 複数の表を結合
+                    all_rows = []
+                    max_cols = 0
+                    for table in group:
+                        table_rows = table.extract()
+                        if table_rows:
+                            max_cols = max(max_cols, len(table_rows[0]))
+                            all_rows.extend(table_rows)
+                    
+                    # 列数を揃える（少ない列は空セルで埋める）
+                    rows = []
+                    for row in all_rows:
+                        if len(row) < max_cols:
+                            row = list(row) + [None] * (max_cols - len(row))
+                        rows.append(row)
+                    
+                    # bboxを結合
+                    bbox = (
+                        min(t.bbox[0] for t in group),
+                        min(t.bbox[1] for t in group),
+                        max(t.bbox[2] for t in group),
+                        max(t.bbox[3] for t in group)
+                    )
+                    debug_print(f"[DEBUG] 近接表を結合: {len(group)}個の表, bbox={bbox}")
                 
                 if not rows:
                     continue

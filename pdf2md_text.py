@@ -191,11 +191,9 @@ class _TextMixin:
             
             for line in block.get("lines", []):
                 line_bbox = line.get("bbox", (0, 0, 0, 0))
-                line_text = ""
-                line_font_size = 0
-                line_is_bold = False
-                line_spans = []
                 
+                # span情報を収集
+                all_spans = []
                 for span in line.get("spans", []):
                     text = span.get("text", "")
                     if text:
@@ -226,7 +224,7 @@ class _TextMixin:
                         # 打消し線の検出（PDFでは直接検出困難、フォント名で推定）
                         span_is_strikethrough = "strikeout" in font_name or "strike" in font_name
                         
-                        line_spans.append({
+                        all_spans.append({
                             "text": text,
                             "size": span_size,
                             "bbox": span_bbox,
@@ -236,80 +234,147 @@ class _TextMixin:
                             "is_subscript": span_is_subscript,
                             "is_strikethrough": span_is_strikethrough
                         })
-                        line_text += text
-                        line_font_size = max(line_font_size, span_size)
                         font_sizes.append(span_size)
-                        if span_is_bold:
-                            line_is_bold = True
                 
-                if not line_text.strip():
+                if not all_spans:
                     continue
                 
-                # ヘッダ・フッタを除外（Y座標とページ高さを渡す）
-                if self._is_header_footer(
-                    line_text, header_footer_patterns,
-                    y_pos=line_bbox[1], page_height=page_height, font_size=line_font_size
-                ):
-                    debug_print(f"[DEBUG] ヘッダ・フッタ除外: {line_text.strip()[:30]}...")
-                    continue
+                # X座標の距離が大きいspanを別の行として分離
+                # 同じPDF行内でも、X座標の距離がフォントサイズの1.5倍以上の場合は別の行として扱う
+                # 空白のみのspanはスキップして、実際のテキストspanの間の距離を計算
+                span_groups = []
+                current_group = [all_spans[0]]
                 
-                # 視覚的に見えないテキストを除外
-                # ページ中央付近の単独数字（装飾的な要素）を除外
-                line_text_stripped = line_text.strip()
-                line_center_x = (line_bbox[0] + line_bbox[2]) / 2
-                relative_x = line_center_x / page_width
-                is_centered = 0.4 < relative_x < 0.6
-                is_single_digit = re.match(r'^[0-9０-９]$', line_text_stripped)
-                if is_centered and is_single_digit:
-                    debug_print(f"[DEBUG] 装飾的テキスト除外: '{line_text_stripped}' at x={line_center_x:.1f}")
-                    continue
-                
-                # 図領域内のテキストを除外（中心点が図領域内にある場合）
-                # ただし、キャプションパターン（図X、表X）は除外しない
-                line_center_x = (line_bbox[0] + line_bbox[2]) / 2
-                line_center_y = (line_bbox[1] + line_bbox[3]) / 2
-                line_text_stripped = line_text.strip()
-                is_caption = re.match(r'^図\s*\d+', line_text_stripped) or re.match(r'^表\s*\d+', line_text_stripped)
-                in_figure = False
-                if not is_caption:
-                    for fig_bbox in exclude_bboxes:
-                        if (fig_bbox[0] <= line_center_x <= fig_bbox[2] and
-                            fig_bbox[1] <= line_center_y <= fig_bbox[3]):
-                            in_figure = True
+                for i in range(1, len(all_spans)):
+                    curr_span = all_spans[i]
+                    
+                    # 空白のみのspanは現在のグループに追加して次へ
+                    if curr_span["text"].strip() == "":
+                        current_group.append(curr_span)
+                        continue
+                    
+                    # 現在のグループの最後の非空白spanを探す
+                    prev_span = None
+                    for j in range(len(current_group) - 1, -1, -1):
+                        if current_group[j]["text"].strip() != "":
+                            prev_span = current_group[j]
                             break
-                if in_figure:
-                    debug_print(f"[DEBUG] 図領域内テキスト除外: {line_text_stripped[:30]}...")
-                    continue
+                    
+                    if prev_span is None:
+                        # グループに非空白spanがない場合は現在のspanを追加
+                        current_group.append(curr_span)
+                        continue
+                    
+                    prev_x_end = prev_span["bbox"][2]
+                    curr_x_start = curr_span["bbox"][0]
+                    x_gap = curr_x_start - prev_x_end
+                    font_size = min(prev_span["size"], curr_span["size"])
+                    
+                    # X座標の距離がフォントサイズの1.5倍以上の場合は別グループ
+                    if x_gap > font_size * 1.5:
+                        span_groups.append(current_group)
+                        current_group = [curr_span]
+                    else:
+                        current_group.append(curr_span)
                 
-                line_width = line_bbox[2] - line_bbox[0]
-                x_center = (line_bbox[0] + line_bbox[2]) / 2
+                span_groups.append(current_group)
                 
-                # カラム判定: フル幅、左カラム、右カラム
-                # 1段組みページでは全行をfullにして、誤った段落分割を防ぐ
-                if is_single_column:
-                    column = "full"
-                elif line_width > page_width * 0.6:
-                    column = "full"
-                elif x_center < page_center:
-                    column = "left"
-                else:
-                    column = "right"
-                
-                # 行全体の斜体フラグを計算
-                line_is_italic = any(s.get("is_italic", False) for s in line_spans)
-                
-                lines_data.append({
-                    "text": line_text,
-                    "bbox": line_bbox,
-                    "font_size": line_font_size,
-                    "is_bold": line_is_bold,
-                    "is_italic": line_is_italic,
-                    "column": column,
-                    "y": line_bbox[1],
-                    "x": line_bbox[0],
-                    "width": line_width,
-                    "spans": line_spans
-                })
+                # 各グループを別の行として処理
+                for line_spans in span_groups:
+                    line_text = ""
+                    line_font_size = 0
+                    line_is_bold = False
+                    
+                    # グループのbboxを計算（空白のみのspanを除外）
+                    # 空白spanを含めるとbboxが広がり、_sort_lines_by_columnで
+                    # 再度クラスタリングされて結合されてしまう
+                    non_whitespace_spans = [s for s in line_spans if s["text"].strip()]
+                    if non_whitespace_spans:
+                        group_x0 = min(s["bbox"][0] for s in non_whitespace_spans)
+                        group_y0 = min(s["bbox"][1] for s in non_whitespace_spans)
+                        group_x1 = max(s["bbox"][2] for s in non_whitespace_spans)
+                        group_y1 = max(s["bbox"][3] for s in non_whitespace_spans)
+                    else:
+                        group_x0 = min(s["bbox"][0] for s in line_spans)
+                        group_y0 = min(s["bbox"][1] for s in line_spans)
+                        group_x1 = max(s["bbox"][2] for s in line_spans)
+                        group_y1 = max(s["bbox"][3] for s in line_spans)
+                    group_bbox = (group_x0, group_y0, group_x1, group_y1)
+                    
+                    for span in line_spans:
+                        line_text += span["text"]
+                        line_font_size = max(line_font_size, span["size"])
+                        if span["is_bold"]:
+                            line_is_bold = True
+                    
+                    if not line_text.strip():
+                        continue
+                    
+                    # ヘッダ・フッタを除外（Y座標とページ高さを渡す）
+                    if self._is_header_footer(
+                        line_text, header_footer_patterns,
+                        y_pos=group_bbox[1], page_height=page_height, font_size=line_font_size
+                    ):
+                        debug_print(f"[DEBUG] ヘッダ・フッタ除外: {line_text.strip()[:30]}...")
+                        continue
+                    
+                    # 視覚的に見えないテキストを除外
+                    # ページ中央付近の単独数字（装飾的な要素）を除外
+                    line_text_stripped = line_text.strip()
+                    line_center_x = (group_bbox[0] + group_bbox[2]) / 2
+                    relative_x = line_center_x / page_width
+                    is_centered = 0.4 < relative_x < 0.6
+                    is_single_digit = re.match(r'^[0-9０-９]$', line_text_stripped)
+                    if is_centered and is_single_digit:
+                        debug_print(f"[DEBUG] 装飾的テキスト除外: '{line_text_stripped}' at x={line_center_x:.1f}")
+                        continue
+                    
+                    # 図領域内のテキストを除外（中心点が図領域内にある場合）
+                    # ただし、キャプションパターン（図X、表X）は除外しない
+                    line_center_x = (group_bbox[0] + group_bbox[2]) / 2
+                    line_center_y = (group_bbox[1] + group_bbox[3]) / 2
+                    line_text_stripped = line_text.strip()
+                    is_caption = re.match(r'^図\s*\d+', line_text_stripped) or re.match(r'^表\s*\d+', line_text_stripped)
+                    in_figure = False
+                    if not is_caption:
+                        for fig_bbox in exclude_bboxes:
+                            if (fig_bbox[0] <= line_center_x <= fig_bbox[2] and
+                                fig_bbox[1] <= line_center_y <= fig_bbox[3]):
+                                in_figure = True
+                                break
+                    if in_figure:
+                        debug_print(f"[DEBUG] 図領域内テキスト除外: {line_text_stripped[:30]}...")
+                        continue
+                    
+                    line_width = group_bbox[2] - group_bbox[0]
+                    x_center = (group_bbox[0] + group_bbox[2]) / 2
+                    
+                    # カラム判定: フル幅、左カラム、右カラム
+                    # 1段組みページでは全行をfullにして、誤った段落分割を防ぐ
+                    if is_single_column:
+                        column = "full"
+                    elif line_width > page_width * 0.6:
+                        column = "full"
+                    elif x_center < page_center:
+                        column = "left"
+                    else:
+                        column = "right"
+                    
+                    # 行全体の斜体フラグを計算
+                    line_is_italic = any(s.get("is_italic", False) for s in line_spans)
+                    
+                    lines_data.append({
+                        "text": line_text,
+                        "bbox": group_bbox,
+                        "font_size": line_font_size,
+                        "is_bold": line_is_bold,
+                        "is_italic": line_is_italic,
+                        "column": column,
+                        "y": group_bbox[1],
+                        "x": group_bbox[0],
+                        "width": line_width,
+                        "spans": line_spans
+                    })
         
         if not lines_data:
             return []
@@ -320,6 +385,9 @@ class _TextMixin:
         
         # 傍注（上付き文字）を検出して結合
         lines_data = self._merge_superscript_lines(lines_data, base_font_size)
+        
+        # 同じY座標にある行を結合（列の分類を修正）
+        lines_data = self._merge_same_y_lines(lines_data, page_width)
         
         # カラム内の表を検出（リフロー前に行う）
         table_regions = self._detect_table_regions(lines_data, page_center)
@@ -494,12 +562,18 @@ class _TextMixin:
                 
                 # 結合条件を判定
                 # 短い継続行（8文字以下）の場合はdelta_x制限を緩和
+                # ただし、X座標の距離が大きい場合は結合しない（同じ行の別要素を誤結合しないため）
+                # 前のブロックの右端と次のブロックの左端の距離を計算
+                x_gap = next_bbox[0] - curr_bbox[2]
+                large_x_gap = x_gap > 10  # 10px以上離れている場合は別要素とみなす
+                
                 if next_text_len <= 8:
-                    # 短い継続行: delta_x制限なし、gap_y制限のみ
+                    # 短い継続行: delta_x制限緩和、ただしX座標の距離が大きい場合は除外
                     should_merge = (
                         gap_y <= 15 and
                         not ends_with_period and
-                        not starts_with_list_marker
+                        not starts_with_list_marker and
+                        not large_x_gap
                     )
                 else:
                     # 通常の継続行: ハングインデント範囲内
@@ -549,9 +623,9 @@ class _TextMixin:
     ) -> List[Dict[str, Any]]:
         """リストの途中で見出しになっているブロックをlist_itemに降格
         
-        直前がlist_itemで、y_gapが小さく、x0が近い場合は
-        headingをlist_itemに降格する。これにより、リストの途中で
-        見出しが挿入される問題を防ぐ。
+        直前または直後がlist_itemで、y_gapが小さく、x0が近い場合は
+        headingをlist_itemに降格する。これにより、リストの途中や
+        リストの先頭で見出しが挿入される問題を防ぐ。
         
         Args:
             blocks: ブロックのリスト
@@ -569,37 +643,56 @@ class _TextMixin:
             r'^[\d０-９]+[\.．\)）]\s+'
         )
         
-        result = []
+        # 降格対象のインデックスを収集
+        demote_indices = set()
+        
         for i, block in enumerate(blocks):
             block_type = block.get("type", "")
             text = block.get("text", "").strip()
             
             # headingで、番号付きパターンに一致する場合のみチェック
             if block_type.startswith("heading") and numbered_heading_pattern.match(text):
-                # 直前のブロックを探す
-                prev_block = result[-1] if result else None
+                curr_bbox = block.get("bbox", (0, 0, 0, 0))
                 
-                if prev_block:
+                # 直前のブロックをチェック
+                if i > 0:
+                    prev_block = blocks[i - 1]
                     prev_type = prev_block.get("type", "")
                     prev_bbox = prev_block.get("bbox", (0, 0, 0, 0))
-                    curr_bbox = block.get("bbox", (0, 0, 0, 0))
                     
-                    # 直前がlist_itemの場合
                     if prev_type == "list_item":
-                        # y_gap（縦方向の距離）を計算
                         y_gap = curr_bbox[1] - prev_bbox[3]
-                        # x0の差（インデントの差）を計算
                         x_diff = abs(curr_bbox[0] - prev_bbox[0])
-                        
-                        # y_gapが小さく（30pt以下）、x0が近い（20pt以下）場合は降格
                         if y_gap <= 30 and x_diff <= 20:
-                            # headingをlist_itemに降格
-                            demoted_block = block.copy()
-                            demoted_block["type"] = "list_item"
-                            result.append(demoted_block)
+                            demote_indices.add(i)
                             continue
-            
-            result.append(block)
+                
+                # 直後のブロックをチェック（リストの先頭の場合）
+                if i < len(blocks) - 1:
+                    next_block = blocks[i + 1]
+                    next_type = next_block.get("type", "")
+                    next_bbox = next_block.get("bbox", (0, 0, 0, 0))
+                    
+                    if next_type == "list_item":
+                        y_gap = next_bbox[1] - curr_bbox[3]
+                        x_diff = abs(next_bbox[0] - curr_bbox[0])
+                        if y_gap <= 30 and x_diff <= 20:
+                            demote_indices.add(i)
+        
+        # 降格を適用
+        result = []
+        for i, block in enumerate(blocks):
+            if i in demote_indices:
+                demoted_block = block.copy()
+                demoted_block["type"] = "list_item"
+                result.append(demoted_block)
+            else:
+                result.append(block)
+        
+        # 降格が発生した場合は再帰的に呼び出し
+        # （連続するheadingブロックを順次降格するため）
+        if demote_indices:
+            return self._demote_heading_in_list_context(result)
         
         return result
 
@@ -763,6 +856,134 @@ class _TextMixin:
         
         return result
 
+    def _merge_same_y_lines(
+        self, lines_data: List[Dict], page_width: float
+    ) -> List[Dict]:
+        """同じY座標にある行を結合
+        
+        同じY座標（±フォントサイズの0.5倍以内）にある行で、
+        X座標が連続している（前の行の右端と現在の行の左端の距離が
+        フォントサイズの1.5倍以内、または重なっている）場合は結合する。
+        結合後の行の列を再計算する。
+        
+        Args:
+            lines_data: 行データのリスト
+            page_width: ページ幅
+            
+        Returns:
+            結合後の行データのリスト
+        """
+        if len(lines_data) < 2:
+            return lines_data
+        
+        page_center = page_width / 2
+        
+        # Y座標でソート
+        sorted_lines = sorted(lines_data, key=lambda x: (x["y"], x["x"]))
+        
+        # 同じY座標の行をグループ化
+        y_groups = []
+        current_group = [sorted_lines[0]]
+        
+        for line in sorted_lines[1:]:
+            prev_line = current_group[-1]
+            y_diff = abs(line["y"] - prev_line["y"])
+            threshold = min(
+                line.get("font_size", 12),
+                prev_line.get("font_size", 12)
+            ) * 0.5
+            
+            if y_diff <= threshold:
+                current_group.append(line)
+            else:
+                y_groups.append(current_group)
+                current_group = [line]
+        
+        y_groups.append(current_group)
+        
+        # 各グループ内でX座標が連続している行を結合
+        result = []
+        for group in y_groups:
+            if len(group) == 1:
+                result.append(group[0])
+                continue
+            
+            # X座標でソート
+            group_sorted = sorted(group, key=lambda x: x["x"])
+            
+            # X座標が連続している行を結合
+            merged_lines = [group_sorted[0]]
+            for i in range(1, len(group_sorted)):
+                prev = merged_lines[-1]
+                curr = group_sorted[i]
+                
+                # 前の行の右端と現在の行の左端の距離を計算
+                prev_x_end = prev["bbox"][2]
+                curr_x_start = curr["bbox"][0]
+                x_gap = curr_x_start - prev_x_end
+                font_size = min(
+                    prev.get("font_size", 12),
+                    curr.get("font_size", 12)
+                )
+                
+                # X座標が連続している（距離がフォントサイズの1.5倍以内、または重なっている）
+                # ただし、左カラムと右カラムの行は結合しない（2段組の場合）
+                prev_column = prev.get("column", "full")
+                curr_column = curr.get("column", "full")
+                is_cross_column = (prev_column == "left" and curr_column == "right") or \
+                                  (prev_column == "right" and curr_column == "left")
+                
+                if x_gap <= font_size * 1.5 and not is_cross_column:
+                    # 結合
+                    merged_text = prev["text"] + curr["text"]
+                    merged_bbox = (
+                        min(prev["bbox"][0], curr["bbox"][0]),
+                        min(prev["bbox"][1], curr["bbox"][1]),
+                        max(prev["bbox"][2], curr["bbox"][2]),
+                        max(prev["bbox"][3], curr["bbox"][3])
+                    )
+                    merged_font_size = max(
+                        prev.get("font_size", 12),
+                        curr.get("font_size", 12)
+                    )
+                    merged_is_bold = prev.get("is_bold", False) or curr.get("is_bold", False)
+                    merged_is_italic = prev.get("is_italic", False) or curr.get("is_italic", False)
+                    
+                    # 結合後の行の列を再計算
+                    merged_width = merged_bbox[2] - merged_bbox[0]
+                    merged_x_center = (merged_bbox[0] + merged_bbox[2]) / 2
+                    
+                    if merged_width > page_width * 0.6:
+                        merged_column = "full"
+                    elif merged_x_center < page_center:
+                        merged_column = "left"
+                    else:
+                        merged_column = "right"
+                    
+                    # spansを結合
+                    merged_spans = prev.get("spans", []) + curr.get("spans", [])
+                    
+                    merged_line = {
+                        "text": merged_text,
+                        "bbox": merged_bbox,
+                        "font_size": merged_font_size,
+                        "is_bold": merged_is_bold,
+                        "is_italic": merged_is_italic,
+                        "column": merged_column,
+                        "y": merged_bbox[1],
+                        "x": merged_bbox[0],
+                        "width": merged_width,
+                        "spans": merged_spans
+                    }
+                    merged_lines[-1] = merged_line
+                    debug_print(f"[DEBUG] 同一Y行結合: {prev['text'][:20]}... + {curr['text'][:20]}...")
+                else:
+                    merged_lines.append(curr)
+            
+            result.extend(merged_lines)
+        
+        return result
+
     def _sort_lines_by_column(
         self, lines_data: List[Dict], is_slide_document: bool = False
     ) -> List[Dict]:
@@ -816,11 +1037,32 @@ class _TextMixin:
             
             clusters.append(current_cluster)
             
-            # 各クラスタ内をx座標順にソート
+            # 各クラスタ内をx座標順にソートし、X座標の距離が大きい場合は分離
             result = []
             for cluster in clusters:
                 cluster_sorted = sorted(cluster, key=lambda x: x.get("x", 0))
-                result.extend(cluster_sorted)
+                # X座標の距離が大きい行を分離
+                if len(cluster_sorted) > 1:
+                    separated = []
+                    current_group = [cluster_sorted[0]]
+                    for i in range(1, len(cluster_sorted)):
+                        prev = cluster_sorted[i - 1]
+                        curr = cluster_sorted[i]
+                        # 前の行の右端と現在の行の左端の距離を計算
+                        prev_x_end = prev.get("bbox", (0, 0, 0, 0))[2]
+                        curr_x_start = curr.get("bbox", (0, 0, 0, 0))[0]
+                        x_gap = curr_x_start - prev_x_end
+                        font_size = min(prev.get("font_size", 12), curr.get("font_size", 12))
+                        # X方向のギャップがフォントサイズの1倍以上の場合は分離
+                        if x_gap > font_size * 1.0:
+                            separated.extend(current_group)
+                            current_group = [curr]
+                        else:
+                            current_group.append(curr)
+                    separated.extend(current_group)
+                    result.extend(separated)
+                else:
+                    result.extend(cluster_sorted)
             
             return result
         
@@ -953,15 +1195,24 @@ class _TextMixin:
                         result.append(fl)
                         added_indices.add(idx)
             
-            # この区間の左カラム行を追加
-            for ll in left_lines:
-                if y_start < ll["y"] < y_end:
-                    result.append(ll)
+            # この区間の左カラム行を収集してY座標順にソート
+            section_left = [ll for ll in left_lines if y_start < ll["y"] < y_end]
+            section_left.sort(key=lambda x: x["y"])
             
-            # この区間の右カラム行を追加
-            for rl in right_lines:
-                if y_start < rl["y"] < y_end:
-                    result.append(rl)
+            # この区間の右カラム行を収集してY座標順にソート
+            section_right = [rl for rl in right_lines if y_start < rl["y"] < y_end]
+            section_right.sort(key=lambda x: x["y"])
+            
+            # 2段組セクションの場合、左カラムをすべて出力してから右カラムを出力
+            # これにより、左右のテキストが混在しないようにする
+            if section_left and section_right:
+                # 左カラムと右カラムの両方がある場合は2段組として処理
+                result.extend(section_left)
+                result.extend(section_right)
+            else:
+                # 片方のカラムのみの場合はそのまま追加
+                result.extend(section_left)
+                result.extend(section_right)
         
         # 最後のフル幅行を追加（まだ追加されていない場合）
         if full_lines:
@@ -1528,10 +1779,35 @@ class _TextMixin:
             return bool(re.match(r'^\S{1,6}[\u3000 ]{2,}\S+', t))
         
         def is_in_table_region(line: Dict) -> Optional[Dict]:
-            """行が表領域内にあるかチェック"""
+            """行が表領域内にあるかチェック
+            
+            罫線ベースの表と重なる場合はNoneを返す（重複出力を防止）
+            """
+            line_y = line.get("y", 0)
+            
+            # 罫線ベースの表と重なる場合はスキップ
+            for line_table in line_based_tables:
+                table_y_start = line_table.get("y_start", 0)
+                table_y_end = line_table.get("y_end", 0)
+                if table_y_start - 10 <= line_y <= table_y_end + 10:
+                    return None
+            
             for region in table_regions:
                 if (line["column"] == region["column"] and
                     region["y_start"] - 10 <= line["y"] <= region["y_end"] + 10):
+                    # テキストベースの表領域が罫線ベースの表と重なる場合はスキップ
+                    region_y_start = region["y_start"]
+                    region_y_end = region["y_end"]
+                    overlaps_with_line_table = False
+                    for line_table in line_based_tables:
+                        lt_y_start = line_table.get("y_start", 0)
+                        lt_y_end = line_table.get("y_end", 0)
+                        # Y範囲が重なるかチェック
+                        if not (region_y_end < lt_y_start - 10 or region_y_start > lt_y_end + 10):
+                            overlaps_with_line_table = True
+                            break
+                    if overlaps_with_line_table:
+                        return None
                     return region
             return None
         
@@ -1540,30 +1816,60 @@ class _TextMixin:
         processed_line_tables = set()
         
         def get_line_based_table_by_y(line: Dict) -> Optional[Dict]:
-            """行のy座標が罫線ベースの表領域内にあるかチェック（テーブル出力トリガ用）
+            """行のy座標とx座標が罫線ベースの表領域内にあるかチェック（テーブル出力トリガ用）
             
-            y座標のみで判定し、テーブルの出力タイミングを決定する。
+            y座標とx座標の両方で判定し、テーブルの出力タイミングを決定する。
+            2段組の場合、同じY範囲に複数の表がある可能性があるため、
+            x座標も考慮して正しい表を返す。
             """
             line_y = line.get("y", 0)
+            line_x = line.get("x", 0)
             for table in sorted_line_tables:
                 if table["y_start"] - 5 <= line_y <= table["y_end"] + 5:
-                    return table
+                    # x座標もチェックして、行が表の範囲内にあるか確認
+                    table_bbox = table.get("bbox", (0, 0, 0, 0))
+                    table_x_start = table_bbox[0]
+                    table_x_end = table_bbox[2]
+                    table_width = table_x_end - table_x_start
+                    margin = max(table_width * 0.2, 30)
+                    if table_x_start - margin <= line_x <= table_x_end + margin:
+                        return table
             return None
         
         def should_skip_line_for_table(line: Dict, table: Dict) -> bool:
             """行がテーブルの一部としてスキップすべきかチェック（行除外判定用）
             
-            2段組の場合、テーブルのx範囲と行のx座標を比較して、
-            同じカラム内の行のみをスキップする。
+            2段組の場合、テーブルと行が同じカラムにある場合のみスキップする。
+            ページの中央（gutter_x）を基準にカラムを判定する。
             """
             line_x = line.get("x", 0)
+            line_y = line.get("y", 0)
             table_bbox = table.get("bbox", (0, 0, 0, 0))
             table_x_start = table_bbox[0]
             table_x_end = table_bbox[2]
-            # 行のx座標がテーブルのx範囲内にあるかチェック
-            # 許容範囲を広めに設定（テーブル幅の20%程度）
+            table_y_start = table.get("y_start", 0)
+            table_y_end = table.get("y_end", 0)
+            
+            # 行のY座標がテーブルのY範囲内にあるかチェック
+            if not (table_y_start - 5 <= line_y <= table_y_end + 5):
+                return False
+            
+            # ページの中央を基準にカラムを判定
+            gutter_x = page_width / 2 if page_width else 300
+            
+            # テーブルと行が同じカラムにあるかチェック
+            table_center_x = (table_x_start + table_x_end) / 2
+            table_in_left = table_center_x < gutter_x
+            line_in_left = line_x < gutter_x
+            
+            # 異なるカラムにある場合はスキップしない
+            if table_in_left != line_in_left:
+                return False
+            
+            # 同じカラム内で、行のx座標がテーブルのx範囲内にあるかチェック
+            # 許容範囲を設定（テーブル幅の10%程度、最大20px）
             table_width = table_x_end - table_x_start
-            margin = max(table_width * 0.2, 30)
+            margin = min(table_width * 0.1, 20)
             return table_x_start - margin <= line_x <= table_x_end + margin
         
         def table_overlaps_with_figure(table: Dict) -> bool:
@@ -1647,19 +1953,59 @@ class _TextMixin:
         blocks = []
         current_block = None
         processed_table_regions = set()
+        processed_line_indices = set()  # 先行処理済みの行インデックスを追跡
         
         i = 0
         while i < len(lines):
             line = lines[i]
             
+            # 先行処理済みの行はスキップ
+            if i in processed_line_indices:
+                i += 1
+                continue
+            
             # 罫線ベースの表領域をチェック
             line_table = get_line_based_table_by_y(line)
             if line_table:
-                table_id = (line_table["y_start"], line_table["y_end"])
-                # テーブルがまだ出力されていない場合、出力する（y座標のみで判定）
+                # table_idにx座標も含めて、2段組の表を区別する
+                table_bbox = line_table.get("bbox", (0, 0, 0, 0))
+                table_id = (table_bbox[0], line_table["y_start"], table_bbox[2], line_table["y_end"])
+                # テーブルがまだ出力されていない場合、出力する
                 if table_id not in processed_line_tables:
                     # 図形と重なるテーブルはMarkdownテーブルとして出力しない
                     if not table_overlaps_with_figure(line_table):
+                        # 表を出力する前に、表のY範囲より上にある未処理の行を先に出力
+                        # これにより、2段組表の上にあるテキストが正しい位置に出力される
+                        table_y_start = line_table["y_start"]
+                        pending_lines_above = []
+                        for j in range(i + 1, len(lines)):
+                            if j not in processed_line_indices:
+                                future_line = lines[j]
+                                future_y = future_line.get("y", 0)
+                                # 表のY範囲より上にある行を収集
+                                if future_y < table_y_start - 5:
+                                    # この行が別の表の範囲内でないことを確認
+                                    future_table = get_line_based_table_by_y(future_line)
+                                    if not future_table:
+                                        pending_lines_above.append((j, future_line))
+                        
+                        # 収集した行をY座標順にソートして先に処理
+                        pending_lines_above.sort(key=lambda x: x[1].get("y", 0))
+                        for pending_idx, pending_line in pending_lines_above:
+                            pending_text = pending_line["text"].strip()
+                            if pending_text:
+                                if current_block:
+                                    blocks.append(self._finalize_block(current_block))
+                                    current_block = None
+                                blocks.append({
+                                    "text": pending_line["text"],
+                                    "bbox": pending_line["bbox"],
+                                    "font_size": pending_line["font_size"],
+                                    "is_bold": pending_line["is_bold"],
+                                    "column": pending_line["column"]
+                                })
+                                processed_line_indices.add(pending_idx)
+                        
                         # 現在のブロックを確定
                         if current_block:
                             blocks.append(self._finalize_block(current_block))
@@ -1809,6 +2155,7 @@ class _TextMixin:
                         # 3. フォントサイズが同等
                         # 4. 次の行が番号付き見出しではない
                         # 5. 次の行が短い（折り返しの続き）
+                        # 6. X座標の距離が小さい（同じ行の折り返しのみ）
                         if next_line.get("column") != line.get("column"):
                             break
                         y_gap = next_line["y"] - merged_bbox[3]
@@ -1822,6 +2169,10 @@ class _TextMixin:
                         # 次の行が短い場合のみマージ（長い本文は除外）
                         next_text = next_line["text"].strip()
                         if len(next_text) > 30:
+                            break
+                        # X座標の距離をチェック（同じY座標でも離れている場合はマージしない）
+                        x_gap = next_line["bbox"][0] - merged_bbox[2]
+                        if x_gap > base_font_size * 1.0:
                             break
                         # マージ
                         merged_heading_text += next_text
@@ -1862,6 +2213,27 @@ class _TextMixin:
                 y_gap = line["y"] - current_block["last_y"]
                 same_column = line["column"] == current_block["column"]
                 
+                # X座標の距離をチェック（同じY座標でも離れている場合は別段落）
+                # 前の行の右端と現在の行の左端の距離を計算
+                prev_x_end = current_block["bbox"][2]
+                curr_x_start = line["bbox"][0]
+                x_gap = curr_x_start - prev_x_end
+                # X方向のギャップがフォントサイズの1倍以上の場合は別段落
+                # （同じY座標にある別々のテキスト要素を分離するため）
+                x_gap_threshold = base_font_size * 1.0
+                large_x_gap = x_gap > x_gap_threshold
+                
+                # 左端の位置が大きく異なる場合も別段落として扱う
+                # （異なるX位置にある行を誤って結合しないため）
+                prev_x_start = current_block["bbox"][0]
+                x_start_diff = abs(curr_x_start - prev_x_start)
+                # 左端の差がフォントサイズの3倍以上の場合は別段落
+                # ただし、インデントされた継続行は除外（curr_x_start > prev_x_startの場合）
+                large_x_start_diff = (
+                    x_start_diff > base_font_size * 3.0 and
+                    curr_x_start < prev_x_start  # 現在の行が前の行より左にある場合のみ
+                )
+                
                 # 箇条書きブロックの終了判定
                 # 現在のブロックが箇条書きで、次の行が番号付きでない場合
                 # 継続行かどうかは「先読み」で判定：
@@ -1897,15 +2269,16 @@ class _TextMixin:
                         # インデントされていない（左端に戻った）場合は分離
                         list_boundary = True
                 
-                # 図表キャプション（「図N」「表N」）で始まるブロックは次の行と結合しない
+                # 現在の行が図表キャプションで始まる場合は新しいブロックとして分離
+                curr_is_caption = bool(re.match(r'^(図|表)\s*[0-9０-９]+', line["text"].strip()))
+                
+                # 現在のブロックが図表キャプションで始まるかどうか
+                # キャプションの続きの行は結合する（改行を入れない）
                 prev_is_caption = False
                 if current_block.get("texts"):
                     first_text = current_block["texts"][0].strip()
                     if re.match(r'^(図|表)\s*[0-9０-９]+', first_text):
                         prev_is_caption = True
-                
-                # 現在の行が図表キャプションで始まる場合は新しいブロックとして分離
-                curr_is_caption = bool(re.match(r'^(図|表)\s*[0-9０-９]+', line["text"].strip()))
                 
                 is_new_paragraph = (
                     y_gap > gap_threshold or
@@ -1914,8 +2287,9 @@ class _TextMixin:
                     abs(line["font_size"] - current_block["font_size"]) > 1 or
                     list_boundary or
                     curr_is_numbered or  # 新しい番号付き行は常に新しいブロック
-                    prev_is_caption or  # 図表キャプションの後は新しいブロック
-                    curr_is_caption  # 図表キャプションは新しいブロックとして開始
+                    curr_is_caption or  # 図表キャプションは新しいブロックとして開始
+                    large_x_gap or  # X方向のギャップが大きい場合は別段落
+                    large_x_start_diff  # 左端の位置が大きく異なる場合は別段落
                 )
                 
                 if is_new_paragraph:

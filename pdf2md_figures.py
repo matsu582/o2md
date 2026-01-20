@@ -859,13 +859,25 @@ class _FiguresMixin:
                     clip_y1 = union[3] + 5
                     
                     union_bottom = union[3]
+                    col_width = (page_text_lines[0]["bbox"][2] - page_text_lines[0]["bbox"][0]) if page_text_lines else 200
+                    
+                    # 表の下部にある本文テキストを検出してclip_y1を制限
                     for line in page_text_lines:
                         line_bbox = line["bbox"]
                         line_text = line["text"]
-                        if line_bbox[1] >= union_bottom - 20 and line_bbox[1] <= union_bottom + 30:
+                        line_width = line_bbox[2] - line_bbox[0]
+                        
+                        # 表の下端付近にあるテキストをチェック
+                        if line_bbox[1] >= union_bottom - 5 and line_bbox[1] <= union_bottom + 30:
+                            # キャプション（図/表で始まる）の場合
                             if re.match(r'^(図|表)\s*\d', line_text):
                                 clip_y1 = line_bbox[1] - 2
                                 debug_print(f"[DEBUG] 表画像: 下キャプション検出 '{line_text[:20]}'")
+                                break
+                            # 本文テキスト（句読点を含む長いテキスト）の場合
+                            elif self._fig_is_body_text_line(line_text, line_width, col_width):
+                                clip_y1 = line_bbox[1] - 2
+                                debug_print(f"[DEBUG] 表画像: 下部本文検出 '{line_text[:20]}'")
                                 break
                     
                     debug_print(f"[DEBUG] 表画像: clip_bbox=({clip_x0:.1f}, {clip_y0:.1f}, {clip_x1:.1f}, {clip_y1:.1f})")
@@ -1067,6 +1079,13 @@ class _FiguresMixin:
                         debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 本文バリアあり")
                         continue
                     
+                    # 両方のクラスタにキャプションがある場合はマージしない（別々の図）
+                    left_caption = self._fig_find_caption_below(left_bbox, page_text_lines)
+                    right_caption = self._fig_find_caption_below(right_bbox, page_text_lines)
+                    if left_caption and right_caption:
+                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 両方にキャプションあり")
+                        continue
+                    
                     if y_overlap_ratio > best_y_overlap:
                         best_y_overlap = y_overlap_ratio
                         best_right_idx = right_idx
@@ -1251,22 +1270,16 @@ class _FiguresMixin:
             debug_print(f"[DEBUG] 本文検出: clip_y0を{clip_y0:.1f}にトリム")
         
         # 見出しテキストを検出してclip_y0を調整
-        # 見出しパターン: "1. ", "2. ", "第1条" など
         heading_pattern = re.compile(r'^(\d+\.\s+|第[一二三四五六七八九十0-9]+)')
-        # clip_bboxの上端付近（padding分上）から図形の上端までの範囲で見出しを検索
-        search_y_start = clip_y0 - padding - 10  # paddingより少し上から検索
+        search_y_start = clip_y0 - padding - 10
         search_y_end = graphics_bbox[1] + 10
         for line in text_lines:
             line_bbox = line.get("bbox", (0, 0, 0, 0))
             line_text = line.get("text", "").strip()
-            # 見出しパターンに一致し、clip_bbox付近にある場合
             if heading_pattern.match(line_text):
-                # 見出しがclip_bboxの上端付近から図形の上端の間にあるかチェック
                 if line_bbox[1] >= search_y_start and line_bbox[3] <= search_y_end:
-                    # X方向のオーバーラップを確認
                     x_overlap = max(0, min(graphics_bbox[2], line_bbox[2]) - max(graphics_bbox[0], line_bbox[0]))
                     if x_overlap > 20:
-                        # 見出しの下端より下にclip_y0を設定
                         new_clip_y0 = line_bbox[3] + 5.0
                         clip_y0 = max(clip_y0, new_clip_y0)
                         debug_print(f"[DEBUG] 見出し検出: clip_y0を{clip_y0:.1f}にトリム（見出し: {line_text[:20]}）")
@@ -1587,7 +1600,7 @@ class _FiguresMixin:
                 self.image_counter += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
                 
-                debug_print(f"[DEBUG] 図候補出力: page={page_num+1}, column={column}, graphics_bbox={graphics_bbox}, clip_bbox={clip_bbox}")
+                debug_print(f"[DEBUG] 図候補出力: page={page_num+1}, column={column}")
                 
                 clip_rect = fitz.Rect(clip_bbox)
                 matrix = fitz.Matrix(2.0, 2.0)
@@ -1892,8 +1905,7 @@ class _FiguresMixin:
         debug_print(f"[DEBUG] ページ {page_num + 1}: {len(all_bboxes)}個の要素を{len(all_figure_candidates)}個の図にグループ化")
         
         # フェーズ8: 画像レンダリング
-        # 2段組みかどうかを判定（column_count >= 2 の場合は2段組み）
-        is_two_column = column_count >= 2
+        is_two_column = (column_count >= 2)
         figures = self._fig_render_candidates(
             page, page_num, all_figure_candidates, page_text_lines, col_width,
             page_width, gutter_x, header_y_max, footer_y_min, line_based_table_bboxes,
@@ -1971,7 +1983,7 @@ class _FiguresMixin:
         try:
             text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
             
-            label_margin = 50.0
+            label_margin = 10.0
             
             def is_in_same_column(line_center_x):
                 if column == "full":
@@ -2009,13 +2021,6 @@ class _FiguresMixin:
                         line_text = line_text.strip()
                         
                         if re.match(r'^図\d+', line_text) or re.match(r'^表\d+', line_text):
-                            continue
-                        
-                        # 見出しパターンはラベル候補から除外（expanded_bboxに含めない）
-                        # これにより、見出しは本文側に残り、図形内テキストには含まれない
-                        if re.match(r'^\d+\.\s+', line_text):
-                            continue
-                        if re.match(r'^第[一二三四五六七八九十0-9]+', line_text):
                             continue
                         
                         is_label = (
@@ -2074,17 +2079,9 @@ class _FiguresMixin:
                         if re.match(r'^図\s*\d+', line_text_stripped) or re.match(r'^表\s*\d+', line_text_stripped):
                             continue
                         
-                        # 見出しパターンをフィルタリング（図形内テキストから除外）
-                        # 例: "1. 近接した図形群", "4. 重なり合う図形", "第1条"
-                        if re.match(r'^\d+\.\s+', line_text_stripped):
-                            continue
-                        if re.match(r'^第[一二三四五六七八九十0-9]+', line_text_stripped):
-                            continue
-                        # 長い説明文も除外（図形内ラベルは通常短い）
-                        # 20文字以上で句読点を含む場合、または「。」で終わる場合は説明文とみなす
-                        if len(line_text_stripped) > 20 and ('。' in line_text_stripped or '、' in line_text_stripped):
-                            continue
-                        if line_text_stripped.endswith('。'):
+                        # 章タイトルパターンをフィルタリング（図形内テキストから除外）
+                        # 例: "第1 章", "第2 章", "第1章 序論"
+                        if re.match(r'^第\s*[一二三四五六七八九十0-9]+\s*章', line_text_stripped):
                             continue
                         
                         # スライド文書の場合、本文テキストを除外
