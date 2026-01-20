@@ -2269,15 +2269,16 @@ class _TextMixin:
                         # インデントされていない（左端に戻った）場合は分離
                         list_boundary = True
                 
-                # 図表キャプション（「図N」「表N」）で始まるブロックは次の行と結合しない
+                # 現在の行が図表キャプションで始まる場合は新しいブロックとして分離
+                curr_is_caption = bool(re.match(r'^(図|表)\s*[0-9０-９]+', line["text"].strip()))
+                
+                # 現在のブロックが図表キャプションで始まるかどうか
+                # キャプションの続きの行は結合する（改行を入れない）
                 prev_is_caption = False
                 if current_block.get("texts"):
                     first_text = current_block["texts"][0].strip()
                     if re.match(r'^(図|表)\s*[0-9０-９]+', first_text):
                         prev_is_caption = True
-                
-                # 現在の行が図表キャプションで始まる場合は新しいブロックとして分離
-                curr_is_caption = bool(re.match(r'^(図|表)\s*[0-9０-９]+', line["text"].strip()))
                 
                 is_new_paragraph = (
                     y_gap > gap_threshold or
@@ -2286,7 +2287,6 @@ class _TextMixin:
                     abs(line["font_size"] - current_block["font_size"]) > 1 or
                     list_boundary or
                     curr_is_numbered or  # 新しい番号付き行は常に新しいブロック
-                    prev_is_caption or  # 図表キャプションの後は新しいブロック
                     curr_is_caption or  # 図表キャプションは新しいブロックとして開始
                     large_x_gap or  # X方向のギャップが大きい場合は別段落
                     large_x_start_diff  # 左端の位置が大きく異なる場合は別段落
