@@ -1,0 +1,7 @@
+# 薬物取引隠語検出PoC 依存パッケージ
+requests>=2.31.0
+mecab-python3>=1.0.9
+unidic-lite>=1.0.8
+gensim>=4.3.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
