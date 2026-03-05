@@ -34,8 +34,8 @@
 .PARAMETER Docling
     [PDF専用] doclingによる表検出を有効にする場合に指定
 
-.PARAMETER Verbose
-    詳細なデバッグ出力を表示する場合に指定
+.PARAMETER DetailedLog
+    詳細なデバッグ出力を表示する場合に指定（o2mdの-vオプションに対応）
 
 .EXAMPLE
     # 基本的な使用方法
@@ -48,6 +48,10 @@
 .EXAMPLE
     # PNG形式で出力、Word文書は見出しテキストリンクを使用
     .\batch_convert.ps1 -InputDir "C:\docs" -Format png -UseHeadingText
+
+.EXAMPLE
+    # 詳細ログを有効にして変換
+    .\batch_convert.ps1 -InputDir "C:\docs" -DetailedLog
 #>
 
 param(
@@ -81,7 +85,7 @@ param(
     [switch]$Docling,
 
     [Parameter(Mandatory = $false)]
-    [switch]$Verbose
+    [switch]$DetailedLog
 )
 
 # --- 定数定義 ---
@@ -169,7 +173,7 @@ function Build-O2mdArguments {
     if ($Docling) {
         $argList += "--docling"
     }
-    if ($Verbose) {
+    if ($DetailedLog) {
         $argList += "-v"
     }
 
@@ -186,11 +190,16 @@ function Invoke-O2mdConversion {
     param(
         [string]$FilePath,
         [string]$FileOutputDir,
-        [string]$ScriptPath
+        [string]$ScriptPath,
+        [string]$WorkDir
     )
 
     $o2mdArgs = Build-O2mdArguments -FilePath $FilePath -FileOutputDir $FileOutputDir
-    $uvArgs = @("run", "python", $ScriptPath) + $o2mdArgs
+    # スペースを含むパスを正しく引用符で囲む
+    $quotedArgs = $o2mdArgs | ForEach-Object {
+        if ($_ -match '\s') { "`"$_`"" } else { $_ }
+    }
+    $uvArgs = @("run", "python", "`"$ScriptPath`"") + $quotedArgs
 
     # 一時ファイルのパスを事前に取得
     $stdoutTempFile = [System.IO.Path]::GetTempFileName()
@@ -199,7 +208,7 @@ function Invoke-O2mdConversion {
     try {
         $proc = Start-Process -FilePath "uv" `
             -ArgumentList $uvArgs `
-            -WorkingDirectory $resolvedO2mdDir `
+            -WorkingDirectory $WorkDir `
             -NoNewWindow `
             -Wait `
             -PassThru `
@@ -286,12 +295,21 @@ if (-not (Test-Path $resolvedOutputDir)) {
 Write-Log "対象ファイルを検索中: $resolvedInputDir"
 $targetFiles = Get-OfficeFiles -SearchDir $resolvedInputDir -Extensions $SUPPORTED_EXTENSIONS
 
-if ($targetFiles.Count -eq 0) {
+# 配列として統一（単一ファイルの場合も配列に変換）
+if ($null -eq $targetFiles) {
+    $targetFiles = @()
+}
+else {
+    $targetFiles = @($targetFiles)
+}
+
+$totalCount = $targetFiles.Count
+if ($totalCount -eq 0) {
     Write-Log "変換対象のOfficeファイルが見つかりませんでした" "WARNING"
     exit 0
 }
 
-Write-Log "変換対象ファイル数: $($targetFiles.Count) 件"
+Write-Log "変換対象ファイル数: $totalCount 件"
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " o2md 一括変換を開始します" -ForegroundColor Cyan
@@ -300,7 +318,7 @@ Write-Host "  入力フォルダ : $resolvedInputDir"
 Write-Host "  出力フォルダ : $resolvedOutputDir"
 Write-Host "  o2mdディレクトリ: $resolvedO2mdDir"
 Write-Host "  画像形式     : $Format"
-Write-Host "  対象ファイル数: $($targetFiles.Count) 件"
+Write-Host "  対象ファイル数: $totalCount 件"
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -327,13 +345,14 @@ foreach ($file in $targetFiles) {
 
     $currentIndex = $successCount + $failCount + 1
     Write-Host ""
-    Write-Log "[$currentIndex/$($targetFiles.Count)] 変換中: $relativePath"
+    Write-Log "[$currentIndex/$totalCount] 変換中: $relativePath"
 
     # o2md変換の実行
     $result = Invoke-O2mdConversion `
         -FilePath $file.FullName `
         -FileOutputDir $fileOutputDir `
-        -ScriptPath $o2mdScript
+        -ScriptPath $o2mdScript `
+        -WorkDir $resolvedO2mdDir
 
     if ($result) {
         $successCount++
