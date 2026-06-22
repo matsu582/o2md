@@ -1,6 +1,6 @@
 [project]
 name = "o2md"
-version = "0.0.1"
+version = "0.0.2"
 description = "Office document to Markdown converter"
 readme = "README.md"
 requires-python = ">=3.9"
