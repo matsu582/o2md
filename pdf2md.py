@@ -92,7 +92,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             pdf_file_path: 変換するPDFファイルのパス
             output_dir: 出力ディレクトリ（省略時は./output）
             output_format: 出力画像形式 ('png' または 'svg')
-            ocr_engine: OCRエンジン ('manga-ocr' または 'tesseract')
+            ocr_engine: OCRエンジン ('manga-ocr', 'tesseract', 'sarashina')
             tessdata_dir: tessdataディレクトリのパス（tessdata_best使用時に指定）
             use_docling: doclingによる表検出を有効にするかどうか
         """
@@ -125,7 +125,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         # OCRエンジン設定
         self.ocr_engine = ocr_engine.lower() if ocr_engine else 'tesseract'
-        if self.ocr_engine not in ('manga-ocr', 'tesseract'):
+        if self.ocr_engine not in ('manga-ocr', 'tesseract', 'sarashina'):
             print(f"[WARNING] 不明なOCRエンジン '{ocr_engine}'。'tesseract'を使用します。")
             self.ocr_engine = 'tesseract'
         
@@ -658,12 +658,17 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             # OCRでテキスト抽出
             ocr_text = self._ocr_page(page)
             if ocr_text and ocr_text.strip() and ocr_text != "(OCR利用不可)":
-                self.markdown_lines.append("### 抽出テキスト（OCR）")
-                self.markdown_lines.append("")
-                for line in ocr_text.strip().split('\n'):
-                    if line.strip():
-                        self.markdown_lines.append(line.strip())
-                self.markdown_lines.append("")
+                if self.ocr_engine == 'sarashina':
+                    # sarashina は構造化Markdownを直接出力するためそのまま追加
+                    self.markdown_lines.append(ocr_text.strip())
+                    self.markdown_lines.append("")
+                else:
+                    self.markdown_lines.append("### 抽出テキスト（OCR）")
+                    self.markdown_lines.append("")
+                    for line in ocr_text.strip().split('\n'):
+                        if line.strip():
+                            self.markdown_lines.append(line.strip())
+                    self.markdown_lines.append("")
             
             # スキャンページでもdoclingで表を検出・出力（doclingが有効な場合のみ）
             if self._use_docling:
@@ -703,12 +708,17 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             # OCRでテキスト抽出
             ocr_text = self._ocr_page(page)
             if ocr_text and ocr_text.strip() and ocr_text != "(OCR利用不可)":
-                self.markdown_lines.append("### 抽出テキスト（OCR）")
-                self.markdown_lines.append("")
-                for line in ocr_text.strip().split('\n'):
-                    if line.strip():
-                        self.markdown_lines.append(line.strip())
-                self.markdown_lines.append("")
+                if self.ocr_engine == 'sarashina':
+                    # sarashina は構造化Markdownを直接出力するためそのまま追加
+                    self.markdown_lines.append(ocr_text.strip())
+                    self.markdown_lines.append("")
+                else:
+                    self.markdown_lines.append("### 抽出テキスト（OCR）")
+                    self.markdown_lines.append("")
+                    for line in ocr_text.strip().split('\n'):
+                        if line.strip():
+                            self.markdown_lines.append(line.strip())
+                    self.markdown_lines.append("")
             
             # 画像ベースPDFでもdoclingで表を検出・出力（doclingが有効な場合のみ）
             if self._use_docling:
@@ -2199,7 +2209,7 @@ def main():
                        help='出力ディレクトリを指定（デフォルト: ./output）')
     parser.add_argument('--format', choices=['png', 'svg'], default='svg',
                        help='出力画像形式を指定（デフォルト: svg）')
-    parser.add_argument('--ocr-engine', choices=['manga-ocr', 'tesseract'], 
+    parser.add_argument('--ocr-engine', choices=['manga-ocr', 'tesseract', 'sarashina'], 
                        default='tesseract',
                        help='OCRエンジンを指定（デフォルト: tesseract）')
     parser.add_argument('--tessdata-dir', type=str,

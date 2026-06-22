@@ -303,7 +303,7 @@ def main():
                        help='図形メタデータを画像の後に出力（テキスト形式とJSON形式）')
     parser.add_argument('--format', choices=['png', 'svg'], default='svg',
                        help='出力画像形式を指定（デフォルト: png）')
-    parser.add_argument('--ocr-engine', choices=['manga-ocr', 'tesseract'], 
+    parser.add_argument('--ocr-engine', choices=['manga-ocr', 'tesseract', 'sarashina'], 
                        default='tesseract',
                        help='[PDF専用] OCRエンジンを指定（デフォルト: tesseract）')
     parser.add_argument('--tessdata-dir', type=str,
