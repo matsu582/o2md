@@ -627,7 +627,7 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
             if target_device == "mps":
                 model = AutoModelForCausalLM.from_pretrained(
                     model_name,
-                    dtype=dtype,
+                    torch_dtype=dtype,
                     trust_remote_code=True,
                     attn_implementation="sdpa",
                 )
@@ -636,7 +636,7 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
                 cls._shared_model = AutoModelForCausalLM.from_pretrained(
                     model_name,
                     device_map=target_device,
-                    dtype=dtype,
+                    torch_dtype=dtype,
                     trust_remote_code=True,
                     attn_implementation="sdpa",
                 )
@@ -669,10 +669,19 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
                 return_dict=True,
                 return_tensors="pt",
             )
-            # デバイス移動: 各テンソルを個別に移動
+            # デバイス・dtype移動: 浮動小数点テンソルはモデルのdtypeに合わせる
             device = self._shared_model.device
-            inputs = {k: v.to(device) if hasattr(v, 'to') else v
-                      for k, v in inputs.items()}
+            model_dtype = next(self._shared_model.parameters()).dtype
+            moved = {}
+            for k, v in inputs.items():
+                if hasattr(v, 'to'):
+                    if v.is_floating_point():
+                        moved[k] = v.to(device=device, dtype=model_dtype)
+                    else:
+                        moved[k] = v.to(device=device)
+                else:
+                    moved[k] = v
+            inputs = moved
 
             output_ids = self._shared_model.generate(
                 **inputs,
