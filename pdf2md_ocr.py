@@ -727,11 +727,57 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
         pil_img = Image.fromarray(rgb)
         return self._run_ocr(pil_img)
 
+    @staticmethod
+    def _html_table_to_markdown(html_table: str) -> str:
+        """HTML <table>をMarkdownテーブルに変換"""
+        import re
+        rows = re.findall(r'<tr[^>]*>(.*?)</tr>', html_table, re.DOTALL)
+        if not rows:
+            return html_table
+        md_rows = []
+        max_cols = 0
+        for row_html in rows:
+            cells = re.findall(
+                r'<(?:td|th)[^>]*>(.*?)</(?:td|th)>', row_html, re.DOTALL
+            )
+            # セル内のHTMLタグを除去し空白を整理
+            cleaned = []
+            for cell in cells:
+                txt = re.sub(r'<[^>]+>', '', cell).strip()
+                txt = txt.replace('|', '\\|')
+                cleaned.append(txt)
+            if len(cleaned) > max_cols:
+                max_cols = len(cleaned)
+            md_rows.append(cleaned)
+        if not md_rows or max_cols == 0:
+            return html_table
+        # 列数を揃える（不足分は空セルで埋める）
+        lines = []
+        for cells in md_rows:
+            padded = cells + [''] * (max_cols - len(cells))
+            lines.append('| ' + ' | '.join(padded) + ' |')
+        # ヘッダー区切り行を挿入（1行目の後）
+        separator = '| ' + ' | '.join(['---'] * max_cols) + ' |'
+        result = [lines[0], separator] + lines[1:]
+        return '\n'.join(result)
+
+    @staticmethod
+    def _convert_html_tables(text: str) -> str:
+        """テキスト内の全HTML tableをMarkdownテーブルに変換"""
+        import re
+        pattern = r'<table[^>]*>.*?</table>'
+        def replacer(match):
+            return SarashinaOCRProcessor._html_table_to_markdown(match.group(0))
+        return re.sub(pattern, replacer, text, flags=re.DOTALL)
+
     def ocr_full_image(self, img: np.ndarray) -> str:
         """画像全体からOCRでテキストを抽出（End-to-End）"""
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb)
-        return self._run_ocr(pil_img)
+        result = self._run_ocr(pil_img)
+        if result:
+            result = self._convert_html_tables(result)
+        return result
 
 
 def create_ocr_processor(engine: str = OCR_ENGINE_TESSERACT,
