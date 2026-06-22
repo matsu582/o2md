@@ -582,6 +582,7 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
 
     _shared_model = None
     _shared_processor = None
+    _load_failed = False
 
     def __init__(self, model_name: str = "sbintuitions/sarashina2.2-ocr"):
         self._model_name = model_name
@@ -589,6 +590,8 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
     @classmethod
     def _load(cls, model_name: str):
         """モデルとプロセッサを遅延読み込み（シングルトン）"""
+        if cls._load_failed:
+            return False
         if cls._shared_model is not None:
             return True
         try:
@@ -597,20 +600,21 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
         except ImportError:
             print("[WARNING] sarashina OCRに必要なライブラリが不足しています")
             print("[WARNING] インストール: pip install 'o2md[sarashina]'")
+            cls._load_failed = True
             return False
 
         # デバイス自動検出: CUDA > MPS > CPU
-        import torch
+        target_device = None
         if torch.cuda.is_available():
-            device_map = "cuda"
+            target_device = "cuda"
             dtype = torch.bfloat16
             debug_print("[INFO] sarashina OCR: CUDAデバイスを使用")
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            device_map = "mps"
+            target_device = "mps"
             dtype = torch.float16
             debug_print("[INFO] sarashina OCR: MPSデバイスを使用")
         else:
-            device_map = "cpu"
+            target_device = "cpu"
             dtype = torch.float32
             print("[WARNING] GPU未検出。sarashina OCRをCPUで実行します（低速）")
 
@@ -619,19 +623,30 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
             cls._shared_processor = AutoProcessor.from_pretrained(
                 model_name, trust_remote_code=True
             )
-            cls._shared_model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                device_map=device_map,
-                torch_dtype=dtype,
-                trust_remote_code=True,
-                attn_implementation="sdpa",
-            )
+            # MPSはdevice_map非対応の場合があるためCPUで読み込み後.to()で移動
+            if target_device == "mps":
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    torch_dtype=dtype,
+                    trust_remote_code=True,
+                    attn_implementation="sdpa",
+                )
+                cls._shared_model = model.to(target_device)
+            else:
+                cls._shared_model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    device_map=target_device,
+                    torch_dtype=dtype,
+                    trust_remote_code=True,
+                    attn_implementation="sdpa",
+                )
             print("[INFO] sarashina OCRモデルの読み込み完了")
             return True
         except Exception as e:
             print(f"[WARNING] sarashina OCRモデルの読み込みに失敗: {e}")
             cls._shared_model = None
             cls._shared_processor = None
+            cls._load_failed = True
             return False
 
     def _run_ocr(self, pil_img: Image.Image) -> str:
@@ -658,8 +673,7 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
             output_ids = self._shared_model.generate(
                 **inputs,
                 max_new_tokens=6000,
-                temperature=0.0,
-                top_p=0.95,
+                do_sample=False,
                 repetition_penalty=1.2,
                 use_cache=True,
             )
