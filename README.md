@@ -112,6 +112,30 @@ uv run python o2md.py input_files/document.pdf --ocr-engine sarashina
 uv run python o2md.py input_files/document.pdf --tessdata-dir ~/tessdata_best
 ```
 
+### フォルダ一括変換
+
+```bash
+# フォルダ内の全対象ファイルを一括変換（フォルダ直下のみ）
+uv run python o2md.py ./input_files/
+
+# サブフォルダも再帰的に処理
+uv run python o2md.py ./input_files/ -r
+
+# 出力先を指定
+uv run python o2md.py ./input_files/ -r -o output_all
+```
+
+フォルダ指定時の出力構造:
+```
+input_files/
+  pdfs/a.pdf
+  b.xlsx
+↓
+output/
+  pdfs/a/a.md + images/
+  b/b.md
+```
+
 ### 古い形式のファイル
 
 ```bash
@@ -125,8 +149,9 @@ uv run python o2md.py input_files/old_presentation.ppt
 
 | オプション           | 説明                                                    |
 | -------------------- | ------------------------------------------------------- |
-| `file`               | 変換するOfficeファイル（必須）                          |
+| `file`               | 変換するOfficeファイルまたはフォルダ（必須）                |
 | `-o, --output-dir`   | 出力ディレクトリを指定（デフォルト: `./output`）        |
+| `-r, --recursive`    | [フォルダ指定時] サブフォルダも再帰的に処理              |
 | `--format`           | 画像出力形式を指定（`svg`または`png`、デフォルト: `svg`）|
 | `--use-heading-text` | [Word専用] 章番号の代わりに見出しテキストをリンクに使用 |
 | `--shape-metadata`   | [Word/Excel専用] 図形のメタデータを出力                 |
