@@ -568,23 +568,154 @@ class TesseractOCRProcessor(BaseOCRProcessor):
 # OCRエンジンの種類
 OCR_ENGINE_MANGA = "manga-ocr"
 OCR_ENGINE_TESSERACT = "tesseract"
-OCR_ENGINES = [OCR_ENGINE_MANGA, OCR_ENGINE_TESSERACT]
+OCR_ENGINE_SARASHINA = "sarashina"
+OCR_ENGINES = [OCR_ENGINE_MANGA, OCR_ENGINE_TESSERACT, OCR_ENGINE_SARASHINA]
 
 
-def create_ocr_processor(engine: str = OCR_ENGINE_TESSERACT, 
+class SarashinaOCRProcessor(BaseOCRProcessor):
+    """sarashina2.2-ocrを使用したEnd-to-End OCR処理器
+
+    画像を入力として構造化Markdownを直接出力する。
+    テキスト検出・OCR・構造化が一体化されたモデル。
+    CUDA / MPS / CPU に対応（GPU推奨）。
+    """
+
+    _shared_model = None
+    _shared_processor = None
+
+    def __init__(self, model_name: str = "sbintuitions/sarashina2.2-ocr"):
+        self._model_name = model_name
+
+    @classmethod
+    def _load(cls, model_name: str):
+        """モデルとプロセッサを遅延読み込み（シングルトン）"""
+        if cls._shared_model is not None:
+            return True
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoProcessor
+        except ImportError:
+            print("[WARNING] sarashina OCRに必要なライブラリが不足しています")
+            print("[WARNING] インストール: pip install 'o2md[sarashina]'")
+            return False
+
+        # デバイス自動検出: CUDA > MPS > CPU
+        import torch
+        if torch.cuda.is_available():
+            device_map = "cuda"
+            dtype = torch.bfloat16
+            debug_print("[INFO] sarashina OCR: CUDAデバイスを使用")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device_map = "mps"
+            dtype = torch.float16
+            debug_print("[INFO] sarashina OCR: MPSデバイスを使用")
+        else:
+            device_map = "cpu"
+            dtype = torch.float32
+            print("[WARNING] GPU未検出。sarashina OCRをCPUで実行します（低速）")
+
+        try:
+            print(f"[INFO] sarashina OCRモデルを読み込み中: {model_name}")
+            cls._shared_processor = AutoProcessor.from_pretrained(
+                model_name, trust_remote_code=True
+            )
+            cls._shared_model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                device_map=device_map,
+                torch_dtype=dtype,
+                trust_remote_code=True,
+                attn_implementation="sdpa",
+            )
+            print("[INFO] sarashina OCRモデルの読み込み完了")
+            return True
+        except Exception as e:
+            print(f"[WARNING] sarashina OCRモデルの読み込みに失敗: {e}")
+            cls._shared_model = None
+            cls._shared_processor = None
+            return False
+
+    def _run_ocr(self, pil_img: Image.Image) -> str:
+        """PIL画像に対してsarashina OCRを実行しMarkdownテキストを返す"""
+        if not self._load(self._model_name):
+            return ""
+        try:
+            import torch
+
+            message = [
+                {
+                    "role": "user",
+                    "content": [{"type": "image", "image": pil_img}],
+                }
+            ]
+            inputs = self._shared_processor.apply_chat_template(
+                message,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_dict=True,
+                return_tensors="pt",
+            ).to(self._shared_model.device)
+
+            output_ids = self._shared_model.generate(
+                **inputs,
+                max_new_tokens=6000,
+                temperature=0.0,
+                top_p=0.95,
+                repetition_penalty=1.2,
+                use_cache=True,
+            )
+            # 入力トークンを除いた生成部分のみデコード
+            generated = output_ids[0, inputs["input_ids"].shape[1]:]
+            text = self._shared_processor.decode(generated, skip_special_tokens=True)
+            return text.strip() if text else ""
+        except Exception as e:
+            debug_print(f"[WARNING] sarashina OCRエラー: {e}")
+            return ""
+
+    def ocr_region(self, img: np.ndarray, region: TextRegion,
+                   padding_ratio: float = 0.1,
+                   min_size: int = 32) -> str:
+        """テキスト領域からOCRでテキストを抽出
+
+        sarashina OCRはページ全体処理が前提のため、
+        領域単位の呼び出しではクロップ画像をそのまま処理する。
+        """
+        im_h, im_w = img.shape[:2]
+        pad_x = int(region.width * padding_ratio)
+        pad_y = int(region.height * padding_ratio)
+        x1 = max(0, region.x1 - pad_x)
+        y1 = max(0, region.y1 - pad_y)
+        x2 = min(im_w, region.x2 + pad_x)
+        y2 = min(im_h, region.y2 + pad_y)
+        cropped = img[y1:y2, x1:x2]
+        if cropped.size == 0:
+            return ""
+        rgb = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(rgb)
+        return self._run_ocr(pil_img)
+
+    def ocr_full_image(self, img: np.ndarray) -> str:
+        """画像全体からOCRでテキストを抽出（End-to-End）"""
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(rgb)
+        return self._run_ocr(pil_img)
+
+
+def create_ocr_processor(engine: str = OCR_ENGINE_TESSERACT,
                          lang: str = "jpn+eng",
                          tessdata_dir: Optional[str] = None) -> BaseOCRProcessor:
     """OCRエンジンに応じたOCR処理器を作成
-    
+
     Args:
-        engine: OCRエンジン名（"manga-ocr" または "tesseract"）
+        engine: OCRエンジン名（"manga-ocr", "tesseract", "sarashina"）
         lang: Tesseractの言語設定（デフォルト: jpn+eng）
         tessdata_dir: tessdataディレクトリのパス（tessdata_best使用時に指定）
-        
+
     Returns:
         OCR処理器インスタンス
     """
-    if engine == OCR_ENGINE_TESSERACT:
+    if engine == OCR_ENGINE_SARASHINA:
+        return SarashinaOCRProcessor()
+    elif engine == OCR_ENGINE_TESSERACT:
         return TesseractOCRProcessor(lang=lang, tessdata_dir=tessdata_dir)
     else:
         return OCRProcessor()
@@ -871,13 +1002,18 @@ def process_pdf_page_with_detection(page_img: np.ndarray,
     Args:
         page_img: ページ画像 (BGR形式)
         model_path: テキスト検出モデルのパス
-        ocr_engine: OCRエンジン名（"manga-ocr" または "tesseract"）
+        ocr_engine: OCRエンジン名（"manga-ocr", "tesseract", "sarashina"）
         ocr_lang: Tesseractの言語設定（デフォルト: jpn+eng）
         tessdata_dir: tessdataディレクトリのパス（tessdata_best使用時に指定）
         
     Returns:
         抽出されたテキスト
     """
+    # sarashina はEnd-to-Endモデルのためテキスト検出をスキップし画像全体を処理
+    if ocr_engine == OCR_ENGINE_SARASHINA:
+        processor = create_ocr_processor(engine=OCR_ENGINE_SARASHINA)
+        return processor.ocr_full_image(page_img)
+
     processor = TextDetectorOCR(model_path=model_path, 
                                 ocr_engine=ocr_engine,
                                 ocr_lang=ocr_lang,

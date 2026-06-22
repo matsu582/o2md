@@ -26,6 +26,14 @@ dev = [
 docling = [
     "docling==2.67.0",
 ]
+sarashina = [
+    "transformers>=4.57.1",
+    "torch>=2.0.0",
+    "torchvision",
+    "sentencepiece",
+    "protobuf",
+    "accelerate",
+]
 
 [tool.setuptools]
 packages = []
