@@ -611,7 +611,7 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
             debug_print("[INFO] sarashina OCR: CUDAデバイスを使用")
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             target_device = "mps"
-            dtype = torch.float16
+            dtype = torch.float32
             debug_print("[INFO] sarashina OCR: MPSデバイスを使用")
         else:
             target_device = "cpu"
@@ -623,15 +623,16 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
             cls._shared_processor = AutoProcessor.from_pretrained(
                 model_name, trust_remote_code=True
             )
-            # MPSはdevice_map非対応の場合があるためCPUで読み込み後.to()で移動
             if target_device == "mps":
+                # モデルのカスタムコードがtorch_dtypeを無視するため
+                # 読み込み後に明示的にfloat32へ変換しMPSに移動
+                # （vision encoderとLLMのdtype不一致を回避）
                 model = AutoModelForCausalLM.from_pretrained(
                     model_name,
-                    torch_dtype=dtype,
                     trust_remote_code=True,
                     attn_implementation="sdpa",
                 )
-                cls._shared_model = model.to(target_device)
+                cls._shared_model = model.float().to(target_device)
             else:
                 cls._shared_model = AutoModelForCausalLM.from_pretrained(
                     model_name,
