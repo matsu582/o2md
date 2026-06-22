@@ -599,7 +599,7 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
             from transformers import AutoModelForCausalLM, AutoProcessor
         except ImportError:
             print("[WARNING] sarashina OCRに必要なライブラリが不足しています")
-            print("[WARNING] インストール: pip install 'o2md[sarashina]'")
+            print("[WARNING] インストール: uv pip install '.[sarashina]'")
             cls._load_failed = True
             return False
 
