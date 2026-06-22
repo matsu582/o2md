@@ -57,7 +57,7 @@
 | 段組みレイアウト | 対応 | なし | 対応 |
 | 表検出 | 対応 (TableFormer) | なし | 対応 (テキスト位置ベース + docling TableFormer) |
 | 図抽出 | 対応 | なし | 対応 (SVG/PNG) |
-| OCR | 対応 (EasyOCR/Tesseract) | なし | 対応 (Tesseract/manga-ocr選択可) |
+| OCR | 対応 (EasyOCR/Tesseract) | なし | 対応 (Tesseract/manga-ocr/[sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr)選択可) |
 | 書式 (太字/斜体等) | 対応 | なし | 対応 |
 | 打消し線/上付き/下付き | なし | なし | 対応 |
 | 脚注/注釈変換 | なし | なし | 対応 ([^N]形式) |
