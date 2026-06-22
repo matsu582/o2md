@@ -627,7 +627,7 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
             if target_device == "mps":
                 model = AutoModelForCausalLM.from_pretrained(
                     model_name,
-                    torch_dtype=dtype,
+                    dtype=dtype,
                     trust_remote_code=True,
                     attn_implementation="sdpa",
                 )
@@ -636,7 +636,7 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
                 cls._shared_model = AutoModelForCausalLM.from_pretrained(
                     model_name,
                     device_map=target_device,
-                    torch_dtype=dtype,
+                    dtype=dtype,
                     trust_remote_code=True,
                     attn_implementation="sdpa",
                 )
@@ -668,7 +668,11 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
                 add_generation_prompt=True,
                 return_dict=True,
                 return_tensors="pt",
-            ).to(self._shared_model.device)
+            )
+            # デバイス移動: 各テンソルを個別に移動
+            device = self._shared_model.device
+            inputs = {k: v.to(device) if hasattr(v, 'to') else v
+                      for k, v in inputs.items()}
 
             output_ids = self._shared_model.generate(
                 **inputs,
@@ -680,9 +684,13 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
             # 入力トークンを除いた生成部分のみデコード
             generated = output_ids[0, inputs["input_ids"].shape[1]:]
             text = self._shared_processor.decode(generated, skip_special_tokens=True)
+            if not text or not text.strip():
+                print("[WARNING] sarashina OCR: モデル出力が空です")
             return text.strip() if text else ""
         except Exception as e:
-            debug_print(f"[WARNING] sarashina OCRエラー: {e}")
+            print(f"[WARNING] sarashina OCRエラー: {e}")
+            import traceback
+            traceback.print_exc()
             return ""
 
     def ocr_region(self, img: np.ndarray, region: TextRegion,
