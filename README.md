@@ -132,8 +132,8 @@ input_files/
   b.xlsx
 ↓
 output/
-  pdfs/a/a.md + images/
-  b/b.md
+  pdfs/a.md + images/
+  b.md
 ```
 
 ### 古い形式のファイル
