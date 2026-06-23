@@ -58,10 +58,15 @@ class TestDetectFileType:
         assert detect_file_type("TEST.PPT") == 'powerpoint'
         assert detect_file_type("/path/to/file.ppt") == 'powerpoint'
 
+    def test_detect_pdf(self):
+        """PDFファイルを正しく検出"""
+        assert detect_file_type("test.pdf") == 'pdf'
+        assert detect_file_type("TEST.PDF") == 'pdf'
+        assert detect_file_type("/path/to/file.pdf") == 'pdf'
+
     def test_detect_unknown(self):
         """未対応ファイルをunknownとして検出"""
         assert detect_file_type("test.txt") == 'unknown'
-        assert detect_file_type("test.pdf") == 'unknown'
         assert detect_file_type("test.csv") == 'unknown'
         assert detect_file_type("test") == 'unknown'
 
