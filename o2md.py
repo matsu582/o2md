@@ -356,9 +356,8 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
 
     for idx, fpath in enumerate(target_files, 1):
         rel = Path(fpath).relative_to(folder)
-        # 出力ディレクトリ: base_output / 元の相対パスのディレクトリ / ファイル名(拡張子なし)
-        file_stem = rel.stem
-        file_output_dir = str(base_output / rel.parent / file_stem)
+        # 出力ディレクトリ: base_output / 元の相対パスのディレクトリ
+        file_output_dir = str(base_output / rel.parent)
 
         print(f"\n[{idx}/{total}] {rel}")
         try:

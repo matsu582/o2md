@@ -30,7 +30,7 @@ o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）およびPDFを**
 
 ### 前提条件
 
-- Python 3.9 以上
+- Python 3.10 以上
 - [uv](https://docs.astral.sh/uv/) (推奨) または pip
 - [LibreOffice](https://www.libreoffice.org/) (図形の画像処理と古い形式の変換に必要)
 
@@ -132,8 +132,8 @@ input_files/
   b.xlsx
 ↓
 output/
-  pdfs/a/a.md + images/
-  b/b.md
+  pdfs/a.md + images/
+  b.md
 ```
 
 ### 古い形式のファイル
