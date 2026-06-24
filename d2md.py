@@ -27,7 +27,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from PIL import Image
 import io
 
-from utils import get_libreoffice_path, is_libreoffice_available
+from utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed
 from d2md_charts import extract_charts_from_docx
 from chart_utils import chart_data_to_markdown
 
@@ -142,6 +142,18 @@ class WordToMarkdownConverter:
         
         print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
         
+    def get_auto_generated_patterns(self) -> list:
+        """このコンバータが自動付与する見出しの正規表現パターンを返す"""
+        import re
+        return [
+            re.compile(r'^目次$'),
+            re.compile(r'^図形 \d+$'),
+        ]
+
+    def get_auto_generated_html_tags(self) -> list:
+        """このコンバータが自動付与するHTMLタグのパターンを返す"""
+        return ['<details>', '</details>', '<summary>図形内テキスト</summary>']
+
     def convert(self) -> str:
         """メイン変換処理"""
         print(f"[INFO] Word文書変換開始: {self.word_file}")
@@ -1061,7 +1073,6 @@ class WordToMarkdownConverter:
         Returns:
             bool: 図形として処理された場合はTrue（テキスト出力をスキップすべき）
         """
-        
         # Word図形キャンバスがある場合は複合図形として処理
         # 処理が行われた場合のみ早期終了、そうでなければ通常の画像処理にフォールバック
         if self._has_word_processing_canvas(paragraph):
@@ -3179,7 +3190,7 @@ def convert_doc_to_docx(doc_file_path: str) -> str:
     import shutil
     from pathlib import Path
     
-    if not is_libreoffice_available():
+    if not is_libreoffice_installed():
         print("[ERROR] LibreOfficeが見つかりません。.docファイルの変換にはLibreOfficeが必要です。")
         print("  .docxファイルであればLibreOfficeなしで変換できます。")
         return None

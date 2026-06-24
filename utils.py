@@ -52,20 +52,45 @@ def get_libreoffice_path():
     return "soffice"
 
 
-def is_libreoffice_available() -> bool:
-    """LibreOfficeが利用可能かどうかを判定する
+# テキストオンリーモードのグローバルフラグ
+_TEXT_ONLY = False
 
-    get_libreoffice_path()が実際に実行可能なパスを返すか確認する。
-    フォールバック値 "soffice" が返された場合でもPATH上に存在すれば利用可能と判定する。
+
+def set_text_only(enabled: bool):
+    """テキストオンリーモードを設定する
+
+    有効時は図形・画像処理をスキップし、テキストのみを抽出する。
+    """
+    global _TEXT_ONLY
+    _TEXT_ONLY = enabled
+
+
+def is_text_only() -> bool:
+    """テキストオンリーモードかどうかを返す"""
+    return _TEXT_ONLY
+
+
+def is_libreoffice_installed() -> bool:
+    """LibreOfficeがシステムにインストールされているかを判定する
+
+    テキストモードの影響を受けない。ファイル形式変換（.doc→.docx等）で使用。
 
     Returns:
-        bool: LibreOfficeが利用可能な場合True
+        bool: LibreOfficeがインストールされている場合True
     """
     path = get_libreoffice_path()
     if os.path.isabs(path):
         return os.path.exists(path)
-    # "soffice" などの相対パスの場合、shutil.whichで検索
     return shutil.which(path) is not None
+
+
+def is_libreoffice_available() -> bool:
+    """LibreOfficeが利用可能かどうかを判定する
+
+    Returns:
+        bool: LibreOfficeが利用可能な場合True
+    """
+    return is_libreoffice_installed()
 
 
 def warn_libreoffice_not_available():
