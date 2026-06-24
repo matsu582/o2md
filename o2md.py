@@ -114,6 +114,70 @@ def debug_print(*args, **kwargs):
     if _VERBOSE:
         print(*args, **kwargs)
 
+def _strip_markdown(text: str) -> str:
+    """Markdownの書式記号を除去してプレーンテキストに変換する
+
+    除去対象:
+    - 見出し記号 (##)
+    - 太字/斜体 (**text**, *text*)
+    - テーブル区切り行 (| --- | --- |)
+    - 画像リンク (![alt](path))
+    - 行末の改行用スペース (trailing two spaces)
+    - 水平線 (---, ***)
+    """
+    import re
+    lines = text.split('\n')
+    result = []
+    for line in lines:
+        # 画像リンク行を除去
+        if re.match(r'^\s*!\[.*?\]\(.*?\)\s*$', line):
+            continue
+        # テーブル区切り行を除去 (| --- | --- | 形式)
+        if re.match(r'^\s*\|[\s\-:|]+\|\s*$', line):
+            continue
+        # 水平線を除去
+        if re.match(r'^\s*([-*_])\s*\1\s*\1[\s\1]*$', line):
+            continue
+        # 見出し記号を除去
+        line = re.sub(r'^#{1,6}\s+', '', line)
+        # 太字記号を除去
+        line = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
+        # 斜体記号を除去
+        line = re.sub(r'\*(.+?)\*', r'\1', line)
+        # テーブルのパイプ記号を除去してタブ区切りに変換
+        if '|' in line and line.strip().startswith('|'):
+            cells = [c.strip() for c in line.strip().strip('|').split('|')]
+            line = '\t'.join(cells)
+        # 行末のMarkdown改行用スペースを除去
+        line = line.rstrip()
+        result.append(line)
+    return '\n'.join(result)
+
+
+def convert_md_to_text(md_file_path: str) -> str:
+    """Markdownファイルをプレーンテキストに変換して.txtとして保存する
+
+    Args:
+        md_file_path: 変換元の.mdファイルパス
+
+    Returns:
+        出力した.txtファイルのパス
+    """
+    with open(md_file_path, 'r', encoding='utf-8') as f:
+        md_content = f.read()
+
+    text_content = _strip_markdown(md_content)
+
+    txt_file_path = md_file_path.rsplit('.md', 1)[0] + '.txt'
+    with open(txt_file_path, 'w', encoding='utf-8') as f:
+        f.write(text_content)
+
+    # 元のmdファイルを削除
+    os.remove(md_file_path)
+
+    return txt_file_path
+
+
 def detect_file_type(file_path: str) -> str:
     """ファイル拡張子からファイルタイプを判定
     
@@ -354,6 +418,8 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
 
     results = {'success': [], 'failed': []}
 
+    from utils import is_text_only
+
     for idx, fpath in enumerate(target_files, 1):
         rel = Path(fpath).relative_to(folder)
         # 出力ディレクトリ: base_output / 元の相対パスのディレクトリ
@@ -366,6 +432,9 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
                 output_dir=file_output_dir,
                 **kwargs
             )
+            # テキストオンリーモード: .mdを.txtに変換
+            if is_text_only() and output_file and output_file.endswith('.md'):
+                output_file = convert_md_to_text(output_file)
             results['success'].append({'file': str(rel), 'output': output_file})
         except Exception as e:
             print(f"[ERROR] 変換失敗: {rel} - {e}")
@@ -485,18 +554,23 @@ def main():
                 **common_kwargs
             )
 
+            # テキストオンリーモード: .mdを.txtに変換
+            if args.text_only and output_file and output_file.endswith('.md'):
+                output_file = convert_md_to_text(output_file)
+
             print("\n" + "=" * 50)
             print("変換完了!")
             print(f"出力ファイル: {output_file}")
 
-            # 画像ディレクトリの情報を表示
-            if args.output_dir:
-                images_dir = os.path.join(args.output_dir, "images")
-            else:
-                images_dir = os.path.join(os.getcwd(), "output", "images")
+            # 画像ディレクトリの情報を表示（テキストオンリー時は非表示）
+            if not args.text_only:
+                if args.output_dir:
+                    images_dir = os.path.join(args.output_dir, "images")
+                else:
+                    images_dir = os.path.join(os.getcwd(), "output", "images")
 
-            if os.path.exists(images_dir) and os.listdir(images_dir):
-                print(f"画像フォルダ: {images_dir}")
+                if os.path.exists(images_dir) and os.listdir(images_dir):
+                    print(f"画像フォルダ: {images_dir}")
 
             if args.use_heading_text:
                 print("見出しテキストリンクモード: 有効")
