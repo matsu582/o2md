@@ -154,6 +154,7 @@ def _strip_markdown(text: str, auto_patterns: dict = None) -> str:
     除去対象:
     - プログラム生成見出し（コンバータが定義したパターン）
     - コンバータが定義したHTMLタグ
+    - コンバータが定義した行パターン（メタデータ等）
     - 見出し記号 (##)
     - 太字/斜体 (**text**, *text*)
     - テーブル区切り行 (| --- | --- |)
@@ -163,9 +164,10 @@ def _strip_markdown(text: str, auto_patterns: dict = None) -> str:
     """
     import re
     if auto_patterns is None:
-        auto_patterns = {'heading_patterns': [], 'html_tags': []}
+        auto_patterns = {'heading_patterns': [], 'html_tags': [], 'line_patterns': []}
     heading_patterns = auto_patterns.get('heading_patterns', [])
     html_tags = set(auto_patterns.get('html_tags', []))
+    line_patterns = auto_patterns.get('line_patterns', [])
     lines = text.split('\n')
     result = []
     for line in lines:
@@ -178,6 +180,9 @@ def _strip_markdown(text: str, auto_patterns: dict = None) -> str:
             continue
         # <summary>...</summary> タグを汎用的に除去（html_tagsに<summary>系が含まれる場合）
         if html_tags and re.match(r'^<summary>.*</summary>$', stripped):
+            continue
+        # コンバータが定義した行パターンを除去（メタデータ等）
+        if line_patterns and any(p.match(stripped) for p in line_patterns):
             continue
         # 画像リンク行を除去
         if re.match(r'^\s*!\[.*?\]\(.*?\)\s*$', line):
@@ -416,6 +421,8 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             auto_patterns['heading_patterns'] = converter.get_auto_generated_patterns()
         if converter and hasattr(converter, 'get_auto_generated_html_tags'):
             auto_patterns['html_tags'] = converter.get_auto_generated_html_tags()
+        if converter and hasattr(converter, 'get_auto_generated_line_patterns'):
+            auto_patterns['line_patterns'] = converter.get_auto_generated_line_patterns()
 
         return output_file, auto_patterns
         

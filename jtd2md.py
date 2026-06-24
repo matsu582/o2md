@@ -538,6 +538,20 @@ class JtdToMarkdownConverter:
 
         os.makedirs(self.output_dir, exist_ok=True)
 
+    def get_auto_generated_patterns(self) -> list:
+        """このコンバータが自動付与する見出しの正規表現パターンを返す"""
+        import re
+        return [
+            re.compile(r'^' + re.escape(self.base_name) + r'$'),
+        ]
+
+    def get_auto_generated_line_patterns(self) -> list:
+        """このコンバータが自動付与するメタデータ行の正規表現パターンを返す"""
+        import re
+        return [
+            re.compile(r'^- \*\*.+\*\*: .+$'),
+        ]
+
     def convert(self) -> str:
         """変換メイン処理
 
