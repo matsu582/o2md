@@ -29,7 +29,7 @@ from typing import List, Dict, Tuple, Optional, Set
 from collections import deque
 import copy
 import hashlib
-from utils import get_libreoffice_path, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id
+from utils import get_libreoffice_path, is_libreoffice_available, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id
 
 
 class IsolatedGroupRenderer:
@@ -2301,11 +2301,11 @@ class IsolatedGroupRenderer:
             print(f"[ERROR][convert_excel_to_pdf] Cannot access source file: {e}")
             return None
         
-        LIBREOFFICE_PATH = get_libreoffice_path()
-        
-        if not LIBREOFFICE_PATH or not os.path.exists(LIBREOFFICE_PATH):
-            print(f"[ERROR] LibreOffice not found: {LIBREOFFICE_PATH}")
+        if not is_libreoffice_available():
+            print("[WARNING] LibreOfficeが利用できないため、図形のPDF変換をスキップします")
             return None
+        
+        LIBREOFFICE_PATH = get_libreoffice_path()
         
         debug_print(f"[DEBUG][convert_excel_to_pdf] LibreOffice path: {LIBREOFFICE_PATH}")
         

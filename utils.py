@@ -52,6 +52,31 @@ def get_libreoffice_path():
     return "soffice"
 
 
+def is_libreoffice_available() -> bool:
+    """LibreOfficeが利用可能かどうかを判定する
+
+    get_libreoffice_path()が実際に実行可能なパスを返すか確認する。
+    フォールバック値 "soffice" が返された場合でもPATH上に存在すれば利用可能と判定する。
+
+    Returns:
+        bool: LibreOfficeが利用可能な場合True
+    """
+    path = get_libreoffice_path()
+    if os.path.isabs(path):
+        return os.path.exists(path)
+    # "soffice" などの相対パスの場合、shutil.whichで検索
+    return shutil.which(path) is not None
+
+
+def warn_libreoffice_not_available():
+    """LibreOfficeが利用できない場合に警告メッセージを出力する"""
+    print("[WARNING] LibreOfficeが見つかりません。以下の機能が制限されます:")
+    print("  - 図形・ベクター画像の変換（スキップされます）")
+    print("  - 旧形式ファイルの変換（.doc→.docx, .xls→.xlsx, .ppt→.pptx）")
+    print("  - スライドの画像レンダリング")
+    print("  テキストのみの変換は正常に動作します。")
+
+
 def col_letter(n: int) -> str:
     """列番号をExcelの列文字に変換（1 -> A, 27 -> AA, etc.）"""
     letters = ''

@@ -23,7 +23,7 @@ import io
 import zipfile
 import xml.etree.ElementTree as ET
 
-from utils import get_libreoffice_path, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
+from utils import get_libreoffice_path, is_libreoffice_available, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
 from isolated_group_renderer import IsolatedGroupRenderer
 
 try:
@@ -1437,7 +1437,13 @@ class _GraphicsMixin:
         
         Returns:
             生成されたPDFファイルのパス または None
+        
+        Note:
+            LibreOfficeが利用できない場合はNoneを返します
         """
+        if not is_libreoffice_available():
+            debug_print("[DEBUG] LibreOfficeが利用できないため、Excel→PDF変換をスキップします")
+            return None
         try:
             # 元のファイルを上書きしないように一時コピーを作成
             tmp_xlsx = os.path.join(tmpdir, os.path.basename(xlsx_path))
@@ -1546,6 +1552,9 @@ class _GraphicsMixin:
         Returns:
             生成されたSVGファイルのパス または None
         """
+        if not is_libreoffice_available():
+            debug_print("[DEBUG] LibreOfficeが利用できないため、Excel→SVG変換をスキップします")
+            return None
         try:
             # 元のファイルを上書きしないように一時コピーを作成
             tmp_xlsx = os.path.join(tmpdir, os.path.basename(xlsx_path))
@@ -1680,7 +1689,7 @@ class _GraphicsMixin:
             debug_print(f"[DEBUG] Fallback rendering for sheet: {sheet.title}")
             pdf_path = self._convert_excel_to_pdf(self.excel_file, tmpdir, apply_fit_to_page=True)
             if pdf_path is None:
-                print("[WARNING] LibreOffice がPDFを出力しませんでした")
+                print("[WARNING] Excel→PDF変換に失敗しました（LibreOfficeが利用できないか、変換エラー）")
                 return False
             
             # 2. シートのページインデックスを取得
@@ -3611,6 +3620,9 @@ class _GraphicsMixin:
 
                 # PDFとPNGに変換（デバッグ用PDFを保存）
                 try:
+                    if not is_libreoffice_available():
+                        debug_print("[DEBUG][_iso_v2] LibreOfficeが利用できないため、図形レンダリングをスキップします")
+                        return None
                     # fit-to-pageを適用しない（図形が25%に縮小され見えなくなる）
                     # pageSetupは上記のワークシートXMLで既に適切に設定済み
                     # self._set_excel_fit_to_one_page(debug_xlsx_path)  # 無効

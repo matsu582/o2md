@@ -27,7 +27,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from PIL import Image
 import io
 
-from utils import get_libreoffice_path
+from utils import get_libreoffice_path, is_libreoffice_available
 from d2md_charts import extract_charts_from_docx
 from chart_utils import chart_data_to_markdown
 
@@ -2511,6 +2511,9 @@ class WordToMarkdownConverter:
     
     def _convert_document_to_pdf(self, docx_path):
         """Word文書をPDFに変換（最高品質設定）"""
+        if not is_libreoffice_available():
+            print("[WARNING] LibreOfficeが利用できないため、PDF変換をスキップします")
+            return None
         try:
             temp_dir = tempfile.mkdtemp()
             
@@ -3103,6 +3106,8 @@ class WordToMarkdownConverter:
 
     def _convert_with_libreoffice(self, input_path: str, output_path: str) -> bool:
         """LibreOfficeを使用してベクター画像を変換（出力形式に応じてPNGまたはSVG）"""
+        if not is_libreoffice_available():
+            return False
         temp_dir = None
         try:
             temp_dir = tempfile.mkdtemp()
@@ -3173,6 +3178,11 @@ def convert_doc_to_docx(doc_file_path: str) -> str:
     import tempfile
     import shutil
     from pathlib import Path
+    
+    if not is_libreoffice_available():
+        print("[ERROR] LibreOfficeが見つかりません。.docファイルの変換にはLibreOfficeが必要です。")
+        print("  .docxファイルであればLibreOfficeなしで変換できます。")
+        return None
     
     print(f"[INFO] DOCファイルをDOCXに変換中: {doc_file_path}")
     
