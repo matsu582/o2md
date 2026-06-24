@@ -133,7 +133,7 @@ class PowerPointToMarkdownConverter:
         print(f"[INFO] PowerPoint文書変換開始: {self.pptx_file}")
         
         # ドキュメント見出し
-        self.markdown_lines.append(f"# {self.base_name} <!-- o2md:auto -->")
+        self.markdown_lines.append(f"# {self.base_name}")
         self.markdown_lines.append("")
         
         # 各スライドを変換
@@ -169,9 +169,9 @@ class PowerPointToMarkdownConverter:
         # スライドタイトルを取得
         title = self._get_slide_title(slide)
         if title:
-            self.markdown_lines.append(f"## {title} <!-- o2md:auto -->")
+            self.markdown_lines.append(f"## {title}")
         else:
-            self.markdown_lines.append(f"## スライド {slide_idx} <!-- o2md:auto -->")
+            self.markdown_lines.append(f"## スライド {slide_idx}")
         self.markdown_lines.append("")
         
         # スライドの内容を分析
@@ -250,7 +250,7 @@ class PowerPointToMarkdownConverter:
                 notes_text = notes_slide.notes_text_frame.text.strip()
                 if notes_text:
                     self.markdown_lines.append("")
-                    self.markdown_lines.append("### ノート: <!-- o2md:auto -->")
+                    self.markdown_lines.append("### ノート:")
                     self.markdown_lines.append(notes_text)
                     self.markdown_lines.append("")
         

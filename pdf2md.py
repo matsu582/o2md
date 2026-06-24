@@ -181,7 +181,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         print(f"[INFO] PDF文書変換開始: {self.pdf_file}")
         
         # ドキュメントタイトルを先頭に追加
-        self.markdown_lines.append(f"# {self.base_name} <!-- o2md:auto -->")
+        self.markdown_lines.append(f"# {self.base_name}")
         self.markdown_lines.append("")
         
         try:
@@ -663,7 +663,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     self.markdown_lines.append(ocr_text.strip())
                     self.markdown_lines.append("")
                 else:
-                    self.markdown_lines.append("### 抽出テキスト（OCR） <!-- o2md:auto -->")
+                    self.markdown_lines.append("### 抽出テキスト（OCR）")
                     self.markdown_lines.append("")
                     for line in ocr_text.strip().split('\n'):
                         if line.strip():
@@ -713,7 +713,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     self.markdown_lines.append(ocr_text.strip())
                     self.markdown_lines.append("")
                 else:
-                    self.markdown_lines.append("### 抽出テキスト（OCR） <!-- o2md:auto -->")
+                    self.markdown_lines.append("### 抽出テキスト（OCR）")
                     self.markdown_lines.append("")
                     for line in ocr_text.strip().split('\n'):
                         if line.strip():

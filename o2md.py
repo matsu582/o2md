@@ -114,25 +114,74 @@ def debug_print(*args, **kwargs):
     if _VERBOSE:
         print(*args, **kwargs)
 
-def _strip_markdown(text: str) -> str:
+def _build_auto_generated_patterns(base_name: str) -> list:
+    """プログラムが自動付与する見出し・タグのパターンリストを構築する
+
+    Args:
+        base_name: 変換元ファイルのベース名（拡張子なし）
+
+    Returns:
+        正規表現パターンのリスト（見出し記号除去後のテキストに対してマッチ）
+    """
+    import re
+    patterns = [
+        # 共通: ファイル名タイトル（全変換エンジン）
+        re.compile(r'^' + re.escape(base_name) + r'$'),
+        # PDF: OCR抽出見出し
+        re.compile(r'^抽出テキスト（OCR）$'),
+        # Excel: シート名見出し（末尾が (Sheet Data)）
+        re.compile(r'^.+ \(Sheet Data\)$'),
+        # PowerPoint: スライド番号見出し
+        re.compile(r'^スライド \d+$'),
+        # PowerPoint: ノート見出し
+        re.compile(r'^ノート:$'),
+        # Word: 目次見出し
+        re.compile(r'^目次$'),
+        # Word: 図形番号見出し
+        re.compile(r'^図形 \d+$'),
+    ]
+    return patterns
+
+
+def _is_auto_generated_heading(line: str, patterns: list) -> bool:
+    """Markdown見出し行がプログラム生成かどうかを判定する
+
+    Args:
+        line: 元のMarkdown行（見出し記号付き）
+        patterns: _build_auto_generated_patternsで構築したパターンリスト
+
+    Returns:
+        プログラム生成の見出しならTrue
+    """
+    import re
+    # 見出し行でなければ対象外
+    m = re.match(r'^#{1,6}\s+(.+)$', line.rstrip())
+    if not m:
+        return False
+    heading_text = m.group(1).strip()
+    return any(p.match(heading_text) for p in patterns)
+
+
+def _strip_markdown(text: str, base_name: str = '') -> str:
     """Markdownの書式記号を除去してプレーンテキストに変換する
 
     除去対象:
-    - プログラム生成行 (<!-- o2md:auto --> マーカー付き)
+    - プログラム生成見出し（ファイル名、OCR見出し、シート名等）
     - 見出し記号 (##)
     - 太字/斜体 (**text**, *text*)
     - テーブル区切り行 (| --- | --- |)
     - 画像リンク (![alt](path))
     - 行末の改行用スペース (trailing two spaces)
     - 水平線 (---, ***)
-    - HTMLコメント (<!-- ... -->)
+    - HTML details/summaryタグ
     """
     import re
+    auto_patterns = _build_auto_generated_patterns(base_name)
     lines = text.split('\n')
     result = []
     for line in lines:
         # プログラムが付与した見出し行を除去
-        if '<!-- o2md:auto -->' in line:
+        if _is_auto_generated_heading(line, auto_patterns):
             continue
         # HTML details/summary タグを除去
         stripped = line.strip()
@@ -182,16 +231,21 @@ def _remove_image_links(text: str) -> str:
 def convert_md_to_text(md_file_path: str) -> str:
     """Markdownファイルをプレーンテキストに変換して.txtとして保存する
 
+    ファイル名からbase_nameを自動取得し、プログラム生成見出しの除去に使用する。
+
     Args:
         md_file_path: 変換元の.mdファイルパス
 
     Returns:
         出力した.txtファイルのパス
     """
+    import os
+    base_name = os.path.splitext(os.path.basename(md_file_path))[0]
+
     with open(md_file_path, 'r', encoding='utf-8') as f:
         md_content = f.read()
 
-    text_content = _strip_markdown(md_content)
+    text_content = _strip_markdown(md_content, base_name=base_name)
 
     txt_file_path = md_file_path.rsplit('.md', 1)[0] + '.txt'
     with open(txt_file_path, 'w', encoding='utf-8') as f:
