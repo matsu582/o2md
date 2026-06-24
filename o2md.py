@@ -172,9 +172,6 @@ def convert_md_to_text(md_file_path: str) -> str:
     with open(txt_file_path, 'w', encoding='utf-8') as f:
         f.write(text_content)
 
-    # 元のmdファイルを削除
-    os.remove(md_file_path)
-
     return txt_file_path
 
 
@@ -432,9 +429,9 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
                 output_dir=file_output_dir,
                 **kwargs
             )
-            # テキストオンリーモード: .mdを.txtに変換
+            # テキストモード: .txtファイルも追加出力（.mdは残す）
             if is_text_only() and output_file and output_file.endswith('.md'):
-                output_file = convert_md_to_text(output_file)
+                convert_md_to_text(output_file)
             results['success'].append({'file': str(rel), 'output': output_file})
         except Exception as e:
             print(f"[ERROR] 変換失敗: {rel} - {e}")
@@ -487,8 +484,8 @@ def main():
                        help='[PDF専用] tessdataディレクトリを指定（tessdata_best使用時）')
     parser.add_argument('--docling', action='store_true',
                        help='[PDF専用] doclingによる表検出を有効にする')
-    parser.add_argument('--text-only', action='store_true',
-                       help='テキストのみ抽出（図形・画像処理をスキップ）')
+    parser.add_argument('--text', action='store_true',
+                       help='テキストのみ抽出（図形・画像処理をスキップ、.txtも出力）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力し、debug_workbooks/pdfs/diagnosticsフォルダを保存')
 
@@ -496,14 +493,14 @@ def main():
 
     set_verbose(args.verbose)
 
-    # テキストオンリーモードの設定
+    # テキストモードの設定
     from utils import set_text_only, is_libreoffice_available, warn_libreoffice_not_available
-    if args.text_only:
+    if args.text:
         set_text_only(True)
-        print("[INFO] テキストオンリーモード: 図形・画像処理をスキップします")
+        print("[INFO] テキストモード: 図形・画像処理をスキップし、.txtファイルも出力します")
 
     # LibreOfficeの利用可否をチェックし、利用できない場合は警告を表示
-    if not is_libreoffice_available() and not args.text_only:
+    if not is_libreoffice_available() and not args.text:
         warn_libreoffice_not_available()
 
     common_kwargs = dict(
@@ -554,16 +551,19 @@ def main():
                 **common_kwargs
             )
 
-            # テキストオンリーモード: .mdを.txtに変換
-            if args.text_only and output_file and output_file.endswith('.md'):
-                output_file = convert_md_to_text(output_file)
+            # テキストモード: .txtファイルも追加出力
+            txt_file = None
+            if args.text and output_file and output_file.endswith('.md'):
+                txt_file = convert_md_to_text(output_file)
 
             print("\n" + "=" * 50)
             print("変換完了!")
             print(f"出力ファイル: {output_file}")
+            if txt_file:
+                print(f"テキストファイル: {txt_file}")
 
-            # 画像ディレクトリの情報を表示（テキストオンリー時は非表示）
-            if not args.text_only:
+            # 画像ディレクトリの情報を表示（テキストモード時は非表示）
+            if not args.text:
                 if args.output_dir:
                     images_dir = os.path.join(args.output_dir, "images")
                 else:
