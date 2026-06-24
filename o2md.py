@@ -118,17 +118,26 @@ def _strip_markdown(text: str) -> str:
     """Markdownの書式記号を除去してプレーンテキストに変換する
 
     除去対象:
+    - プログラム生成行 (<!-- o2md:auto --> マーカー付き)
     - 見出し記号 (##)
     - 太字/斜体 (**text**, *text*)
     - テーブル区切り行 (| --- | --- |)
     - 画像リンク (![alt](path))
     - 行末の改行用スペース (trailing two spaces)
     - 水平線 (---, ***)
+    - HTMLコメント (<!-- ... -->)
     """
     import re
     lines = text.split('\n')
     result = []
     for line in lines:
+        # プログラムが付与した見出し行を除去
+        if '<!-- o2md:auto -->' in line:
+            continue
+        # HTML details/summary タグを除去
+        stripped = line.strip()
+        if stripped in ('<details>', '</details>') or re.match(r'^<summary>.*</summary>$', stripped):
+            continue
         # 画像リンク行を除去
         if re.match(r'^\s*!\[.*?\]\(.*?\)\s*$', line):
             continue

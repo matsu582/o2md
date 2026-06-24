@@ -416,7 +416,7 @@ class WordToMarkdownConverter:
         """目次を生成"""
         print("[INFO] 目次を生成中...")
         
-        self.markdown_lines.append("# 目次")
+        self.markdown_lines.append("# 目次 <!-- o2md:auto -->")
         self.markdown_lines.append("")
         
         for heading in self.headings:
@@ -1657,7 +1657,7 @@ class WordToMarkdownConverter:
             self.markdown_lines.append("")
             
             for i, texts in enumerate(filtered_textbox_texts, 1):
-                self.markdown_lines.append(f"### 図形 {i}")
+                self.markdown_lines.append(f"### 図形 {i} <!-- o2md:auto -->")
                 self.markdown_lines.append("")
                 for text in texts:
                     if text.strip():

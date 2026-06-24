@@ -209,7 +209,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         print(f"[INFO] Excel文書変換開始: {self.excel_file}")
 
         # ドキュメントタイトルを先頭に追加
-        self.markdown_lines.append(f"# {self.base_name}")
+        self.markdown_lines.append(f"# {self.base_name} <!-- o2md:auto -->")
         self.markdown_lines.append("")
 
         # ヘルパーが存在する場合は目次を生成
@@ -648,7 +648,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             anchors_cid_list = []
         
         # シート見出し（番号とアンカーIDを削除）
-        self.markdown_lines.append(f"## {sheet_name} (Sheet Data)")
+        self.markdown_lines.append(f"## {sheet_name} (Sheet Data) <!-- o2md:auto -->")
         self.markdown_lines.append("")
         # シート先頭の説明文を、データ範囲の手前まで（最大12行）スキャンして
         # 表示順どおりに出力する。これにより「MailBoxより先の処理は」のような
