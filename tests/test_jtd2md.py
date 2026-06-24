@@ -488,11 +488,11 @@ class TestDetectHeading:
             "セクションタイトル", 1200, 700)
         assert result == (2, "セクションタイトル")
 
-    def test_default_font_with_body_explicit(self):
-        """フォントサイズ=0（デフォルト）で本文が明示サイズ → h2"""
+    def test_default_font_not_heading(self):
+        """フォントサイズ=0（デフォルト）は見出しではなく太字として扱う"""
         result = JtdToMarkdownConverter._detect_heading(
             "1.計画の目的", 0, 700)
-        assert result == (2, "1.計画の目的")
+        assert result is None
 
     def test_same_font_as_body(self):
         """本文と同じフォントサイズ → None"""
@@ -523,6 +523,30 @@ class TestDetectHeading:
         result = JtdToMarkdownConverter._detect_heading(
             "テキスト", 850, 0)
         assert result is None
+
+
+class TestIsBold:
+    """太字検出テスト"""
+
+    def test_default_font_is_bold(self):
+        """フォントサイズ=0（デフォルト）で本文が明示サイズ → 太字"""
+        assert JtdToMarkdownConverter._is_bold(0, 700) is True
+
+    def test_explicit_font_not_bold(self):
+        """明示フォントサイズ（本文と同じ） → 太字ではない"""
+        assert JtdToMarkdownConverter._is_bold(700, 700) is False
+
+    def test_larger_font_not_bold(self):
+        """本文より大きいフォント → 見出し扱いなので太字判定はただす"""
+        assert JtdToMarkdownConverter._is_bold(1200, 700) is False
+
+    def test_no_body_font_not_bold(self):
+        """本文フォント不明 → 太字判定しない"""
+        assert JtdToMarkdownConverter._is_bold(0, 0) is False
+
+    def test_smaller_font_not_bold(self):
+        """本文より小さいフォント → 太字ではない"""
+        assert JtdToMarkdownConverter._is_bold(500, 700) is False
 
 
 class TestDetectBodyFontSize:

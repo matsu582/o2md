@@ -571,9 +571,11 @@ class JtdToMarkdownConverter:
         """構造化コンテンツからMarkdown形式に変換する
 
         見出し推定（フォントサイズベース）:
-        - フォントサイズが本文より大きい → ## (h2)
-        - フォントサイズ=0（デフォルト）で本文フォントが
-          明示されている場合 → ## (h2)
+        - フォントサイズが本文より明示的に大きい → ## (h2)
+
+        太字検出:
+        - フォントサイズ=0（TAG 0020なし＝文書デフォルトフォント使用）で
+          本文が明示フォントサイズを持つ場合 → **太字**
         """
         md = []
         md.append(f"# {self.base_name}")
@@ -615,12 +617,18 @@ class JtdToMarkdownConverter:
                     md.append("")
                     continue
 
+                is_bold = self._is_bold(
+                    font_size, body_font_size)
+
                 if stripped.startswith("**脚注"):
                     md.append(stripped)
                     md.append("")
                     continue
 
-                md.append(stripped + "  ")
+                if is_bold:
+                    md.append(f"**{stripped}**  ")
+                else:
+                    md.append(stripped + "  ")
 
         while md and md[-1] == "":
             md.pop()
@@ -655,10 +663,8 @@ class JtdToMarkdownConverter:
     ) -> tuple[int, str] | None:
         """フォントサイズのみで見出しを推定する
 
-        本文フォントサイズと比較して大きいフォントの行を見出しと判定。
-        フォントサイズ=0（タグなし=デフォルト）の行は、
-        本文に明示的なフォントサイズがある場合、デフォルトの方が
-        大きい可能性が高いため見出し候補とする。
+        本文フォントサイズと比較して明示的に大きいフォントの行を
+        見出しと判定。
 
         Returns:
             (見出しレベル, テキスト) または None
@@ -670,12 +676,25 @@ class JtdToMarkdownConverter:
         if font_size > body_font_size:
             return (2, text)
 
-        # フォントサイズ=0（デフォルト）で本文が明示サイズの場合
-        # → デフォルトフォントは文書の基本サイズで本文より大きい可能性
-        if font_size == 0:
-            return (2, text)
-
         return None
+
+    @staticmethod
+    def _is_bold(
+        font_size: int, body_font_size: int,
+    ) -> bool:
+        """太字テキストを検出する
+
+        TAG 0020（文字書式）がないパラグラフ（font_size=0）は
+        文書デフォルトフォントを使用しており、本文が明示的な
+        フォントサイズを持つ場合、デフォルトフォントは太字である
+        ことが多い。
+
+        Returns:
+            太字の場合True
+        """
+        if body_font_size <= 0:
+            return False
+        return font_size == 0
 
     def _get_metadata(self) -> dict:
         """ファイルのOLE2メタデータを取得"""
