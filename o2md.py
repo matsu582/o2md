@@ -179,10 +179,16 @@ def _strip_markdown(text: str, auto_patterns: dict = None) -> str:
             continue
         # 見出し記号を除去
         line = re.sub(r'^#{1,6}\s+', '', line)
+        # 箇条書き記号を除去（インデント保持）
+        line = re.sub(r'^(\s*)[-*+]\s+', r'\1', line)
+        # 番号付きリスト記号を除去（インデント保持）
+        line = re.sub(r'^(\s*)\d+\.\s+', r'\1', line)
         # 太字記号を除去
         line = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
         # 斜体記号を除去
         line = re.sub(r'\*(.+?)\*', r'\1', line)
+        # Markdownリンクをテキスト部分のみに変換 [text](url) -> text
+        line = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', line)
         # テーブルのパイプ記号を除去してタブ区切りに変換
         if '|' in line and line.strip().startswith('|'):
             cells = [c.strip() for c in line.strip().strip('|').split('|')]
