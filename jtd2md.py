@@ -739,18 +739,13 @@ def main():
         help='デバッグ情報を出力'
     )
     parser.add_argument(
-        '--text-only', action='store_true',
-        help='Markdown変換せずテキストのみ出力'
+        '--text', action='store_true',
+        help='.mdと.txtの両方を出力（プレーンテキスト変換）'
     )
 
     args = parser.parse_args()
 
     set_verbose(args.verbose)
-
-    if args.text_only:
-        text = extract_jtd_text(args.file)
-        print(text)
-        return
 
     converter = JtdToMarkdownConverter(
         args.file,
@@ -758,8 +753,18 @@ def main():
     )
     output_file = converter.convert()
 
+    txt_file = None
+    if args.text and output_file and output_file.endswith('.md'):
+        from o2md import convert_md_to_text
+        auto_patterns = {'heading_patterns': [], 'html_tags': [], 'line_patterns': []}
+        auto_patterns['heading_patterns'] = converter.get_auto_generated_patterns()
+        auto_patterns['line_patterns'] = converter.get_auto_generated_line_patterns()
+        txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns)
+
     print(f"\n変換完了!")
     print(f"出力ファイル: {output_file}")
+    if txt_file:
+        print(f"テキストファイル: {txt_file}")
 
 
 if __name__ == "__main__":

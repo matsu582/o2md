@@ -2230,6 +2230,8 @@ def main():
                        help='デバッグ情報を出力')
     parser.add_argument('--docling', action='store_true',
                        help='doclingによる表検出を有効にする')
+    parser.add_argument('--text', action='store_true',
+                       help='.mdと.txtの両方を出力（プレーンテキスト変換）')
     
     args = parser.parse_args()
     
@@ -2253,9 +2255,20 @@ def main():
             use_docling=args.docling
         )
         output_file = converter.convert()
+
+        txt_file = None
+        if args.text and output_file and output_file.endswith('.md'):
+            from o2md import convert_md_to_text
+            auto_patterns = {'heading_patterns': [], 'html_tags': [], 'line_patterns': []}
+            auto_patterns['heading_patterns'] = converter.get_auto_generated_patterns()
+            auto_patterns['html_tags'] = converter.get_auto_generated_html_tags()
+            txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns)
+
         print("\n変換完了!")
         print(f"出力ファイル: {output_file}")
         print(f"画像フォルダ: {converter.images_dir}")
+        if txt_file:
+            print(f"テキストファイル: {txt_file}")
         
     except Exception as e:
         print(f"変換エラー: {e}")
