@@ -25,9 +25,19 @@ from jtd2md import (
     _trim_trailing_binary,
     _extract_text_from_stream,
     extract_jtd_text,
+    extract_jtd_structured,
     JtdToMarkdownConverter,
     HEADER_MAGIC_SSMG,
     HEADER_MAGIC_CTEXT,
+    HEADER_MAGIC_TEXT,
+)
+from jtd2md_table import (
+    TableCell,
+    parse_cell_block,
+    scan_stream_events,
+    extract_tables_from_events,
+    table_to_markdown,
+    _merge_continuation_rows,
 )
 from o2md import detect_file_type
 
@@ -249,6 +259,116 @@ class TestDetectFileTypeIchitaro:
         assert detect_file_type("test.pptx") == 'powerpoint'
         assert detect_file_type("test.pdf") == 'pdf'
         assert detect_file_type("test.txt") == 'unknown'
+
+
+class TestFindContentStartTextV01:
+    """TextV.01ヘッダでのコンテンツ開始位置検出テスト"""
+
+    def test_textv01_header(self):
+        """TextV.01ヘッダからの開始位置検出"""
+        header = HEADER_MAGIC_SSMG + b'\x00' * 8 + HEADER_MAGIC_TEXT + b'\x00'
+        pos = _find_content_start(header + b'\x00' * 20)
+        assert pos >= 0
+        assert pos % 2 == 0
+
+    def test_ctextv01_preferred_over_textv01(self):
+        """CTextV.01がある場合はそちらが優先される"""
+        header = HEADER_MAGIC_SSMG + b'\x00' * 3 + HEADER_MAGIC_CTEXT + b'\x00'
+        pos = _find_content_start(header + b'\x00' * 20)
+        assert pos >= 0
+
+
+class TestTableCell:
+    """TableCellクラスのテスト"""
+
+    def test_create_cell(self):
+        """セル作成"""
+        cell = TableCell(0x0002, 0x0048, 0x0001)
+        assert cell.col_start == 0x0002
+        assert cell.col_end == 0x0048
+        assert cell.row_flag == 0x0001
+        assert cell.text == ""
+
+    def test_append_text(self):
+        """テキスト追記"""
+        cell = TableCell(0, 0, 0)
+        cell.text = "テスト"
+        cell.append_text("追加")
+        assert cell.text == "テスト 追加"
+
+
+class TestMergeContinuationRows:
+    """継続行統合のテスト"""
+
+    def test_no_merge_needed(self):
+        """統合不要な行"""
+        c1 = TableCell(0, 10, 0)
+        c1.text = "A"
+        c2 = TableCell(10, 20, 0)
+        c2.text = "B"
+        c3 = TableCell(0, 10, 0)
+        c3.text = "C"
+        c4 = TableCell(10, 20, 0)
+        c4.text = "D"
+        rows = [[c1, c2], [c3, c4]]
+        result = _merge_continuation_rows(rows, 2)
+        assert len(result) == 2
+
+    def test_merge_continuation(self):
+        """継続行を前の行に統合"""
+        c1 = TableCell(0, 10, 0)
+        c1.text = "行1"
+        c2 = TableCell(10, 20, 0)
+        c2.text = ""
+        c3 = TableCell(0, 10, 0)
+        c3.text = ""
+        c4 = TableCell(10, 20, 0)
+        c4.text = "継続"
+        rows = [[c1, c2], [c3, c4]]
+        result = _merge_continuation_rows(rows, 2)
+        assert len(result) == 1
+        assert result[0][1].text.strip() == "継続"
+
+    def test_empty_rows(self):
+        """空の行リスト"""
+        assert _merge_continuation_rows([], 2) == []
+
+
+class TestTableToMarkdown:
+    """テーブルMarkdown変換のテスト"""
+
+    def test_simple_table(self):
+        """シンプルなテーブル"""
+        c1 = TableCell(0, 10, 0)
+        c1.text = "ヘッダ1"
+        c2 = TableCell(10, 20, 0)
+        c2.text = "ヘッダ2"
+        c3 = TableCell(0, 10, 0)
+        c3.text = "データ1"
+        c4 = TableCell(10, 20, 0)
+        c4.text = "データ2"
+        table = {
+            'rows': [[c1, c2], [c3, c4]],
+            'num_cols': 2,
+            'col_map': [(0, 10), (10, 20)],
+        }
+        md = table_to_markdown(table)
+        assert len(md) == 3  # ヘッダ + セパレータ + データ行
+        assert "ヘッダ1" in md[0]
+        assert "---" in md[1]
+        assert "データ1" in md[2]
+
+    def test_pipe_escaping(self):
+        """パイプ文字のエスケープ"""
+        c1 = TableCell(0, 10, 0)
+        c1.text = "A|B"
+        table = {
+            'rows': [[c1]],
+            'num_cols': 1,
+            'col_map': [(0, 10)],
+        }
+        md = table_to_markdown(table)
+        assert "A\\|B" in md[0]
 
 
 class TestJtdToMarkdownConverter:

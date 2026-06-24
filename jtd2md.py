@@ -26,6 +26,12 @@ except ImportError:
     print("olefileライブラリが必要です: pip install olefile")
     sys.exit(1)
 
+from jtd2md_table import (
+    scan_stream_events,
+    extract_tables_from_events,
+    table_to_markdown,
+)
+
 
 # 一太郎ファイルの対応拡張子
 JTD_EXTENSIONS = ('.jtd', '.jtt')
@@ -37,6 +43,7 @@ STREAM_FOOTNOTE = "Footnote"
 # ストリームヘッダのマジック文字列
 HEADER_MAGIC_SSMG = b"SsmgV.01"
 HEADER_MAGIC_CTEXT = b"CTextV.01"
+HEADER_MAGIC_TEXT = b"TextV.01"
 
 
 # グローバルverboseフラグ
@@ -94,14 +101,19 @@ def _find_content_start(data: bytes) -> int:
         debug_print(f"[警告] SsmgV.01ヘッダが見つかりません: {data[:8]}")
         return -1
 
-    # CTextV.01の位置を探す
+    # CTextV.01 または TextV.01 の位置を探す
     ctext_pos = data.find(HEADER_MAGIC_CTEXT)
-    if ctext_pos < 0:
-        debug_print("[警告] CTextV.01ヘッダが見つかりません")
-        return -1
+    if ctext_pos >= 0:
+        header_magic = HEADER_MAGIC_CTEXT
+    else:
+        ctext_pos = data.find(HEADER_MAGIC_TEXT)
+        if ctext_pos < 0:
+            debug_print("[警告] CTextV.01/TextV.01ヘッダが見つかりません")
+            return -1
+        header_magic = HEADER_MAGIC_TEXT
 
-    # CTextV.01 + null終端の直後、偶数アライメントで開始
-    start = ctext_pos + len(HEADER_MAGIC_CTEXT) + 1  # +1 for null terminator
+    # ヘッダマジック + null終端の直後、偶数アライメントで開始
+    start = ctext_pos + len(header_magic) + 1  # +1 for null terminator
     if start % 2 != 0:
         start += 1
 
@@ -355,6 +367,127 @@ def extract_jtd_text(file_path: str) -> str:
     return '\n'.join(all_lines)
 
 
+def _extract_structured_content(data: bytes) -> list[dict]:
+    """ストリームから構造化されたコンテンツを抽出する
+
+    テキスト行とテーブルを区別して返す。
+
+    Returns:
+        コンテンツブロックのリスト:
+        - {'type': 'text', 'lines': [テキスト行...]}
+        - {'type': 'table', 'markdown': [Markdownテーブル行...]}
+    """
+    content_start = _find_content_start(data)
+    if content_start < 0:
+        return []
+
+    # イベント列を取得
+    events = scan_stream_events(data, content_start)
+
+    # テーブルを抽出
+    tables = extract_tables_from_events(events)
+
+    # テーブルがカバーするイベント範囲を記録
+    table_ranges = []
+    for tbl in tables:
+        table_ranges.append(tbl['event_range'])
+
+    blocks = []
+    current_text_lines = []
+    event_idx = 0
+
+    while event_idx < len(events):
+        # 現在のイベントがテーブル範囲内かチェック
+        matched_table = None
+        for ti, (ts, te) in enumerate(table_ranges):
+            if ts <= event_idx < te:
+                matched_table = ti
+                break
+
+        if matched_table is not None:
+            # テキストブロックを確定
+            if current_text_lines:
+                blocks.append({
+                    'type': 'text',
+                    'lines': list(current_text_lines)
+                })
+                current_text_lines = []
+
+            # テーブルをMarkdownに変換
+            tbl = tables[matched_table]
+            md_lines = table_to_markdown(tbl)
+            if md_lines:
+                blocks.append({
+                    'type': 'table',
+                    'markdown': md_lines
+                })
+
+            # テーブル範囲の終わりまでスキップ
+            _, te = table_ranges[matched_table]
+            event_idx = te
+            continue
+
+        # 非テーブルイベントの処理
+        ev = events[event_idx]
+        if ev.kind == 'PARA' and ev.text:
+            current_text_lines.append(ev.text)
+        elif ev.kind == 'CELL' and ev.cell and ev.cell.text:
+            current_text_lines.append(ev.cell.text)
+        event_idx += 1
+
+    # 残りのテキスト
+    if current_text_lines:
+        blocks.append({
+            'type': 'text',
+            'lines': list(current_text_lines)
+        })
+
+    return blocks
+
+
+def extract_jtd_structured(file_path: str) -> list[dict]:
+    """一太郎ファイルから構造化コンテンツ(テキスト+テーブル)を抽出する
+
+    Args:
+        file_path: JTDファイルのパス
+
+    Returns:
+        コンテンツブロックのリスト
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"ファイルが見つかりません: {file_path}")
+
+    if not olefile.isOleFile(file_path):
+        raise ValueError(
+            f"OLE2形式ではありません: {file_path}"
+        )
+
+    ole = olefile.OleFileIO(file_path)
+    blocks = []
+
+    try:
+        if ole.exists(STREAM_DOCUMENT_TEXT):
+            raw = ole.openstream(STREAM_DOCUMENT_TEXT).read()
+            debug_print(
+                f"[JTD] {STREAM_DOCUMENT_TEXT}ストリーム: {len(raw)} バイト"
+            )
+            blocks = _extract_structured_content(raw)
+
+        # 脚注はテキストブロックとして追加
+        if ole.exists(STREAM_FOOTNOTE):
+            fn_raw = ole.openstream(STREAM_FOOTNOTE).read()
+            fn_lines = _extract_text_from_stream(fn_raw)
+            if fn_lines:
+                blocks.append({
+                    'type': 'text',
+                    'lines': ['', '---', '**脚注:**'] + fn_lines
+                })
+    finally:
+        ole.close()
+
+    return blocks
+
+
 def _get_ole_metadata(ole: olefile.OleFileIO) -> dict:
     """OLE2メタデータを取得する"""
     meta = ole.get_metadata()
@@ -417,12 +550,11 @@ class JtdToMarkdownConverter:
         """
         print(f"[INFO] 一太郎文書変換開始: {self.file_path}")
 
-        # テキスト抽出
-        text = extract_jtd_text(self.file_path)
-        lines = text.split('\n')
+        # 構造化コンテンツ抽出（テーブル対応）
+        blocks = extract_jtd_structured(self.file_path)
 
         # Markdown生成
-        md_lines = self._build_markdown(lines)
+        md_lines = self._build_markdown(blocks)
 
         # ファイル出力
         output_path = os.path.join(
@@ -431,16 +563,20 @@ class JtdToMarkdownConverter:
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(md_lines))
 
+        total_lines = sum(
+            len(b.get('lines', b.get('markdown', [])))
+            for b in blocks
+        )
         print(f"[INFO] 変換完了: {output_path}")
-        print(f"[INFO] 抽出行数: {len(lines)}")
+        print(f"[INFO] 抽出行数: {total_lines}")
         return output_path
 
-    def _build_markdown(self, lines: list[str]) -> list[str]:
-        """テキスト行からMarkdown形式に変換する
+    def _build_markdown(self, blocks: list[dict]) -> list[str]:
+        """構造化コンテンツからMarkdown形式に変換する
 
         見出し候補の判定:
         - ■/●/◆ で始まる行 → ## (h2)
-        - （様式... や 【...】 を含む行はタイトル補助
+        - （N） 形式の行 → ### (h3)
         """
         md = []
         md.append(f"# {self.base_name}")
@@ -455,31 +591,39 @@ class JtdToMarkdownConverter:
             md.append("---")
             md.append("")
 
-        for line in lines:
-            stripped = line.strip()
-            if not stripped:
+        for block in blocks:
+            if block['type'] == 'table':
+                md.append("")
+                md.extend(block['markdown'])
                 md.append("")
                 continue
 
-            # 脚注セパレータはそのまま
-            if stripped == "---":
-                md.append("---")
-                continue
+            # テキストブロック
+            for line in block.get('lines', []):
+                stripped = line.strip()
+                if not stripped:
+                    md.append("")
+                    continue
 
-            # 見出し判定: ■/●/◆ で始まる行
-            if stripped.startswith(('■', '●', '◆')):
-                md.append(f"## {stripped}")
-                md.append("")
-                continue
+                # 脚注セパレータはそのまま
+                if stripped == "---":
+                    md.append("---")
+                    continue
 
-            # 太字マーカー付き脚注ヘッダ
-            if stripped.startswith("**脚注"):
+                # 見出し判定: ■/●/◆ で始まる行
+                if stripped.startswith(('■', '●', '◆')):
+                    md.append(f"## {stripped}")
+                    md.append("")
+                    continue
+
+                # 太字マーカー付き脚注ヘッダ
+                if stripped.startswith("**脚注"):
+                    md.append(stripped)
+                    md.append("")
+                    continue
+
+                # 通常テキスト
                 md.append(stripped)
-                md.append("")
-                continue
-
-            # 通常テキスト
-            md.append(stripped)
 
         # 末尾の空行を整理
         while md and md[-1] == "":
