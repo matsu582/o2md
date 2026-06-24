@@ -460,9 +460,8 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
                 output_dir=file_output_dir,
                 **kwargs
             )
-            # テキストモード: 画像リンクを除去し、.txtファイルも追加出力
+            # テキストモード: .txtファイルも追加出力（.mdはそのまま）
             if is_text_only() and output_file and output_file.endswith('.md'):
-                strip_images_from_md(output_file)
                 convert_md_to_text(output_file)
             results['success'].append({'file': str(rel), 'output': output_file})
         except Exception as e:
@@ -529,7 +528,7 @@ def main():
     from utils import set_text_only, is_libreoffice_available, warn_libreoffice_not_available
     if args.text:
         set_text_only(True)
-        print("[INFO] テキストモード: 画像リンクを除去し、.txtファイルも出力します")
+        print("[INFO] テキストモード: .mdと.txtの両方を出力します")
 
     # LibreOfficeの利用可否をチェックし、利用できない場合は警告を表示
     if not is_libreoffice_available():
@@ -583,10 +582,9 @@ def main():
                 **common_kwargs
             )
 
-            # テキストモード: 画像リンクを除去し、.txtファイルも追加出力
+            # テキストモード: .txtファイルも追加出力（.mdはそのまま）
             txt_file = None
             if args.text and output_file and output_file.endswith('.md'):
-                strip_images_from_md(output_file)
                 txt_file = convert_md_to_text(output_file)
 
             print("\n" + "=" * 50)
