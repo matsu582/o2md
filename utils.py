@@ -85,17 +85,11 @@ def is_libreoffice_installed() -> bool:
 
 
 def is_libreoffice_available() -> bool:
-    """LibreOfficeが利用可能かどうかを判定する（画像レンダリング用）
-
-    テキストモードが有効な場合は常にFalseを返す。
-    図形・画像のレンダリング判定に使用する。
-    ファイル形式変換にはis_libreoffice_installed()を使用すること。
+    """LibreOfficeが利用可能かどうかを判定する
 
     Returns:
         bool: LibreOfficeが利用可能な場合True
     """
-    if _TEXT_ONLY:
-        return False
     return is_libreoffice_installed()
 
 

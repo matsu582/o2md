@@ -154,6 +154,22 @@ def _strip_markdown(text: str) -> str:
     return '\n'.join(result)
 
 
+def _remove_image_links(text: str) -> str:
+    """Markdownテキストから画像リンク行のみを除去する
+
+    画像リンク(![alt](path))を含む行を削除し、
+    それ以外のMarkdown書式はそのまま保持する。
+    """
+    import re
+    lines = text.split('\n')
+    result = []
+    for line in lines:
+        if re.match(r'^\s*!\[.*?\]\(.*?\)\s*$', line):
+            continue
+        result.append(line)
+    return '\n'.join(result)
+
+
 def convert_md_to_text(md_file_path: str) -> str:
     """Markdownファイルをプレーンテキストに変換して.txtとして保存する
 
@@ -173,6 +189,21 @@ def convert_md_to_text(md_file_path: str) -> str:
         f.write(text_content)
 
     return txt_file_path
+
+
+def strip_images_from_md(md_file_path: str):
+    """Markdownファイルから画像リンク行を除去して上書きする
+
+    Args:
+        md_file_path: 対象の.mdファイルパス
+    """
+    with open(md_file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    cleaned = _remove_image_links(content)
+
+    with open(md_file_path, 'w', encoding='utf-8') as f:
+        f.write(cleaned)
 
 
 def detect_file_type(file_path: str) -> str:
@@ -429,8 +460,9 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
                 output_dir=file_output_dir,
                 **kwargs
             )
-            # テキストモード: .txtファイルも追加出力（.mdは残す）
+            # テキストモード: 画像リンクを除去し、.txtファイルも追加出力
             if is_text_only() and output_file and output_file.endswith('.md'):
+                strip_images_from_md(output_file)
                 convert_md_to_text(output_file)
             results['success'].append({'file': str(rel), 'output': output_file})
         except Exception as e:
@@ -485,7 +517,7 @@ def main():
     parser.add_argument('--docling', action='store_true',
                        help='[PDF専用] doclingによる表検出を有効にする')
     parser.add_argument('--text', action='store_true',
-                       help='テキストのみ抽出（図形・画像処理をスキップ、.txtも出力）')
+                       help='テキスト抽出モード（画像リンクを除去し、.txtも出力）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力し、debug_workbooks/pdfs/diagnosticsフォルダを保存')
 
@@ -497,10 +529,10 @@ def main():
     from utils import set_text_only, is_libreoffice_available, warn_libreoffice_not_available
     if args.text:
         set_text_only(True)
-        print("[INFO] テキストモード: 図形・画像処理をスキップし、.txtファイルも出力します")
+        print("[INFO] テキストモード: 画像リンクを除去し、.txtファイルも出力します")
 
     # LibreOfficeの利用可否をチェックし、利用できない場合は警告を表示
-    if not is_libreoffice_available() and not args.text:
+    if not is_libreoffice_available():
         warn_libreoffice_not_available()
 
     common_kwargs = dict(
@@ -551,9 +583,10 @@ def main():
                 **common_kwargs
             )
 
-            # テキストモード: .txtファイルも追加出力
+            # テキストモード: 画像リンクを除去し、.txtファイルも追加出力
             txt_file = None
             if args.text and output_file and output_file.endswith('.md'):
+                strip_images_from_md(output_file)
                 txt_file = convert_md_to_text(output_file)
 
             print("\n" + "=" * 50)
@@ -562,15 +595,14 @@ def main():
             if txt_file:
                 print(f"テキストファイル: {txt_file}")
 
-            # 画像ディレクトリの情報を表示（テキストモード時は非表示）
-            if not args.text:
-                if args.output_dir:
-                    images_dir = os.path.join(args.output_dir, "images")
-                else:
-                    images_dir = os.path.join(os.getcwd(), "output", "images")
+            # 画像ディレクトリの情報を表示
+            if args.output_dir:
+                images_dir = os.path.join(args.output_dir, "images")
+            else:
+                images_dir = os.path.join(os.getcwd(), "output", "images")
 
-                if os.path.exists(images_dir) and os.listdir(images_dir):
-                    print(f"画像フォルダ: {images_dir}")
+            if os.path.exists(images_dir) and os.listdir(images_dir):
+                print(f"画像フォルダ: {images_dir}")
 
             if args.use_heading_text:
                 print("見出しテキストリンクモード: 有効")

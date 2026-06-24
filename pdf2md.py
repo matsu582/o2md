@@ -17,7 +17,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Set
 
-from utils import get_libreoffice_path, is_text_only
+from utils import get_libreoffice_path
 
 try:
     import fitz
@@ -623,25 +623,6 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         if header_footer_patterns is None:
             header_footer_patterns = set()
         
-        # テキストオンリーモード: 図形抽出をスキップしテキストのみ処理
-        if is_text_only():
-            text_blocks = self._extract_structured_text_v2(
-                page, header_footer_patterns, exclude_bboxes=[],
-                is_slide_document=self._is_slide_document
-            )
-            if text_blocks:
-                self._output_structured_markdown_with_images(
-                    text_blocks, [], [], self._is_slide_document
-                )
-            else:
-                ocr_text = self._ocr_page(page)
-                if ocr_text and ocr_text.strip() and ocr_text != "(OCR利用不可)":
-                    for line in ocr_text.strip().split('\n'):
-                        if line.strip():
-                            self.markdown_lines.append(line.strip())
-                    self.markdown_lines.append("")
-            return
-
         # 先にベクタ描画（図）を検出して、その領域を取得
         # 図領域内のテキストは本文から除外するため
         # ヘッダー/フッター領域内の装飾要素を除外するためにpatternsを渡す

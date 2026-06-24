@@ -234,11 +234,12 @@ class TestTextOnly:
         set_text_only(False)
         assert is_text_only() is False
 
-    def test_libreoffice_unavailable_in_text_only(self):
-        """テキストオンリーモード時はLibreOffice利用不可を返す"""
-        from utils import set_text_only, is_libreoffice_available
+    def test_libreoffice_available_in_text_mode(self):
+        """テキストモード時もLibreOfficeは利用可能（画像処理を行うため）"""
+        from utils import set_text_only, is_libreoffice_available, is_libreoffice_installed
         set_text_only(True)
-        assert is_libreoffice_available() is False
+        # テキストモードでもLibreOfficeの利用可否はインストール状態に依存
+        assert is_libreoffice_available() == is_libreoffice_installed()
 
 
 if __name__ == '__main__':
