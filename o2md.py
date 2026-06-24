@@ -418,6 +418,8 @@ def main():
                        help='[PDF専用] tessdataディレクトリを指定（tessdata_best使用時）')
     parser.add_argument('--docling', action='store_true',
                        help='[PDF専用] doclingによる表検出を有効にする')
+    parser.add_argument('--text-only', action='store_true',
+                       help='テキストのみ抽出（図形・画像処理をスキップ）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力し、debug_workbooks/pdfs/diagnosticsフォルダを保存')
 
@@ -425,9 +427,14 @@ def main():
 
     set_verbose(args.verbose)
 
+    # テキストオンリーモードの設定
+    from utils import set_text_only, is_libreoffice_available, warn_libreoffice_not_available
+    if args.text_only:
+        set_text_only(True)
+        print("[INFO] テキストオンリーモード: 図形・画像処理をスキップします")
+
     # LibreOfficeの利用可否をチェックし、利用できない場合は警告を表示
-    from utils import is_libreoffice_available, warn_libreoffice_not_available
-    if not is_libreoffice_available():
+    if not is_libreoffice_available() and not args.text_only:
         warn_libreoffice_not_available()
 
     common_kwargs = dict(

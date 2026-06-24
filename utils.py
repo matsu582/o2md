@@ -52,15 +52,36 @@ def get_libreoffice_path():
     return "soffice"
 
 
+# テキストオンリーモードのグローバルフラグ
+_TEXT_ONLY = False
+
+
+def set_text_only(enabled: bool):
+    """テキストオンリーモードを設定する
+
+    有効時は図形・画像処理をスキップし、テキストのみを抽出する。
+    """
+    global _TEXT_ONLY
+    _TEXT_ONLY = enabled
+
+
+def is_text_only() -> bool:
+    """テキストオンリーモードかどうかを返す"""
+    return _TEXT_ONLY
+
+
 def is_libreoffice_available() -> bool:
     """LibreOfficeが利用可能かどうかを判定する
 
+    テキストオンリーモードが有効な場合は常にFalseを返す。
     get_libreoffice_path()が実際に実行可能なパスを返すか確認する。
     フォールバック値 "soffice" が返された場合でもPATH上に存在すれば利用可能と判定する。
 
     Returns:
         bool: LibreOfficeが利用可能な場合True
     """
+    if _TEXT_ONLY:
+        return False
     path = get_libreoffice_path()
     if os.path.isabs(path):
         return os.path.exists(path)

@@ -203,5 +203,43 @@ class TestEdgeCases:
         assert result1 == result2
 
 
+class TestTextOnly:
+    """テキストオンリーモードのテスト"""
+
+    def setup_method(self):
+        """各テスト前にフラグをリセット"""
+        from utils import set_text_only
+        set_text_only(False)
+
+    def teardown_method(self):
+        """各テスト後にフラグをリセット"""
+        from utils import set_text_only
+        set_text_only(False)
+
+    def test_default_is_false(self):
+        """デフォルトではテキストオンリーモードは無効"""
+        from utils import is_text_only
+        assert is_text_only() is False
+
+    def test_set_text_only_true(self):
+        """有効化するとTrueを返す"""
+        from utils import set_text_only, is_text_only
+        set_text_only(True)
+        assert is_text_only() is True
+
+    def test_set_text_only_false(self):
+        """無効化するとFalseに戻る"""
+        from utils import set_text_only, is_text_only
+        set_text_only(True)
+        set_text_only(False)
+        assert is_text_only() is False
+
+    def test_libreoffice_unavailable_in_text_only(self):
+        """テキストオンリーモード時はLibreOffice利用不可を返す"""
+        from utils import set_text_only, is_libreoffice_available
+        set_text_only(True)
+        assert is_libreoffice_available() is False
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

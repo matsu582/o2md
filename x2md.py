@@ -23,7 +23,7 @@ import io
 import zipfile
 import xml.etree.ElementTree as ET
 
-from utils import get_libreoffice_path, is_libreoffice_available, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
+from utils import get_libreoffice_path, is_libreoffice_available, is_text_only, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
 from isolated_group_renderer import IsolatedGroupRenderer
 from x2md_tables import _TablesMixin
 from x2md_graphics import _GraphicsMixin
@@ -839,6 +839,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         
         各チャートを個別にレンダリングし、画像とデータテーブルを出力する。
         チャートがある場合、シート全体画像は出力から除外する。
+        テキストオンリーモード時は画像レンダリングをスキップしデータのみ出力。
         
         Args:
             sheet: openpyxlのワークシートオブジェクト
@@ -852,6 +853,15 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             
             self._remove_sheet_image_from_output(sheet.title)
             
+            if is_text_only():
+                # テキストオンリー: チャートデータのみテーブルとして出力
+                for i in range(len(ws_charts)):
+                    if i < len(chart_data_list):
+                        md_content = chart_data_to_markdown(chart_data_list[i])
+                        for line in md_content.split('\n'):
+                            self.markdown_lines.append(line)
+                return
+
             print(f"[INFO] シート '{sheet.title}' から {len(ws_charts)} 個のチャートを画像化")
             
             for i, chart in enumerate(ws_charts):

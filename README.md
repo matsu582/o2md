@@ -126,6 +126,12 @@ uv run python o2md.py input_files/document.pdf --ocr-engine sarashina
 
 # tessdata_bestを使用する場合（高精度モード）
 uv run python o2md.py input_files/document.pdf --tessdata-dir ~/tessdata_best
+
+# テキストのみ抽出（図形・画像処理をスキップ、高速変換）
+uv run python o2md.py input_files/data.xlsx --text-only
+uv run python o2md.py input_files/document.docx --text-only
+uv run python o2md.py input_files/presentation.pptx --text-only
+uv run python o2md.py input_files/document.pdf --text-only
 ```
 
 ### フォルダ一括変換
@@ -174,6 +180,7 @@ uv run python o2md.py input_files/old_presentation.ppt
 | `--ocr-engine`       | [PDF専用] OCRエンジンを指定（`tesseract`/`manga-ocr`/`sarashina`、デフォルト: `tesseract`）|
 | `--tessdata-dir`     | [PDF専用] tessdataディレクトリを指定（tessdata_best使用時）|
 | `--docling`          | [PDF専用] doclingによる表検出を有効にする（罫線のない表も検出可能）|
+| `--text-only`        | テキストのみ抽出（図形・画像処理をスキップ、高速変換）  |
 | `-v, --verbose`      | 詳細なデバッグ出力を表示                                |
 | `-h, --help`         | ヘルプメッセージを表示                                  |
 

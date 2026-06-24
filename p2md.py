@@ -29,7 +29,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from collections import defaultdict
 import io
 
-from utils import get_libreoffice_path, is_libreoffice_available
+from utils import get_libreoffice_path, is_libreoffice_available, is_text_only
 
 try:
     from pptx import Presentation
@@ -232,8 +232,8 @@ class PowerPointToMarkdownConverter:
                 self.markdown_lines.append(chart_md)
                 self.markdown_lines.append("")
         
-        # 図形またはチャートの処理
-        if has_shapes or has_charts:
+        # 図形またはチャートの処理（テキストオンリーモード時はスキップ）
+        if (has_shapes or has_charts) and not is_text_only():
             if needs_image:
                 # 複合スライドまたはチャートあり：スライド全体を画像化してテキストの最後に挿入
                 print(f"[INFO] スライド {slide_idx}: スライド全体を画像化")

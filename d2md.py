@@ -27,7 +27,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from PIL import Image
 import io
 
-from utils import get_libreoffice_path, is_libreoffice_available
+from utils import get_libreoffice_path, is_libreoffice_available, is_text_only
 from d2md_charts import extract_charts_from_docx
 from chart_utils import chart_data_to_markdown
 
@@ -1061,7 +1061,9 @@ class WordToMarkdownConverter:
         Returns:
             bool: 図形として処理された場合はTrue（テキスト出力をスキップすべき）
         """
-        
+        if is_text_only():
+            return False
+
         # Word図形キャンバスがある場合は複合図形として処理
         # 処理が行われた場合のみ早期終了、そうでなければ通常の画像処理にフォールバック
         if self._has_word_processing_canvas(paragraph):
@@ -1512,6 +1514,8 @@ class WordToMarkdownConverter:
     
     def _process_images(self):
         """実際に文書内で参照されている画像のみを処理（文書末尾の画像など）- 重複除去"""
+        if is_text_only():
+            return
         print("[INFO] 残りの画像を処理中...")
         
         # 実際に参照されている画像のみを処理（重複チェック強化）
