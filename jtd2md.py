@@ -30,6 +30,8 @@ from jtd2md_table import (
     scan_stream_events,
     extract_tables_from_events,
     table_to_markdown,
+    _split_sections,
+    _is_table_section,
 )
 
 
@@ -370,7 +372,8 @@ def extract_jtd_text(file_path: str) -> str:
 def _extract_structured_content(data: bytes) -> list[dict]:
     """ストリームから構造化されたコンテンツを抽出する
 
-    テキスト行とテーブルを区別して返す。
+    罫線情報に基づいてテキスト行とテーブルを区別して返す。
+    PARAブロック内の008Fタグの罫線数が≥1のセクションをテーブル行と判定。
 
     Returns:
         コンテンツブロックのリスト:
@@ -381,61 +384,49 @@ def _extract_structured_content(data: bytes) -> list[dict]:
     if content_start < 0:
         return []
 
-    # イベント列を取得
     events = scan_stream_events(data, content_start)
-
-    # テーブルを抽出
     tables = extract_tables_from_events(events)
 
-    # テーブルがカバーするイベント範囲を記録
-    table_ranges = []
-    for tbl in tables:
-        table_ranges.append(tbl['event_range'])
+    # テーブルがカバーするセクション範囲を記録
+    table_section_ranges = {}
+    for ti, tbl in enumerate(tables):
+        s_start, s_end = tbl['section_range']
+        for si in range(s_start, s_end):
+            table_section_ranges[si] = ti
 
+    # セクション単位で処理
+    sections = _split_sections(events)
     blocks = []
     current_text_lines = []
-    event_idx = 0
 
-    while event_idx < len(events):
-        # 現在のイベントがテーブル範囲内かチェック
-        matched_table = None
-        for ti, (ts, te) in enumerate(table_ranges):
-            if ts <= event_idx < te:
-                matched_table = ti
-                break
-
-        if matched_table is not None:
-            # テキストブロックを確定
-            if current_text_lines:
-                blocks.append({
-                    'type': 'text',
-                    'lines': list(current_text_lines)
-                })
-                current_text_lines = []
-
-            # テーブルをMarkdownに変換
-            tbl = tables[matched_table]
-            md_lines = table_to_markdown(tbl)
-            if md_lines:
-                blocks.append({
-                    'type': 'table',
-                    'markdown': md_lines
-                })
-
-            # テーブル範囲の終わりまでスキップ
-            _, te = table_ranges[matched_table]
-            event_idx = te
+    for sec_idx, section in enumerate(sections):
+        if sec_idx in table_section_ranges:
+            ti = table_section_ranges[sec_idx]
+            # このテーブルの最初のセクションでのみMarkdownを出力
+            tbl = tables[ti]
+            first_sec = tbl['section_range'][0]
+            if sec_idx == first_sec:
+                if current_text_lines:
+                    blocks.append({
+                        'type': 'text',
+                        'lines': list(current_text_lines)
+                    })
+                    current_text_lines = []
+                md_lines = table_to_markdown(tbl)
+                if md_lines:
+                    blocks.append({
+                        'type': 'table',
+                        'markdown': md_lines
+                    })
             continue
 
-        # 非テーブルイベントの処理
-        ev = events[event_idx]
-        if ev.kind == 'PARA' and ev.text:
-            current_text_lines.append(ev.text)
-        elif ev.kind == 'CELL' and ev.cell and ev.cell.text:
-            current_text_lines.append(ev.cell.text)
-        event_idx += 1
+        # 非テーブルセクション: テキストとセル内テキストを抽出
+        for ev in section:
+            if ev.kind == 'PARA' and ev.text:
+                current_text_lines.append(ev.text)
+            elif ev.kind == 'CELL' and ev.cell and ev.cell.text:
+                current_text_lines.append(ev.cell.text)
 
-    # 残りのテキスト
     if current_text_lines:
         blocks.append({
             'type': 'text',

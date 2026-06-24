@@ -1,14 +1,20 @@
 """
 一太郎テーブル構造解析モジュール
 
-DocumentTextストリーム内のフォーマットブロック(001C 0030)から
-テーブルセルの位置情報を読み取り、Markdownテーブルに変換する
+DocumentTextストリーム内のフォーマットブロックから
+罫線情報（008Fタグ）を読み取り、テーブル行を判定する。
+
+テーブル判定基準:
+- PARAブロック(001C 0010)内の008Fタグに罫線データ(001B/0013)が≥1個
+  → テーブル行（カラム分割の罫線あり）
+- 008Fタグなし or 罫線データ=0
+  → 通常テキスト（枠線のみ、またはテーブル外）
 
 テーブル構造:
 - 001C 0030: セル開始（カラム位置・行情報を含む）
 - 001C 0000: 行末マーカー（ROW_END）
 - 001C 0001: 行開始マーカー（ROW_START, 複数行セルの継続行）
-- 001C 0010: 段落書式（非テーブル段落）
+- 001C 0010: 段落書式（罫線情報を含む）
 - 000E: セクション終了
 """
 
@@ -30,6 +36,40 @@ def _safe_chr(code: int) -> str:
         return chr(code)
     except (ValueError, OverflowError):
         return ''
+
+
+# 罫線タイプ識別子
+_RULER_TAGS = frozenset((0x001b, 0x0013))
+
+
+def count_rulers_in_para(data: bytes, pos: int,
+                         block_len: int) -> int:
+    """PARAブロック(001C 0010)から罫線の本数を数える
+
+    008Fタグ内のデータに含まれる罫線識別子(001B/0013)の数を返す。
+    罫線≥1 → テーブル行（カラム分割線あり）
+    罫線=0 → テーブル外（枠線のみ or 非テーブル）
+    """
+    block = data[pos:pos + block_len]
+    # 008Fタグを探す
+    for k in range(0, len(block) - 3, 2):
+        if _read_u16be(block, k) == 0x008f:
+            data_len = _read_u16be(block, k + 2)
+            if data_len <= 0:
+                return 0
+            # 008Fデータ内の罫線識別子をカウント
+            ruler_data_start = k + 4
+            ruler_data_end = min(
+                ruler_data_start + data_len * 2,
+                len(block)
+            )
+            count = 0
+            for m in range(ruler_data_start, ruler_data_end - 1, 2):
+                val = _read_u16be(block, m)
+                if val in _RULER_TAGS:
+                    count += 1
+            return count
+    return 0
 
 
 class TableCell:
@@ -57,16 +97,17 @@ class TableCell:
 
 class _StreamEvent:
     """ストリーム解析で検出されるイベント"""
-    __slots__ = ('kind', 'offset', 'cell', 'text')
+    __slots__ = ('kind', 'offset', 'cell', 'text', 'ruler_count')
 
     def __init__(self, kind: str, offset: int,
                  cell: Optional[TableCell] = None,
-                 text: str = ""):
-        self.kind = kind      # 'CELL', 'PARA', 'ROW_END', 'ROW_START',
-                               # 'NEWLINE', 'SECTION_END'
+                 text: str = "",
+                 ruler_count: int = 0):
+        self.kind = kind
         self.offset = offset
         self.cell = cell
         self.text = text
+        self.ruler_count = ruler_count
 
 
 def _read_text_at(data: bytes, pos: int,
@@ -84,14 +125,17 @@ def _read_text_at(data: bytes, pos: int,
         code = _read_u16be(data, i)
         if code < 0:
             break
-        # 制御コードで停止
         if code < 0x0020 and code != 0x0009:
             break
         # サロゲートペア処理
         if 0xD800 <= code <= 0xDBFF and i + 3 < total:
             lo = _read_u16be(data, i + 2)
             if 0xDC00 <= lo <= 0xDFFF:
-                full_cp = 0x10000 + ((code - 0xD800) << 10) + (lo - 0xDC00)
+                full_cp = (
+                    0x10000
+                    + ((code - 0xD800) << 10)
+                    + (lo - 0xDC00)
+                )
                 ch = _safe_chr(full_cp)
                 if ch:
                     chars.append(ch)
@@ -135,7 +179,6 @@ def parse_cell_block(data: bytes, pos: int) -> tuple[TableCell, int]:
     col_end = _read_u16be(data, pos + 10)
     row_flag = _read_u16be(data, pos + 12)
     cell = TableCell(col_start, col_end, row_flag)
-    # 001Fまでスキップ
     after = _skip_to_marker(data, pos + 2, 0x001F)
     return cell, after
 
@@ -144,8 +187,7 @@ def scan_stream_events(data: bytes,
                        content_start: int) -> list[_StreamEvent]:
     """ストリームを走査してイベント列を構築する
 
-    テーブル解析のために、フォーマットブロックの種類と
-    テキスト内容をイベントとして収集する
+    PARAブロックの罫線情報を含めてイベントを収集する
     """
     events = []
     total = len(data)
@@ -160,7 +202,6 @@ def scan_stream_events(data: bytes,
             block_type = _read_u16be(data, i + 2)
 
             if block_type == 0x0030:
-                # テーブルセル
                 cell, after = parse_cell_block(data, i)
                 text, text_end = _read_text_at(data, after)
                 cell.text = text.strip()
@@ -170,30 +211,36 @@ def scan_stream_events(data: bytes,
                 continue
 
             elif block_type == 0x0010:
-                # 段落書式
-                after = _skip_to_marker(data, i + 2, 0x001F)
+                # 001Fまでの位置を取得
+                j = i + 2
+                while j < total - 1:
+                    if _read_u16be(data, j) == 0x001F:
+                        break
+                    j += 2
+                block_len = j - i + 2
+                # 罫線数を取得
+                rulers = count_rulers_in_para(data, i, block_len)
+                after = j + 2
                 text, text_end = _read_text_at(data, after)
                 events.append(_StreamEvent(
-                    'PARA', i, text=text.strip()))
+                    'PARA', i, text=text.strip(),
+                    ruler_count=rulers))
                 i = after
                 continue
 
             elif block_type == 0x0000:
-                # 行末(ROW_END)
                 after = _skip_to_marker(data, i + 2, 0x001F)
                 events.append(_StreamEvent('ROW_END', i))
                 i = after
                 continue
 
             elif block_type == 0x0001:
-                # 行開始(ROW_START, 継続行)
                 after = _skip_to_marker(data, i + 2, 0x001F)
                 events.append(_StreamEvent('ROW_START', i))
                 i = after
                 continue
 
             else:
-                # その他のフォーマットブロック
                 after = _skip_to_marker(data, i + 2, 0x001F)
                 i = after
                 continue
@@ -214,29 +261,50 @@ def scan_stream_events(data: bytes,
     return events
 
 
-def _build_column_map(events: list[_StreamEvent]) -> list[tuple[int, int]]:
-    """イベント列からユニークなカラム位置をソートして返す
-
-    全テーブル範囲で一貫したカラムインデックスを付与するために
-    ユニークなカラム範囲を収集してソートする
-    """
-    col_set = set()
+def _split_sections(events: list[_StreamEvent]) -> list[list[_StreamEvent]]:
+    """イベント列をセクション(SECTION_END区切り)に分割する"""
+    sections = []
+    current = []
     for ev in events:
-        if ev.kind == 'CELL' and ev.cell:
-            col_set.add((ev.cell.col_start, ev.cell.col_end))
+        current.append(ev)
+        if ev.kind == 'SECTION_END':
+            sections.append(current)
+            current = []
+    if current:
+        sections.append(current)
+    return sections
+
+
+def _is_table_section(section: list[_StreamEvent]) -> bool:
+    """セクションがテーブル行かどうかを罫線情報で判定する
+
+    PARAブロックに罫線≥1がある場合にテーブル行とみなす
+    """
+    for ev in section:
+        if ev.kind == 'PARA' and ev.ruler_count >= 1:
+            return True
+    return False
+
+
+def _build_column_map(
+    table_sections: list[list[_StreamEvent]],
+) -> list[tuple[int, int]]:
+    """テーブルセクション群からユニークなカラム位置をソートして返す"""
+    col_set = set()
+    for section in table_sections:
+        for ev in section:
+            if ev.kind == 'CELL' and ev.cell:
+                col_set.add((ev.cell.col_start, ev.cell.col_end))
     return sorted(col_set, key=lambda c: c[0])
 
 
 def _find_col_index(col_map: list[tuple[int, int]],
                     col_start: int, col_end: int) -> int:
-    """カラムマップからカラムインデックスを返す
-
-    完全一致しない場合（結合セル等）は、最も近い開始位置を使用
-    """
+    """カラムマップからカラムインデックスを返す"""
     for idx, (cs, ce) in enumerate(col_map):
         if cs == col_start:
             return idx
-    # フォールバック: 開始位置で最近傍を探す
+    # フォールバック: 開始位置で最近傍
     best = 0
     best_dist = abs(col_map[0][0] - col_start) if col_map else 999999
     for idx, (cs, ce) in enumerate(col_map):
@@ -247,116 +315,90 @@ def _find_col_index(col_map: list[tuple[int, int]],
     return best
 
 
-def _find_col_span(col_map: list[tuple[int, int]],
-                   col_start: int, col_end: int) -> int:
-    """セルのカラムスパン数を計算する（結合セル対応）"""
-    start_idx = _find_col_index(col_map, col_start, col_end)
-    span = 1
-    for idx in range(start_idx + 1, len(col_map)):
-        if col_map[idx][0] < col_end:
-            span += 1
-        else:
-            break
-    return span
-
-
 def extract_tables_from_events(
     events: list[_StreamEvent],
 ) -> list[dict]:
-    """イベント列からテーブルデータを抽出する
+    """イベント列からテーブルデータを抽出する（罫線ベース判定）
 
     Returns:
         テーブル情報のリスト。各テーブルは:
         - 'col_map': カラム位置リスト
         - 'rows': 行リスト。各行はセルリスト
+        - 'section_range': (開始セクションidx, 終了セクションidx)
         - 'event_range': (開始イベントidx, 終了イベントidx)
     """
+    sections = _split_sections(events)
     tables = []
 
-    # テーブル領域を検出（連続するCELLイベントの塊）
-    table_ranges = []
-    i = 0
-    n = len(events)
-    while i < n:
-        # CELLイベントを探す
-        if events[i].kind == 'CELL':
-            start_idx = i
-            # CELLが途切れるまで進む（PARA, ROW_END等は許容）
-            j = i
-            last_cell_idx = i
-            while j < n:
-                if events[j].kind == 'CELL':
-                    last_cell_idx = j
-                elif events[j].kind == 'PARA':
-                    # PARAの後にCELLが来なければテーブル終了
-                    k = j + 1
-                    has_more_cells = False
-                    # 次の3イベント内にCELLがあるかチェック
-                    while k < min(j + 5, n):
-                        if events[k].kind == 'CELL':
-                            has_more_cells = True
-                            break
-                        k += 1
-                    if not has_more_cells:
-                        break
-                j += 1
-            table_ranges.append((start_idx, last_cell_idx + 1))
-            i = last_cell_idx + 1
-        else:
-            i += 1
+    # 連続するテーブルセクションをグループ化
+    table_groups = []
+    current_group = []
+    current_start_idx = -1
 
-    for tbl_start, tbl_end in table_ranges:
-        tbl_events = events[tbl_start:tbl_end]
-        col_map = _build_column_map(tbl_events)
+    for sec_idx, section in enumerate(sections):
+        if _is_table_section(section):
+            if not current_group:
+                current_start_idx = sec_idx
+            current_group.append(section)
+        else:
+            if current_group:
+                table_groups.append(
+                    (current_start_idx, sec_idx, current_group))
+                current_group = []
+
+    if current_group:
+        table_groups.append(
+            (current_start_idx, len(sections), current_group))
+
+    # 各グループをテーブルとして処理
+    for grp_start, grp_end, grp_sections in table_groups:
+        col_map = _build_column_map(grp_sections)
         if not col_map:
             continue
 
         num_cols = len(col_map)
         rows = []
-        current_row = [None] * num_cols
 
-        for ev in tbl_events:
-            if ev.kind == 'CELL' and ev.cell:
-                cell = ev.cell
-                col_idx = _find_col_index(
-                    col_map, cell.col_start, cell.col_end)
-                if current_row[col_idx] is not None:
-                    # 同じカラムにすでにデータ → テキスト追記
-                    current_row[col_idx].append_text(cell.text)
-                else:
-                    current_row[col_idx] = cell
+        for section in grp_sections:
+            current_row = [None] * num_cols
+            has_cells = False
 
-            elif ev.kind == 'SECTION_END':
-                # 行を確定
-                if any(c is not None for c in current_row):
-                    rows.append(current_row)
-                    current_row = [None] * num_cols
+            for ev in section:
+                if ev.kind == 'CELL' and ev.cell:
+                    has_cells = True
+                    cell = ev.cell
+                    col_idx = _find_col_index(
+                        col_map, cell.col_start, cell.col_end)
+                    if current_row[col_idx] is not None:
+                        current_row[col_idx].append_text(cell.text)
+                    else:
+                        current_row[col_idx] = cell
 
-            elif ev.kind == 'ROW_START':
-                # 複数行セルの継続
-                # ROW_STARTの後のCELLは同じ論理行に追加
-                pass
-
-            elif ev.kind == 'NEWLINE':
-                # セル内改行（テキスト追記として処理済み）
-                pass
-
-        # 最後の行が残っていれば追加
-        if any(c is not None for c in current_row):
-            rows.append(current_row)
+            if has_cells:
+                rows.append(current_row)
 
         if rows:
+            # イベント範囲を計算
+            first_ev = sections[grp_start][0]
+            last_section = sections[min(grp_end - 1, len(sections) - 1)]
+            last_ev = last_section[-1]
+            ev_start = events.index(first_ev)
+            ev_end = events.index(last_ev) + 1
+
             tables.append({
                 'col_map': col_map,
                 'rows': rows,
-                'event_range': (tbl_start, tbl_end),
                 'num_cols': num_cols,
+                'section_range': (grp_start, grp_end),
+                'event_range': (ev_start, ev_end),
             })
 
     return tables
 
 
-def _merge_continuation_rows(rows: list[list], num_cols: int) -> list[list]:
+def _merge_continuation_rows(
+    rows: list[list], num_cols: int,
+) -> list[list]:
     """継続行を前の行に統合する
 
     一太郎では1つの論理行が複数の物理行に分割されることがある。
@@ -370,17 +412,17 @@ def _merge_continuation_rows(rows: list[list], num_cols: int) -> list[list]:
         prev = merged[-1]
         is_continuation = True
 
-        # 前の行にデータがあるカラムに、現在行にも新たなデータがある場合は新規行
         for ci in range(num_cols):
             if prev[ci] is not None and row[ci] is not None:
-                prev_text = prev[ci].text.strip() if prev[ci] else ""
-                curr_text = row[ci].text.strip() if row[ci] else ""
+                prev_text = (
+                    prev[ci].text.strip() if prev[ci] else "")
+                curr_text = (
+                    row[ci].text.strip() if row[ci] else "")
                 if prev_text and curr_text:
                     is_continuation = False
                     break
 
         if is_continuation:
-            # 前の行にテキストを追記
             for ci in range(num_cols):
                 if row[ci] is not None and row[ci].text.strip():
                     if prev[ci] is None:
@@ -398,7 +440,6 @@ def table_to_markdown(table: dict) -> list[str]:
     rows = table['rows']
     num_cols = table['num_cols']
 
-    # 継続行を統合
     merged = _merge_continuation_rows(rows, num_cols)
 
     if not merged:
@@ -411,9 +452,7 @@ def table_to_markdown(table: dict) -> list[str]:
         for ci in range(num_cols):
             cell = row[ci]
             if cell is not None:
-                # セル内テキストを整形（改行をスペースに）
                 text = cell.text.strip()
-                # Markdownテーブルのパイプをエスケープ
                 text = text.replace('|', '\\|')
                 cells_text.append(text)
             else:
@@ -421,7 +460,6 @@ def table_to_markdown(table: dict) -> list[str]:
 
         md_lines.append("| " + " | ".join(cells_text) + " |")
 
-        # ヘッダ行の後にセパレータを挿入
         if row_idx == 0:
             sep = "| " + " | ".join(
                 "---" for _ in range(num_cols)) + " |"

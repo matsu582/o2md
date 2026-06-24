@@ -38,6 +38,9 @@ from jtd2md_table import (
     extract_tables_from_events,
     table_to_markdown,
     _merge_continuation_rows,
+    count_rulers_in_para,
+    _is_table_section,
+    _StreamEvent,
 )
 from o2md import detect_file_type
 
@@ -369,6 +372,85 @@ class TestTableToMarkdown:
         }
         md = table_to_markdown(table)
         assert "A\\|B" in md[0]
+
+
+class TestCountRulersInPara:
+    """PARAブロック内の罫線数カウントのテスト"""
+
+    def test_no_008f_tag(self):
+        """008Fタグなし → 罫線0"""
+        # PARAブロック: 001C 0010 0019 0000 ... FFFF ... 0010 001F
+        block = bytes([
+            0x00, 0x1c, 0x00, 0x10,
+            0x00, 0x19, 0x00, 0x00,
+            0x00, 0x01, 0x00, 0x20,
+            0xff, 0xff,
+            0x00, 0x00, 0x00, 0x10, 0x00, 0x1f,
+        ])
+        assert count_rulers_in_para(block, 0, len(block)) == 0
+
+    def test_008f_with_rulers(self):
+        """008Fタグ内に罫線識別子(001B)が含まれる → 罫線カウント"""
+        # 008F 0007 [data with 001B entries]
+        block = bytes([
+            0x00, 0x8f, 0x00, 0x07,
+            0x01, 0x24, 0x00, 0x00,
+            0x00, 0x00,
+            0x00, 0x1b, 0x00, 0x00,
+            0x00, 0x08, 0x00, 0x46,
+        ])
+        assert count_rulers_in_para(block, 0, len(block)) == 1
+
+    def test_008f_with_multiple_rulers(self):
+        """罫線識別子0013も含む場合"""
+        block = bytes([
+            0x00, 0x8f, 0x00, 0x09,
+            0x01, 0x24, 0x00, 0x00,
+            0x00, 0x00,
+            0x00, 0x13, 0x00, 0x00,
+            0x00, 0x13, 0x00, 0x00,
+            0x00, 0x13, 0x00, 0x00,
+        ])
+        assert count_rulers_in_para(block, 0, len(block)) == 3
+
+    def test_008f_zero_rulers(self):
+        """008Fタグあり、罫線なし → 罫線0（枠線のみ）"""
+        block = bytes([
+            0x00, 0x8f, 0x00, 0x03,
+            0x01, 0x24, 0x00, 0x00,
+            0x00, 0x00,
+        ])
+        assert count_rulers_in_para(block, 0, len(block)) == 0
+
+
+class TestIsTableSection:
+    """セクションのテーブル判定テスト"""
+
+    def test_section_with_rulers(self):
+        """罫線≥1のPARAがあるセクション → テーブル"""
+        section = [
+            _StreamEvent('PARA', 0, ruler_count=3),
+            _StreamEvent('CELL', 10, cell=TableCell(0, 10, 0)),
+            _StreamEvent('SECTION_END', 20),
+        ]
+        assert _is_table_section(section) is True
+
+    def test_section_without_rulers(self):
+        """罫線なしのセクション → 非テーブル"""
+        section = [
+            _StreamEvent('PARA', 0, text='通常テキスト'),
+            _StreamEvent('SECTION_END', 10),
+        ]
+        assert _is_table_section(section) is False
+
+    def test_section_with_cell_but_no_rulers(self):
+        """セルはあるが罫線なし → 非テーブル（枠線のみ）"""
+        section = [
+            _StreamEvent('PARA', 0, ruler_count=0),
+            _StreamEvent('CELL', 10, cell=TableCell(0, 100, 0)),
+            _StreamEvent('SECTION_END', 20),
+        ]
+        assert _is_table_section(section) is False
 
 
 class TestJtdToMarkdownConverter:
