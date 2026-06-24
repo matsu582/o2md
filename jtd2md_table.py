@@ -41,6 +41,26 @@ def _safe_chr(code: int) -> str:
 # 罫線タイプ識別子
 _RULER_TAGS = frozenset((0x001b, 0x0013))
 
+# フォントサイズタグ
+_TAG_FONT_SIZE = 0x0008
+
+
+def extract_font_size_from_para(data: bytes, pos: int,
+                               block_len: int) -> int:
+    """PARAブロックからフォントサイズを抽出する
+
+    TAG 0008の最初の値をフォントサイズ(1/100pt単位)として返す。
+    フォントサイズタグが見つからない場合は0を返す（デフォルトサイズ使用）。
+    """
+    block = data[pos:pos + block_len]
+    for k in range(8, len(block) - 3, 2):
+        tag = _read_u16be(block, k)
+        if tag == _TAG_FONT_SIZE:
+            return _read_u16be(block, k + 2)
+        if tag == 0xFFFF or tag == 0x001F:
+            break
+    return 0
+
 
 def count_rulers_in_para(data: bytes, pos: int,
                          block_len: int) -> int:
@@ -97,17 +117,22 @@ class TableCell:
 
 class _StreamEvent:
     """ストリーム解析で検出されるイベント"""
-    __slots__ = ('kind', 'offset', 'cell', 'text', 'ruler_count')
+    __slots__ = (
+        'kind', 'offset', 'cell', 'text',
+        'ruler_count', 'font_size',
+    )
 
     def __init__(self, kind: str, offset: int,
                  cell: Optional[TableCell] = None,
                  text: str = "",
-                 ruler_count: int = 0):
+                 ruler_count: int = 0,
+                 font_size: int = 0):
         self.kind = kind
         self.offset = offset
         self.cell = cell
         self.text = text
         self.ruler_count = ruler_count
+        self.font_size = font_size
 
 
 def _read_text_at(data: bytes, pos: int,
@@ -218,13 +243,16 @@ def scan_stream_events(data: bytes,
                         break
                     j += 2
                 block_len = j - i + 2
-                # 罫線数を取得
+                # 罫線数とフォントサイズを取得
                 rulers = count_rulers_in_para(data, i, block_len)
+                fsize = extract_font_size_from_para(
+                    data, i, block_len)
                 after = j + 2
                 text, text_end = _read_text_at(data, after)
                 events.append(_StreamEvent(
                     'PARA', i, text=text.strip(),
-                    ruler_count=rulers))
+                    ruler_count=rulers,
+                    font_size=fsize))
                 i = after
                 continue
 

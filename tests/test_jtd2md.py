@@ -39,6 +39,7 @@ from jtd2md_table import (
     table_to_markdown,
     _merge_continuation_rows,
     count_rulers_in_para,
+    extract_font_size_from_para,
     _is_table_section,
     _StreamEvent,
 )
@@ -451,6 +452,106 @@ class TestIsTableSection:
             _StreamEvent('SECTION_END', 20),
         ]
         assert _is_table_section(section) is False
+
+
+class TestExtractFontSizeFromPara:
+    """PARAブロックからのフォントサイズ抽出テスト"""
+
+    def test_font_size_tag_present(self):
+        """TAG 0008がある場合 → フォントサイズを返す"""
+        # 001C 0010 ... 0008 [size=850=0x0352] ...
+        block = bytes([
+            0x00, 0x1c, 0x00, 0x10,
+            0x00, 0x19, 0x00, 0x00,
+            0x00, 0x08, 0x03, 0x52,
+            0x00, 0x1f,
+        ])
+        assert extract_font_size_from_para(block, 0, len(block)) == 850
+
+    def test_font_size_tag_absent(self):
+        """TAG 0008がない場合 → 0を返す"""
+        block = bytes([
+            0x00, 0x1c, 0x00, 0x10,
+            0x00, 0x19, 0x00, 0x00,
+            0x00, 0x09, 0x00, 0x01,
+            0x00, 0x1f,
+        ])
+        assert extract_font_size_from_para(block, 0, len(block)) == 0
+
+
+class TestDetectHeading:
+    """見出し推定テスト"""
+
+    def test_bullet_prefix_h2(self):
+        """■/●/◆ プレフィックス → h2"""
+        result = JtdToMarkdownConverter._detect_heading(
+            "■情報収集・伝達事項の整理", 850, 700)
+        assert result == (2, "■情報収集・伝達事項の整理")
+
+    def test_numbered_heading_h2(self):
+        """N.テキスト → h2"""
+        result = JtdToMarkdownConverter._detect_heading(
+            "1.計画の目的", 0, 700)
+        assert result == (2, "1.計画の目的")
+
+    def test_parenthesized_number_h3(self):
+        """（N）テキスト → h3"""
+        result = JtdToMarkdownConverter._detect_heading(
+            "（1） 情報収集及び情報伝達を担う担当者", 850, 700)
+        assert result == (3, "（1） 情報収集及び情報伝達を担う担当者")
+
+    def test_half_width_paren_h3(self):
+        """(N) テキスト → h3"""
+        result = JtdToMarkdownConverter._detect_heading(
+            "(2) 情報収集", 850, 700)
+        assert result == (3, "(2) 情報収集")
+
+    def test_larger_font_h2(self):
+        """フォントサイズが本文より大きい → h2"""
+        result = JtdToMarkdownConverter._detect_heading(
+            "セクションタイトル", 1200, 700)
+        assert result == (2, "セクションタイトル")
+
+    def test_normal_text_no_heading(self):
+        """通常テキスト → None"""
+        result = JtdToMarkdownConverter._detect_heading(
+            "この計画は、土砂災害に関する法律です。", 700, 700)
+        assert result is None
+
+    def test_no_body_font_no_heading(self):
+        """本文フォント不明 → パターンマッチのみ"""
+        result = JtdToMarkdownConverter._detect_heading(
+            "通常のテキスト行です", 0, 0)
+        assert result is None
+
+
+class TestDetectBodyFontSize:
+    """本文フォントサイズ推定テスト"""
+
+    def test_most_frequent_size(self):
+        """最頻出フォントサイズを返す"""
+        blocks = [
+            {'type': 'text', 'lines': [
+                ("見出し", 0),
+                ("本文1", 700),
+                ("本文2", 700),
+                ("本文3", 700),
+                ("大きい文字", 1200),
+            ]},
+        ]
+        assert JtdToMarkdownConverter._detect_body_font_size(
+            blocks) == 700
+
+    def test_no_explicit_font(self):
+        """明示的フォントなし → 0"""
+        blocks = [
+            {'type': 'text', 'lines': [
+                ("テキスト1", 0),
+                ("テキスト2", 0),
+            ]},
+        ]
+        assert JtdToMarkdownConverter._detect_body_font_size(
+            blocks) == 0
 
 
 class TestJtdToMarkdownConverter:

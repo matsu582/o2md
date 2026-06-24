@@ -32,6 +32,7 @@ from jtd2md_table import (
     table_to_markdown,
     _split_sections,
     _is_table_section,
+    extract_font_size_from_para,
 )
 
 
@@ -373,11 +374,11 @@ def _extract_structured_content(data: bytes) -> list[dict]:
     """ストリームから構造化されたコンテンツを抽出する
 
     罫線情報に基づいてテキスト行とテーブルを区別して返す。
-    PARAブロック内の008Fタグの罫線数が≥1のセクションをテーブル行と判定。
+    各テキスト行にはフォントサイズ情報(1/100pt)を付与する。
 
     Returns:
         コンテンツブロックのリスト:
-        - {'type': 'text', 'lines': [テキスト行...]}
+        - {'type': 'text', 'lines': [(テキスト, フォントサイズ)...]}
         - {'type': 'table', 'markdown': [Markdownテーブル行...]}
     """
     content_start = _find_content_start(data)
@@ -402,7 +403,6 @@ def _extract_structured_content(data: bytes) -> list[dict]:
     for sec_idx, section in enumerate(sections):
         if sec_idx in table_section_ranges:
             ti = table_section_ranges[sec_idx]
-            # このテーブルの最初のセクションでのみMarkdownを出力
             tbl = tables[ti]
             first_sec = tbl['section_range'][0]
             if sec_idx == first_sec:
@@ -420,12 +420,17 @@ def _extract_structured_content(data: bytes) -> list[dict]:
                     })
             continue
 
-        # 非テーブルセクション: テキストとセル内テキストを抽出
+        # 非テーブルセクション: テキストとフォントサイズを抽出
+        last_font_size = 0
         for ev in section:
-            if ev.kind == 'PARA' and ev.text:
-                current_text_lines.append(ev.text)
+            if ev.kind == 'PARA':
+                last_font_size = ev.font_size
+                if ev.text:
+                    current_text_lines.append(
+                        (ev.text, ev.font_size))
             elif ev.kind == 'CELL' and ev.cell and ev.cell.text:
-                current_text_lines.append(ev.cell.text)
+                current_text_lines.append(
+                    (ev.cell.text, last_font_size))
 
     if current_text_lines:
         blocks.append({
@@ -565,15 +570,18 @@ class JtdToMarkdownConverter:
     def _build_markdown(self, blocks: list[dict]) -> list[str]:
         """構造化コンテンツからMarkdown形式に変換する
 
-        見出し候補の判定:
-        - ■/●/◆ で始まる行 → ## (h2)
-        - （N） 形式の行 → ### (h3)
+        見出し推定（フォントサイズ＋テキストパターン）:
+        1. ■/●/◆ で始まる行 → ## (h2)
+        2. N.テキスト 形式（番号付き見出し） → ## (h2)
+        3. （N）テキスト 形式 → ### (h3)
+        4. フォントサイズがデフォルト（0=タグなし）で
+           本文フォントサイズが明示されている場合 → ## (h2)
+        5. フォントサイズが本文より大きい場合 → ## (h2)
         """
         md = []
         md.append(f"# {self.base_name}")
         md.append("")
 
-        # メタデータの追加
         metadata = self._get_metadata()
         if metadata:
             for key, value in metadata.items():
@@ -582,6 +590,8 @@ class JtdToMarkdownConverter:
             md.append("---")
             md.append("")
 
+        body_font_size = self._detect_body_font_size(blocks)
+
         for block in blocks:
             if block['type'] == 'table':
                 md.append("")
@@ -589,39 +599,89 @@ class JtdToMarkdownConverter:
                 md.append("")
                 continue
 
-            # テキストブロック
-            for line in block.get('lines', []):
-                stripped = line.strip()
+            for item in block.get('lines', []):
+                text, font_size = item
+                stripped = text.strip()
                 if not stripped:
                     md.append("")
                     continue
 
-                # 脚注セパレータはそのまま
                 if stripped == "---":
                     md.append("---")
                     continue
 
-                # 見出し判定: ■/●/◆ で始まる行
-                if stripped.startswith(('■', '●', '◆')):
-                    md.append(f"## {stripped}")
+                heading = self._detect_heading(
+                    stripped, font_size, body_font_size)
+                if heading:
+                    level, text = heading
+                    md.append(f"{'#' * level} {text}")
                     md.append("")
                     continue
 
-                # 太字マーカー付き脚注ヘッダ
                 if stripped.startswith("**脚注"):
                     md.append(stripped)
                     md.append("")
                     continue
 
-                # 通常テキスト（末尾にスペース2つでMarkdown改行）
                 md.append(stripped + "  ")
 
-        # 末尾の空行を整理
         while md and md[-1] == "":
             md.pop()
         md.append("")
 
         return md
+
+    @staticmethod
+    def _detect_body_font_size(
+        blocks: list[dict],
+    ) -> int:
+        """テキストブロックから本文フォントサイズを推定する
+
+        最も頻出するフォントサイズを本文サイズとして返す。
+        フォントサイズ=0（タグなし）は除外して集計する。
+        """
+        freq = {}
+        for block in blocks:
+            if block['type'] != 'text':
+                continue
+            for item in block.get('lines', []):
+                text, fsize = item
+                if fsize > 0 and text.strip():
+                    freq[fsize] = freq.get(fsize, 0) + 1
+        if not freq:
+            return 0
+        return max(freq, key=freq.get)
+
+    @staticmethod
+    def _detect_heading(
+        text: str, font_size: int, body_font_size: int,
+    ) -> tuple[int, str] | None:
+        """テキストと書式情報から見出しを推定する
+
+        Returns:
+            (見出しレベル, テキスト) または None
+        """
+        import re
+
+        # パターン1: ■/●/◆ プレフィックス → h2
+        if text.startswith(('■', '●', '◆')):
+            return (2, text)
+
+        # パターン2: 番号付き見出し "N.テキスト" → h2
+        m = re.match(r'^(\d+)\.\s*\S', text)
+        if m:
+            return (2, text)
+
+        # パターン3: （N）テキスト or (N) テキスト → h3
+        m = re.match(r'^[（(]\s*\d+\s*[）)]\s*\S', text)
+        if m:
+            return (3, text)
+
+        # パターン4: フォントサイズが本文より明示的に大きい → h2
+        if body_font_size > 0 and font_size > body_font_size:
+            return (2, text)
+
+        return None
 
     def _get_metadata(self) -> dict:
         """ファイルのOLE2メタデータを取得"""
