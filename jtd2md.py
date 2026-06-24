@@ -570,13 +570,10 @@ class JtdToMarkdownConverter:
     def _build_markdown(self, blocks: list[dict]) -> list[str]:
         """構造化コンテンツからMarkdown形式に変換する
 
-        見出し推定（フォントサイズ＋テキストパターン）:
-        1. ■/●/◆ で始まる行 → ## (h2)
-        2. N.テキスト 形式（番号付き見出し） → ## (h2)
-        3. （N）テキスト 形式 → ### (h3)
-        4. フォントサイズがデフォルト（0=タグなし）で
-           本文フォントサイズが明示されている場合 → ## (h2)
-        5. フォントサイズが本文より大きい場合 → ## (h2)
+        見出し推定（フォントサイズベース）:
+        - フォントサイズが本文より大きい → ## (h2)
+        - フォントサイズ=0（デフォルト）で本文フォントが
+          明示されている場合 → ## (h2)
         """
         md = []
         md.append(f"# {self.base_name}")
@@ -656,29 +653,26 @@ class JtdToMarkdownConverter:
     def _detect_heading(
         text: str, font_size: int, body_font_size: int,
     ) -> tuple[int, str] | None:
-        """テキストと書式情報から見出しを推定する
+        """フォントサイズのみで見出しを推定する
+
+        本文フォントサイズと比較して大きいフォントの行を見出しと判定。
+        フォントサイズ=0（タグなし=デフォルト）の行は、
+        本文に明示的なフォントサイズがある場合、デフォルトの方が
+        大きい可能性が高いため見出し候補とする。
 
         Returns:
             (見出しレベル, テキスト) または None
         """
-        import re
+        if body_font_size <= 0:
+            return None
 
-        # パターン1: ■/●/◆ プレフィックス → h2
-        if text.startswith(('■', '●', '◆')):
+        # フォントサイズが本文より明示的に大きい → h2
+        if font_size > body_font_size:
             return (2, text)
 
-        # パターン2: 番号付き見出し "N.テキスト" → h2
-        m = re.match(r'^(\d+)\.\s*\S', text)
-        if m:
-            return (2, text)
-
-        # パターン3: （N）テキスト or (N) テキスト → h3
-        m = re.match(r'^[（(]\s*\d+\s*[）)]\s*\S', text)
-        if m:
-            return (3, text)
-
-        # パターン4: フォントサイズが本文より明示的に大きい → h2
-        if body_font_size > 0 and font_size > body_font_size:
+        # フォントサイズ=0（デフォルト）で本文が明示サイズの場合
+        # → デフォルトフォントは文書の基本サイズで本文より大きい可能性
+        if font_size == 0:
             return (2, text)
 
         return None

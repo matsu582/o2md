@@ -480,31 +480,7 @@ class TestExtractFontSizeFromPara:
 
 
 class TestDetectHeading:
-    """見出し推定テスト"""
-
-    def test_bullet_prefix_h2(self):
-        """■/●/◆ プレフィックス → h2"""
-        result = JtdToMarkdownConverter._detect_heading(
-            "■情報収集・伝達事項の整理", 850, 700)
-        assert result == (2, "■情報収集・伝達事項の整理")
-
-    def test_numbered_heading_h2(self):
-        """N.テキスト → h2"""
-        result = JtdToMarkdownConverter._detect_heading(
-            "1.計画の目的", 0, 700)
-        assert result == (2, "1.計画の目的")
-
-    def test_parenthesized_number_h3(self):
-        """（N）テキスト → h3"""
-        result = JtdToMarkdownConverter._detect_heading(
-            "（1） 情報収集及び情報伝達を担う担当者", 850, 700)
-        assert result == (3, "（1） 情報収集及び情報伝達を担う担当者")
-
-    def test_half_width_paren_h3(self):
-        """(N) テキスト → h3"""
-        result = JtdToMarkdownConverter._detect_heading(
-            "(2) 情報収集", 850, 700)
-        assert result == (3, "(2) 情報収集")
+    """見出し推定テスト（フォントサイズベース）"""
 
     def test_larger_font_h2(self):
         """フォントサイズが本文より大きい → h2"""
@@ -512,16 +488,40 @@ class TestDetectHeading:
             "セクションタイトル", 1200, 700)
         assert result == (2, "セクションタイトル")
 
+    def test_default_font_with_body_explicit(self):
+        """フォントサイズ=0（デフォルト）で本文が明示サイズ → h2"""
+        result = JtdToMarkdownConverter._detect_heading(
+            "1.計画の目的", 0, 700)
+        assert result == (2, "1.計画の目的")
+
+    def test_same_font_as_body(self):
+        """本文と同じフォントサイズ → None"""
+        result = JtdToMarkdownConverter._detect_heading(
+            "（1） 情報収集及び情報伝達を担う担当者", 850, 850)
+        assert result is None
+
+    def test_smaller_font_than_body(self):
+        """本文より小さいフォントサイズ → None"""
+        result = JtdToMarkdownConverter._detect_heading(
+            "注記テキスト", 500, 700)
+        assert result is None
+
     def test_normal_text_no_heading(self):
-        """通常テキスト → None"""
+        """通常テキスト（同サイズ） → None"""
         result = JtdToMarkdownConverter._detect_heading(
             "この計画は、土砂災害に関する法律です。", 700, 700)
         assert result is None
 
     def test_no_body_font_no_heading(self):
-        """本文フォント不明 → パターンマッチのみ"""
+        """本文フォント不明 → None"""
         result = JtdToMarkdownConverter._detect_heading(
             "通常のテキスト行です", 0, 0)
+        assert result is None
+
+    def test_default_font_no_body_info(self):
+        """本文フォント=0の場合は見出し判定しない"""
+        result = JtdToMarkdownConverter._detect_heading(
+            "テキスト", 850, 0)
         assert result is None
 
 
