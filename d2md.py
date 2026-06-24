@@ -2053,7 +2053,7 @@ class WordToMarkdownConverter:
             
             # LibreOfficeでPDFに変換
             temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
-            if not temp_doc_path:
+            if not temp_pdf_path:
                 os.unlink(temp_doc_path)
                 return False
             
