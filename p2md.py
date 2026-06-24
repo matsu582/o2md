@@ -128,6 +128,15 @@ class PowerPointToMarkdownConverter:
         
         print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
     
+    def get_auto_generated_patterns(self) -> list:
+        """このコンバータが自動付与する見出しの正規表現パターンを返す"""
+        import re
+        return [
+            re.compile(r'^' + re.escape(self.base_name) + r'$'),
+            re.compile(r'^スライド \d+$'),
+            re.compile(r'^ノート:$'),
+        ]
+
     def convert(self) -> str:
         """メイン変換処理"""
         print(f"[INFO] PowerPoint文書変換開始: {self.pptx_file}")

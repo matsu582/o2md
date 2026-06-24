@@ -114,78 +114,56 @@ def debug_print(*args, **kwargs):
     if _VERBOSE:
         print(*args, **kwargs)
 
-def _build_auto_generated_patterns(base_name: str) -> list:
-    """プログラムが自動付与する見出し・タグのパターンリストを構築する
-
-    Args:
-        base_name: 変換元ファイルのベース名（拡張子なし）
-
-    Returns:
-        正規表現パターンのリスト（見出し記号除去後のテキストに対してマッチ）
-    """
-    import re
-    patterns = [
-        # 共通: ファイル名タイトル（全変換エンジン）
-        re.compile(r'^' + re.escape(base_name) + r'$'),
-        # PDF: OCR抽出見出し
-        re.compile(r'^抽出テキスト（OCR）$'),
-        # Excel: シート名見出し（末尾が (Sheet Data)）
-        re.compile(r'^.+ \(Sheet Data\)$'),
-        # PowerPoint: スライド番号見出し
-        re.compile(r'^スライド \d+$'),
-        # PowerPoint: ノート見出し
-        re.compile(r'^ノート:$'),
-        # Word: 目次見出し
-        re.compile(r'^目次$'),
-        # Word: 図形番号見出し
-        re.compile(r'^図形 \d+$'),
-    ]
-    return patterns
-
-
-def _is_auto_generated_heading(line: str, patterns: list) -> bool:
+def _is_auto_generated_heading(line: str, heading_patterns: list) -> bool:
     """Markdown見出し行がプログラム生成かどうかを判定する
 
     Args:
         line: 元のMarkdown行（見出し記号付き）
-        patterns: _build_auto_generated_patternsで構築したパターンリスト
+        heading_patterns: コンバータのget_auto_generated_patterns()が返したパターンリスト
 
     Returns:
         プログラム生成の見出しならTrue
     """
     import re
-    # 見出し行でなければ対象外
     m = re.match(r'^#{1,6}\s+(.+)$', line.rstrip())
     if not m:
         return False
     heading_text = m.group(1).strip()
-    return any(p.match(heading_text) for p in patterns)
+    return any(p.match(heading_text) for p in heading_patterns)
 
 
-def _strip_markdown(text: str, base_name: str = '') -> str:
+def _strip_markdown(text: str, auto_patterns: dict = None) -> str:
     """Markdownの書式記号を除去してプレーンテキストに変換する
 
+    Args:
+        text: Markdownテキスト
+        auto_patterns: コンバータから取得したプログラム生成パターン情報
+            {'heading_patterns': list[re.Pattern], 'html_tags': list[str]}
+
     除去対象:
-    - プログラム生成見出し（ファイル名、OCR見出し、シート名等）
+    - プログラム生成見出し（コンバータが定義したパターン）
+    - コンバータが定義したHTMLタグ
     - 見出し記号 (##)
     - 太字/斜体 (**text**, *text*)
     - テーブル区切り行 (| --- | --- |)
     - 画像リンク (![alt](path))
     - 行末の改行用スペース (trailing two spaces)
     - 水平線 (---, ***)
-    - HTML details/summaryタグ
     """
     import re
-    auto_patterns = _build_auto_generated_patterns(base_name)
+    if auto_patterns is None:
+        auto_patterns = {'heading_patterns': [], 'html_tags': []}
+    heading_patterns = auto_patterns.get('heading_patterns', [])
+    html_tags = set(auto_patterns.get('html_tags', []))
     lines = text.split('\n')
     result = []
     for line in lines:
         # プログラムが付与した見出し行を除去
-        if _is_auto_generated_heading(line, auto_patterns):
+        if heading_patterns and _is_auto_generated_heading(line, heading_patterns):
             continue
-        # HTML details/summary タグを除去
+        # コンバータが定義したHTMLタグを除去
         stripped = line.strip()
-        if stripped in ('<details>', '</details>') or re.match(r'^<summary>.*</summary>$', stripped):
+        if html_tags and stripped in html_tags:
             continue
         # 画像リンク行を除去
         if re.match(r'^\s*!\[.*?\]\(.*?\)\s*$', line):
@@ -228,24 +206,20 @@ def _remove_image_links(text: str) -> str:
     return '\n'.join(result)
 
 
-def convert_md_to_text(md_file_path: str) -> str:
+def convert_md_to_text(md_file_path: str, auto_patterns: dict = None) -> str:
     """Markdownファイルをプレーンテキストに変換して.txtとして保存する
-
-    ファイル名からbase_nameを自動取得し、プログラム生成見出しの除去に使用する。
 
     Args:
         md_file_path: 変換元の.mdファイルパス
+        auto_patterns: コンバータから取得したプログラム生成パターン情報
 
     Returns:
         出力した.txtファイルのパス
     """
-    import os
-    base_name = os.path.splitext(os.path.basename(md_file_path))[0]
-
     with open(md_file_path, 'r', encoding='utf-8') as f:
         md_content = f.read()
 
-    text_content = _strip_markdown(md_content, base_name=base_name)
+    text_content = _strip_markdown(md_content, auto_patterns=auto_patterns)
 
     txt_file_path = md_file_path.rsplit('.md', 1)[0] + '.txt'
     with open(txt_file_path, 'w', encoding='utf-8') as f:
@@ -292,7 +266,7 @@ def detect_file_type(file_path: str) -> str:
         return 'unknown'
 
 
-def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs) -> str:
+def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs) -> tuple:
     """Officeファイルを自動判定してMarkdownに変換
     
     Args:
@@ -304,7 +278,8 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             - output_format: 出力画像形式 ('png' または 'svg'、デフォルト: 'png')
             
     Returns:
-        出力ファイルのパス
+        (出力ファイルのパス, プログラム生成パターン情報の辞書) のタプル
+        パターン情報: {'heading_patterns': list[re.Pattern], 'html_tags': list[str]}
         
     Raises:
         ValueError: サポートされていないファイル形式
@@ -328,6 +303,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
     output_file = None
     converted_file = None
     converted_temp_dir = None
+    auto_patterns = {'heading_patterns': [], 'html_tags': []}
     
     try:
         if file_type == 'excel':
@@ -405,7 +381,13 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             )
             output_file = converter.convert()
         
-        return output_file
+        # コンバータからプログラム生成パターンを取得
+        if converter and hasattr(converter, 'get_auto_generated_patterns'):
+            auto_patterns['heading_patterns'] = converter.get_auto_generated_patterns()
+        if converter and hasattr(converter, 'get_auto_generated_html_tags'):
+            auto_patterns['html_tags'] = converter.get_auto_generated_html_tags()
+
+        return output_file, auto_patterns
         
     finally:
         # PowerPointの一時ファイルクリーンアップ
@@ -518,14 +500,14 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
 
         print(f"\n[{idx}/{total}] {rel}")
         try:
-            output_file = convert_office_to_markdown(
+            output_file, auto_patterns = convert_office_to_markdown(
                 fpath,
                 output_dir=file_output_dir,
                 **kwargs
             )
             # テキストモード: .txtファイルも追加出力（.mdはそのまま）
             if is_text_only() and output_file and output_file.endswith('.md'):
-                convert_md_to_text(output_file)
+                convert_md_to_text(output_file, auto_patterns=auto_patterns)
             results['success'].append({'file': str(rel), 'output': output_file})
         except Exception as e:
             print(f"[ERROR] 変換失敗: {rel} - {e}")
@@ -639,7 +621,7 @@ def main():
     else:
         # 単一ファイル変換
         try:
-            output_file = convert_office_to_markdown(
+            output_file, auto_patterns = convert_office_to_markdown(
                 args.file,
                 output_dir=args.output_dir,
                 **common_kwargs
@@ -648,7 +630,7 @@ def main():
             # テキストモード: .txtファイルも追加出力（.mdはそのまま）
             txt_file = None
             if args.text and output_file and output_file.endswith('.md'):
-                txt_file = convert_md_to_text(output_file)
+                txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns)
 
             print("\n" + "=" * 50)
             print("変換完了!")

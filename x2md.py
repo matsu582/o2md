@@ -196,6 +196,14 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         except Exception:
             return None
 
+    def get_auto_generated_patterns(self) -> list:
+        """このコンバータが自動付与する見出しの正規表現パターンを返す"""
+        import re
+        return [
+            re.compile(r'^' + re.escape(self.base_name) + r'$'),
+            re.compile(r'^.+ \(Sheet Data\)$'),
+        ]
+
     def convert(self) -> str:
         """トップレベルの変換処理 (軽量ラッパ)
 

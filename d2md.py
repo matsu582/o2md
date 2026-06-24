@@ -142,6 +142,18 @@ class WordToMarkdownConverter:
         
         print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
         
+    def get_auto_generated_patterns(self) -> list:
+        """このコンバータが自動付与する見出しの正規表現パターンを返す"""
+        import re
+        return [
+            re.compile(r'^目次$'),
+            re.compile(r'^図形 \d+$'),
+        ]
+
+    def get_auto_generated_html_tags(self) -> list:
+        """このコンバータが自動付与するHTMLタグのパターンを返す"""
+        return ['<details>', '</details>', '<summary>図形内テキスト</summary>']
+
     def convert(self) -> str:
         """メイン変換処理"""
         print(f"[INFO] Word文書変換開始: {self.word_file}")

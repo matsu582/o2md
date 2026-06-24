@@ -172,6 +172,14 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 self._ocr = False
         return self._ocr if self._ocr else None
     
+    def get_auto_generated_patterns(self) -> list:
+        """このコンバータが自動付与する見出しの正規表現パターンを返す"""
+        import re
+        return [
+            re.compile(r'^' + re.escape(self.base_name) + r'$'),
+            re.compile(r'^抽出テキスト（OCR）$'),
+        ]
+
     def convert(self) -> str:
         """メイン変換処理
         
