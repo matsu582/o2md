@@ -11,7 +11,7 @@ docling、markitdown との機能比較は [o2md_comparison.md](o2md_comparison.
 ## 概要
 
 o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）およびPDFを**それっぽい**Markdown形式に変換するPythonツールです。ファイルの種類を自動判定し、適切な変換エンジンを使用して処理します。
-古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換は**LibreOffice**に依存しています。必ず**LibreOffice**をインストールしてください。
+古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換は**LibreOffice**に依存しています。LibreOfficeがない環境でもテキストのみの変換は正常に動作します。
 
 ### 主な特徴
 
@@ -32,7 +32,7 @@ o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）およびPDFを**
 
 - Python 3.10 以上
 - [uv](https://docs.astral.sh/uv/) (推奨) または pip
-- [LibreOffice](https://www.libreoffice.org/) (図形の画像処理と古い形式の変換に必要)
+- [LibreOffice](https://www.libreoffice.org/) (図形の画像処理と古い形式の変換に必要、オプショナル)
 
 ### 1. uv のインストール（未インストールの場合）
 
@@ -58,9 +58,10 @@ uv sync
 uv sync --all-extras
 ```
 
-### 3. LibreOffice のインストール
+### 3. LibreOffice のインストール（オプショナル）
 
 古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換に必要です。
+インストールしない場合でも、テキストのみの変換は正常に動作します。
 
 ```bash
 # macOS
@@ -72,6 +73,21 @@ sudo apt-get install libreoffice
 # Windows
 # https://www.libreoffice.org/download/download/ からダウンロード
 ```
+
+### LibreOfficeがない場合の動作
+
+LibreOfficeがインストールされていない環境では、起動時に警告メッセージが表示され、以下のように縮退動作します。
+
+| 機能 | LibreOfficeあり | LibreOfficeなし |
+| --- | --- | --- |
+| .docx / .xlsx / .pptx のテキスト変換 | ✔ | ✔ |
+| .doc / .xls / .ppt の変換 | ✔ | ✖（エラー表示） |
+| 図形・ベクター画像の変換 | ✔ | ✖（スキップ） |
+| スライドの画像レンダリング | ✔ | ✖（スキップ） |
+| チャートの画像変換 | ✔ | ✖（スキップ） |
+| PDF変換 | ✔ | ✔ |
+
+> **ヒント**: 旧形式ファイル（.doc, .xls, .ppt）は、事前に新形式（.docx, .xlsx, .pptx）に変換しておくと、LibreOfficeなしでもテキスト変換が可能です。
 
 ## 使用方法
 
