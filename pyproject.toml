@@ -16,6 +16,7 @@ dependencies = [
     "manga-ocr>=0.1.14",
     "opencv-python>=4.10.0",
     "pytesseract>=0.3.13",
+    "olefile>=0.47",
 ]
 
 [project.optional-dependencies]
