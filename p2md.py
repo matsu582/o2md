@@ -29,7 +29,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from collections import defaultdict
 import io
 
-from utils import get_libreoffice_path, is_libreoffice_available, is_text_only
+from utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed, is_text_only
 
 try:
     from pptx import Presentation
@@ -1149,7 +1149,7 @@ class PowerPointToMarkdownConverter:
         Returns:
             str: 変換されたpptxファイルのパス、失敗時はNone
         """
-        if not is_libreoffice_available():
+        if not is_libreoffice_installed():
             print("[ERROR] LibreOfficeが見つかりません。.pptファイルの変換にはLibreOfficeが必要です。")
             print("  .pptxファイルであればLibreOfficeなしで変換できます。")
             return None

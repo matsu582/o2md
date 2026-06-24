@@ -27,7 +27,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from PIL import Image
 import io
 
-from utils import get_libreoffice_path, is_libreoffice_available, is_text_only
+from utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed, is_text_only
 from d2md_charts import extract_charts_from_docx
 from chart_utils import chart_data_to_markdown
 
@@ -3183,7 +3183,7 @@ def convert_doc_to_docx(doc_file_path: str) -> str:
     import shutil
     from pathlib import Path
     
-    if not is_libreoffice_available():
+    if not is_libreoffice_installed():
         print("[ERROR] LibreOfficeが見つかりません。.docファイルの変換にはLibreOfficeが必要です。")
         print("  .docxファイルであればLibreOfficeなしで変換できます。")
         return None

@@ -23,7 +23,7 @@ import io
 import zipfile
 import xml.etree.ElementTree as ET
 
-from utils import get_libreoffice_path, is_libreoffice_available, is_text_only, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
+from utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed, is_text_only, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
 from isolated_group_renderer import IsolatedGroupRenderer
 from x2md_tables import _TablesMixin
 from x2md_graphics import _GraphicsMixin
@@ -2785,7 +2785,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
 
 def convert_xls_to_xlsx(xls_file_path: str) -> Optional[str]:
     """XLSファイルをXLSXに変換"""
-    if not is_libreoffice_available():
+    if not is_libreoffice_installed():
         print("[ERROR] LibreOfficeが見つかりません。.xlsファイルの変換にはLibreOfficeが必要です。")
         print("  .xlsxファイルであればLibreOfficeなしで変換できます。")
         return None
