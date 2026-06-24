@@ -29,7 +29,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from collections import defaultdict
 import io
 
-from utils import get_libreoffice_path
+from utils import get_libreoffice_path, is_libreoffice_available
 
 try:
     from pptx import Presentation
@@ -980,6 +980,10 @@ class PowerPointToMarkdownConverter:
         if hasattr(self, '_cached_pdf_path') and os.path.exists(self._cached_pdf_path):
             return self._cached_pdf_path
         
+        if not is_libreoffice_available():
+            print("[WARNING] LibreOfficeが利用できないため、スライドの画像レンダリングをスキップします")
+            return None
+        
         try:
             temp_dir = tempfile.mkdtemp()
             
@@ -1145,6 +1149,10 @@ class PowerPointToMarkdownConverter:
         Returns:
             str: 変換されたpptxファイルのパス、失敗時はNone
         """
+        if not is_libreoffice_available():
+            print("[ERROR] LibreOfficeが見つかりません。.pptファイルの変換にはLibreOfficeが必要です。")
+            print("  .pptxファイルであればLibreOfficeなしで変換できます。")
+            return None
         try:
             # 一時ディレクトリを作成
             temp_dir = tempfile.mkdtemp()
