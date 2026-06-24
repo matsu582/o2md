@@ -165,6 +165,9 @@ def _strip_markdown(text: str, auto_patterns: dict = None) -> str:
         stripped = line.strip()
         if html_tags and stripped in html_tags:
             continue
+        # <summary>...</summary> タグを汎用的に除去（html_tagsに<summary>系が含まれる場合）
+        if html_tags and re.match(r'^<summary>.*</summary>$', stripped):
+            continue
         # 画像リンク行を除去
         if re.match(r'^\s*!\[.*?\]\(.*?\)\s*$', line):
             continue

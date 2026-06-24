@@ -204,6 +204,10 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             re.compile(r'^.+ \(Sheet Data\)$'),
         ]
 
+    def get_auto_generated_html_tags(self) -> list:
+        """このコンバータが自動付与するHTMLタグのパターンを返す"""
+        return ['<details>', '</details>', '<summary>図形内テキスト</summary>', '<summary>JSON形式の図形情報</summary>']
+
     def convert(self) -> str:
         """トップレベルの変換処理 (軽量ラッパ)
 

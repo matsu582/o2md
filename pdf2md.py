@@ -180,6 +180,10 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             re.compile(r'^抽出テキスト（OCR）$'),
         ]
 
+    def get_auto_generated_html_tags(self) -> list:
+        """このコンバータが自動付与するHTMLタグのパターンを返す"""
+        return ['<details>', '</details>', '<summary>図形内テキスト</summary>', '<summary>表データ</summary>']
+
     def convert(self) -> str:
         """メイン変換処理
         
