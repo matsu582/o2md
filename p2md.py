@@ -29,7 +29,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from collections import defaultdict
 import io
 
-from utils import get_libreoffice_path, is_libreoffice_available
+from utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed
 
 try:
     from pptx import Presentation
@@ -128,6 +128,15 @@ class PowerPointToMarkdownConverter:
         
         print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
     
+    def get_auto_generated_patterns(self) -> list:
+        """このコンバータが自動付与する見出しの正規表現パターンを返す"""
+        import re
+        return [
+            re.compile(r'^' + re.escape(self.base_name) + r'$'),
+            re.compile(r'^スライド \d+$'),
+            re.compile(r'^ノート:$'),
+        ]
+
     def convert(self) -> str:
         """メイン変換処理"""
         print(f"[INFO] PowerPoint文書変換開始: {self.pptx_file}")
@@ -1149,7 +1158,7 @@ class PowerPointToMarkdownConverter:
         Returns:
             str: 変換されたpptxファイルのパス、失敗時はNone
         """
-        if not is_libreoffice_available():
+        if not is_libreoffice_installed():
             print("[ERROR] LibreOfficeが見つかりません。.pptファイルの変換にはLibreOfficeが必要です。")
             print("  .pptxファイルであればLibreOfficeなしで変換できます。")
             return None

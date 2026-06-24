@@ -23,7 +23,7 @@ import io
 import zipfile
 import xml.etree.ElementTree as ET
 
-from utils import get_libreoffice_path, is_libreoffice_available, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
+from utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
 from isolated_group_renderer import IsolatedGroupRenderer
 from x2md_tables import _TablesMixin
 from x2md_graphics import _GraphicsMixin
@@ -195,6 +195,18 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             return sheet.cell(row, col).value
         except Exception:
             return None
+
+    def get_auto_generated_patterns(self) -> list:
+        """このコンバータが自動付与する見出しの正規表現パターンを返す"""
+        import re
+        return [
+            re.compile(r'^' + re.escape(self.base_name) + r'$'),
+            re.compile(r'^.+ \(Sheet Data\)$'),
+        ]
+
+    def get_auto_generated_html_tags(self) -> list:
+        """このコンバータが自動付与するHTMLタグのパターンを返す"""
+        return ['<details>', '</details>', '<summary>図形内テキスト</summary>', '<summary>JSON形式の図形情報</summary>']
 
     def convert(self) -> str:
         """トップレベルの変換処理 (軽量ラッパ)
@@ -839,6 +851,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         
         各チャートを個別にレンダリングし、画像とデータテーブルを出力する。
         チャートがある場合、シート全体画像は出力から除外する。
+        テキストオンリーモード時は画像レンダリングをスキップしデータのみ出力。
         
         Args:
             sheet: openpyxlのワークシートオブジェクト
@@ -2775,7 +2788,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
 
 def convert_xls_to_xlsx(xls_file_path: str) -> Optional[str]:
     """XLSファイルをXLSXに変換"""
-    if not is_libreoffice_available():
+    if not is_libreoffice_installed():
         print("[ERROR] LibreOfficeが見つかりません。.xlsファイルの変換にはLibreOfficeが必要です。")
         print("  .xlsxファイルであればLibreOfficeなしで変換できます。")
         return None

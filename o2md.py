@@ -114,6 +114,144 @@ def debug_print(*args, **kwargs):
     if _VERBOSE:
         print(*args, **kwargs)
 
+def _is_auto_generated_heading(line: str, heading_patterns: list) -> bool:
+    """Markdown見出し行がプログラム生成かどうかを判定する
+
+    Args:
+        line: 元のMarkdown行（見出し記号付き）
+        heading_patterns: コンバータのget_auto_generated_patterns()が返したパターンリスト
+
+    Returns:
+        プログラム生成の見出しならTrue
+    """
+    import re
+    m = re.match(r'^#{1,6}\s+(.+)$', line.rstrip())
+    if not m:
+        return False
+    heading_text = m.group(1).strip()
+    return any(p.match(heading_text) for p in heading_patterns)
+
+
+def _strip_markdown(text: str, auto_patterns: dict = None) -> str:
+    """Markdownの書式記号を除去してプレーンテキストに変換する
+
+    Args:
+        text: Markdownテキスト
+        auto_patterns: コンバータから取得したプログラム生成パターン情報
+            {'heading_patterns': list[re.Pattern], 'html_tags': list[str]}
+
+    除去対象:
+    - プログラム生成見出し（コンバータが定義したパターン）
+    - コンバータが定義したHTMLタグ
+    - 見出し記号 (##)
+    - 太字/斜体 (**text**, *text*)
+    - テーブル区切り行 (| --- | --- |)
+    - 画像リンク (![alt](path))
+    - 行末の改行用スペース (trailing two spaces)
+    - 水平線 (---, ***)
+    """
+    import re
+    if auto_patterns is None:
+        auto_patterns = {'heading_patterns': [], 'html_tags': []}
+    heading_patterns = auto_patterns.get('heading_patterns', [])
+    html_tags = set(auto_patterns.get('html_tags', []))
+    lines = text.split('\n')
+    result = []
+    for line in lines:
+        # プログラムが付与した見出し行を除去
+        if heading_patterns and _is_auto_generated_heading(line, heading_patterns):
+            continue
+        # コンバータが定義したHTMLタグを除去
+        stripped = line.strip()
+        if html_tags and stripped in html_tags:
+            continue
+        # <summary>...</summary> タグを汎用的に除去（html_tagsに<summary>系が含まれる場合）
+        if html_tags and re.match(r'^<summary>.*</summary>$', stripped):
+            continue
+        # 画像リンク行を除去
+        if re.match(r'^\s*!\[.*?\]\(.*?\)\s*$', line):
+            continue
+        # テーブル区切り行を除去 (| --- | --- | 形式)
+        if re.match(r'^\s*\|[\s\-:|]+\|\s*$', line):
+            continue
+        # 水平線を除去
+        if re.match(r'^\s*([-*_])\s*\1\s*\1[\s\1]*$', line):
+            continue
+        # 見出し記号を除去
+        line = re.sub(r'^#{1,6}\s+', '', line)
+        # 箇条書き記号を除去（インデント保持）
+        line = re.sub(r'^(\s*)[-*+]\s+', r'\1', line)
+        # 番号付きリスト記号を除去（インデント保持）
+        line = re.sub(r'^(\s*)\d+\.\s+', r'\1', line)
+        # 太字記号を除去
+        line = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
+        # 斜体記号を除去
+        line = re.sub(r'\*(.+?)\*', r'\1', line)
+        # Markdownリンクをテキスト部分のみに変換 [text](url) -> text
+        line = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', line)
+        # テーブルのパイプ記号を除去してタブ区切りに変換
+        if '|' in line and line.strip().startswith('|'):
+            cells = [c.strip() for c in line.strip().strip('|').split('|')]
+            line = '\t'.join(cells)
+        # 行末のMarkdown改行用スペースを除去
+        line = line.rstrip()
+        result.append(line)
+    return '\n'.join(result)
+
+
+def _remove_image_links(text: str) -> str:
+    """Markdownテキストから画像リンク行のみを除去する
+
+    画像リンク(![alt](path))を含む行を削除し、
+    それ以外のMarkdown書式はそのまま保持する。
+    """
+    import re
+    lines = text.split('\n')
+    result = []
+    for line in lines:
+        if re.match(r'^\s*!\[.*?\]\(.*?\)\s*$', line):
+            continue
+        result.append(line)
+    return '\n'.join(result)
+
+
+def convert_md_to_text(md_file_path: str, auto_patterns: dict = None) -> str:
+    """Markdownファイルをプレーンテキストに変換して.txtとして保存する
+
+    Args:
+        md_file_path: 変換元の.mdファイルパス
+        auto_patterns: コンバータから取得したプログラム生成パターン情報
+
+    Returns:
+        出力した.txtファイルのパス
+    """
+    with open(md_file_path, 'r', encoding='utf-8') as f:
+        md_content = f.read()
+
+    text_content = _strip_markdown(md_content, auto_patterns=auto_patterns)
+
+    txt_file_path = md_file_path.rsplit('.md', 1)[0] + '.txt'
+    with open(txt_file_path, 'w', encoding='utf-8') as f:
+        f.write(text_content)
+
+    return txt_file_path
+
+
+def strip_images_from_md(md_file_path: str):
+    """Markdownファイルから画像リンク行を除去して上書きする
+
+    Args:
+        md_file_path: 対象の.mdファイルパス
+    """
+    with open(md_file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    cleaned = _remove_image_links(content)
+
+    with open(md_file_path, 'w', encoding='utf-8') as f:
+        f.write(cleaned)
+
+
 def detect_file_type(file_path: str) -> str:
     """ファイル拡張子からファイルタイプを判定
     
@@ -137,7 +275,7 @@ def detect_file_type(file_path: str) -> str:
         return 'unknown'
 
 
-def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs) -> str:
+def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs) -> tuple:
     """Officeファイルを自動判定してMarkdownに変換
     
     Args:
@@ -149,7 +287,8 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             - output_format: 出力画像形式 ('png' または 'svg'、デフォルト: 'png')
             
     Returns:
-        出力ファイルのパス
+        (出力ファイルのパス, プログラム生成パターン情報の辞書) のタプル
+        パターン情報: {'heading_patterns': list[re.Pattern], 'html_tags': list[str]}
         
     Raises:
         ValueError: サポートされていないファイル形式
@@ -173,6 +312,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
     output_file = None
     converted_file = None
     converted_temp_dir = None
+    auto_patterns = {'heading_patterns': [], 'html_tags': []}
     
     try:
         if file_type == 'excel':
@@ -250,7 +390,13 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             )
             output_file = converter.convert()
         
-        return output_file
+        # コンバータからプログラム生成パターンを取得
+        if converter and hasattr(converter, 'get_auto_generated_patterns'):
+            auto_patterns['heading_patterns'] = converter.get_auto_generated_patterns()
+        if converter and hasattr(converter, 'get_auto_generated_html_tags'):
+            auto_patterns['html_tags'] = converter.get_auto_generated_html_tags()
+
+        return output_file, auto_patterns
         
     finally:
         # PowerPointの一時ファイルクリーンアップ
@@ -354,6 +500,8 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
 
     results = {'success': [], 'failed': []}
 
+    from utils import is_text_only
+
     for idx, fpath in enumerate(target_files, 1):
         rel = Path(fpath).relative_to(folder)
         # 出力ディレクトリ: base_output / 元の相対パスのディレクトリ
@@ -361,11 +509,14 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
 
         print(f"\n[{idx}/{total}] {rel}")
         try:
-            output_file = convert_office_to_markdown(
+            output_file, auto_patterns = convert_office_to_markdown(
                 fpath,
                 output_dir=file_output_dir,
                 **kwargs
             )
+            # テキストモード: .txtファイルも追加出力（.mdはそのまま）
+            if is_text_only() and output_file and output_file.endswith('.md'):
+                convert_md_to_text(output_file, auto_patterns=auto_patterns)
             results['success'].append({'file': str(rel), 'output': output_file})
         except Exception as e:
             print(f"[ERROR] 変換失敗: {rel} - {e}")
@@ -418,6 +569,8 @@ def main():
                        help='[PDF専用] tessdataディレクトリを指定（tessdata_best使用時）')
     parser.add_argument('--docling', action='store_true',
                        help='[PDF専用] doclingによる表検出を有効にする')
+    parser.add_argument('--text', action='store_true',
+                       help='テキスト抽出モード（画像リンクを除去し、.txtも出力）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力し、debug_workbooks/pdfs/diagnosticsフォルダを保存')
 
@@ -425,8 +578,13 @@ def main():
 
     set_verbose(args.verbose)
 
+    # テキストモードの設定
+    from utils import set_text_only, is_libreoffice_available, warn_libreoffice_not_available
+    if args.text:
+        set_text_only(True)
+        print("[INFO] テキストモード: .mdと.txtの両方を出力します")
+
     # LibreOfficeの利用可否をチェックし、利用できない場合は警告を表示
-    from utils import is_libreoffice_available, warn_libreoffice_not_available
     if not is_libreoffice_available():
         warn_libreoffice_not_available()
 
@@ -472,15 +630,22 @@ def main():
     else:
         # 単一ファイル変換
         try:
-            output_file = convert_office_to_markdown(
+            output_file, auto_patterns = convert_office_to_markdown(
                 args.file,
                 output_dir=args.output_dir,
                 **common_kwargs
             )
 
+            # テキストモード: .txtファイルも追加出力（.mdはそのまま）
+            txt_file = None
+            if args.text and output_file and output_file.endswith('.md'):
+                txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns)
+
             print("\n" + "=" * 50)
             print("変換完了!")
             print(f"出力ファイル: {output_file}")
+            if txt_file:
+                print(f"テキストファイル: {txt_file}")
 
             # 画像ディレクトリの情報を表示
             if args.output_dir:
