@@ -613,8 +613,8 @@ class JtdToMarkdownConverter:
                     md.append("")
                     continue
 
-                # 通常テキスト
-                md.append(stripped)
+                # 通常テキスト（末尾にスペース2つでMarkdown改行）
+                md.append(stripped + "  ")
 
         # 末尾の空行を整理
         while md and md[-1] == "":
