@@ -629,50 +629,50 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
             print("[WARNING] GPU未検出。sarashina OCRをCPUで実行します（低速）")
 
         try:
-            print(f"[INFO] sarashina OCRモデルを読み込み中: {model_name}")
-            # モデル読み込み中の警告を抑制
             import os
+            import sys
+            import io
+            print(f"[INFO] sarashina OCRモデルを読み込み中: {model_name}")
+            # モデル読み込み中の警告・print出力を抑制
             prev_verbosity = os.environ.get("TRANSFORMERS_VERBOSITY")
             os.environ["TRANSFORMERS_VERBOSITY"] = "error"
             warnings.filterwarnings("ignore", category=UserWarning)
-            cls._shared_processor = AutoProcessor.from_pretrained(
-                model_name, trust_remote_code=True
-            )
-            if target_device == "mps":
-                # モデルのカスタムコードがtorch_dtypeを無視するため
-                # 読み込み後に.to(bfloat16)で全サブモジュールを統一
-                # （vision encoderとLLMのdtype不一致を回避、省メモリ）
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
-                    trust_remote_code=True,
-                    attn_implementation="sdpa",
+            _orig_stdout = sys.stdout
+            _orig_stderr = sys.stderr
+            sys.stdout = io.StringIO()
+            sys.stderr = io.StringIO()
+            try:
+                cls._shared_processor = AutoProcessor.from_pretrained(
+                    model_name, trust_remote_code=True
                 )
-                cls._shared_model = model.to(
-                    dtype=torch.bfloat16, device=target_device
-                )
-            else:
-                cls._shared_model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
-                    device_map=target_device,
-                    torch_dtype=dtype,
-                    trust_remote_code=True,
-                    attn_implementation="sdpa",
-                )
-            # 警告抑制を解除
-            if prev_verbosity is None:
-                os.environ.pop("TRANSFORMERS_VERBOSITY", None)
-            else:
-                os.environ["TRANSFORMERS_VERBOSITY"] = prev_verbosity
-            warnings.resetwarnings()
+                if target_device == "mps":
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_name,
+                        trust_remote_code=True,
+                        attn_implementation="sdpa",
+                    )
+                    cls._shared_model = model.to(
+                        dtype=torch.bfloat16, device=target_device
+                    )
+                else:
+                    cls._shared_model = AutoModelForCausalLM.from_pretrained(
+                        model_name,
+                        device_map=target_device,
+                        torch_dtype=dtype,
+                        trust_remote_code=True,
+                        attn_implementation="sdpa",
+                    )
+            finally:
+                sys.stdout = _orig_stdout
+                sys.stderr = _orig_stderr
+                if prev_verbosity is None:
+                    os.environ.pop("TRANSFORMERS_VERBOSITY", None)
+                else:
+                    os.environ["TRANSFORMERS_VERBOSITY"] = prev_verbosity
+                warnings.resetwarnings()
             print("[INFO] sarashina OCRモデルの読み込み完了")
             return True
         except Exception as e:
-            # 警告抑制を解除
-            if prev_verbosity is None:
-                os.environ.pop("TRANSFORMERS_VERBOSITY", None)
-            else:
-                os.environ["TRANSFORMERS_VERBOSITY"] = prev_verbosity
-            warnings.resetwarnings()
             print(f"[WARNING] sarashina OCRモデルの読み込みに失敗: {e}")
             cls._shared_model = None
             cls._shared_processor = None
