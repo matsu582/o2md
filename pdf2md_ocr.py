@@ -621,7 +621,7 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
         try:
             print(f"[INFO] sarashina OCRモデルを読み込み中: {model_name}")
             cls._shared_processor = AutoProcessor.from_pretrained(
-                model_name, trust_remote_code=True
+                model_name, trust_remote_code=True, use_fast=False
             )
             if target_device == "mps":
                 # モデルのカスタムコードがtorch_dtypeを無視するため
