@@ -129,7 +129,7 @@ class ImageToMarkdownConverter:
         if not is_text_only():
             dest_image_path = os.path.join(self.images_dir, image_filename)
             shutil.copy2(self.file_path, dest_image_path)
-            debug_logger.info(f"画像をコピー: {dest_image_path}")
+            logger.info(f"画像をコピー: {dest_image_path}")
 
         # Markdown生成
         md_lines = self._build_markdown(image_filename, ocr_text)

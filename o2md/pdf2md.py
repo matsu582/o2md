@@ -18,6 +18,9 @@ import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Set
 
+# PyMuPDFのレイアウト推奨メッセージを抑制
+os.environ.setdefault("PYMUPDF_SUGGEST_LAYOUT_ANALYZER", "0")
+
 from o2md.utils import get_libreoffice_path
 
 try:

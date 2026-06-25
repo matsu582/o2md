@@ -1200,7 +1200,7 @@ class PowerPointToMarkdownConverter:
         """
         if not is_libreoffice_installed():
             logger.error("LibreOfficeが見つかりません。.pptファイルの変換にはLibreOfficeが必要です。")
-            print("  .pptxファイルであればLibreOfficeなしで変換できます。")
+            logger.error("  .pptxファイルであればLibreOfficeなしで変換できます。")
             return None
         try:
             # 一時ディレクトリを作成

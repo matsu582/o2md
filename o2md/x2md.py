@@ -1836,7 +1836,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                     for row, _, kind, payload in events_emit:
                         try:
                             if kind == 'text':
-                                print(f"  [LOG] text @{row}: {payload}")
+                                logger.debug(f"  [LOG] text @{row}: {payload}")
                             elif kind == 'table':
                                 # payloadは(table_data, src_rows, meta)の可能性
                                 tdata = None
@@ -1853,14 +1853,14 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                 except Exception:
                                     title = None
                                 if title:
-                                    print(f"  [LOG] table @{row} title: {title} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
+                                    logger.debug(f"  [LOG] table @{row} title: {title} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
                                 else:
-                                    print(f"  [LOG] table @{row} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
+                                    logger.debug(f"  [LOG] table @{row} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
                             else:  # 画像
-                                print(f"  [LOG] image @{row}: {payload}")
+                                logger.debug(f"  [LOG] image @{row}: {payload}")
                         except (ValueError, TypeError):
                             # 診断パスでは堅牢に; 例外を発生させない
-                            print(f"  [LOG] event @{row} kind={kind} (payload unstable)")
+                            logger.debug(f"  [LOG] event @{row} kind={kind} (payload unstable)")
                 except (ValueError, TypeError) as e:
                     logger.debug(f"[DEBUG] 型変換エラー（無視）: {e}")
 
@@ -2824,7 +2824,7 @@ def convert_xls_to_xlsx(xls_file_path: str) -> Optional[str]:
     """XLSファイルをXLSXに変換"""
     if not is_libreoffice_installed():
         logger.error("LibreOfficeが見つかりません。.xlsファイルの変換にはLibreOfficeが必要です。")
-        print("  .xlsxファイルであればLibreOfficeなしで変換できます。")
+        logger.error("  .xlsxファイルであればLibreOfficeなしで変換できます。")
         return None
     
     logger.info(f"XLSファイルをXLSXに変換中: {xls_file_path}")

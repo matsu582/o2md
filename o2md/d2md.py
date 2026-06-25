@@ -2061,7 +2061,7 @@ class WordToMarkdownConverter:
             # pic（通常の画像）がある段落では、段落グループ化をスキップ
             # 通常の画像処理ロジックに任せる
             if has_picture:
-                debug_logger.info("段落内にpic（通常の画像）があるため、段落グループ化をスキップ")
+                logger.info("段落内にpic（通常の画像）があるため、段落グループ化をスキップ")
                 return False
             
             # wspのみの段落では、すべてのdrawingを1つの画像にまとめる
@@ -2094,7 +2094,7 @@ class WordToMarkdownConverter:
     def _process_shape_as_vector(self, shape_element, drawing_element):
         """個別のWord図形をベクター画像として処理"""
         try:
-            debug_logger.info("個別図形をベクター画像として処理中...")
+            logger.info("個別図形をベクター画像として処理中...")
             
             # 一時的なWord文書を作成して図形のみを含める
             temp_doc_path = self._create_canvas_document(shape_element, drawing_element)
@@ -2133,7 +2133,7 @@ class WordToMarkdownConverter:
                 shape_texts = self._extract_shape_texts_from_drawing(drawing_element)
                 self._output_shape_texts_as_details(shape_texts)
                 
-                debug_logger.info(f"個別図形を処理: {image_filename}")
+                logger.info(f"個別図形を処理: {image_filename}")
                 
                 # 一時ファイルを削除
                 os.unlink(temp_doc_path)
@@ -2156,7 +2156,7 @@ class WordToMarkdownConverter:
         同じ段落内の複数のdrawing要素を1つの画像にまとめる
         """
         try:
-            debug_logger.info(f"{len(drawing_elements)}個の図形を1つの画像にまとめて処理中...")
+            logger.info(f"{len(drawing_elements)}個の図形を1つの画像にまとめて処理中...")
             
             # 一時的なWord文書を作成して複数の図形を含める
             temp_doc_path = self._create_canvas_document(None, drawing_elements)
@@ -2195,7 +2195,7 @@ class WordToMarkdownConverter:
                 shape_texts = self._extract_shape_texts_from_drawing(drawing_elements)
                 self._output_shape_texts_as_details(shape_texts)
                 
-                debug_logger.info(f"図形クラスターを処理: {image_filename}")
+                logger.info(f"図形クラスターを処理: {image_filename}")
                 
                 # 一時ファイルを削除
                 os.unlink(temp_doc_path)
@@ -3233,7 +3233,7 @@ def convert_doc_to_docx(doc_file_path: str) -> str:
     
     if not is_libreoffice_installed():
         logger.error("LibreOfficeが見つかりません。.docファイルの変換にはLibreOfficeが必要です。")
-        print("  .docxファイルであればLibreOfficeなしで変換できます。")
+        logger.error("  .docxファイルであればLibreOfficeなしで変換できます。")
         return None
     
     logger.info(f"DOCファイルをDOCXに変換中: {doc_file_path}")
@@ -3322,7 +3322,7 @@ def main():
     converted_file = None
     
     if args.word_file.endswith('.doc'):
-        print("DOCファイルが指定されました。DOCXに変換します...")
+        logger.info("DOCファイルが指定されました。DOCXに変換します...")
         converted_file = convert_doc_to_docx(args.word_file)
         if converted_file is None:
             print("DOC→DOCX変換に失敗しました。")
@@ -3367,13 +3367,13 @@ def main():
                 
                 if temp_dir.exists() and temp_dir.name.startswith('word2md_doc_conversion_'):
                     shutil.rmtree(temp_dir)
-                    print(f"一時ディレクトリを削除: {temp_dir}")
+                    logger.debug(f"一時ディレクトリを削除: {temp_dir}")
                 elif os.path.exists(converted_file):
                     os.remove(converted_file)
-                    print(f"一時ファイルを削除: {converted_file}")
+                    logger.debug(f"一時ファイルを削除: {converted_file}")
                     
             except Exception as cleanup_error:
-                print(f"一時ファイル削除に失敗: {cleanup_error}")
+                logger.warning(f"一時ファイル削除に失敗: {cleanup_error}")
 
 
 if __name__ == "__main__":
