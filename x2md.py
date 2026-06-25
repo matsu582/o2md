@@ -258,6 +258,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             output_file = os.path.join(self.output_dir, f"{self.base_name}.txt")
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(text_content)
+            # テキストモード時は画像ディレクトリを削除
+            self._cleanup_images_dir()
             print(f"[SUCCESS] 変換完了: {output_file}")
             return output_file
 
@@ -275,6 +277,12 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             'html_tags': self.get_auto_generated_html_tags(),
             'line_patterns': [],
         }
+
+    def _cleanup_images_dir(self):
+        """テキストモード時に画像ディレクトリを削除する"""
+        import shutil
+        if os.path.exists(self.images_dir):
+            shutil.rmtree(self.images_dir)
 
     def _mark_image_emitted(self, img_name: str):
         """Mark an image as emitted only during the canonical emission pass."""
@@ -2919,7 +2927,8 @@ def main():
 
         debug_print("\n変換完了!")
         debug_print(f"出力ファイル: {output_file}")
-        debug_print(f"画像フォルダ: {converter.images_dir}")
+        if os.path.exists(converter.images_dir) and os.listdir(converter.images_dir):
+            debug_print(f"画像フォルダ: {converter.images_dir}")
         
     except Exception as e:
         debug_print(f"変換エラー: {e}")

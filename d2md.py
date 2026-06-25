@@ -190,6 +190,8 @@ class WordToMarkdownConverter:
             output_file = os.path.join(self.output_dir, f"{self.base_name}.txt")
             with open(output_file, "w", encoding="utf-8") as f:
                 f.write(text_content)
+            # テキストモード時は画像ディレクトリを削除
+            self._cleanup_images_dir()
             print(f"[SUCCESS] 変換完了: {output_file}")
             return output_file
 
@@ -209,6 +211,12 @@ class WordToMarkdownConverter:
             'html_tags': self.get_auto_generated_html_tags(),
             'line_patterns': [],
         }
+
+    def _cleanup_images_dir(self):
+        """テキストモード時に画像ディレクトリを削除する"""
+        import shutil
+        if os.path.exists(self.images_dir):
+            shutil.rmtree(self.images_dir)
     
     def _process_document_charts(self):
         """Word文書内のチャートデータを抽出してMarkdownテーブルとして出力する
@@ -3332,7 +3340,8 @@ def main():
 
         print("\n変換完了!")
         print(f"出力ファイル: {output_file}")
-        print(f"画像フォルダ: {converter.images_dir}")
+        if os.path.exists(converter.images_dir) and os.listdir(converter.images_dir):
+            print(f"画像フォルダ: {converter.images_dir}")
         if args.use_heading_text:
             print("見出しテキストリンクモード: 有効")
         

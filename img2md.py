@@ -113,14 +113,19 @@ class ImageToMarkdownConverter:
         if img is None:
             raise ValueError(f"画像ファイルの読み込みに失敗しました: {self.file_path}")
 
-        # 画像を出力ディレクトリにコピー
-        image_filename = f"{self.base_name}{self.file_ext}"
-        dest_image_path = os.path.join(self.images_dir, image_filename)
-        shutil.copy2(self.file_path, dest_image_path)
-        debug_print(f"[INFO] 画像をコピー: {dest_image_path}")
-
         # OCRでテキスト抽出
         ocr_text = self._extract_text_with_ocr(img)
+
+        # 画像を出力ディレクトリにコピー（テキストモード時はスキップ）
+        image_filename = f"{self.base_name}{self.file_ext}"
+        if not is_text_only():
+            dest_image_path = os.path.join(self.images_dir, image_filename)
+            shutil.copy2(self.file_path, dest_image_path)
+            debug_print(f"[INFO] 画像をコピー: {dest_image_path}")
+        else:
+            # テキストモード時はimagesディレクトリも不要なので削除
+            if os.path.exists(self.images_dir) and not os.listdir(self.images_dir):
+                os.rmdir(self.images_dir)
 
         # Markdown生成
         md_lines = self._build_markdown(image_filename, ocr_text)
@@ -330,7 +335,8 @@ def main():
 
     print(f"\n変換完了!")
     print(f"出力ファイル: {output_file}")
-    print(f"画像フォルダ: {converter.images_dir}")
+    if os.path.exists(converter.images_dir) and os.listdir(converter.images_dir):
+        print(f"画像フォルダ: {converter.images_dir}")
 
 
 if __name__ == "__main__":
