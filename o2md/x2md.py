@@ -18,6 +18,9 @@ import sys
 import tempfile
 import subprocess
 import shutil
+import warnings
+
+warnings.filterwarnings("ignore", message="DrawingML support is incomplete", category=UserWarning)
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any, Set
 import io
