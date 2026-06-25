@@ -51,6 +51,7 @@ sarashina = [
 ]
 docling = [
     "docling>=2.67.0",
+    "rapidocr>=3.8; platform_machine == 'arm64' and sys_platform == 'darwin'",
 ]
 dev = [
     "pytest>=7.4.0",
