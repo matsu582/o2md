@@ -122,10 +122,6 @@ class ImageToMarkdownConverter:
             dest_image_path = os.path.join(self.images_dir, image_filename)
             shutil.copy2(self.file_path, dest_image_path)
             debug_print(f"[INFO] 画像をコピー: {dest_image_path}")
-        else:
-            # テキストモード時はimagesディレクトリも不要なので削除
-            if os.path.exists(self.images_dir) and not os.listdir(self.images_dir):
-                os.rmdir(self.images_dir)
 
         # Markdown生成
         md_lines = self._build_markdown(image_filename, ocr_text)
@@ -141,6 +137,8 @@ class ImageToMarkdownConverter:
             )
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(text_content)
+            # テキストモード時は画像ディレクトリを削除
+            self._cleanup_images_dir()
             print(f"[SUCCESS] 変換完了: {output_path}")
             return output_path
 
@@ -161,6 +159,11 @@ class ImageToMarkdownConverter:
             'html_tags': [],
             'line_patterns': [],
         }
+
+    def _cleanup_images_dir(self):
+        """テキストモード時に画像ディレクトリを削除する"""
+        if os.path.exists(self.images_dir):
+            shutil.rmtree(self.images_dir)
 
     def _load_image(self) -> Optional[np.ndarray]:
         """画像ファイルを読み込む
