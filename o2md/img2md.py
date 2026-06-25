@@ -95,9 +95,7 @@ class ImageToMarkdownConverter:
         else:
             self.output_dir = os.path.join(os.getcwd(), "output")
 
-        self.images_dir = os.path.join(self.output_dir, "images")
         os.makedirs(self.output_dir, exist_ok=True)
-        os.makedirs(self.images_dir, exist_ok=True)
 
     def get_auto_generated_patterns(self) -> list:
         """このコンバータが自動付与する見出しの正規表現パターンを返す"""
@@ -124,15 +122,9 @@ class ImageToMarkdownConverter:
         # OCRでテキスト抽出
         ocr_text = self._extract_text_with_ocr(img)
 
-        # 画像を出力ディレクトリにコピー（テキストモード時はスキップ）
-        image_filename = f"{self.base_name}{self.file_ext}"
-        if not is_text_only():
-            dest_image_path = os.path.join(self.images_dir, image_filename)
-            shutil.copy2(self.file_path, dest_image_path)
-            logger.info(f"画像をコピー: {dest_image_path}")
-
-        # Markdown生成
-        md_lines = self._build_markdown(image_filename, ocr_text)
+        # Markdown生成（元画像への相対パスを使用）
+        image_rel_path = os.path.relpath(self.file_path, self.output_dir)
+        md_lines = self._build_markdown(image_rel_path, ocr_text)
         md_content = '\n'.join(md_lines)
 
         # テキストモード: 直接.txtを出力（.mdは生成しない）
@@ -145,8 +137,6 @@ class ImageToMarkdownConverter:
             )
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(text_content)
-            # テキストモード時は画像ディレクトリを削除
-            self._cleanup_images_dir()
             logger.info(f"変換完了: {output_path}")
             return output_path
 
@@ -167,11 +157,6 @@ class ImageToMarkdownConverter:
             'html_tags': [],
             'line_patterns': [],
         }
-
-    def _cleanup_images_dir(self):
-        """テキストモード時に画像ディレクトリを削除する"""
-        if os.path.exists(self.images_dir):
-            shutil.rmtree(self.images_dir)
 
     def _load_image(self) -> Optional[np.ndarray]:
         """画像ファイルを読み込む
@@ -271,7 +256,7 @@ class ImageToMarkdownConverter:
         md = []
         md.append(f"# {self.base_name}")
         md.append("")
-        md.append(f"![{self.base_name}](images/{image_filename})")
+        md.append(f"![{self.base_name}]({image_filename})")
         md.append("")
 
         if ocr_text:
@@ -346,8 +331,6 @@ def main():
 
     print(f"\n変換完了!")
     print(f"出力ファイル: {output_file}")
-    if os.path.exists(converter.images_dir) and os.listdir(converter.images_dir):
-        print(f"画像フォルダ: {converter.images_dir}")
 
 
 if __name__ == "__main__":

@@ -130,15 +130,12 @@ class ComicTextDetector:
         model_dir.mkdir(parents=True, exist_ok=True)
         
         logger.info(f"テキスト検出モデルをダウンロード中: {MODEL_URL}")
-        logger.info(f"テキスト検出モデルをダウンロード中...")
         
         try:
             urllib.request.urlretrieve(MODEL_URL, self.model_path)
             logger.info(f"モデルのダウンロード完了: {self.model_path}")
-            logger.info(f"モデルのダウンロード完了")
             return True
         except Exception as e:
-            logger.warning(f"モデルのダウンロードに失敗: {e}")
             logger.warning(f"モデルのダウンロードに失敗: {e}")
             return False
     

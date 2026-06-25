@@ -372,7 +372,8 @@ This ensures callouts, colored rectangles, and other decorative elements are pro
 - Text extraction accuracy may decrease for complex PDF layouts
 - [tessdata_best](https://github.com/tesseract-ocr/tessdata_best) requires separate download (`--tessdata-dir` option)
 - [docling](https://github.com/docling-project/docling) table detection requires additional installation
-  - Install with `uv sync --extra docling` (`rapidocr-torch` is auto-installed on macOS ARM64)
+  - Install with `uv sync --extra docling`
+  - macOS ARM64 requires additional manual install: `uv pip install rapidocr-torch`
   - Processing time: ~7-15 seconds per page (CPU only)
 - [manga-ocr](https://github.com/kha-white/manga-ocr) requires additional installation
   - Install with `uv sync --extra manga-ocr`
