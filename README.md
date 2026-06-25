@@ -11,6 +11,7 @@ docling、markitdown との機能比較は [o2md_comparison.md](o2md_comparison.
 ## 概要
 
 o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）、PDF、一太郎文書（.jtd/.jtt）、および画像ファイル（JPEG/PNG/GIF/BMP/TIFF/WebP）を**それっぽい**Markdown形式に変換するPythonツールです。ファイルの種類を自動判定し、適切な変換エンジンを使用して処理します。
+画像ファイルや画像ベースのPDF（スキャン文書等）は、OCR（Tesseract/manga-ocr/sarashina2.2-ocr）によりテキスト抽出を行います。
 古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換は**LibreOffice**に依存しています。LibreOfficeがない環境でもテキストのみの変換は正常に動作します。
 
 ### 主な特徴
