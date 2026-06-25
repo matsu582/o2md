@@ -709,14 +709,15 @@ def main():
             print("変換完了!")
             print(f"出力ファイル: {output_file}")
 
-            # 画像ディレクトリの情報を表示
-            if args.output_dir:
-                images_dir = os.path.join(args.output_dir, "images")
-            else:
-                images_dir = os.path.join(os.getcwd(), "output", "images")
+            # 画像ディレクトリの情報を表示（画像OCR変換時は除外）
+            if detect_file_type(args.file) != 'image':
+                if args.output_dir:
+                    images_dir = os.path.join(args.output_dir, "images")
+                else:
+                    images_dir = os.path.join(os.getcwd(), "output", "images")
 
-            if os.path.exists(images_dir) and os.listdir(images_dir):
-                print(f"画像フォルダ: {images_dir}")
+                if os.path.exists(images_dir) and os.listdir(images_dir):
+                    print(f"画像フォルダ: {images_dir}")
 
             if args.use_heading_text:
                 print("見出しテキストリンクモード: 有効")
