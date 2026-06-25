@@ -556,8 +556,9 @@ class JtdToMarkdownConverter:
         """変換メイン処理
 
         Returns:
-            出力Markdownファイルのパス
+            出力ファイルのパス（.mdまたは.txt）
         """
+        from utils import is_text_only
         print(f"[INFO] 一太郎文書変換開始: {self.file_path}")
 
         # 構造化コンテンツ抽出（テーブル対応）
@@ -565,21 +566,45 @@ class JtdToMarkdownConverter:
 
         # Markdown生成
         md_lines = self._build_markdown(blocks)
-
-        # ファイル出力
-        output_path = os.path.join(
-            self.output_dir, f"{self.base_name}.md"
-        )
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(md_lines))
+        md_content = '\n'.join(md_lines)
 
         total_lines = sum(
             len(b.get('lines', b.get('markdown', [])))
             for b in blocks
         )
+
+        # テキストモード: 直接.txtを出力（.mdは生成しない）
+        if is_text_only():
+            from o2md import strip_markdown
+            auto_patterns = self._get_auto_patterns()
+            text_content = strip_markdown(md_content, auto_patterns=auto_patterns)
+            output_path = os.path.join(
+                self.output_dir, f"{self.base_name}.txt"
+            )
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(text_content)
+            print(f"[INFO] 変換完了: {output_path}")
+            print(f"[INFO] 抽出行数: {total_lines}")
+            return output_path
+
+        # 通常モード: .md出力
+        output_path = os.path.join(
+            self.output_dir, f"{self.base_name}.md"
+        )
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(md_content)
+
         print(f"[INFO] 変換完了: {output_path}")
         print(f"[INFO] 抽出行数: {total_lines}")
         return output_path
+
+    def _get_auto_patterns(self) -> dict:
+        """strip_markdownに渡すパターン情報を返す"""
+        return {
+            'heading_patterns': self.get_auto_generated_patterns(),
+            'html_tags': [],
+            'line_patterns': self.get_auto_generated_line_patterns(),
+        }
 
     def _build_markdown(self, blocks: list[dict]) -> list[str]:
         """構造化コンテンツからMarkdown形式に変換する
@@ -751,22 +776,15 @@ def main():
         args.file,
         output_dir=args.output_dir,
     )
+    # テキストモード設定
+    if args.text:
+        from utils import set_text_only
+        set_text_only(True)
+
     output_file = converter.convert()
 
-    txt_file = None
-    if args.text and output_file and output_file.endswith('.md'):
-        from o2md import convert_md_to_text
-        auto_patterns = {'heading_patterns': [], 'html_tags': [], 'line_patterns': []}
-        auto_patterns['heading_patterns'] = converter.get_auto_generated_patterns()
-        auto_patterns['line_patterns'] = converter.get_auto_generated_line_patterns()
-        txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns,
-                                      remove_md=True)
-
     print(f"\n変換完了!")
-    if txt_file:
-        print(f"出力ファイル: {txt_file}")
-    else:
-        print(f"出力ファイル: {output_file}")
+    print(f"出力ファイル: {output_file}")
 
 
 if __name__ == "__main__":

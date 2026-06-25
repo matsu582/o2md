@@ -152,8 +152,8 @@ def _is_auto_generated_heading(line: str, heading_patterns: list) -> bool:
     return any(p.match(heading_text) for p in heading_patterns)
 
 
-def _strip_markdown(text: str, auto_patterns: dict = None) -> str:
-    """Markdownの書式記号を除去してプレーンテキストに変換する
+def strip_markdown(text: str, auto_patterns: dict = None) -> str:
+    """Markdownの書式記号を除去してプレーンテキストに変換する（公開API）
 
     Args:
         text: Markdownテキスト
@@ -255,7 +255,7 @@ def convert_md_to_text(md_file_path: str, auto_patterns: dict = None,
     with open(md_file_path, 'r', encoding='utf-8') as f:
         md_content = f.read()
 
-    text_content = _strip_markdown(md_content, auto_patterns=auto_patterns)
+    text_content = strip_markdown(md_content, auto_patterns=auto_patterns)
 
     txt_file_path = md_file_path.rsplit('.md', 1)[0] + '.txt'
     with open(txt_file_path, 'w', encoding='utf-8') as f:
@@ -572,10 +572,7 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
                 output_dir=file_output_dir,
                 **kwargs
             )
-            # テキストモード: .txtのみ出力（.mdは削除）
-            if is_text_only() and output_file and output_file.endswith('.md'):
-                convert_md_to_text(output_file, auto_patterns=auto_patterns,
-                                   remove_md=True)
+            # テキストモードでは各コンバータが直接.txtを出力するため追加処理不要
             results['success'].append({'file': str(rel), 'output': output_file})
         except Exception as e:
             print(f"[ERROR] 変換失敗: {rel} - {e}")
@@ -696,18 +693,9 @@ def main():
                 **common_kwargs
             )
 
-            # テキストモード: .txtのみ出力（.mdは削除）
-            txt_file = None
-            if args.text and output_file and output_file.endswith('.md'):
-                txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns,
-                                              remove_md=True)
-
             print("\n" + "=" * 50)
             print("変換完了!")
-            if txt_file:
-                print(f"出力ファイル: {txt_file}")
-            else:
-                print(f"出力ファイル: {output_file}")
+            print(f"出力ファイル: {output_file}")
 
             # 画像ディレクトリの情報を表示
             if args.output_dir:
