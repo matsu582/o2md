@@ -575,7 +575,7 @@ class JtdToMarkdownConverter:
 
         # テキストモード: 直接.txtを出力（.mdは生成しない）
         if is_text_only():
-            from o2md.cli import strip_markdown
+            from o2md.o2md import strip_markdown
             auto_patterns = self._get_auto_patterns()
             text_content = strip_markdown(md_content, auto_patterns=auto_patterns)
             output_path = os.path.join(

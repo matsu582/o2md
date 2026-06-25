@@ -43,7 +43,7 @@ from o2md.jtd2md_table import (
     _is_table_section,
     _StreamEvent,
 )
-from o2md.cli import detect_file_type
+from o2md.o2md import detect_file_type
 
 
 class TestReadU16BE:
