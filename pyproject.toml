@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "o2md"
 version = "0.1.0"
-description = "Office/PDF/画像ファイルをMarkdownに変換するツール"
+description = "Convert Office documents, PDFs, and images to Markdown"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
