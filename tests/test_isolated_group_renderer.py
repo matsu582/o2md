@@ -18,8 +18,8 @@ from unittest.mock import Mock, MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from isolated_group_renderer import IsolatedGroupRenderer
-from utils import col_letter
+from o2md.isolated_group_renderer import IsolatedGroupRenderer
+from o2md.utils import col_letter
 
 
 class TestIsolatedGroupRendererInit:

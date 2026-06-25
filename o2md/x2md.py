@@ -23,12 +23,12 @@ import io
 import zipfile
 import xml.etree.ElementTree as ET
 
-from utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
-from isolated_group_renderer import IsolatedGroupRenderer
-from x2md_tables import _TablesMixin
-from x2md_graphics import _GraphicsMixin
-from x2md_charts import extract_charts_from_worksheet
-from chart_utils import chart_data_to_markdown
+from o2md.utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
+from o2md.isolated_group_renderer import IsolatedGroupRenderer
+from o2md.x2md_tables import _TablesMixin
+from o2md.x2md_graphics import _GraphicsMixin
+from o2md.x2md_charts import extract_charts_from_worksheet
+from o2md.chart_utils import chart_data_to_markdown
 
 try:
     import openpyxl
@@ -216,7 +216,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         - 各シートを順に変換
         - テキストモード時は.txtを直接出力、通常時は.md出力
         """
-        from utils import is_text_only
+        from o2md.utils import is_text_only
         print(f"[INFO] Excel文書変換開始: {self.excel_file}")
 
         # ドキュメントタイトルを先頭に追加
@@ -252,7 +252,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
 
         # テキストモード: 直接.txtを出力（.mdは生成しない）
         if is_text_only():
-            from o2md import strip_markdown
+            from o2md.cli import strip_markdown
             auto_patterns = self._get_auto_patterns()
             text_content = strip_markdown(content, auto_patterns=auto_patterns)
             output_file = os.path.join(self.output_dir, f"{self.base_name}.txt")
@@ -1070,7 +1070,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             str: PDFファイルのパス、失敗時はNone
         """
         try:
-            from utils import get_libreoffice_path, is_libreoffice_available
+            from o2md.utils import get_libreoffice_path, is_libreoffice_available
             
             if not is_libreoffice_available():
                 debug_print("[DEBUG] LibreOfficeが利用できないため、チャートのPDF変換をスキップします")
@@ -2920,7 +2920,7 @@ def main():
         )
         # テキストモード設定
         if args.text:
-            from utils import set_text_only
+            from o2md.utils import set_text_only
             set_text_only(True)
 
         output_file = converter.convert()

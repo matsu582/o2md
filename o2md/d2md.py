@@ -27,13 +27,13 @@ from typing import List, Dict, Tuple, Optional, Any
 from PIL import Image
 import io
 
-from utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed
-from d2md_charts import extract_charts_from_docx
-from chart_utils import chart_data_to_markdown
+from o2md.utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed
+from o2md.d2md_charts import extract_charts_from_docx
+from o2md.chart_utils import chart_data_to_markdown
 
 # 数式変換モジュール (オプション)
 try:
-    from omml_converter.pre_process import pre_process_docx, has_math_content
+    from o2md.omml_converter.pre_process import pre_process_docx, has_math_content
     MATH_SUPPORT = True
 except ImportError:
     MATH_SUPPORT = False
@@ -160,7 +160,7 @@ class WordToMarkdownConverter:
         Returns:
             出力ファイルのパス（.mdまたは.txt）
         """
-        from utils import is_text_only
+        from o2md.utils import is_text_only
         print(f"[INFO] Word文書変換開始: {self.word_file}")
         
         # 1. 見出し構造を解析（参照リンク生成のため）
@@ -184,7 +184,7 @@ class WordToMarkdownConverter:
 
         # テキストモード: 直接.txtを出力（.mdは生成しない）
         if is_text_only():
-            from o2md import strip_markdown
+            from o2md.cli import strip_markdown
             auto_patterns = self._get_auto_patterns()
             text_content = strip_markdown(markdown_content, auto_patterns=auto_patterns)
             output_file = os.path.join(self.output_dir, f"{self.base_name}.txt")
@@ -1250,7 +1250,7 @@ class WordToMarkdownConverter:
             ChartDataオブジェクト、または抽出できない場合はNone
         """
         try:
-            from d2md_charts import _parse_chart_xml, CHART_NS
+            from o2md.d2md_charts import _parse_chart_xml, CHART_NS
             
             if not isinstance(drawing_elements, (list, tuple)):
                 drawing_elements = [drawing_elements]
@@ -1321,7 +1321,7 @@ class WordToMarkdownConverter:
             ChartDataオブジェクト、または解析できない場合はNone
         """
         try:
-            from d2md_charts import _parse_chart_xml
+            from o2md.d2md_charts import _parse_chart_xml
             
             with zipfile.ZipFile(self.word_file, 'r') as zf:
                 if chart_path not in zf.namelist():
@@ -3333,7 +3333,7 @@ def main():
         )
         # テキストモード設定
         if args.text:
-            from utils import set_text_only
+            from o2md.utils import set_text_only
             set_text_only(True)
 
         output_file = converter.convert()

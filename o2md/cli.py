@@ -62,48 +62,48 @@ from pathlib import Path
 
 # 各変換クラスをインポート
 try:
-    from x2md import ExcelToMarkdownConverter, convert_xls_to_xlsx
-    import x2md
+    from o2md.x2md import ExcelToMarkdownConverter, convert_xls_to_xlsx
+    from o2md import x2md
 except ImportError as e:
     raise ImportError(
         "x2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
     ) from e
 
 try:
-    from d2md import WordToMarkdownConverter, convert_doc_to_docx
-    import d2md
+    from o2md.d2md import WordToMarkdownConverter, convert_doc_to_docx
+    from o2md import d2md
 except ImportError as e:
     raise ImportError(
         "d2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
     ) from e
 
 try:
-    from p2md import PowerPointToMarkdownConverter
-    import p2md
+    from o2md.p2md import PowerPointToMarkdownConverter
+    from o2md import p2md
 except ImportError as e:
     raise ImportError(
         "p2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
     ) from e
 
 try:
-    from pdf2md import PDFToMarkdownConverter
-    import pdf2md
+    from o2md.pdf2md import PDFToMarkdownConverter
+    from o2md import pdf2md
 except ImportError as e:
     raise ImportError(
         "pdf2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
     ) from e
 
 try:
-    from jtd2md import JtdToMarkdownConverter
-    import jtd2md
+    from o2md.jtd2md import JtdToMarkdownConverter
+    from o2md import jtd2md
 except ImportError as e:
     raise ImportError(
         "jtd2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: pip install olefile"
     ) from e
 
 try:
-    from img2md import ImageToMarkdownConverter
-    import img2md
+    from o2md.img2md import ImageToMarkdownConverter
+    from o2md import img2md
 except ImportError as e:
     raise ImportError(
         "img2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
@@ -558,7 +558,7 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
 
     results = {'success': [], 'failed': []}
 
-    from utils import is_text_only
+    from o2md.utils import is_text_only
 
     for idx, fpath in enumerate(target_files, 1):
         rel = Path(fpath).relative_to(folder)
@@ -636,7 +636,7 @@ def main():
     set_verbose(args.verbose)
 
     # テキストモードの設定
-    from utils import set_text_only, is_libreoffice_available, warn_libreoffice_not_available
+    from o2md.utils import set_text_only, is_libreoffice_available, warn_libreoffice_not_available
     if args.text:
         set_text_only(True)
         print("[INFO] テキストモード: .txtのみを出力します")

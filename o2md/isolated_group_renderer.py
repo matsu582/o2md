@@ -1,7 +1,7 @@
 
 # デバッグ出力用関数（x2md.pyから使用可能な場合はインポート、そうでない場合はフォールバック）
 try:
-    from x2md import debug_print, is_verbose
+    from o2md.x2md import debug_print, is_verbose
 except ImportError:
     _VERBOSE = False
     def debug_print(*args, **kwargs):
@@ -29,7 +29,7 @@ from typing import List, Dict, Tuple, Optional, Set
 from collections import deque
 import copy
 import hashlib
-from utils import get_libreoffice_path, is_libreoffice_available, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id
+from o2md.utils import get_libreoffice_path, is_libreoffice_available, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id
 
 
 class IsolatedGroupRenderer:

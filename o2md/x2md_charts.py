@@ -15,7 +15,7 @@ ChartDataオブジェクトに変換する。
 import re
 from typing import List, Optional, Any
 
-from chart_utils import ChartData, SeriesData
+from o2md.chart_utils import ChartData, SeriesData
 
 
 CHART_TYPE_MAP = {

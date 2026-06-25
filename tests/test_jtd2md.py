@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from jtd2md import (
+from o2md.jtd2md import (
     _read_u16be,
     _safe_chr,
     _find_content_start,
@@ -31,7 +31,7 @@ from jtd2md import (
     HEADER_MAGIC_CTEXT,
     HEADER_MAGIC_TEXT,
 )
-from jtd2md_table import (
+from o2md.jtd2md_table import (
     TableCell,
     parse_cell_block,
     scan_stream_events,
@@ -43,7 +43,7 @@ from jtd2md_table import (
     _is_table_section,
     _StreamEvent,
 )
-from o2md import detect_file_type
+from o2md.cli import detect_file_type
 
 
 class TestReadU16BE:

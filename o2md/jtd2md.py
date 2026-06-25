@@ -26,7 +26,7 @@ except ImportError:
     print("olefileライブラリが必要です: pip install olefile")
     sys.exit(1)
 
-from jtd2md_table import (
+from o2md.jtd2md_table import (
     scan_stream_events,
     extract_tables_from_events,
     table_to_markdown,
@@ -558,7 +558,7 @@ class JtdToMarkdownConverter:
         Returns:
             出力ファイルのパス（.mdまたは.txt）
         """
-        from utils import is_text_only
+        from o2md.utils import is_text_only
         print(f"[INFO] 一太郎文書変換開始: {self.file_path}")
 
         # 構造化コンテンツ抽出（テーブル対応）
@@ -575,7 +575,7 @@ class JtdToMarkdownConverter:
 
         # テキストモード: 直接.txtを出力（.mdは生成しない）
         if is_text_only():
-            from o2md import strip_markdown
+            from o2md.cli import strip_markdown
             auto_patterns = self._get_auto_patterns()
             text_content = strip_markdown(md_content, auto_patterns=auto_patterns)
             output_path = os.path.join(
@@ -778,7 +778,7 @@ def main():
     )
     # テキストモード設定
     if args.text:
-        from utils import set_text_only
+        from o2md.utils import set_text_only
         set_text_only(True)
 
     output_file = converter.convert()

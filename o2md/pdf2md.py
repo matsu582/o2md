@@ -17,7 +17,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Set
 
-from utils import get_libreoffice_path
+from o2md.utils import get_libreoffice_path
 
 try:
     import fitz
@@ -33,12 +33,12 @@ except ImportError as e:
         "Pillowライブラリが必要です: pip install pillow または uv sync を実行してください"
     ) from e
 # Mixinクラスのインポート
-from pdf2md_figures import _FiguresMixin
-from pdf2md_tables import _TablesMixin
-from pdf2md_text import _TextMixin
+from o2md.pdf2md_figures import _FiguresMixin
+from o2md.pdf2md_tables import _TablesMixin
+from o2md.pdf2md_text import _TextMixin
 
 # docling統合モジュール（オプショナル）
-from pdf2md_docling import is_docling_available, extract_slide_tables_with_docling
+from o2md.pdf2md_docling import is_docling_available, extract_slide_tables_with_docling
 
 # 設定
 LIBREOFFICE_PATH = get_libreoffice_path()
@@ -190,7 +190,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         Returns:
             出力ファイルのパス（.mdまたは.txt）
         """
-        from utils import is_text_only
+        from o2md.utils import is_text_only
         print(f"[INFO] PDF文書変換開始: {self.pdf_file}")
         
         # ドキュメントタイトルを先頭に追加
@@ -253,7 +253,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         # テキストモード: 直接.txtを出力（.mdは生成しない）
         if is_text_only():
-            from o2md import strip_markdown
+            from o2md.cli import strip_markdown
             auto_patterns = self._get_auto_patterns()
             text_content = strip_markdown(markdown_content, auto_patterns=auto_patterns)
             output_file = os.path.join(self.output_dir, f"{self.base_name}.txt")
@@ -2186,7 +2186,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 img_bgr = img_array
             
             # pdf2md_ocrモジュールを使用してテキスト抽出
-            from pdf2md_ocr import process_pdf_page_with_detection, set_verbose as ocr_set_verbose
+            from o2md.pdf2md_ocr import process_pdf_page_with_detection, set_verbose as ocr_set_verbose
             ocr_set_verbose(is_verbose())
             
             text = process_pdf_page_with_detection(
@@ -2284,7 +2284,7 @@ def main():
         )
         # テキストモード設定
         if args.text:
-            from utils import set_text_only
+            from o2md.utils import set_text_only
             set_text_only(True)
 
         output_file = converter.convert()

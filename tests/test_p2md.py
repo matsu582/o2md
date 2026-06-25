@@ -17,8 +17,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from p2md import PowerPointToMarkdownConverter
-from utils import get_libreoffice_path
+from o2md.p2md import PowerPointToMarkdownConverter
+from o2md.utils import get_libreoffice_path
 
 
 class TestPowerPointToMarkdownConverter:

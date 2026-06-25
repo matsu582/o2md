@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from x2md import ExcelToMarkdownConverter
+from o2md.x2md import ExcelToMarkdownConverter
 
 
 class TestExcelToMarkdownConverter:

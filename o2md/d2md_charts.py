@@ -18,7 +18,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from typing import List, Optional, Any
 
-from chart_utils import ChartData, SeriesData
+from o2md.chart_utils import ChartData, SeriesData
 
 
 CHART_NS = "http://schemas.openxmlformats.org/drawingml/2006/chart"
