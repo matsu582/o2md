@@ -101,6 +101,14 @@ except ImportError as e:
         "jtd2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: pip install olefile"
     ) from e
 
+try:
+    from img2md import ImageToMarkdownConverter
+    import img2md
+except ImportError as e:
+    raise ImportError(
+        "img2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
+    ) from e
+
 
 
 # グローバルverboseフラグ
@@ -115,6 +123,7 @@ def set_verbose(verbose: bool):
     p2md.set_verbose(verbose)
     pdf2md.set_verbose(verbose)
     jtd2md.set_verbose(verbose)
+    img2md.set_verbose(verbose)
 
 def is_verbose() -> bool:
     """verboseモードかどうかを返す"""
@@ -275,7 +284,7 @@ def detect_file_type(file_path: str) -> str:
         file_path: ファイルパス
         
     Returns:
-        'excel', 'word', 'powerpoint', 'pdf', 'unknown'のいずれか
+        'excel', 'word', 'powerpoint', 'pdf', 'ichitaro', 'image', 'unknown'のいずれか
     """
     file_path_lower = file_path.lower()
     
@@ -289,6 +298,8 @@ def detect_file_type(file_path: str) -> str:
         return 'pdf'
     elif file_path_lower.endswith(('.jtd', '.jtt')):
         return 'ichitaro'
+    elif file_path_lower.endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp')):
+        return 'image'
     else:
         return 'unknown'
 
@@ -320,7 +331,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
     if file_type == 'unknown':
         raise ValueError(
             f"サポートされていないファイル形式です: {file_path}\n"
-            "対応形式: .xlsx, .xls, .docx, .doc, .pptx, .ppt, .pdf, .jtd, .jtt"
+            "対応形式: .xlsx, .xls, .docx, .doc, .pptx, .ppt, .pdf, .jtd, .jtt, .jpg, .jpeg, .png, .gif, .bmp, .tiff, .tif, .webp"
         )
     
     print(f"[INFO] ファイルタイプを検出: {file_type}")
@@ -415,6 +426,18 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
                 output_dir=output_dir,
             )
             output_file = converter.convert()
+
+        elif file_type == 'image':
+            # 画像OCR変換
+            ocr_engine = kwargs.get('ocr_engine', 'tesseract')
+            tessdata_dir = kwargs.get('tessdata_dir', None)
+            converter = ImageToMarkdownConverter(
+                file_path,
+                output_dir=output_dir,
+                ocr_engine=ocr_engine,
+                tessdata_dir=tessdata_dir,
+            )
+            output_file = converter.convert()
         
         # コンバータからプログラム生成パターンを取得
         if converter and hasattr(converter, 'get_auto_generated_patterns'):
@@ -470,6 +493,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
 SUPPORTED_EXTENSIONS = (
     '.xlsx', '.xls', '.docx', '.doc', '.pptx', '.ppt', '.pdf',
     '.jtd', '.jtt',
+    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp',
 )
 
 
