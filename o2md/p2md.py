@@ -151,7 +151,7 @@ class PowerPointToMarkdownConverter:
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        logger.info(f"PowerPoint文書変換開始: {self.pptx_file}")
+        print(f"PowerPoint文書変換開始: {self.pptx_file}")
         
         # ドキュメント見出し
         self.markdown_lines.append(f"# {self.base_name}")
@@ -160,7 +160,7 @@ class PowerPointToMarkdownConverter:
         # 各スライドを変換
         for slide_idx, slide in enumerate(self.prs.slides, 1):
             self.slide_counter = slide_idx
-            logger.info(f"スライド {slide_idx}/{len(self.prs.slides)} を処理中...")
+            print(f"スライド {slide_idx}/{len(self.prs.slides)} を処理中...")
             
             try:
                 self._convert_slide(slide, slide_idx)

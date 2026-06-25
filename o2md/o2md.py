@@ -351,8 +351,8 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             "対応形式: .xlsx, .xls, .docx, .doc, .pptx, .ppt, .pdf, .jtd, .jtt, .jpg, .jpeg, .png, .gif, .bmp, .tiff, .tif, .webp"
         )
     
-    logger.info(f"ファイルタイプを検出: {file_type}")
-    logger.info(f"変換開始: {file_path}")
+    print(f"ファイルタイプを検出: {file_type}")
+    print(f"変換開始: {file_path}")
     
     converter = None
     output_file = None
@@ -564,8 +564,8 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
         return {'success': [], 'failed': []}
 
     total = len(target_files)
-    logger.info(f"フォルダ一括変換開始: {folder}")
-    logger.info(f"対象ファイル数: {total}")
+    print(f"フォルダ一括変換開始: {folder}")
+    print(f"対象ファイル数: {total}")
     print("=" * 50)
 
     results = {'success': [], 'failed': []}
@@ -651,7 +651,7 @@ def main():
     from o2md.utils import set_text_only, is_libreoffice_available, warn_libreoffice_not_available
     if args.text:
         set_text_only(True)
-        logger.info("テキストモード: .txtのみを出力します")
+        print("テキストモード: .txtのみを出力します")
 
     # LibreOfficeの利用可否をチェックし、利用できない場合は警告を表示
     if not is_libreoffice_available():

@@ -224,7 +224,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         - テキストモード時は.txtを直接出力、通常時は.md出力
         """
         from o2md.utils import is_text_only
-        logger.info(f"Excel文書変換開始: {self.excel_file}")
+        print(f"Excel文書変換開始: {self.excel_file}")
 
         # ドキュメントタイトルを先頭に追加
         self.markdown_lines.append(f"# {self.base_name}")

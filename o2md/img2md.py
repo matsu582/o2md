@@ -112,7 +112,7 @@ class ImageToMarkdownConverter:
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        logger.info(f"画像OCR変換開始: {self.file_path}")
+        print(f"画像OCR変換開始: {self.file_path}")
 
         # 画像を読み込み
         img = self._load_image()

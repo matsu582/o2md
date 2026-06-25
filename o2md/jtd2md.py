@@ -566,7 +566,7 @@ class JtdToMarkdownConverter:
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        logger.info(f"一太郎文書変換開始: {self.file_path}")
+        print(f"一太郎文書変換開始: {self.file_path}")
 
         # 構造化コンテンツ抽出（テーブル対応）
         blocks = extract_jtd_structured(self.file_path)

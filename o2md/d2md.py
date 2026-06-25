@@ -168,7 +168,7 @@ class WordToMarkdownConverter:
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        logger.info(f"Word文書変換開始: {self.word_file}")
+        print(f"Word文書変換開始: {self.word_file}")
         
         # 1. 見出し構造を解析（参照リンク生成のため）
         self._analyze_headings()

@@ -201,7 +201,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        logger.info(f"PDF文書変換開始: {self.pdf_file}")
+        print(f"PDF文書変換開始: {self.pdf_file}")
         
         # ドキュメントタイトルを先頭に追加
         self.markdown_lines.append(f"# {self.base_name}")
@@ -215,7 +215,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         try:
             total_pages = len(doc)
-            logger.info(f"総ページ数: {total_pages}")
+            print(f"総ページ数: {total_pages}")
             
             # スライド文書（PPT由来のPDFなど）かどうかを判定
             self._is_slide_document = self._detect_slide_document(doc)
@@ -245,7 +245,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 self._compute_doc_wide_header_footer(doc, header_footer_patterns)
             
             for page_num in range(total_pages):
-                logger.info(f"ページ {page_num + 1}/{total_pages} を処理中...")
+                print(f"ページ {page_num + 1}/{total_pages} を処理中...")
                 page = doc[page_num]
                 self._convert_page(page, page_num, header_footer_patterns)
         finally:
