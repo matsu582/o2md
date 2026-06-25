@@ -240,12 +240,14 @@ def _remove_image_links(text: str) -> str:
     return '\n'.join(result)
 
 
-def convert_md_to_text(md_file_path: str, auto_patterns: dict = None) -> str:
+def convert_md_to_text(md_file_path: str, auto_patterns: dict = None,
+                       remove_md: bool = False) -> str:
     """Markdownファイルをプレーンテキストに変換して.txtとして保存する
 
     Args:
         md_file_path: 変換元の.mdファイルパス
         auto_patterns: コンバータから取得したプログラム生成パターン情報
+        remove_md: Trueの場合、変換後に元の.mdファイルを削除する
 
     Returns:
         出力した.txtファイルのパス
@@ -258,6 +260,9 @@ def convert_md_to_text(md_file_path: str, auto_patterns: dict = None) -> str:
     txt_file_path = md_file_path.rsplit('.md', 1)[0] + '.txt'
     with open(txt_file_path, 'w', encoding='utf-8') as f:
         f.write(text_content)
+
+    if remove_md:
+        os.remove(md_file_path)
 
     return txt_file_path
 
@@ -567,9 +572,10 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
                 output_dir=file_output_dir,
                 **kwargs
             )
-            # テキストモード: .txtファイルも追加出力（.mdはそのまま）
+            # テキストモード: .txtのみ出力（.mdは削除）
             if is_text_only() and output_file and output_file.endswith('.md'):
-                convert_md_to_text(output_file, auto_patterns=auto_patterns)
+                convert_md_to_text(output_file, auto_patterns=auto_patterns,
+                                   remove_md=True)
             results['success'].append({'file': str(rel), 'output': output_file})
         except Exception as e:
             print(f"[ERROR] 変換失敗: {rel} - {e}")
@@ -624,7 +630,7 @@ def main():
     parser.add_argument('--docling', action='store_true',
                        help='[PDF専用] doclingによる表検出を有効にする')
     parser.add_argument('--text', action='store_true',
-                       help='テキスト抽出モード（画像リンクを除去し、.txtも出力）')
+                       help='テキスト抽出モード（.txtのみ出力、.mdは生成しない）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力し、debug_workbooks/pdfs/diagnosticsフォルダを保存')
 
@@ -636,7 +642,7 @@ def main():
     from utils import set_text_only, is_libreoffice_available, warn_libreoffice_not_available
     if args.text:
         set_text_only(True)
-        print("[INFO] テキストモード: .mdと.txtの両方を出力します")
+        print("[INFO] テキストモード: .txtのみを出力します")
 
     # LibreOfficeの利用可否をチェックし、利用できない場合は警告を表示
     if not is_libreoffice_available():
@@ -690,16 +696,18 @@ def main():
                 **common_kwargs
             )
 
-            # テキストモード: .txtファイルも追加出力（.mdはそのまま）
+            # テキストモード: .txtのみ出力（.mdは削除）
             txt_file = None
             if args.text and output_file and output_file.endswith('.md'):
-                txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns)
+                txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns,
+                                              remove_md=True)
 
             print("\n" + "=" * 50)
             print("変換完了!")
-            print(f"出力ファイル: {output_file}")
             if txt_file:
-                print(f"テキストファイル: {txt_file}")
+                print(f"出力ファイル: {txt_file}")
+            else:
+                print(f"出力ファイル: {output_file}")
 
             # 画像ディレクトリの情報を表示
             if args.output_dir:

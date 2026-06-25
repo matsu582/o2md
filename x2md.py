@@ -2899,13 +2899,15 @@ def main():
             auto_patterns = {'heading_patterns': [], 'html_tags': [], 'line_patterns': []}
             auto_patterns['heading_patterns'] = converter.get_auto_generated_patterns()
             auto_patterns['html_tags'] = converter.get_auto_generated_html_tags()
-            txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns)
+            txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns,
+                                          remove_md=True)
 
         debug_print("\n変換完了!")
-        debug_print(f"出力ファイル: {output_file}")
-        debug_print(f"画像フォルダ: {converter.images_dir}")
         if txt_file:
-            debug_print(f"テキストファイル: {txt_file}")
+            debug_print(f"出力ファイル: {txt_file}")
+        else:
+            debug_print(f"出力ファイル: {output_file}")
+        debug_print(f"画像フォルダ: {converter.images_dir}")
         
     except Exception as e:
         debug_print(f"変換エラー: {e}")

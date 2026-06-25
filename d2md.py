@@ -3305,13 +3305,15 @@ def main():
             auto_patterns = {'heading_patterns': [], 'html_tags': [], 'line_patterns': []}
             auto_patterns['heading_patterns'] = converter.get_auto_generated_patterns()
             auto_patterns['html_tags'] = converter.get_auto_generated_html_tags()
-            txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns)
+            txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns,
+                                          remove_md=True)
 
         print("\n変換完了!")
-        print(f"出力ファイル: {output_file}")
-        print(f"画像フォルダ: {converter.images_dir}")
         if txt_file:
-            print(f"テキストファイル: {txt_file}")
+            print(f"出力ファイル: {txt_file}")
+        else:
+            print(f"出力ファイル: {output_file}")
+        print(f"画像フォルダ: {converter.images_dir}")
         if args.use_heading_text:
             print("見出しテキストリンクモード: 有効")
         

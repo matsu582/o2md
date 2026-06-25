@@ -312,14 +312,16 @@ def main():
             converter.get_auto_generated_patterns()
         )
         txt_file = convert_md_to_text(
-            output_file, auto_patterns=auto_patterns
+            output_file, auto_patterns=auto_patterns,
+            remove_md=True
         )
 
     print(f"\n変換完了!")
-    print(f"出力ファイル: {output_file}")
-    print(f"画像フォルダ: {converter.images_dir}")
     if txt_file:
-        print(f"テキストファイル: {txt_file}")
+        print(f"出力ファイル: {txt_file}")
+    else:
+        print(f"出力ファイル: {output_file}")
+    print(f"画像フォルダ: {converter.images_dir}")
 
 
 if __name__ == "__main__":

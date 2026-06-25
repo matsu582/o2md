@@ -759,12 +759,14 @@ def main():
         auto_patterns = {'heading_patterns': [], 'html_tags': [], 'line_patterns': []}
         auto_patterns['heading_patterns'] = converter.get_auto_generated_patterns()
         auto_patterns['line_patterns'] = converter.get_auto_generated_line_patterns()
-        txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns)
+        txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns,
+                                      remove_md=True)
 
     print(f"\n変換完了!")
-    print(f"出力ファイル: {output_file}")
     if txt_file:
-        print(f"テキストファイル: {txt_file}")
+        print(f"出力ファイル: {txt_file}")
+    else:
+        print(f"出力ファイル: {output_file}")
 
 
 if __name__ == "__main__":
