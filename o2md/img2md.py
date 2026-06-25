@@ -18,6 +18,7 @@ OCRエンジン:
 pdf2md_ocrモジュールのOCRエンジンを再利用して画像からテキストを抽出する。
 """
 
+import logging
 import os
 import sys
 import shutil
@@ -35,6 +36,9 @@ IMAGE_EXTENSIONS = (
 )
 
 # グローバル変数
+logger = logging.getLogger(__name__)
+
+# グローバルverboseフラグ
 _VERBOSE = False
 
 
@@ -42,6 +46,10 @@ def set_verbose(verbose: bool):
     """デバッグ出力の有効/無効を設定"""
     global _VERBOSE
     _VERBOSE = verbose
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.WARNING,
+        format='[%(levelname)s] %(message)s',
+    )
 
 
 def is_verbose() -> bool:
@@ -106,7 +114,7 @@ class ImageToMarkdownConverter:
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        print(f"[INFO] 画像OCR変換開始: {self.file_path}")
+        logger.info(f"画像OCR変換開始: {self.file_path}")
 
         # 画像を読み込み
         img = self._load_image()
@@ -121,7 +129,7 @@ class ImageToMarkdownConverter:
         if not is_text_only():
             dest_image_path = os.path.join(self.images_dir, image_filename)
             shutil.copy2(self.file_path, dest_image_path)
-            debug_print(f"[INFO] 画像をコピー: {dest_image_path}")
+            debug_logger.info(f"画像をコピー: {dest_image_path}")
 
         # Markdown生成
         md_lines = self._build_markdown(image_filename, ocr_text)
@@ -139,7 +147,7 @@ class ImageToMarkdownConverter:
                 f.write(text_content)
             # テキストモード時は画像ディレクトリを削除
             self._cleanup_images_dir()
-            print(f"[SUCCESS] 変換完了: {output_path}")
+            logger.info(f"変換完了: {output_path}")
             return output_path
 
         # 通常モード: .md出力
@@ -149,7 +157,7 @@ class ImageToMarkdownConverter:
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(md_content)
 
-        print(f"[SUCCESS] 変換完了: {output_path}")
+        logger.info(f"変換完了: {output_path}")
         return output_path
 
     def _get_auto_patterns(self) -> dict:
@@ -176,14 +184,14 @@ class ImageToMarkdownConverter:
             buf = np.fromfile(self.file_path, dtype=np.uint8)
             img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
             if img is None:
-                print(f"[ERROR] 画像のデコードに失敗: {self.file_path}")
+                logger.error(f"画像のデコードに失敗: {self.file_path}")
                 return None
-            debug_print(
+            logger.debug(
                 f"[INFO] 画像読み込み完了: {img.shape[1]}x{img.shape[0]}"
             )
             return img
         except Exception as e:
-            print(f"[ERROR] 画像読み込みエラー: {e}")
+            logger.error(f"画像読み込みエラー: {e}")
             return None
 
     def _extract_text_with_ocr(self, img: np.ndarray) -> str:
@@ -208,19 +216,19 @@ class ImageToMarkdownConverter:
                 tessdata_dir=self.tessdata_dir,
             )
             if text:
-                debug_print(
+                logger.debug(
                     f"[INFO] OCRテキスト抽出完了: {len(text)}文字"
                 )
             else:
-                print("[WARNING] OCRでテキストが抽出されませんでした")
+                logger.warning("OCRでテキストが抽出されませんでした")
             return text.strip() if text else ""
 
         except ImportError as e:
-            print(f"[WARNING] pdf2md_ocrモジュールが利用できません: {e}")
+            logger.warning(f"pdf2md_ocrモジュールが利用できません: {e}")
             # フォールバック: 直接tesseractを呼び出し
             return self._ocr_fallback(img)
         except Exception as e:
-            print(f"[WARNING] OCR処理中にエラー: {e}")
+            logger.warning(f"OCR処理中にエラー: {e}")
             return self._ocr_fallback(img)
 
     def _ocr_fallback(self, img: np.ndarray) -> str:
@@ -242,10 +250,10 @@ class ImageToMarkdownConverter:
             )
             return text.strip() if text else ""
         except ImportError:
-            print("[ERROR] pytesseractがインストールされていません")
+            logger.error("pytesseractがインストールされていません")
             return ""
         except Exception as e:
-            print(f"[ERROR] フォールバックOCRエラー: {e}")
+            logger.error(f"フォールバックOCRエラー: {e}")
             return ""
 
     def _build_markdown(

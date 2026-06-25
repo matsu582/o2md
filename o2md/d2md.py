@@ -12,6 +12,7 @@ Word to Markdown Converter
 - 見出し参照のリンク対応
 """
 
+import logging
 import os
 import sys
 import re
@@ -66,6 +67,8 @@ except ImportError as e:
 LIBREOFFICE_PATH = get_libreoffice_path()
 
 
+logger = logging.getLogger(__name__)
+
 # グローバルverboseフラグ
 _VERBOSE = False
 
@@ -73,6 +76,10 @@ def set_verbose(verbose: bool):
     """verboseモードを設定"""
     global _VERBOSE
     _VERBOSE = verbose
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.WARNING,
+        format='[%(levelname)s] %(message)s',
+    )
 
 def is_verbose() -> bool:
     """verboseモードかどうかを返す"""
@@ -98,7 +105,7 @@ class WordToMarkdownConverter:
         
         # 数式前処理: OMML を LaTeX に変換
         if MATH_SUPPORT and has_math_content(word_file_path):
-            print("[INFO] 数式を検出しました。LaTeX 形式に変換します...")
+            logger.info("数式を検出しました。LaTeX 形式に変換します...")
             with open(word_file_path, 'rb') as f:
                 processed_docx = pre_process_docx(f)
             self.doc = Document(processed_docx)
@@ -137,10 +144,10 @@ class WordToMarkdownConverter:
         
         # 出力形式の検証
         if self.output_format not in ('png', 'svg'):
-            print(f"[WARNING] 不明な出力形式 '{output_format}'。'png'を使用します。")
+            logger.warning(f"不明な出力形式 '{output_format}'。'png'を使用します。")
             self.output_format = 'png'
         
-        print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
+        logger.info(f"出力画像形式: {self.output_format.upper()}")
         
     def get_auto_generated_patterns(self) -> list:
         """このコンバータが自動付与する見出しの正規表現パターンを返す"""
@@ -161,7 +168,7 @@ class WordToMarkdownConverter:
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        print(f"[INFO] Word文書変換開始: {self.word_file}")
+        logger.info(f"Word文書変換開始: {self.word_file}")
         
         # 1. 見出し構造を解析（参照リンク生成のため）
         self._analyze_headings()
@@ -192,7 +199,7 @@ class WordToMarkdownConverter:
                 f.write(text_content)
             # テキストモード時は画像ディレクトリを削除
             self._cleanup_images_dir()
-            print(f"[SUCCESS] 変換完了: {output_file}")
+            logger.info(f"変換完了: {output_file}")
             return output_file
 
         # 通常モード: .md出力
@@ -201,7 +208,7 @@ class WordToMarkdownConverter:
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(markdown_content)
         
-        print(f"[SUCCESS] 変換完了: {output_file}")
+        logger.info(f"変換完了: {output_file}")
         return output_file
 
     def _get_auto_patterns(self) -> dict:
@@ -229,7 +236,7 @@ class WordToMarkdownConverter:
     
     def _analyze_headings(self):
         """見出し構造を解析"""
-        print("[INFO] 見出し構造を解析中...")
+        logger.info("見出し構造を解析中...")
         
         for paragraph in self.doc.paragraphs:
             style_name = paragraph.style.name.lower()
@@ -261,7 +268,7 @@ class WordToMarkdownConverter:
                     'text': text,
                     'anchor': anchor_id
                 })
-                debug_print(f"[DEBUG] 見出し発見: レベル{heading_level} - {text}")
+                logger.debug(f"[DEBUG] 見出し発見: レベル{heading_level} - {text}")
                 
                 # 章番号マッピングを構築（見出しテキストと段落の番号付け情報を使用）
                 self._build_chapter_mapping(text, anchor_id, paragraph)
@@ -307,7 +314,7 @@ class WordToMarkdownConverter:
                     # 章番号部分を除去した見出しタイトルを取得
                     title_text = self._extract_heading_title(heading_text)
                     self.heading_titles_map[pattern] = title_text
-                debug_print(f"[DEBUG] 自動章番号マッピング: '{pattern}' -> '#{anchor_id}'")
+                logger.debug(f"[DEBUG] 自動章番号マッピング: '{pattern}' -> '#{anchor_id}'")
         
         # 見出しテキストから章番号を抽出
         patterns = [
@@ -333,7 +340,7 @@ class WordToMarkdownConverter:
                         if self.use_heading_text:
                             title_text = self._extract_heading_title(heading_text)
                             self.heading_titles_map[chapter_ref] = title_text
-                        debug_print(f"[DEBUG] テキスト章番号マッピング: '{chapter_ref}' -> '#{anchor_id}'")
+                        logger.debug(f"[DEBUG] テキスト章番号マッピング: '{chapter_ref}' -> '#{anchor_id}'")
                 else:
                     # 単一のマッピング
                     self.headings_map[result] = anchor_id
@@ -341,7 +348,7 @@ class WordToMarkdownConverter:
                     if self.use_heading_text:
                         title_text = self._extract_heading_title(heading_text)
                         self.heading_titles_map[result] = title_text
-                    debug_print(f"[DEBUG] テキスト章番号マッピング: '{result}' -> '#{anchor_id}'")
+                    logger.debug(f"[DEBUG] テキスト章番号マッピング: '{result}' -> '#{anchor_id}'")
                 break
     
     def _extract_heading_title(self, heading_text: str) -> str:
@@ -455,12 +462,12 @@ class WordToMarkdownConverter:
                     return True
             return False
         except Exception as e:
-            debug_print(f"[DEBUG] 目次チェックエラー: {e}")
+            logger.debug(f"[DEBUG] 目次チェックエラー: {e}")
             return False
     
     def _generate_toc(self):
         """目次を生成"""
-        print("[INFO] 目次を生成中...")
+        logger.info("目次を生成中...")
         
         self.markdown_lines.append("# 目次")
         self.markdown_lines.append("")
@@ -476,7 +483,7 @@ class WordToMarkdownConverter:
     
     def _convert_document_body(self):
         """文書本体を変換"""
-        print("[INFO] 文書本体を変換中...")
+        logger.info("文書本体を変換中...")
         
         # 要素を順番に処理
         # 直前の要素を追跡するための変数
@@ -654,10 +661,10 @@ class WordToMarkdownConverter:
         # Word文書内の目次を検出して展開
         if self._is_toc_placeholder(paragraph):
             if self.headings:
-                print(f"[INFO] Word文書内の目次を検出、見出し{len(self.headings)}個で目次を展開します")
+                logger.info(f"Word文書内の目次を検出、見出し{len(self.headings)}個で目次を展開します")
                 self._generate_toc()
             else:
-                print("[INFO] 見出しが見つからないため、目次プレースホルダーをスキップします")
+                logger.info("見出しが見つからないため、目次プレースホルダーをスキップします")
             return
         
         # 見出しの処理
@@ -688,18 +695,18 @@ class WordToMarkdownConverter:
             # スタイル名での判定
             style_name = paragraph.style.name.lower()
             if style_name in ['toc 1', 'toc 2', 'toc 3', 'toc heading', 'table of contents']:
-                debug_print(f"[DEBUG] 目次スタイル検出: {style_name}")
+                logger.debug(f"[DEBUG] 目次スタイル検出: {style_name}")
                 return True
             
             # テキスト内容での判定
             text = paragraph.text.strip().lower()
             if text in ['目次', 'contents', 'table of contents', '目 次']:
-                debug_print(f"[DEBUG] 目次テキスト検出: {text}")
+                logger.debug(f"[DEBUG] 目次テキスト検出: {text}")
                 return True
             
             # フィールドコードでの判定
             if 'TOC' in paragraph.text or 'HYPERLINK' in paragraph.text:
-                debug_print(f"[DEBUG] 目次フィールド検出: TOC/HYPERLINK")
+                logger.debug(f"[DEBUG] 目次フィールド検出: TOC/HYPERLINK")
                 return True
             
             # Word文書のXML構造での判定
@@ -709,7 +716,7 @@ class WordToMarkdownConverter:
                     next_run = run._element.getnext()
                     while next_run is not None:
                         if 'TOC' in next_run.text if hasattr(next_run, 'text') else '':
-                            debug_print(f"[DEBUG] Word目次フィールド検出")
+                            logger.debug(f"[DEBUG] Word目次フィールド検出")
                             return True
                         if next_run.xpath('.//w:fldChar[@w:fldCharType="end"]'):
                             break
@@ -717,7 +724,7 @@ class WordToMarkdownConverter:
             
             return False
         except Exception as e:
-            debug_print(f"[DEBUG] 目次判定エラー: {e}")
+            logger.debug(f"[DEBUG] 目次判定エラー: {e}")
             return False
     
     def _is_heading(self, paragraph) -> bool:
@@ -881,11 +888,11 @@ class WordToMarkdownConverter:
                 numbering_info = self.numbering_types[numId]
                 is_bullet = numbering_info['type'] == 'bullet'
                 
-                debug_print(f"[DEBUG] numId={numId} -> type={numbering_info['type']}, format='{numbering_info['format']}'")
+                logger.debug(f"[DEBUG] numId={numId} -> type={numbering_info['type']}, format='{numbering_info['format']}'")
             else:
                 # フォールバック：従来の判定方法
                 is_bullet = self._is_bullet_numbering(numId)
-                debug_print(f"[DEBUG] numId={numId} -> フォールバック判定: {'bullet' if is_bullet else 'number'}")
+                logger.debug(f"[DEBUG] numId={numId} -> フォールバック判定: {'bullet' if is_bullet else 'number'}")
             
             if is_bullet:
                 # 箇条書きリスト
@@ -944,9 +951,9 @@ class WordToMarkdownConverter:
                 ilvl = ilvl_elem[0].get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val') if ilvl_elem else 'None'
                 
                 text = paragraph.text.strip()[:30]
-                debug_print(f"[DEBUG] リスト項目: '{text}' | numId={num_id} | ilvl={ilvl}")
+                logger.debug(f"[DEBUG] リスト項目: '{text}' | numId={num_id} | ilvl={ilvl}")
         except Exception as e:
-            debug_print(f"[DEBUG] 番号付けデバッグエラー: {e}")
+            logger.debug(f"[DEBUG] 番号付けデバッグエラー: {e}")
     
     def _analyze_numbering_definitions(self):
         """numbering.xmlから番号付け定義を解析"""
@@ -963,7 +970,7 @@ class WordToMarkdownConverter:
             
             if numbering_part:
                 numbering_xml = numbering_part.blob.decode('utf-8')
-                debug_print(f"[DEBUG] numbering.xml の一部: {numbering_xml[:500]}")
+                logger.debug(f"[DEBUG] numbering.xml の一部: {numbering_xml[:500]}")
                 
                 # 各numIdのlvlText（表示形式）を解析
                 import xml.etree.ElementTree as ET
@@ -977,7 +984,7 @@ class WordToMarkdownConverter:
                     if abstract_num_id is not None:
                         abstract_id = abstract_num_id.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')
                         num_to_abstract[num_id] = abstract_id
-                        debug_print(f"[DEBUG] numId={num_id} -> abstractNumId={abstract_id}")
+                        logger.debug(f"[DEBUG] numId={num_id} -> abstractNumId={abstract_id}")
                 
                 # abstractNum定義から実際の番号形式を解析
                 for abstract_num in root.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNum'):
@@ -1017,16 +1024,16 @@ class WordToMarkdownConverter:
                                     'format_type': format_type,
                                     'abstract_id': abstract_id
                                 }
-                                debug_print(f"[DEBUG] numId={num_id}: type={'bullet' if is_bullet else 'number'}, format='{format_text}', format_type='{format_type}'")
+                                logger.debug(f"[DEBUG] numId={num_id}: type={'bullet' if is_bullet else 'number'}, format='{format_text}', format_type='{format_type}'")
                         
         except Exception as e:
-            debug_print(f"[DEBUG] numbering解析エラー: {e}")
+            logger.debug(f"[DEBUG] numbering解析エラー: {e}")
             import traceback
             traceback.print_exc()
     
     def _convert_table(self, table):
         """表を変換"""
-        print("[INFO] 表を変換中...")
+        logger.info("表を変換中...")
         
         # テーブル前に空行を確保（Markdownビューワでの正しい表示のため）
         if self.markdown_lines and self.markdown_lines[-1] != "":
@@ -1144,13 +1151,13 @@ class WordToMarkdownConverter:
         
         # チャートがある場合、チャート画像として処理
         if has_chart:
-            debug_print(f"[DEBUG] チャートを含む段落を検出")
+            logger.debug(f"[DEBUG] チャートを含む段落を検出")
             if self._process_chart_as_image(paragraph, all_drawings):
                 return True  # チャートとして処理された
         
         # 画像とテキストボックスが両方ある場合、vector_compositeとして処理
         if has_bitmap_image and has_textbox:
-            debug_print(f"[DEBUG] 画像+テキストボックス混在段落を検出、vector_compositeとして処理")
+            logger.debug(f"[DEBUG] 画像+テキストボックス混在段落を検出、vector_compositeとして処理")
             if self._process_mixed_drawings_as_vector(all_drawings, all_shape_texts):
                 return True  # vector_compositeとして処理された
         
@@ -1179,14 +1186,14 @@ class WordToMarkdownConverter:
             bool: 処理成功時True
         """
         try:
-            print(f"[INFO] チャートを画像として処理中...")
+            logger.info(f"チャートを画像として処理中...")
             
             # 元のdocxをコピーしてdocument.xmlだけ最小化
             temp_doc_path = self._create_chart_document(drawing_elements)
             if not temp_doc_path:
                 return False
             
-            debug_print(f"[DEBUG] チャート用一時Word文書作成: {temp_doc_path}")
+            logger.debug(f"[DEBUG] チャート用一時Word文書作成: {temp_doc_path}")
             
             # LibreOfficeでPDFに変換
             temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
@@ -1194,7 +1201,7 @@ class WordToMarkdownConverter:
                 os.unlink(temp_doc_path)
                 return False
             
-            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            logger.debug(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
             
             # PDFから画像に変換（チャート用カウンターを使用）
             self.vector_image_counter += 1
@@ -1221,7 +1228,7 @@ class WordToMarkdownConverter:
                     for line in md_content.split('\n'):
                         self.markdown_lines.append(line)
                 
-                print(f"[SUCCESS] チャートを画像として処理: {image_filename}")
+                logger.info(f"チャートを画像として処理: {image_filename}")
                 
                 # 一時ファイルを削除
                 os.unlink(temp_doc_path)
@@ -1235,7 +1242,7 @@ class WordToMarkdownConverter:
             return False
             
         except Exception as e:
-            print(f"[ERROR] チャート画像処理エラー: {e}")
+            logger.error(f"チャート画像処理エラー: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1273,7 +1280,7 @@ class WordToMarkdownConverter:
             return None
             
         except Exception as e:
-            debug_print(f"[DEBUG] チャートデータ抽出エラー: {e}")
+            logger.debug(f"[DEBUG] チャートデータ抽出エラー: {e}")
             return None
     
     def _get_chart_path_from_rid(self, r_id: str):
@@ -1308,7 +1315,7 @@ class WordToMarkdownConverter:
             return None
             
         except Exception as e:
-            debug_print(f"[DEBUG] rIdからチャートパス取得エラー: {e}")
+            logger.debug(f"[DEBUG] rIdからチャートパス取得エラー: {e}")
             return None
     
     def _parse_chart_file(self, chart_path: str):
@@ -1333,7 +1340,7 @@ class WordToMarkdownConverter:
                     return _parse_chart_xml(root)
             
         except Exception as e:
-            debug_print(f"[DEBUG] チャートファイル解析エラー: {e}")
+            logger.debug(f"[DEBUG] チャートファイル解析エラー: {e}")
             return None
     
     def _create_chart_document(self, drawing_elements):
@@ -1349,7 +1356,7 @@ class WordToMarkdownConverter:
             str: 一時docxファイルのパス、失敗時はNone
         """
         try:
-            debug_print("[DEBUG] チャート用Word文書作成開始...")
+            logger.debug("[DEBUG] チャート用Word文書作成開始...")
             
             # drawing_elementsがリストでない場合は単一要素として扱う
             if not isinstance(drawing_elements, (list, tuple)):
@@ -1396,11 +1403,11 @@ class WordToMarkdownConverter:
                             # その他のファイルはそのままコピー
                             dst_zip.writestr(item, src_zip.read(item))
             
-            print(f"[INFO] チャート用一時Word文書作成完了: {temp_docx_path}")
+            logger.info(f"チャート用一時Word文書作成完了: {temp_docx_path}")
             return temp_docx_path
             
         except Exception as e:
-            print(f"[ERROR] チャート用一時文書作成エラー: {e}")
+            logger.error(f"チャート用一時文書作成エラー: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -1416,14 +1423,14 @@ class WordToMarkdownConverter:
             bool: 処理成功時True
         """
         try:
-            print(f"[INFO] 画像+テキストボックス混在図形を処理中...")
+            logger.info(f"画像+テキストボックス混在図形を処理中...")
             
             # 一時的なWord文書を作成して複数のdrawing要素を含める
             temp_doc_path = self._create_canvas_document(None, drawing_elements)
             if not temp_doc_path:
                 return False
             
-            debug_print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
+            logger.debug(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
             
             # LibreOfficeでPDFに変換
             temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
@@ -1431,7 +1438,7 @@ class WordToMarkdownConverter:
                 os.unlink(temp_doc_path)
                 return False
             
-            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            logger.debug(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
             
             # PDFから画像に変換（vector_composite用カウンターを使用）
             self.vector_image_counter += 1
@@ -1454,7 +1461,7 @@ class WordToMarkdownConverter:
                 # 図形内テキストをdetailsで出力
                 self._output_shape_texts_as_details(shape_texts)
                 
-                print(f"[SUCCESS] 混在図形をvector_compositeとして処理: {image_filename}")
+                logger.info(f"混在図形をvector_compositeとして処理: {image_filename}")
                 
                 # 一時ファイルを削除
                 os.unlink(temp_doc_path)
@@ -1468,7 +1475,7 @@ class WordToMarkdownConverter:
             return False
             
         except Exception as e:
-            print(f"[ERROR] 混在図形処理エラー: {e}")
+            logger.error(f"混在図形処理エラー: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1545,19 +1552,19 @@ class WordToMarkdownConverter:
                             self.markdown_lines.append("</details>")
                             self.markdown_lines.append("")
                         
-                        debug_print(f"[DEBUG] 図形メタデータ追加: {len(metadata['shapes'])} shapes")
+                        logger.debug(f"[DEBUG] 図形メタデータ追加: {len(metadata['shapes'])} shapes")
                 except Exception as e:
-                    print(f"[WARNING] 図形メタデータ追加失敗: {e}")
+                    logger.warning(f"図形メタデータ追加失敗: {e}")
             
-            print(f"[SUCCESS] 画像をインライン処理: {image_filename}")
+            logger.info(f"画像をインライン処理: {image_filename}")
             
         except Exception as e:
-            print(f"[ERROR] インライン画像処理エラー: {e}")
+            logger.error(f"インライン画像処理エラー: {e}")
     
     
     def _process_images(self):
         """実際に文書内で参照されている画像のみを処理（文書末尾の画像など）- 重複除去"""
-        print("[INFO] 残りの画像を処理中...")
+        logger.info("残りの画像を処理中...")
         
         # 実際に参照されている画像のみを処理（重複チェック強化）
         for rel in self.doc.part.rels.values():
@@ -1574,7 +1581,7 @@ class WordToMarkdownConverter:
                 for processed_rel_id, processed_info in self.processed_images.items():
                     if isinstance(processed_info, dict) and processed_info.get('hash') == image_hash:
                         already_processed = True
-                        debug_print(f"[DEBUG] 画像重複スキップ: {rel.rId} (ハッシュ重複)")
+                        logger.debug(f"[DEBUG] 画像重複スキップ: {rel.rId} (ハッシュ重複)")
                         break
                 
                 if not already_processed:
@@ -1586,7 +1593,7 @@ class WordToMarkdownConverter:
         VML (<v:textbox>) と DrawingML (txbxContent) の両方からテキストを抽出します。
         既に本文として出力されたテキストは重複を避けるため出力しません。
         """
-        print("[INFO] テキストボックス内テキストを抽出中...")
+        logger.info("テキストボックス内テキストを抽出中...")
         
         # python-docx の BaseOxmlElement.xpath() は namespaces キーワードをサポートしていないため
         # XML を文字列に変換して lxml で再パースする
@@ -1670,7 +1677,7 @@ class WordToMarkdownConverter:
             for shape_text in self._emitted_shape_texts:
                 if shape_text in combined_text or combined_text in shape_text:
                     is_already_emitted = True
-                    debug_print(f"[DEBUG] 図形処理で出力済みのためスキップ: {combined_text[:50]}...")
+                    logger.debug(f"[DEBUG] 図形処理で出力済みのためスキップ: {combined_text[:50]}...")
                     break
             
             if is_already_emitted:
@@ -1681,12 +1688,12 @@ class WordToMarkdownConverter:
                 # テキストボックスの内容が本文に含まれているかチェック
                 if combined_text and combined_text in emitted_text:
                     is_already_emitted = True
-                    debug_print(f"[DEBUG] テキストボックス内容が本文に含まれているためスキップ: {combined_text[:50]}...")
+                    logger.debug(f"[DEBUG] テキストボックス内容が本文に含まれているためスキップ: {combined_text[:50]}...")
                     break
                 # 本文の内容がテキストボックスに含まれているかチェック
                 if emitted_text and emitted_text in combined_text:
                     is_already_emitted = True
-                    debug_print(f"[DEBUG] 本文内容がテキストボックスに含まれているためスキップ: {emitted_text[:50]}...")
+                    logger.debug(f"[DEBUG] 本文内容がテキストボックスに含まれているためスキップ: {emitted_text[:50]}...")
                     break
             
             if not is_already_emitted:
@@ -1694,7 +1701,7 @@ class WordToMarkdownConverter:
         
         # フィルタリング後のテキストボックスが見つかった場合、details タグで出力
         if filtered_textbox_texts:
-            print(f"[INFO] {len(filtered_textbox_texts)} 個のテキストボックス/図形テキストを details に出力します")
+            logger.info(f"{len(filtered_textbox_texts)} 個のテキストボックス/図形テキストを details に出力します")
             self.markdown_lines.append("")
             self.markdown_lines.append("---")
             self.markdown_lines.append("")
@@ -1714,9 +1721,9 @@ class WordToMarkdownConverter:
             self.markdown_lines.append("")
         else:
             if textbox_texts:
-                debug_print(f"[DEBUG] {len(textbox_texts)} 個のテキストボックスは既に本文に出力されているためスキップ")
+                logger.debug(f"[DEBUG] {len(textbox_texts)} 個のテキストボックスは既に本文に出力されているためスキップ")
             else:
-                debug_print("[DEBUG] テキストボックスは見つかりませんでした")
+                logger.debug("[DEBUG] テキストボックスは見つかりませんでした")
     
     def _xpath_with_ns(self, element, xpath_expr: str, namespaces: dict) -> list:
         """名前空間を考慮した XPath クエリを実行
@@ -1885,7 +1892,7 @@ class WordToMarkdownConverter:
                             texts.append(t_elem.text.strip())
                 
             except Exception as e:
-                debug_print(f"[DEBUG] 図形テキスト抽出エラー: {e}")
+                logger.debug(f"[DEBUG] 図形テキスト抽出エラー: {e}")
         
         return texts
     
@@ -1915,7 +1922,7 @@ class WordToMarkdownConverter:
         for t in set(items):
             self._emitted_shape_texts.add(t)
         
-        debug_print(f"[DEBUG] 図形内テキスト {len(items)} 件を details で出力")
+        logger.debug(f"[DEBUG] 図形内テキスト {len(items)} 件を details で出力")
     
     def _extract_and_convert_image(self, rel):
         """画像を抽出・変換（重複防止強化）"""
@@ -1954,10 +1961,10 @@ class WordToMarkdownConverter:
                 'path': image_path
             }
             
-            print(f"[SUCCESS] 画像を処理: {image_filename}")
+            logger.info(f"画像を処理: {image_filename}")
             
         except Exception as e:
-            print(f"[ERROR] 画像処理エラー: {e}")
+            logger.error(f"画像処理エラー: {e}")
     
     def _has_word_processing_canvas(self, paragraph):
         """段落にWord図形キャンバス（またはグループ、または個別図形）があるかチェック"""
@@ -1967,24 +1974,24 @@ class WordToMarkdownConverter:
                 # Word Processing Canvas (wpc) をチェック
                 canvas_elements = drawing.xpath('.//*[local-name()="wpc"]')
                 if canvas_elements:
-                    debug_print("[DEBUG] Word Processing Canvas検出")
+                    logger.debug("[DEBUG] Word Processing Canvas検出")
                     return True
                 
                 # Word Processing Group (wpg) をチェック
                 group_elements = drawing.xpath('.//*[local-name()="wgp"]')
                 if group_elements:
-                    debug_print("[DEBUG] Word Processing Group検出")
+                    logger.debug("[DEBUG] Word Processing Group検出")
                     return True
                 
                 # 個別のWord図形 (wps:wsp) をチェック（グループに含まれないもの）
                 shape_elements = drawing.xpath('.//*[local-name()="wsp"]')
                 if shape_elements:
-                    debug_print("[DEBUG] Word Processing Shape検出")
+                    logger.debug("[DEBUG] Word Processing Shape検出")
                     return True
                     
             return False
         except Exception as e:
-            print(f"[ERROR] キャンバス検出エラー: {e}")
+            logger.error(f"キャンバス検出エラー: {e}")
             return False
     
     def _process_composite_figure(self, paragraph):
@@ -1999,7 +2006,7 @@ class WordToMarkdownConverter:
             bool: 処理が行われた場合はTrue、スキップした場合はFalse
         """
         try:
-            print("[INFO] 複合図形を処理中...")
+            logger.info("複合図形を処理中...")
             
             # Drawing要素を取得
             drawings = paragraph._element.xpath('.//w:drawing')
@@ -2037,64 +2044,64 @@ class WordToMarkdownConverter:
                 blip_elements = drawing.xpath('.//*[local-name()="blip"]')
                 if pic_elements or blip_elements:
                     has_picture = True
-                    debug_print("[DEBUG] 段落内にpic（通常の画像）を検出")
+                    logger.debug("[DEBUG] 段落内にpic（通常の画像）を検出")
             
             # wpc/wpgがある場合は、それらのみを処理（個別wspは無視）
             if canvas_drawings:
                 processed = False
                 for drawing, element, element_type in canvas_drawings:
-                    print(f"[INFO] Word Processing {element_type.upper()} として処理")
+                    logger.info(f"Word Processing {element_type.upper()} として処理")
                     if self._process_canvas_as_vector(element, drawing):
-                        print("[SUCCESS] ベクター処理成功")
+                        logger.info("ベクター処理成功")
                         processed = True
                     else:
-                        print("[ERROR] ベクター処理失敗")
+                        logger.error("ベクター処理失敗")
                 return processed
             
             # pic（通常の画像）がある段落では、段落グループ化をスキップ
             # 通常の画像処理ロジックに任せる
             if has_picture:
-                debug_print("[INFO] 段落内にpic（通常の画像）があるため、段落グループ化をスキップ")
+                debug_logger.info("段落内にpic（通常の画像）があるため、段落グループ化をスキップ")
                 return False
             
             # wspのみの段落では、すべてのdrawingを1つの画像にまとめる
             if shape_only_drawings:
                 if len(shape_only_drawings) == 1:
                     # 1つだけの場合は従来通り処理
-                    print("[INFO] 単一のWord Processing Shape として処理")
+                    logger.info("単一のWord Processing Shape として処理")
                     if self._process_shape_as_vector(None, shape_only_drawings[0]):
-                        print("[SUCCESS] 個別図形ベクター処理成功")
+                        logger.info("個別図形ベクター処理成功")
                         return True
                     else:
-                        print("[ERROR] 個別図形ベクター処理失敗")
+                        logger.error("個別図形ベクター処理失敗")
                         return False
                 else:
                     # 複数の場合は1つの画像にまとめる
-                    print(f"[INFO] {len(shape_only_drawings)}個の個別図形を1つの画像にまとめて処理")
+                    logger.info(f"{len(shape_only_drawings)}個の個別図形を1つの画像にまとめて処理")
                     if self._process_shape_cluster_as_vector(shape_only_drawings):
-                        print("[SUCCESS] 図形クラスターベクター処理成功")
+                        logger.info("図形クラスターベクター処理成功")
                         return True
                     else:
-                        print("[ERROR] 図形クラスターベクター処理失敗")
+                        logger.error("図形クラスターベクター処理失敗")
                         return False
             
             return False
             
         except Exception as e:
-            print(f"[ERROR] 複合図形処理エラー: {e}")
+            logger.error(f"複合図形処理エラー: {e}")
             return False
     
     def _process_shape_as_vector(self, shape_element, drawing_element):
         """個別のWord図形をベクター画像として処理"""
         try:
-            debug_print("[INFO] 個別図形をベクター画像として処理中...")
+            debug_logger.info("個別図形をベクター画像として処理中...")
             
             # 一時的なWord文書を作成して図形のみを含める
             temp_doc_path = self._create_canvas_document(shape_element, drawing_element)
             if not temp_doc_path:
                 return False
             
-            debug_print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
+            logger.debug(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
             
             # LibreOfficeでPDFに変換
             temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
@@ -2102,7 +2109,7 @@ class WordToMarkdownConverter:
                 os.unlink(temp_doc_path)
                 return False
             
-            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            logger.debug(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
             
             # PDFから画像に変換（個別図形用カウンターを使用）
             self.shape_image_counter += 1
@@ -2126,7 +2133,7 @@ class WordToMarkdownConverter:
                 shape_texts = self._extract_shape_texts_from_drawing(drawing_element)
                 self._output_shape_texts_as_details(shape_texts)
                 
-                debug_print(f"[SUCCESS] 個別図形を処理: {image_filename}")
+                debug_logger.info(f"個別図形を処理: {image_filename}")
                 
                 # 一時ファイルを削除
                 os.unlink(temp_doc_path)
@@ -2140,7 +2147,7 @@ class WordToMarkdownConverter:
             return False
             
         except Exception as e:
-            print(f"[ERROR] 個別図形処理エラー: {e}")
+            logger.error(f"個別図形処理エラー: {e}")
             return False
     
     def _process_shape_cluster_as_vector(self, drawing_elements):
@@ -2149,14 +2156,14 @@ class WordToMarkdownConverter:
         同じ段落内の複数のdrawing要素を1つの画像にまとめる
         """
         try:
-            debug_print(f"[INFO] {len(drawing_elements)}個の図形を1つの画像にまとめて処理中...")
+            debug_logger.info(f"{len(drawing_elements)}個の図形を1つの画像にまとめて処理中...")
             
             # 一時的なWord文書を作成して複数の図形を含める
             temp_doc_path = self._create_canvas_document(None, drawing_elements)
             if not temp_doc_path:
                 return False
             
-            debug_print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
+            logger.debug(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
             
             # LibreOfficeでPDFに変換
             temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
@@ -2164,7 +2171,7 @@ class WordToMarkdownConverter:
                 os.unlink(temp_doc_path)
                 return False
             
-            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            logger.debug(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
             
             # PDFから画像に変換（図形クラスター用カウンターを使用）
             self.shape_image_counter += 1
@@ -2188,7 +2195,7 @@ class WordToMarkdownConverter:
                 shape_texts = self._extract_shape_texts_from_drawing(drawing_elements)
                 self._output_shape_texts_as_details(shape_texts)
                 
-                debug_print(f"[SUCCESS] 図形クラスターを処理: {image_filename}")
+                debug_logger.info(f"図形クラスターを処理: {image_filename}")
                 
                 # 一時ファイルを削除
                 os.unlink(temp_doc_path)
@@ -2202,20 +2209,20 @@ class WordToMarkdownConverter:
             return False
             
         except Exception as e:
-            print(f"[ERROR] 図形クラスター処理エラー: {e}")
+            logger.error(f"図形クラスター処理エラー: {e}")
             return False
     
     def _process_canvas_as_vector(self, canvas_element, drawing_element):
         """Word図形キャンバス全体をベクター画像として処理"""
         try:
-            print("[INFO] キャンバス全体をベクター画像として処理中...")
+            logger.info("キャンバス全体をベクター画像として処理中...")
             
             # 一時的なWord文書を作成してキャンバスのみを含める
             temp_doc_path = self._create_canvas_document(canvas_element, drawing_element)
             if not temp_doc_path:
                 return False
             
-            debug_print(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
+            logger.debug(f"[DEBUG] 一時Word文書作成: {temp_doc_path}")
             
             # LibreOfficeでPDFに変換
             temp_pdf_path = self._convert_document_to_pdf(temp_doc_path)
@@ -2223,7 +2230,7 @@ class WordToMarkdownConverter:
                 os.unlink(temp_doc_path)
                 return False
             
-            debug_print(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
+            logger.debug(f"[DEBUG] PDF変換完了: {temp_pdf_path}")
             
             # PDFの内容を確認
             self._debug_pdf_content(temp_pdf_path)
@@ -2276,18 +2283,18 @@ class WordToMarkdownConverter:
                                 self.markdown_lines.append("</details>")
                                 self.markdown_lines.append("")
                             
-                            debug_print(f"[DEBUG] 図形メタデータ追加: {len(metadata['shapes'])} shapes")
+                            logger.debug(f"[DEBUG] 図形メタデータ追加: {len(metadata['shapes'])} shapes")
                     except Exception as e:
-                        print(f"[WARNING] 図形メタデータ追加失敗: {e}")
+                        logger.warning(f"図形メタデータ追加失敗: {e}")
                 
-                print(f"[SUCCESS] ベクター複合図形を処理: {image_filename}")
+                logger.info(f"ベクター複合図形を処理: {image_filename}")
                 
                 # デバッグ用にPDFも保存（-v指定時のみ）
                 if is_verbose():
                     debug_pdf_path = os.path.join('output/debug', f"{os.path.splitext(os.path.basename(image_filename))[0]}.pdf")
                     os.makedirs('output/debug', exist_ok=True)
                     shutil.copy2(temp_pdf_path, debug_pdf_path)
-                    debug_print(f"[DEBUG] PDFデバッグファイル保存: {debug_pdf_path}")
+                    logger.debug(f"[DEBUG] PDFデバッグファイル保存: {debug_pdf_path}")
                 
                 # 一時ファイルを削除
                 os.unlink(temp_doc_path)
@@ -2301,7 +2308,7 @@ class WordToMarkdownConverter:
             return False
             
         except Exception as e:
-            print(f"[ERROR] ベクター画像処理エラー: {e}")
+            logger.error(f"ベクター画像処理エラー: {e}")
             return False
     
     def _build_theme_color_map(self, theme_data):
@@ -2343,9 +2350,9 @@ class WordToMarkdownConverter:
                     if last_clr:
                         color_map[tag_name] = last_clr
             
-            debug_print(f"[DEBUG] テーマカラーマップ構築: {len(color_map)}色")
+            logger.debug(f"[DEBUG] テーマカラーマップ構築: {len(color_map)}色")
         except Exception as e:
-            debug_print(f"[DEBUG] テーマカラーマップ構築エラー: {e}")
+            logger.debug(f"[DEBUG] テーマカラーマップ構築エラー: {e}")
         
         return color_map
     
@@ -2396,12 +2403,12 @@ class WordToMarkdownConverter:
                     converted_count += 1
             
             if converted_count > 0:
-                debug_print(f"[DEBUG] テキスト色変換: {converted_count}箇所")
+                logger.debug(f"[DEBUG] テキスト色変換: {converted_count}箇所")
             
             return etree.tostring(tree, encoding='unicode')
             
         except Exception as e:
-            debug_print(f"[DEBUG] テキスト色変換エラー: {e}")
+            logger.debug(f"[DEBUG] テキスト色変換エラー: {e}")
             return ET.tostring(drawing_element, encoding='unicode')
     
     def _create_canvas_document(self, canvas_element, drawing_elements):
@@ -2412,8 +2419,8 @@ class WordToMarkdownConverter:
             drawing_elements: drawing要素（単一またはリスト）
         """
         try:
-            debug_print("[DEBUG] Word文書作成開始...")
-            debug_print("[DEBUG] SCHEMECLR_PATCH_V3_20251211")
+            logger.debug("[DEBUG] Word文書作成開始...")
+            logger.debug("[DEBUG] SCHEMECLR_PATCH_V3_20251211")
             
             # drawing_elementsがリストでない場合は単一要素として扱う
             if not isinstance(drawing_elements, (list, tuple)):
@@ -2432,12 +2439,12 @@ class WordToMarkdownConverter:
                         try:
                             theme_data = rel.target_part.blob
                             theme_rel_id = rel.rId
-                            debug_print(f"[DEBUG] テーマ取得: {rel.rId}")
+                            logger.debug(f"[DEBUG] テーマ取得: {rel.rId}")
                         except Exception as theme_error:
-                            debug_print(f"[DEBUG] テーマ取得エラー: {theme_error}")
-                debug_print(f"[DEBUG] 取得したリレーション数: {len(original_rels)}, テーマ: {theme_rel_id is not None}")
+                            logger.debug(f"[DEBUG] テーマ取得エラー: {theme_error}")
+                logger.debug(f"[DEBUG] 取得したリレーション数: {len(original_rels)}, テーマ: {theme_rel_id is not None}")
             except Exception as rel_error:
-                debug_print(f"[DEBUG] リレーション取得エラー: {rel_error}")
+                logger.debug(f"[DEBUG] リレーション取得エラー: {rel_error}")
             
             # テーマからカラーマップを作成（schemeClr→srgbClr変換用）
             theme_color_map = self._build_theme_color_map(theme_data)
@@ -2448,7 +2455,7 @@ class WordToMarkdownConverter:
                 converted_xml = self._convert_text_scheme_colors(d, theme_color_map)
                 converted_drawings.append(converted_xml)
             drawings_xml = "".join(converted_drawings)
-            debug_print(f"[DEBUG] Drawing XML長: {len(drawings_xml)}")
+            logger.debug(f"[DEBUG] Drawing XML長: {len(drawings_xml)}")
             
             # より適切なWord文書XMLを作成
             doc_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -2526,7 +2533,7 @@ class WordToMarkdownConverter:
     <Relationship Id="{theme_rel_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>'''
                     # テーマファイルを追加
                     docx.writestr('word/theme/theme1.xml', theme_data)
-                    debug_print(f"[DEBUG] テーマファイル追加: word/theme/theme1.xml")
+                    logger.debug(f"[DEBUG] テーマファイル追加: word/theme/theme1.xml")
                 
                 doc_rels_xml += '''
 </Relationships>'''
@@ -2536,7 +2543,7 @@ class WordToMarkdownConverter:
                 # 文書内容
                 docx.writestr('word/document.xml', doc_xml)
             
-            print(f"[INFO] 一時Word文書作成完了: {temp_docx_path}")
+            logger.info(f"一時Word文書作成完了: {temp_docx_path}")
             
             # デバッグ用に一時Word文書を保存（-v指定時のみ）
             if is_verbose():
@@ -2544,12 +2551,12 @@ class WordToMarkdownConverter:
                 os.makedirs(debug_docx_dir, exist_ok=True)
                 debug_docx_path = os.path.join(debug_docx_dir, f"temp_docx_{os.path.basename(temp_docx_path)}")
                 shutil.copy2(temp_docx_path, debug_docx_path)
-                debug_print(f"[DEBUG] 一時Word文書デバッグコピー: {debug_docx_path}")
+                logger.debug(f"[DEBUG] 一時Word文書デバッグコピー: {debug_docx_path}")
             
             return temp_docx_path
             
         except Exception as e:
-            print(f"[ERROR] 一時文書作成エラー: {e}")
+            logger.error(f"一時文書作成エラー: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -2557,7 +2564,7 @@ class WordToMarkdownConverter:
     def _convert_document_to_pdf(self, docx_path):
         """Word文書をPDFに変換（最高品質設定）"""
         if not is_libreoffice_available():
-            print("[WARNING] LibreOfficeが利用できないため、PDF変換をスキップします")
+            logger.warning("LibreOfficeが利用できないため、PDF変換をスキップします")
             return None
         try:
             temp_dir = tempfile.mkdtemp()
@@ -2586,25 +2593,25 @@ class WordToMarkdownConverter:
                         final_pdf_path = tempfile.mktemp(suffix='.pdf')
                         shutil.copy2(pdf_path, final_pdf_path)
                         shutil.rmtree(temp_dir)
-                        print(f"[INFO] PDFに変換完了: {final_pdf_path}")
+                        logger.info(f"PDFに変換完了: {final_pdf_path}")
                         return final_pdf_path
             
             shutil.rmtree(temp_dir)
-            print(f"[ERROR] PDF変換失敗: {result.stderr}")
+            logger.error(f"PDF変換失敗: {result.stderr}")
             return None
             
         except Exception as e:
-            print(f"[ERROR] PDF変換エラー: {e}")
+            logger.error(f"PDF変換エラー: {e}")
             return None
     
     def _convert_pdf_to_png(self, pdf_path, output_path):
         """PDFをPNGに変換（PyMuPDF使用）"""
         try:
-            debug_print("[DEBUG] PyMuPDFでPDF→PNG変換実行...")
+            logger.debug("[DEBUG] PyMuPDFでPDF→PNG変換実行...")
             
             doc = fitz.open(pdf_path)
             if len(doc) == 0:
-                print("[ERROR] PDFにページが含まれていません")
+                logger.error("PDFにページが含まれていません")
                 doc.close()
                 return False
             
@@ -2635,11 +2642,11 @@ class WordToMarkdownConverter:
             
             img.save(output_path, 'PNG', quality=95)
             
-            print(f"[INFO] PNG変換完了: {output_path} (サイズ: {img.size[0]}x{img.size[1]})")
+            logger.info(f"PNG変換完了: {output_path} (サイズ: {img.size[0]}x{img.size[1]})")
             return True
                 
         except Exception as e:
-            print(f"[ERROR] PNG変換エラー: {e}")
+            logger.error(f"PNG変換エラー: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -2681,11 +2688,11 @@ class WordToMarkdownConverter:
             from PIL import Image as PILImage
             import re
             
-            debug_print("[DEBUG] PyMuPDFでPDF→SVG変換実行...")
+            logger.debug("[DEBUG] PyMuPDFでPDF→SVG変換実行...")
             
             doc = fitz.open(pdf_path)
             if len(doc) == 0:
-                print("[ERROR] PDFにページが含まれていません")
+                logger.error("PDFにページが含まれていません")
                 doc.close()
                 return False
             
@@ -2746,11 +2753,11 @@ class WordToMarkdownConverter:
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(svg_content)
             
-            print(f"[INFO] SVG変換完了: {output_path}")
+            logger.info(f"SVG変換完了: {output_path}")
             return True
                 
         except Exception as e:
-            print(f"[ERROR] SVG変換エラー: {e}")
+            logger.error(f"SVG変換エラー: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -2818,9 +2825,9 @@ class WordToMarkdownConverter:
                     lines = result.stdout.split('\n')
                     for line in lines:
                         if 'Pages:' in line or 'Page size:' in line:
-                            debug_print(f"[DEBUG] {line.strip()}")
+                            logger.debug(f"[DEBUG] {line.strip()}")
                 else:
-                    debug_print(f"[DEBUG] PDF情報取得失敗")
+                    logger.debug(f"[DEBUG] PDF情報取得失敗")
             # pdfinfoがない場合は何もしない（エラーメッセージなし）
         except Exception:
             # エラーが発生しても無視（オプション機能のため）
@@ -2837,9 +2844,9 @@ class WordToMarkdownConverter:
                 ]
                 if hasattr(img, 'info') and 'dpi' in img.info:
                     info_parts.append(f"DPI: {img.info['dpi']}")
-                debug_print(f"[DEBUG] 画像情報: {' | '.join(info_parts)}")
+                logger.debug(f"[DEBUG] 画像情報: {' | '.join(info_parts)}")
         except Exception as e:
-            debug_print(f"[DEBUG] 画像情報取得エラー: {e}")
+            logger.debug(f"[DEBUG] 画像情報取得エラー: {e}")
 
     def _extract_shape_metadata_from_drawing(self, drawing_element) -> Dict[str, Any]:
         """DrawingML要素から図形メタデータを抽出"""
@@ -2910,7 +2917,7 @@ class WordToMarkdownConverter:
                                 processed_ids.add(shape_id)
             
         except Exception as e:
-            debug_print(f"[DEBUG] 図形メタデータ抽出エラー: {e}")
+            logger.debug(f"[DEBUG] 図形メタデータ抽出エラー: {e}")
             import traceback
             traceback.print_exc()
         
@@ -2961,7 +2968,7 @@ class WordToMarkdownConverter:
                         pass
         
         except Exception as e:
-            debug_print(f"[DEBUG] 単一図形メタデータ抽出エラー: {e}")
+            logger.debug(f"[DEBUG] 単一図形メタデータ抽出エラー: {e}")
         
         return shape_info
     
@@ -3009,7 +3016,7 @@ class WordToMarkdownConverter:
                 shape_info['text'] = ' / '.join(text_parts)
         
         except Exception as e:
-            debug_print(f"[DEBUG] wsp要素メタデータ抽出エラー: {e}")
+            logger.debug(f"[DEBUG] wsp要素メタデータ抽出エラー: {e}")
         
         return shape_info
     
@@ -3051,7 +3058,7 @@ class WordToMarkdownConverter:
                         shape_info['image_rel_id'] = embed
         
         except Exception as e:
-            debug_print(f"[DEBUG] pic要素メタデータ抽出エラー: {e}")
+            logger.debug(f"[DEBUG] pic要素メタデータ抽出エラー: {e}")
         
         return shape_info
     
@@ -3138,13 +3145,13 @@ class WordToMarkdownConverter:
                 return output_path
             
             os.unlink(temp_path)
-            print(f"[ERROR] ベクター画像変換失敗")
+            logger.error(f"ベクター画像変換失敗")
             with open(original_path, 'wb') as f:
                 f.write(image_data)
             return original_path
                 
         except Exception as e:
-            print(f"[ERROR] ベクター画像変換エラー: {e}")
+            logger.error(f"ベクター画像変換エラー: {e}")
             with open(original_path, 'wb') as f:
                 f.write(image_data)
             return original_path
@@ -3180,7 +3187,7 @@ class WordToMarkdownConverter:
                 if fmt == 'svg':
                     # SVG出力
                     if self._convert_pdf_to_svg(pdf_path, output_path):
-                        print(f"[SUCCESS] ベクター画像変換完了（LibreOffice→PDF→SVG）: {output_path}")
+                        logger.info(f"ベクター画像変換完了（LibreOffice→PDF→SVG）: {output_path}")
                         return True
                 else:
                     # PNG出力（既存の処理）
@@ -3204,13 +3211,13 @@ class WordToMarkdownConverter:
                     img.save(output_path, "PNG")
                     
                     if os.path.exists(output_path):
-                        print(f"[SUCCESS] ベクター画像変換完了（LibreOffice→PDF→PNG）: {output_path}")
+                        logger.info(f"ベクター画像変換完了（LibreOffice→PDF→PNG）: {output_path}")
                         return True
             
             return False
             
         except Exception as e:
-            print(f"[ERROR] LibreOffice変換エラー: {e}")
+            logger.error(f"LibreOffice変換エラー: {e}")
             return False
         finally:
             if temp_dir and os.path.exists(temp_dir):
@@ -3225,11 +3232,11 @@ def convert_doc_to_docx(doc_file_path: str) -> str:
     from pathlib import Path
     
     if not is_libreoffice_installed():
-        print("[ERROR] LibreOfficeが見つかりません。.docファイルの変換にはLibreOfficeが必要です。")
+        logger.error("LibreOfficeが見つかりません。.docファイルの変換にはLibreOfficeが必要です。")
         print("  .docxファイルであればLibreOfficeなしで変換できます。")
         return None
     
-    print(f"[INFO] DOCファイルをDOCXに変換中: {doc_file_path}")
+    logger.info(f"DOCファイルをDOCXに変換中: {doc_file_path}")
     
     # 一時ディレクトリを作成（自動削除されない）
     temp_dir = tempfile.mkdtemp(prefix='word2md_doc_conversion_')
@@ -3249,32 +3256,32 @@ def convert_doc_to_docx(doc_file_path: str) -> str:
             doc_file_path
         ]
         
-        debug_print(f"[DEBUG] LibreOffice変換コマンド: {' '.join(cmd)}")
+        logger.debug(f"[DEBUG] LibreOffice変換コマンド: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         
         if result.returncode != 0:
-            print(f"[ERROR] LibreOffice変換失敗: {result.stderr}")
+            logger.error(f"LibreOffice変換失敗: {result.stderr}")
             shutil.rmtree(temp_dir)  # エラー時は一時ディレクトリを削除
             return None
         
         # 変換されたファイルが存在するか確認
         if not os.path.exists(docx_output_path):
-            print(f"[ERROR] 変換後のDOCXファイルが見つかりません: {docx_output_path}")
+            logger.error(f"変換後のDOCXファイルが見つかりません: {docx_output_path}")
             shutil.rmtree(temp_dir)  # エラー時は一時ディレクトリを削除
             return None
         
-        print(f"[SUCCESS] DOC→DOCX変換完了: {docx_output_path}")
-        print(f"[INFO] 一時ファイル作成: {docx_output_path}")
+        logger.info(f"DOC→DOCX変換完了: {docx_output_path}")
+        logger.info(f"一時ファイル作成: {docx_output_path}")
         
         # 一時ディレクトリのパスを返す（後でメイン関数で削除）
         return docx_output_path
         
     except subprocess.TimeoutExpired:
-        print("[ERROR] LibreOffice変換がタイムアウトしました")
+        logger.error("LibreOffice変換がタイムアウトしました")
         shutil.rmtree(temp_dir)  # エラー時は一時ディレクトリを削除
         return None
     except Exception as e:
-        print(f"[ERROR] DOC変換エラー: {e}")
+        logger.error(f"DOC変換エラー: {e}")
         shutil.rmtree(temp_dir)  # エラー時は一時ディレクトリを削除
         return None
 

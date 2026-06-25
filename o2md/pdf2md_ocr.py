@@ -6,6 +6,7 @@ comic-text-detectorを使用してテキスト領域を検出し、
 manga-ocrで各領域のテキストを抽出します。
 """
 
+import logging
 import os
 import sys
 import time
@@ -26,6 +27,9 @@ MODEL_EXPECTED_SIZE = 99000000  # 約94.6MB、最小サイズとして99MBを期
 MAX_REGIONS = 100
 
 # グローバル変数
+logger = logging.getLogger(__name__)
+
+# グローバルverboseフラグ
 _VERBOSE = False
 
 
@@ -125,17 +129,17 @@ class ComicTextDetector:
         model_dir = Path(self.model_path).parent
         model_dir.mkdir(parents=True, exist_ok=True)
         
-        debug_print(f"[INFO] テキスト検出モデルをダウンロード中: {MODEL_URL}")
-        print(f"[INFO] テキスト検出モデルをダウンロード中...")
+        debug_logger.info(f"テキスト検出モデルをダウンロード中: {MODEL_URL}")
+        logger.info(f"テキスト検出モデルをダウンロード中...")
         
         try:
             urllib.request.urlretrieve(MODEL_URL, self.model_path)
-            debug_print(f"[INFO] モデルのダウンロード完了: {self.model_path}")
-            print(f"[INFO] モデルのダウンロード完了")
+            debug_logger.info(f"モデルのダウンロード完了: {self.model_path}")
+            logger.info(f"モデルのダウンロード完了")
             return True
         except Exception as e:
-            debug_print(f"[WARNING] モデルのダウンロードに失敗: {e}")
-            print(f"[WARNING] モデルのダウンロードに失敗: {e}")
+            debug_logger.warning(f"モデルのダウンロードに失敗: {e}")
+            logger.warning(f"モデルのダウンロードに失敗: {e}")
             return False
     
     def _load_model(self):
@@ -150,10 +154,10 @@ class ComicTextDetector:
         
         try:
             self.model = cv2.dnn.readNetFromONNX(self.model_path)
-            debug_print(f"[INFO] テキスト検出モデルを読み込みました: {self.model_path}")
+            debug_logger.info(f"テキスト検出モデルを読み込みました: {self.model_path}")
             return True
         except Exception as e:
-            debug_print(f"[WARNING] モデル読み込みエラー: {e}")
+            debug_logger.warning(f"モデル読み込みエラー: {e}")
             return False
     
     def _preprocess_image(self, img: np.ndarray) -> Tuple[np.ndarray, float, int, int]:
@@ -261,7 +265,7 @@ class ComicTextDetector:
             output_names = self.model.getUnconnectedOutLayersNames()
             outputs = self.model.forward(output_names)
         except Exception as e:
-            debug_print(f"[WARNING] 推論エラー: {e}")
+            debug_logger.warning(f"推論エラー: {e}")
             return []
         
         # 出力を解析
@@ -369,12 +373,12 @@ class OCRProcessor(BaseOCRProcessor):
                 
                 from manga_ocr import MangaOcr
                 self._ocr = MangaOcr()
-                debug_print("[INFO] manga-ocrを初期化しました")
+                debug_logger.info("manga-ocrを初期化しました")
             except ImportError:
-                debug_print("[WARNING] manga-ocrがインストールされていません")
+                debug_logger.warning("manga-ocrがインストールされていません")
                 self._ocr = False
             except Exception as e:
-                debug_print(f"[WARNING] manga-ocr初期化エラー: {e}")
+                debug_logger.warning(f"manga-ocr初期化エラー: {e}")
                 self._ocr = False
         
         return self._ocr if self._ocr else None
@@ -430,7 +434,7 @@ class OCRProcessor(BaseOCRProcessor):
             text = ocr(pil_img)
             return text.strip() if text else ""
         except Exception as e:
-            debug_print(f"[WARNING] OCRエラー: {e}")
+            debug_logger.warning(f"OCRエラー: {e}")
             return ""
     
     def ocr_full_image(self, img: np.ndarray) -> str:
@@ -454,7 +458,7 @@ class OCRProcessor(BaseOCRProcessor):
             text = ocr(pil_img)
             return text.strip() if text else ""
         except Exception as e:
-            debug_print(f"[WARNING] OCRエラー: {e}")
+            debug_logger.warning(f"OCRエラー: {e}")
             return ""
 
 
@@ -477,12 +481,12 @@ class TesseractOCRProcessor(BaseOCRProcessor):
             try:
                 import pytesseract
                 self._tesseract = pytesseract
-                debug_print("[INFO] Tesseractを初期化しました")
+                debug_logger.info("Tesseractを初期化しました")
             except ImportError:
-                debug_print("[WARNING] pytesseractがインストールされていません")
+                debug_logger.warning("pytesseractがインストールされていません")
                 self._tesseract = False
             except Exception as e:
-                debug_print(f"[WARNING] Tesseract初期化エラー: {e}")
+                debug_logger.warning(f"Tesseract初期化エラー: {e}")
                 self._tesseract = False
         
         return self._tesseract if self._tesseract else None
@@ -533,7 +537,7 @@ class TesseractOCRProcessor(BaseOCRProcessor):
             text = tesseract.image_to_string(pil_img, lang=self._lang, config=config)
             return text.strip() if text else ""
         except Exception as e:
-            debug_print(f"[WARNING] Tesseract OCRエラー: {e}")
+            debug_logger.warning(f"Tesseract OCRエラー: {e}")
             return ""
     
     def ocr_full_image(self, img: np.ndarray) -> str:
@@ -561,7 +565,7 @@ class TesseractOCRProcessor(BaseOCRProcessor):
             text = tesseract.image_to_string(pil_img, lang=self._lang, config=config)
             return text.strip() if text else ""
         except Exception as e:
-            debug_print(f"[WARNING] Tesseract OCRエラー: {e}")
+            debug_logger.warning(f"Tesseract OCRエラー: {e}")
             return ""
 
 
@@ -598,8 +602,8 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
             import torch
             from transformers import AutoModelForCausalLM, AutoProcessor
         except ImportError:
-            print("[WARNING] sarashina OCRに必要なライブラリが不足しています")
-            print("[WARNING] インストール: uv pip install '.[sarashina]'")
+            logger.warning("sarashina OCRに必要なライブラリが不足しています")
+            logger.warning("インストール: uv pip install '.[sarashina]'")
             cls._load_failed = True
             return False
 
@@ -608,18 +612,18 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
         if torch.cuda.is_available():
             target_device = "cuda"
             dtype = torch.bfloat16
-            debug_print("[INFO] sarashina OCR: CUDAデバイスを使用")
+            debug_logger.info("sarashina OCR: CUDAデバイスを使用")
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             target_device = "mps"
             dtype = torch.bfloat16
-            debug_print("[INFO] sarashina OCR: MPSデバイスを使用")
+            debug_logger.info("sarashina OCR: MPSデバイスを使用")
         else:
             target_device = "cpu"
             dtype = torch.float32
-            print("[WARNING] GPU未検出。sarashina OCRをCPUで実行します（低速）")
+            logger.warning("GPU未検出。sarashina OCRをCPUで実行します（低速）")
 
         try:
-            print(f"[INFO] sarashina OCRモデルを読み込み中: {model_name}")
+            logger.info(f"sarashina OCRモデルを読み込み中: {model_name}")
             cls._shared_processor = AutoProcessor.from_pretrained(
                 model_name, trust_remote_code=True, use_fast=False
             )
@@ -643,10 +647,10 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
                     trust_remote_code=True,
                     attn_implementation="sdpa",
                 )
-            print("[INFO] sarashina OCRモデルの読み込み完了")
+            logger.info("sarashina OCRモデルの読み込み完了")
             return True
         except Exception as e:
-            print(f"[WARNING] sarashina OCRモデルの読み込みに失敗: {e}")
+            logger.warning(f"sarashina OCRモデルの読み込みに失敗: {e}")
             cls._shared_model = None
             cls._shared_processor = None
             cls._load_failed = True
@@ -697,10 +701,10 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
             generated = output_ids[0, inputs["input_ids"].shape[1]:]
             text = self._shared_processor.decode(generated, skip_special_tokens=True)
             if not text or not text.strip():
-                print("[WARNING] sarashina OCR: モデル出力が空です")
+                logger.warning("sarashina OCR: モデル出力が空です")
             return text.strip() if text else ""
         except Exception as e:
-            print(f"[WARNING] sarashina OCRエラー: {e}")
+            logger.warning(f"sarashina OCRエラー: {e}")
             import traceback
             traceback.print_exc()
             return ""
@@ -922,7 +926,7 @@ class TextDetectorOCR:
                 ))
         
         if len(sub_regions) > 1:
-            debug_print(f"[DEBUG] 領域を{len(sub_regions)}行に分割")
+            logger.debug(f"[DEBUG] 領域を{len(sub_regions)}行に分割")
             return sub_regions
         
         return [region]
@@ -942,10 +946,10 @@ class TextDetectorOCR:
         regions = self.detector.detect(img)
         
         if len(regions) == 0:
-            debug_print("[DEBUG] テキスト領域が検出されませんでした")
+            logger.debug("[DEBUG] テキスト領域が検出されませんでした")
             return []
         
-        debug_print(f"[DEBUG] {len(regions)}個のテキスト領域を検出")
+        logger.debug(f"[DEBUG] {len(regions)}個のテキスト領域を検出")
         
         # 複数行を含む領域を行ごとに分割
         split_regions = []
@@ -953,7 +957,7 @@ class TextDetectorOCR:
             split_regions.extend(self._split_multiline_region(img, region))
         
         if len(split_regions) != len(regions):
-            debug_print(f"[DEBUG] 分割後: {len(split_regions)}個の領域")
+            logger.debug(f"[DEBUG] 分割後: {len(split_regions)}個の領域")
         
         regions = split_regions
         
@@ -966,7 +970,7 @@ class TextDetectorOCR:
             text = self.ocr_processor.ocr_region(img, region)
             region.text = text
             if text:
-                debug_print(f"[DEBUG] OCR結果: {text[:50]}...")
+                logger.debug(f"[DEBUG] OCR結果: {text[:50]}...")
         
         return regions
     
@@ -1112,7 +1116,7 @@ def process_pdf_page_with_detection(page_img: np.ndarray,
     
     if len(regions) == 0:
         # テキスト領域が検出されなかった場合は画像全体でOCR
-        debug_print("[DEBUG] テキスト領域が検出されなかったため、画像全体でOCRを実行")
+        logger.debug("[DEBUG] テキスト領域が検出されなかったため、画像全体でOCRを実行")
         return processor.ocr_processor.ocr_full_image(page_img)
     
     # 画像高さを渡して行グループ化を有効にする

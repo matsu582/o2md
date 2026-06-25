@@ -14,6 +14,8 @@ from typing import Optional, Tuple, List, Set, Dict, Any
 import logging
 
 
+logger = logging.getLogger(__name__)
+
 def get_libreoffice_path():
     """プラットフォームに応じたLibreOfficeのパスを取得"""
     system = platform.system()
@@ -95,7 +97,7 @@ def is_libreoffice_available() -> bool:
 
 def warn_libreoffice_not_available():
     """LibreOfficeが利用できない場合に警告メッセージを出力する"""
-    print("[WARNING] LibreOfficeが見つかりません。以下の機能が制限されます:")
+    logger.warning("LibreOfficeが見つかりません。以下の機能が制限されます:")
     print("  - 図形・ベクター画像の変換（スキップされます）")
     print("  - 旧形式ファイルの変換（.doc→.docx, .xls→.xlsx, .ppt→.pptx）")
     print("  - スライドの画像レンダリング")

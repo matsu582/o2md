@@ -10,6 +10,7 @@ PDFファイルをMarkdown形式に変換するツール
 - o2mdファミリーとして統一されたインターフェース
 """
 
+import logging
 import os
 import sys
 import tempfile
@@ -48,6 +49,8 @@ DEFAULT_DPI = 300
 IMAGE_QUALITY = 95
 
 
+logger = logging.getLogger(__name__)
+
 # グローバルverboseフラグ
 _VERBOSE = False
 
@@ -55,6 +58,10 @@ def set_verbose(verbose: bool):
     """verboseモードを設定"""
     global _VERBOSE
     _VERBOSE = verbose
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.WARNING,
+        format='[%(levelname)s] %(message)s',
+    )
 
 def is_verbose() -> bool:
     """verboseモードかどうかを返す"""
@@ -110,7 +117,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         # 出力形式の検証
         if self.output_format not in ('png', 'svg'):
-            print(f"[WARNING] 不明な出力形式 '{output_format}'。'png'を使用します。")
+            logger.warning(f"不明な出力形式 '{output_format}'。'png'を使用します。")
             self.output_format = 'png'
         
         # ディレクトリ作成
@@ -126,7 +133,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         # OCRエンジン設定
         self.ocr_engine = ocr_engine.lower() if ocr_engine else 'tesseract'
         if self.ocr_engine not in ('manga-ocr', 'tesseract', 'sarashina'):
-            print(f"[WARNING] 不明なOCRエンジン '{ocr_engine}'。'tesseract'を使用します。")
+            logger.warning(f"不明なOCRエンジン '{ocr_engine}'。'tesseract'を使用します。")
             self.ocr_engine = 'tesseract'
         
         # tessdataディレクトリ（tessdata_best使用時に指定）
@@ -149,9 +156,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         # doclingによる表検出を有効にするかどうか
         self._use_docling: bool = use_docling
         
-        print(f"[INFO] 出力画像形式: {self.output_format.upper()}")
+        logger.info(f"出力画像形式: {self.output_format.upper()}")
         if self._use_docling:
-            print("[INFO] doclingによる表検出が有効です")
+            logger.info("doclingによる表検出が有効です")
     
     def _get_ocr(self):
         """manga-ocrインスタンスを取得（遅延初期化）"""
@@ -162,13 +169,13 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 
                 from manga_ocr import MangaOcr
                 self._ocr = MangaOcr()
-                print("[INFO] manga-ocrを初期化しました")
+                logger.info("manga-ocrを初期化しました")
             except ImportError:
-                print("[WARNING] manga-ocrがインストールされていません。OCR機能は無効です。")
-                print("[WARNING] インストール: pip install manga-ocr または uv sync")
+                logger.warning("manga-ocrがインストールされていません。OCR機能は無効です。")
+                logger.warning("インストール: pip install manga-ocr または uv sync")
                 self._ocr = False
             except Exception as e:
-                print(f"[WARNING] manga-ocrの初期化に失敗しました: {e}")
+                logger.warning(f"manga-ocrの初期化に失敗しました: {e}")
                 self._ocr = False
         return self._ocr if self._ocr else None
     
@@ -191,7 +198,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        print(f"[INFO] PDF文書変換開始: {self.pdf_file}")
+        logger.info(f"PDF文書変換開始: {self.pdf_file}")
         
         # ドキュメントタイトルを先頭に追加
         self.markdown_lines.append(f"# {self.base_name}")
@@ -200,17 +207,17 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         try:
             doc = fitz.open(self.pdf_file)
         except Exception as e:
-            print(f"[ERROR] PDFファイルを開けません: {self.pdf_file} - {e}")
+            logger.error(f"PDFファイルを開けません: {self.pdf_file} - {e}")
             raise
         
         try:
             total_pages = len(doc)
-            print(f"[INFO] 総ページ数: {total_pages}")
+            logger.info(f"総ページ数: {total_pages}")
             
             # スライド文書（PPT由来のPDFなど）かどうかを判定
             self._is_slide_document = self._detect_slide_document(doc)
             if self._is_slide_document:
-                print("[INFO] スライド文書として処理します")
+                logger.info("スライド文書として処理します")
                 # スライド文書の場合、繰り返し出現する画像xrefを収集（ヘッダ装飾除外用）
                 self._repeated_image_xrefs = self._collect_repeated_image_xrefs(doc)
             else:
@@ -220,11 +227,11 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             # スライド文書の場合はヘッダ・フッタパターン検出をスキップ
             if self._is_slide_document:
                 header_footer_patterns = set()
-                debug_print("[DEBUG] スライド文書のためヘッダ・フッタパターン検出をスキップ")
+                logger.debug("[DEBUG] スライド文書のためヘッダ・フッタパターン検出をスキップ")
             else:
                 header_footer_patterns = self._detect_header_footer_patterns(doc)
                 if header_footer_patterns:
-                    debug_print(f"[DEBUG] ヘッダ・フッタパターン検出: {len(header_footer_patterns)}個")
+                    logger.debug(f"[DEBUG] ヘッダ・フッタパターン検出: {len(header_footer_patterns)}個")
             
             # doc-wideのヘッダー/フッター領域を計算（フォールバック用）
             # スライド文書の場合はヘッダー/フッター領域を無効化
@@ -235,7 +242,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 self._compute_doc_wide_header_footer(doc, header_footer_patterns)
             
             for page_num in range(total_pages):
-                print(f"[INFO] ページ {page_num + 1}/{total_pages} を処理中...")
+                logger.info(f"ページ {page_num + 1}/{total_pages} を処理中...")
                 page = doc[page_num]
                 self._convert_page(page, page_num, header_footer_patterns)
         finally:
@@ -261,7 +268,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 f.write(text_content)
             # テキストモード時は画像ディレクトリを削除
             self._cleanup_images_dir()
-            print(f"[SUCCESS] 変換完了: {output_file}")
+            logger.info(f"変換完了: {output_file}")
             return output_file
         
         # 通常モード: .md出力
@@ -270,7 +277,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(markdown_content)
         
-        print(f"[SUCCESS] 変換完了: {output_file}")
+        logger.info(f"変換完了: {output_file}")
         return output_file
 
     def _get_auto_patterns(self) -> dict:
@@ -412,13 +419,13 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             header_y_values.sort()
             mid = len(header_y_values) // 2
             self._doc_header_y_max = header_y_values[mid]
-            debug_print(f"[DEBUG] doc-wideヘッダー領域: y_max={self._doc_header_y_max:.1f} ({len(header_y_values)}ページから計算)")
+            logger.debug(f"[DEBUG] doc-wideヘッダー領域: y_max={self._doc_header_y_max:.1f} ({len(header_y_values)}ページから計算)")
         
         if footer_y_values:
             footer_y_values.sort()
             mid = len(footer_y_values) // 2
             self._doc_footer_y_min = footer_y_values[mid]
-            debug_print(f"[DEBUG] doc-wideフッター領域: y_min={self._doc_footer_y_min:.1f} ({len(footer_y_values)}ページから計算)")
+            logger.debug(f"[DEBUG] doc-wideフッター領域: y_min={self._doc_footer_y_min:.1f} ({len(footer_y_values)}ページから計算)")
     
     def _is_header_footer(
         self, text: str, patterns: Set[str], 
@@ -465,7 +472,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     if in_header_zone or in_footer_zone:
                         return True
                     # ヘッダー/フッター帯外にある場合は除外しない
-                    debug_print(f"[DEBUG] パターン一致だがヘッダー/フッター帯外のため除外しない: '{text_stripped[:30]}' y={y_pos:.1f}")
+                    logger.debug(f"[DEBUG] パターン一致だがヘッダー/フッター帯外のため除外しない: '{text_stripped[:30]}' y={y_pos:.1f}")
                     continue
                 else:
                     # y座標情報がない場合は従来通り除外
@@ -517,13 +524,13 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         # 生テキストが存在する場合はスキャンページではない（PPTスライドなど）
         raw_text = page.get_text().strip()
         if raw_text:
-            debug_print(f"[DEBUG] 生テキストが存在するためスキャン判定をスキップ: {len(raw_text)}文字")
+            logger.debug(f"[DEBUG] 生テキストが存在するためスキャン判定をスキップ: {len(raw_text)}文字")
             return False
         
         # 埋め込み画像が存在しない場合はスキャンページではない（背景矩形のみ）
         images = page.get_images(full=True)
         if not images:
-            debug_print(f"[DEBUG] 埋め込み画像がないためスキャン判定をスキップ")
+            logger.debug(f"[DEBUG] 埋め込み画像がないためスキャン判定をスキップ")
             return False
         
         # ページサイズを取得
@@ -542,7 +549,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         coverage_ratio = fig_area / page_area if page_area > 0 else 0
         
         if coverage_ratio >= 0.8:
-            debug_print(f"[DEBUG] スキャンページ検出: 図の面積比={coverage_ratio:.2%}")
+            logger.debug(f"[DEBUG] スキャンページ検出: 図の面積比={coverage_ratio:.2%}")
             return True
         
         return False
@@ -595,7 +602,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             if width_variance > 100 or height_variance > 100:
                 return False
         
-        debug_print(f"[DEBUG] スライド文書検出: 横長率={landscape_ratio:.1%}, ページ数={total_pages}")
+        logger.debug(f"[DEBUG] スライド文書検出: 横長率={landscape_ratio:.1%}, ページ数={total_pages}")
         return True
     
     def _collect_repeated_image_xrefs(self, doc) -> Set[int]:
@@ -648,7 +655,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             
             if all_header_decoration:
                 repeated_xrefs.add(xref)
-                debug_print(f"[DEBUG] ヘッダ装飾画像検出: xref={xref}, 出現ページ数={len(unique_pages)}")
+                logger.debug(f"[DEBUG] ヘッダ装飾画像検出: xref={xref}, 出現ページ数={len(unique_pages)}")
         
         return repeated_xrefs
     
@@ -685,7 +692,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         if is_scan:
             # スキャンページ: 図の画像を出力し、OCRでテキスト抽出
-            debug_print(f"[DEBUG] ページ {page_num + 1}: スキャンページとして処理（OCR実行）")
+            logger.debug(f"[DEBUG] ページ {page_num + 1}: スキャンページとして処理（OCR実行）")
             
             # 図の画像を出力
             if vector_figures:
@@ -718,7 +725,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     self.markdown_lines.append(table_md)
         elif text_blocks or vector_figures:
             # テキストベースのPDF: 構造化されたMarkdownを出力
-            debug_print(f"[DEBUG] ページ {page_num + 1}: テキストベースPDFとして処理")
+            logger.debug(f"[DEBUG] ページ {page_num + 1}: テキストベースPDFとして処理")
             
             # 統合版の図抽出を使用（ベクター図形と埋め込み画像を統合）
             # vector_figuresは既に_extract_all_figuresで統合処理済み
@@ -729,7 +736,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             docling_tables = []
             if self._use_docling and (self._is_slide_document or has_table_image):
                 if has_table_image:
-                    debug_print(f"[DEBUG] ページ {page_num + 1}: 表画像を検出、doclingで表を抽出")
+                    logger.debug(f"[DEBUG] ページ {page_num + 1}: 表画像を検出、doclingで表を抽出")
                 docling_tables = self._detect_slide_tables_with_docling(page_num)
             
             # 構造化テキストと画像を出力（docling表は表画像の直後に出力）
@@ -738,7 +745,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             )
         else:
             # 画像ベースのPDF: 従来の画像+OCR処理
-            debug_print(f"[DEBUG] ページ {page_num + 1}: 画像ベースPDFとして処理")
+            logger.debug(f"[DEBUG] ページ {page_num + 1}: 画像ベースPDFとして処理")
             image_path = self._render_page_as_image(page, page_num)
             if image_path:
                 image_filename = os.path.basename(image_path)
@@ -854,12 +861,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     md = self._format_markdown_table(processed_rows)
                     if md:
                         tables_md.append(md)
-                        debug_print(
+                        logger.debug(
                             f"[DEBUG] スライド表検出: "
                             f"rows={len(processed_rows)}, cols={col_count}"
                         )
         except Exception as e:
-            debug_print(f"[DEBUG] スライド表検出エラー: {e}")
+            logger.debug(f"[DEBUG] スライド表検出エラー: {e}")
         return tables_md
     
     def _detect_slide_tables_with_docling(self, page_num: int) -> List[str]:
@@ -875,7 +882,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             Markdown形式の表文字列のリスト
         """
         if not is_docling_available():
-            debug_print("[DEBUG] doclingが利用不可のため、罫線ベース検出にフォールバック")
+            logger.debug("[DEBUG] doclingが利用不可のため、罫線ベース検出にフォールバック")
             # doclingが利用不可の場合は空リストを返す
             return []
         
@@ -884,7 +891,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             # doclingはページ番号が1始まり
             docling_page_num = page_num + 1
             
-            debug_print(f"[DEBUG] doclingで表検出開始: ページ {docling_page_num}")
+            logger.debug(f"[DEBUG] doclingで表検出開始: ページ {docling_page_num}")
             
             # doclingで表を抽出
             docling_tables = extract_slide_tables_with_docling(
@@ -894,13 +901,13 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             )
             
             if docling_tables:
-                debug_print(f"[DEBUG] docling表検出: {len(docling_tables)}個の表を検出")
+                logger.debug(f"[DEBUG] docling表検出: {len(docling_tables)}個の表を検出")
                 tables_md.extend(docling_tables)
             else:
-                debug_print(f"[DEBUG] docling表検出: 表なし")
+                logger.debug(f"[DEBUG] docling表検出: 表なし")
                 
         except Exception as e:
-            debug_print(f"[DEBUG] docling表検出エラー: {e}")
+            logger.debug(f"[DEBUG] docling表検出エラー: {e}")
         
         return tables_md
     
@@ -1030,7 +1037,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 if curr_first_y is not None and self._doc_header_y_max is not None:
                     if curr_first_y <= self._doc_header_y_max:
                         in_header_area = True
-                        debug_print(f"[DEBUG] ヘッダ帯検出: y={curr_first_y:.1f} <= header_y_max={self._doc_header_y_max:.1f}")
+                        logger.debug(f"[DEBUG] ヘッダ帯検出: y={curr_first_y:.1f} <= header_y_max={self._doc_header_y_max:.1f}")
                 
                 # 前ページの末尾ブロックが署名帯にあるかチェック（座標ベース）
                 # 署名帯の条件: ページ下部（85%以上）かつ幅が狭い（50%以下）
@@ -1046,12 +1053,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     # 署名帯: ページ下部85%以上 かつ 幅がページ幅の50%以下
                     if y_ratio >= 0.85 and w_ratio < 0.50:
                         in_signature_area = True
-                        debug_print(f"[DEBUG] 署名帯検出: y_ratio={y_ratio:.2%}, w_ratio={w_ratio:.2%}")
+                        logger.debug(f"[DEBUG] 署名帯検出: y_ratio={y_ratio:.2%}, w_ratio={w_ratio:.2%}")
                 
                 # 結合条件: 文末でなく、新構造要素でもなく、ヘッダ帯でもなく、署名帯でもない
                 if not ends_with_sentence and not starts_with_structure and not in_header_area and not in_signature_area:
                     should_merge = True
-                    debug_print(f"[DEBUG] ページ跨ぎ結合: '{prev_last_line[-20:]}' + '{curr_first_line[:20]}'")
+                    logger.debug(f"[DEBUG] ページ跨ぎ結合: '{prev_last_line[-20:]}' + '{curr_first_line[:20]}'")
             
             if should_merge:
                 # 前ページの末尾と現ページの先頭を結合
@@ -1284,7 +1291,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                     found_new = True
         
         if found_new:
-            debug_print(f"[DEBUG] 脚注番号セット: {sorted(self._defined_footnote_nums, key=int)}")
+            logger.debug(f"[DEBUG] 脚注番号セット: {sorted(self._defined_footnote_nums, key=int)}")
     
     
     
@@ -1547,7 +1554,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         # 両方に一定数以上の行があれば2段組みと判定
         if left_count >= 3 and right_count >= 3:
-            debug_print(f"[DEBUG] 2段組みレイアウトを検出 (左: {left_count}, 右: {right_count})")
+            logger.debug(f"[DEBUG] 2段組みレイアウトを検出 (左: {left_count}, 右: {right_count})")
             return 2
         
         return 1
@@ -1721,12 +1728,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 block_idx, block = best_above_caption
                 image_captions[img_idx]["above"] = block
                 used_caption_ids.add(block_idx)
-                debug_print(f"[DEBUG] 画像{img_idx}に上キャプションを関連付け: {block.get('text', '')[:30]}")
+                logger.debug(f"[DEBUG] 画像{img_idx}に上キャプションを関連付け: {block.get('text', '')[:30]}")
             if best_below_caption:
                 block_idx, block = best_below_caption
                 image_captions[img_idx]["below"] = block
                 used_caption_ids.add(block_idx)
-                debug_print(f"[DEBUG] 画像{img_idx}に下キャプションを関連付け: {block.get('text', '')[:30]}")
+                logger.debug(f"[DEBUG] 画像{img_idx}に下キャプションを関連付け: {block.get('text', '')[:30]}")
         
         # ブロックと画像をカラム・Y座標でマージしてソート
         all_items = []
@@ -2088,11 +2095,11 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 pix.save(image_path)
             
             self.image_counter += 1
-            debug_print(f"[DEBUG] 画像を保存: {image_path}")
+            logger.debug(f"[DEBUG] 画像を保存: {image_path}")
             return image_path
             
         except Exception as e:
-            print(f"[WARNING] ページ {page_num + 1} の画像変換に失敗: {e}")
+            logger.warning(f"ページ {page_num + 1} の画像変換に失敗: {e}")
             return None
     
     def _convert_png_to_svg(self, png_path: str, svg_path: str):
@@ -2122,7 +2129,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 f.write(svg_content)
                 
         except Exception as e:
-            print(f"[WARNING] SVG変換に失敗: {e}")
+            logger.warning(f"SVG変換に失敗: {e}")
             # フォールバック: PNGをそのままコピー
             import shutil
             png_fallback = svg_path.replace('.svg', '.png')
@@ -2145,11 +2152,11 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         text = page.get_text("text").strip()
         
         if text:
-            debug_print(f"[DEBUG] ページ {page_num + 1}: 埋め込みテキストを抽出")
+            logger.debug(f"[DEBUG] ページ {page_num + 1}: 埋め込みテキストを抽出")
             return text
         
         # テキストがない場合はOCRを試す
-        debug_print(f"[DEBUG] ページ {page_num + 1}: OCRでテキストを抽出")
+        logger.debug(f"[DEBUG] ページ {page_num + 1}: OCRでテキストを抽出")
         ocr_text = self._ocr_page(page)
         return ocr_text
     
@@ -2198,12 +2205,12 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             
         except ImportError as e:
             # ImportErrorは常に表示（原因特定のため）
-            print(f"[WARNING] pdf2md_ocrモジュールが利用できません: {e}")
-            print("[WARNING] テキスト領域検出が無効です。フォールバックOCRを使用します。")
+            logger.warning(f"pdf2md_ocrモジュールが利用できません: {e}")
+            logger.warning("テキスト領域検出が無効です。フォールバックOCRを使用します。")
             # フォールバック: 従来のmanga-ocr直接呼び出し
             return self._ocr_page_fallback(page)
         except Exception as e:
-            print(f"[WARNING] OCR処理中にエラーが発生: {e}")
+            logger.warning(f"OCR処理中にエラーが発生: {e}")
             return "(OCRエラー)"
     
     def _ocr_page_fallback(self, page) -> str:
@@ -2235,7 +2242,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             return text.strip() if text else ""
             
         except Exception as e:
-            print(f"[WARNING] フォールバックOCR処理中にエラーが発生: {e}")
+            logger.warning(f"フォールバックOCR処理中にエラーが発生: {e}")
             return "(OCRエラー)"
 
 

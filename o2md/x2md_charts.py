@@ -12,6 +12,7 @@ ChartDataオブジェクトに変換する。
 - 散布図 (ScatterChart)
 """
 
+import logging
 import re
 from typing import List, Optional, Any
 
@@ -28,6 +29,8 @@ CHART_TYPE_MAP = {
     'DoughnutChart': 'doughnut',
 }
 
+
+logger = logging.getLogger(__name__)
 
 def extract_charts_from_worksheet(worksheet, workbook) -> List[ChartData]:
     """
@@ -67,7 +70,7 @@ def _extract_chart_data(chart, workbook) -> Optional[ChartData]:
     chart_type = CHART_TYPE_MAP.get(chart_type_name)
     
     if not chart_type:
-        print(f"[WARNING] 未対応のチャートタイプ: {chart_type_name}")
+        logger.warning(f"未対応のチャートタイプ: {chart_type_name}")
         return None
     
     title = _extract_chart_title(chart)
@@ -318,7 +321,7 @@ def _resolve_cell_reference(ref_str: str, workbook) -> List[Any]:
     try:
         ws = workbook[sheet_name]
     except KeyError:
-        print(f"[WARNING] シートが見つかりません: {sheet_name}")
+        logger.warning(f"シートが見つかりません: {sheet_name}")
         return []
     
     values = []
