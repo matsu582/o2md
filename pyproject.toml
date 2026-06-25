@@ -1,9 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "o2md"
-version = "0.0.2"
-description = "Office document to Markdown converter"
+version = "0.1.0"
+description = "Convert Office documents, PDFs, and images to Markdown"
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.10"
+keywords = ["markdown", "converter", "office", "pdf", "ocr", "excel", "word", "powerpoint"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: Markup",
+    "Topic :: Office/Business",
+]
 dependencies = [
     "python-docx>=1.2.0",
     "python-pptx>=1.0.2",
@@ -13,19 +31,14 @@ dependencies = [
     "Pillow>=12.0.0",
     "PyMuPDF>=1.27.0",
     "numpy>=2.0.0",
-    "manga-ocr>=0.1.14",
     "opencv-python>=4.10.0",
     "pytesseract>=0.3.13",
     "olefile>=0.47",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-]
-docling = [
-    "docling>=2.67.0",
+manga-ocr = [
+    "manga-ocr>=0.1.14",
 ]
 sarashina = [
     "transformers>=4.44.0,<5.0.0",
@@ -36,9 +49,30 @@ sarashina = [
     "protobuf",
     "accelerate",
 ]
+docling = [
+    "docling>=2.67.0",
+    "rapidocr-torch; platform_machine == 'arm64' and sys_platform == 'darwin'",
+]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+]
 
-[tool.setuptools]
-packages = []
+[project.urls]
+Homepage = "https://github.com/matsu582/o2md"
+Repository = "https://github.com/matsu582/o2md"
+
+[project.scripts]
+o2md = "o2md.o2md:main"
+d2md = "o2md.d2md:main"
+x2md = "o2md.x2md:main"
+p2md = "o2md.p2md:main"
+pdf2md = "o2md.pdf2md:main"
+jtd2md = "o2md.jtd2md:main"
+img2md = "o2md.img2md:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["o2md"]
 
 [tool.pytest.ini_options]
 filterwarnings = [

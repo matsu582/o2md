@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from o2md import detect_file_type, convert_office_to_markdown
+from o2md.o2md import detect_file_type, convert_office_to_markdown
 
 
 class TestDetectFileType:

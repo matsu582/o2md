@@ -105,7 +105,7 @@ class ImageToMarkdownConverter:
         Returns:
             出力ファイルのパス（.mdまたは.txt）
         """
-        from utils import is_text_only
+        from o2md.utils import is_text_only
         print(f"[INFO] 画像OCR変換開始: {self.file_path}")
 
         # 画像を読み込み
@@ -129,7 +129,7 @@ class ImageToMarkdownConverter:
 
         # テキストモード: 直接.txtを出力（.mdは生成しない）
         if is_text_only():
-            from o2md import strip_markdown
+            from o2md.o2md import strip_markdown
             auto_patterns = self._get_auto_patterns()
             text_content = strip_markdown(md_content, auto_patterns=auto_patterns)
             output_path = os.path.join(
@@ -196,7 +196,7 @@ class ImageToMarkdownConverter:
             抽出されたテキスト
         """
         try:
-            from pdf2md_ocr import (
+            from o2md.pdf2md_ocr import (
                 process_pdf_page_with_detection,
                 set_verbose as ocr_set_verbose,
             )
@@ -325,7 +325,7 @@ def main():
 
     # テキストモード設定
     if args.text:
-        from utils import set_text_only
+        from o2md.utils import set_text_only
         set_text_only(True)
 
     converter = ImageToMarkdownConverter(

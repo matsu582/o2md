@@ -29,7 +29,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from collections import defaultdict
 import io
 
-from utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed
+from o2md.utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed
 
 try:
     from pptx import Presentation
@@ -143,7 +143,7 @@ class PowerPointToMarkdownConverter:
         Returns:
             出力ファイルのパス（.mdまたは.txt）
         """
-        from utils import is_text_only
+        from o2md.utils import is_text_only
         print(f"[INFO] PowerPoint文書変換開始: {self.pptx_file}")
         
         # ドキュメント見出し
@@ -167,7 +167,7 @@ class PowerPointToMarkdownConverter:
 
         # テキストモード: 直接.txtを出力（.mdは生成しない）
         if is_text_only():
-            from o2md import strip_markdown
+            from o2md.o2md import strip_markdown
             auto_patterns = self._get_auto_patterns()
             text_content = strip_markdown(markdown_content, auto_patterns=auto_patterns)
             output_file = os.path.join(self.output_dir, f"{self.base_name}.txt")
@@ -1279,7 +1279,7 @@ def main():
         )
         # テキストモード設定
         if args.text:
-            from utils import set_text_only
+            from o2md.utils import set_text_only
             set_text_only(True)
 
         output_file = converter.convert()

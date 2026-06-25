@@ -18,14 +18,14 @@ from typing import List, Dict, Tuple, Optional, Any, Set
 # または遅延インポートを使用する必要がある場合があります
 def _get_debug_print():
     """debug_print関数を取得（循環インポート回避）"""
-    from x2md import debug_print
+    from o2md.x2md import debug_print
     return debug_print
 
 # モジュールレベルでdebug_printを定義（遅延評価）
 def debug_print(*args, **kwargs):
     """デバッグ出力（x2mdモジュールに委譲）"""
     try:
-        from x2md import debug_print as _dp
+        from o2md.x2md import debug_print as _dp
         _dp(*args, **kwargs)
     except ImportError:
         pass  # インポートエラー時は無視

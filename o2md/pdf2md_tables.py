@@ -19,7 +19,7 @@ from typing import List, Dict, Tuple, Set, Any
 def debug_print(*args, **kwargs):
     """デバッグ出力（pdf2mdモジュールに委譲）"""
     try:
-        from pdf2md import debug_print as _dp
+        from o2md.pdf2md import debug_print as _dp
         _dp(*args, **kwargs)
     except ImportError:
         pass

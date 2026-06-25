@@ -23,8 +23,8 @@ import io
 import zipfile
 import xml.etree.ElementTree as ET
 
-from utils import get_libreoffice_path, is_libreoffice_available, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
-from isolated_group_renderer import IsolatedGroupRenderer
+from o2md.utils import get_libreoffice_path, is_libreoffice_available, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
+from o2md.isolated_group_renderer import IsolatedGroupRenderer
 
 try:
     import openpyxl
@@ -62,7 +62,7 @@ IMAGE_BORDER_SIZE = 8
 def debug_print(*args, **kwargs):
     """デバッグ出力（x2mdモジュールに委譲）"""
     try:
-        from x2md import debug_print as _dp
+        from o2md.x2md import debug_print as _dp
         _dp(*args, **kwargs)
     except ImportError:
         pass
