@@ -595,17 +595,7 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
         if cls._shared_model is not None:
             return True
         try:
-            import warnings
-            import logging
             import torch
-            # transformers/huggingface_hub読み込み時のwarningを抑制
-            warnings.filterwarnings("ignore", category=FutureWarning)
-            warnings.filterwarnings("ignore", message=".*use_fast.*")
-            warnings.filterwarnings("ignore", message=".*is deprecated.*")
-            warnings.filterwarnings("ignore", message=".*unauthenticated.*")
-            # ドキュメント未記載パラメータの警告（🚨）を抑制
-            logging.getLogger("transformers").setLevel(logging.ERROR)
-            logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
             from transformers import AutoModelForCausalLM, AutoProcessor
         except ImportError:
             print("[WARNING] sarashina OCRに必要なライブラリが不足しています")
@@ -630,11 +620,6 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
 
         try:
             print(f"[INFO] sarashina OCRモデルを読み込み中: {model_name}")
-            # モデル読み込み中の警告を抑制
-            import os
-            prev_verbosity = os.environ.get("TRANSFORMERS_VERBOSITY")
-            os.environ["TRANSFORMERS_VERBOSITY"] = "error"
-            warnings.filterwarnings("ignore", category=UserWarning)
             cls._shared_processor = AutoProcessor.from_pretrained(
                 model_name, trust_remote_code=True
             )
@@ -658,21 +643,9 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
                     trust_remote_code=True,
                     attn_implementation="sdpa",
                 )
-            # 警告抑制を解除
-            if prev_verbosity is None:
-                os.environ.pop("TRANSFORMERS_VERBOSITY", None)
-            else:
-                os.environ["TRANSFORMERS_VERBOSITY"] = prev_verbosity
-            warnings.resetwarnings()
             print("[INFO] sarashina OCRモデルの読み込み完了")
             return True
         except Exception as e:
-            # 警告抑制を解除
-            if prev_verbosity is None:
-                os.environ.pop("TRANSFORMERS_VERBOSITY", None)
-            else:
-                os.environ["TRANSFORMERS_VERBOSITY"] = prev_verbosity
-            warnings.resetwarnings()
             print(f"[WARNING] sarashina OCRモデルの読み込みに失敗: {e}")
             cls._shared_model = None
             cls._shared_processor = None
