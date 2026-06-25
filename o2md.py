@@ -101,6 +101,14 @@ except ImportError as e:
         "jtd2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: pip install olefile"
     ) from e
 
+try:
+    from img2md import ImageToMarkdownConverter
+    import img2md
+except ImportError as e:
+    raise ImportError(
+        "img2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
+    ) from e
+
 
 
 # グローバルverboseフラグ
@@ -115,6 +123,7 @@ def set_verbose(verbose: bool):
     p2md.set_verbose(verbose)
     pdf2md.set_verbose(verbose)
     jtd2md.set_verbose(verbose)
+    img2md.set_verbose(verbose)
 
 def is_verbose() -> bool:
     """verboseモードかどうかを返す"""
@@ -143,8 +152,8 @@ def _is_auto_generated_heading(line: str, heading_patterns: list) -> bool:
     return any(p.match(heading_text) for p in heading_patterns)
 
 
-def _strip_markdown(text: str, auto_patterns: dict = None) -> str:
-    """Markdownの書式記号を除去してプレーンテキストに変換する
+def strip_markdown(text: str, auto_patterns: dict = None) -> str:
+    """Markdownの書式記号を除去してプレーンテキストに変換する（公開API）
 
     Args:
         text: Markdownテキスト
@@ -231,12 +240,14 @@ def _remove_image_links(text: str) -> str:
     return '\n'.join(result)
 
 
-def convert_md_to_text(md_file_path: str, auto_patterns: dict = None) -> str:
+def convert_md_to_text(md_file_path: str, auto_patterns: dict = None,
+                       remove_md: bool = False) -> str:
     """Markdownファイルをプレーンテキストに変換して.txtとして保存する
 
     Args:
         md_file_path: 変換元の.mdファイルパス
         auto_patterns: コンバータから取得したプログラム生成パターン情報
+        remove_md: Trueの場合、変換後に元の.mdファイルを削除する
 
     Returns:
         出力した.txtファイルのパス
@@ -244,11 +255,14 @@ def convert_md_to_text(md_file_path: str, auto_patterns: dict = None) -> str:
     with open(md_file_path, 'r', encoding='utf-8') as f:
         md_content = f.read()
 
-    text_content = _strip_markdown(md_content, auto_patterns=auto_patterns)
+    text_content = strip_markdown(md_content, auto_patterns=auto_patterns)
 
     txt_file_path = md_file_path.rsplit('.md', 1)[0] + '.txt'
     with open(txt_file_path, 'w', encoding='utf-8') as f:
         f.write(text_content)
+
+    if remove_md:
+        os.remove(md_file_path)
 
     return txt_file_path
 
@@ -275,7 +289,7 @@ def detect_file_type(file_path: str) -> str:
         file_path: ファイルパス
         
     Returns:
-        'excel', 'word', 'powerpoint', 'pdf', 'unknown'のいずれか
+        'excel', 'word', 'powerpoint', 'pdf', 'ichitaro', 'image', 'unknown'のいずれか
     """
     file_path_lower = file_path.lower()
     
@@ -289,6 +303,8 @@ def detect_file_type(file_path: str) -> str:
         return 'pdf'
     elif file_path_lower.endswith(('.jtd', '.jtt')):
         return 'ichitaro'
+    elif file_path_lower.endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp')):
+        return 'image'
     else:
         return 'unknown'
 
@@ -320,7 +336,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
     if file_type == 'unknown':
         raise ValueError(
             f"サポートされていないファイル形式です: {file_path}\n"
-            "対応形式: .xlsx, .xls, .docx, .doc, .pptx, .ppt, .pdf, .jtd, .jtt"
+            "対応形式: .xlsx, .xls, .docx, .doc, .pptx, .ppt, .pdf, .jtd, .jtt, .jpg, .jpeg, .png, .gif, .bmp, .tiff, .tif, .webp"
         )
     
     print(f"[INFO] ファイルタイプを検出: {file_type}")
@@ -415,6 +431,18 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
                 output_dir=output_dir,
             )
             output_file = converter.convert()
+
+        elif file_type == 'image':
+            # 画像OCR変換
+            ocr_engine = kwargs.get('ocr_engine', 'tesseract')
+            tessdata_dir = kwargs.get('tessdata_dir', None)
+            converter = ImageToMarkdownConverter(
+                file_path,
+                output_dir=output_dir,
+                ocr_engine=ocr_engine,
+                tessdata_dir=tessdata_dir,
+            )
+            output_file = converter.convert()
         
         # コンバータからプログラム生成パターンを取得
         if converter and hasattr(converter, 'get_auto_generated_patterns'):
@@ -470,6 +498,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
 SUPPORTED_EXTENSIONS = (
     '.xlsx', '.xls', '.docx', '.doc', '.pptx', '.ppt', '.pdf',
     '.jtd', '.jtt',
+    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp',
 )
 
 
@@ -543,9 +572,7 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
                 output_dir=file_output_dir,
                 **kwargs
             )
-            # テキストモード: .txtファイルも追加出力（.mdはそのまま）
-            if is_text_only() and output_file and output_file.endswith('.md'):
-                convert_md_to_text(output_file, auto_patterns=auto_patterns)
+            # テキストモードでは各コンバータが直接.txtを出力するため追加処理不要
             results['success'].append({'file': str(rel), 'output': output_file})
         except Exception as e:
             print(f"[ERROR] 変換失敗: {rel} - {e}")
@@ -600,7 +627,7 @@ def main():
     parser.add_argument('--docling', action='store_true',
                        help='[PDF専用] doclingによる表検出を有効にする')
     parser.add_argument('--text', action='store_true',
-                       help='テキスト抽出モード（画像リンクを除去し、.txtも出力）')
+                       help='テキスト抽出モード（.txtのみ出力、.mdは生成しない）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力し、debug_workbooks/pdfs/diagnosticsフォルダを保存')
 
@@ -612,7 +639,7 @@ def main():
     from utils import set_text_only, is_libreoffice_available, warn_libreoffice_not_available
     if args.text:
         set_text_only(True)
-        print("[INFO] テキストモード: .mdと.txtの両方を出力します")
+        print("[INFO] テキストモード: .txtのみを出力します")
 
     # LibreOfficeの利用可否をチェックし、利用できない場合は警告を表示
     if not is_libreoffice_available():
@@ -666,16 +693,9 @@ def main():
                 **common_kwargs
             )
 
-            # テキストモード: .txtファイルも追加出力（.mdはそのまま）
-            txt_file = None
-            if args.text and output_file and output_file.endswith('.md'):
-                txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns)
-
             print("\n" + "=" * 50)
             print("変換完了!")
             print(f"出力ファイル: {output_file}")
-            if txt_file:
-                print(f"テキストファイル: {txt_file}")
 
             # 画像ディレクトリの情報を表示
             if args.output_dir:

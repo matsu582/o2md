@@ -188,8 +188,9 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         """メイン変換処理
         
         Returns:
-            出力ファイルのパス
+            出力ファイルのパス（.mdまたは.txt）
         """
+        from utils import is_text_only
         print(f"[INFO] PDF文書変換開始: {self.pdf_file}")
         
         # ドキュメントタイトルを先頭に追加
@@ -240,17 +241,30 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         finally:
             doc.close()
         
-        # Markdownファイルを書き出し
+        # Markdownコンテンツを構築
         markdown_content = "\n".join(self.markdown_lines)
         
         # ページ跨ぎの文章を結合する後処理
         markdown_content = self._merge_across_page_breaks(markdown_content)
         
         # 最終パス: 全文に対して脚注参照変換を適用
-        # （出力経路によっては変換が漏れる可能性があるため）
         if self._defined_footnote_nums:
             markdown_content = self._convert_inline_footnote_refs(markdown_content)
         
+        # テキストモード: 直接.txtを出力（.mdは生成しない）
+        if is_text_only():
+            from o2md import strip_markdown
+            auto_patterns = self._get_auto_patterns()
+            text_content = strip_markdown(markdown_content, auto_patterns=auto_patterns)
+            output_file = os.path.join(self.output_dir, f"{self.base_name}.txt")
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(text_content)
+            # テキストモード時は画像ディレクトリを削除
+            self._cleanup_images_dir()
+            print(f"[SUCCESS] 変換完了: {output_file}")
+            return output_file
+        
+        # 通常モード: .md出力
         output_file = os.path.join(self.output_dir, f"{self.base_name}.md")
         
         with open(output_file, "w", encoding="utf-8") as f:
@@ -258,6 +272,20 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         print(f"[SUCCESS] 変換完了: {output_file}")
         return output_file
+
+    def _get_auto_patterns(self) -> dict:
+        """strip_markdownに渡すパターン情報を返す"""
+        return {
+            'heading_patterns': self.get_auto_generated_patterns(),
+            'html_tags': self.get_auto_generated_html_tags(),
+            'line_patterns': [],
+        }
+
+    def _cleanup_images_dir(self):
+        """テキストモード時に画像ディレクトリを削除する"""
+        import shutil
+        if os.path.exists(self.images_dir):
+            shutil.rmtree(self.images_dir)
     
     def _detect_header_footer_patterns(self, doc) -> Set[str]:
         """全ページからヘッダ・フッタパターンを検出
@@ -2254,21 +2282,17 @@ def main():
             tessdata_dir=args.tessdata_dir,
             use_docling=args.docling
         )
-        output_file = converter.convert()
+        # テキストモード設定
+        if args.text:
+            from utils import set_text_only
+            set_text_only(True)
 
-        txt_file = None
-        if args.text and output_file and output_file.endswith('.md'):
-            from o2md import convert_md_to_text
-            auto_patterns = {'heading_patterns': [], 'html_tags': [], 'line_patterns': []}
-            auto_patterns['heading_patterns'] = converter.get_auto_generated_patterns()
-            auto_patterns['html_tags'] = converter.get_auto_generated_html_tags()
-            txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns)
+        output_file = converter.convert()
 
         print("\n変換完了!")
         print(f"出力ファイル: {output_file}")
-        print(f"画像フォルダ: {converter.images_dir}")
-        if txt_file:
-            print(f"テキストファイル: {txt_file}")
+        if os.path.exists(converter.images_dir) and os.listdir(converter.images_dir):
+            print(f"画像フォルダ: {converter.images_dir}")
         
     except Exception as e:
         print(f"変換エラー: {e}")

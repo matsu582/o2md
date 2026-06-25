@@ -209,15 +209,14 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         return ['<details>', '</details>', '<summary>図形内テキスト</summary>', '<summary>JSON形式の図形情報</summary>']
 
     def convert(self) -> str:
-        """トップレベルの変換処理 (軽量ラッパ)
+        """トップレベルの変換処理
 
-        既存のコードベースには複数の補助メソッドがあるため、ここでは
-        最小限のフローを提供して CLI から呼べるようにします。
         - ドキュメント見出しの追加
         - 目次生成 (存在すれば呼ぶ)
         - 各シートを順に変換
-        - Markdown ファイルを書き出してパスを返す
+        - テキストモード時は.txtを直接出力、通常時は.md出力
         """
+        from utils import is_text_only
         print(f"[INFO] Excel文書変換開始: {self.excel_file}")
 
         # ドキュメントタイトルを先頭に追加
@@ -249,13 +248,41 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 traceback.print_exc()
                 continue
 
-        # Markdown出力を書き込み
-        output_file = os.path.join(self.output_dir, f"{self.base_name}.md")
         content = "\n".join(str(x) for x in self.markdown_lines)
+
+        # テキストモード: 直接.txtを出力（.mdは生成しない）
+        if is_text_only():
+            from o2md import strip_markdown
+            auto_patterns = self._get_auto_patterns()
+            text_content = strip_markdown(content, auto_patterns=auto_patterns)
+            output_file = os.path.join(self.output_dir, f"{self.base_name}.txt")
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(text_content)
+            # テキストモード時は画像ディレクトリを削除
+            self._cleanup_images_dir()
+            print(f"[SUCCESS] 変換完了: {output_file}")
+            return output_file
+
+        # 通常モード: .md出力
+        output_file = os.path.join(self.output_dir, f"{self.base_name}.md")
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(content)
         print(f"[SUCCESS] 変換完了: {output_file}")
         return output_file
+
+    def _get_auto_patterns(self) -> dict:
+        """strip_markdownに渡すパターン情報を返す"""
+        return {
+            'heading_patterns': self.get_auto_generated_patterns(),
+            'html_tags': self.get_auto_generated_html_tags(),
+            'line_patterns': [],
+        }
+
+    def _cleanup_images_dir(self):
+        """テキストモード時に画像ディレクトリを削除する"""
+        import shutil
+        if os.path.exists(self.images_dir):
+            shutil.rmtree(self.images_dir)
 
     def _mark_image_emitted(self, img_name: str):
         """Mark an image as emitted only during the canonical emission pass."""
@@ -2891,21 +2918,17 @@ def main():
             shape_metadata=args.shape_metadata,
             output_format=args.format
         )
-        output_file = converter.convert()
+        # テキストモード設定
+        if args.text:
+            from utils import set_text_only
+            set_text_only(True)
 
-        txt_file = None
-        if args.text and output_file and output_file.endswith('.md'):
-            from o2md import convert_md_to_text
-            auto_patterns = {'heading_patterns': [], 'html_tags': [], 'line_patterns': []}
-            auto_patterns['heading_patterns'] = converter.get_auto_generated_patterns()
-            auto_patterns['html_tags'] = converter.get_auto_generated_html_tags()
-            txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns)
+        output_file = converter.convert()
 
         debug_print("\n変換完了!")
         debug_print(f"出力ファイル: {output_file}")
-        debug_print(f"画像フォルダ: {converter.images_dir}")
-        if txt_file:
-            debug_print(f"テキストファイル: {txt_file}")
+        if os.path.exists(converter.images_dir) and os.listdir(converter.images_dir):
+            debug_print(f"画像フォルダ: {converter.images_dir}")
         
     except Exception as e:
         debug_print(f"変換エラー: {e}")

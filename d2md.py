@@ -155,7 +155,12 @@ class WordToMarkdownConverter:
         return ['<details>', '</details>', '<summary>図形内テキスト</summary>']
 
     def convert(self) -> str:
-        """メイン変換処理"""
+        """メイン変換処理
+
+        Returns:
+            出力ファイルのパス（.mdまたは.txt）
+        """
+        from utils import is_text_only
         print(f"[INFO] Word文書変換開始: {self.word_file}")
         
         # 1. 見出し構造を解析（参照リンク生成のため）
@@ -174,8 +179,23 @@ class WordToMarkdownConverter:
         # 2.6. チャートデータを抽出してMarkdownテーブルとして出力
         self._process_document_charts()
         
-        # 3. Markdownファイルを保存
+        # 3. コンテンツを構築
         markdown_content = "\n".join(self.markdown_lines)
+
+        # テキストモード: 直接.txtを出力（.mdは生成しない）
+        if is_text_only():
+            from o2md import strip_markdown
+            auto_patterns = self._get_auto_patterns()
+            text_content = strip_markdown(markdown_content, auto_patterns=auto_patterns)
+            output_file = os.path.join(self.output_dir, f"{self.base_name}.txt")
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(text_content)
+            # テキストモード時は画像ディレクトリを削除
+            self._cleanup_images_dir()
+            print(f"[SUCCESS] 変換完了: {output_file}")
+            return output_file
+
+        # 通常モード: .md出力
         output_file = os.path.join(self.output_dir, f"{self.base_name}.md")
         
         with open(output_file, "w", encoding="utf-8") as f:
@@ -183,6 +203,20 @@ class WordToMarkdownConverter:
         
         print(f"[SUCCESS] 変換完了: {output_file}")
         return output_file
+
+    def _get_auto_patterns(self) -> dict:
+        """strip_markdownに渡すパターン情報を返す"""
+        return {
+            'heading_patterns': self.get_auto_generated_patterns(),
+            'html_tags': self.get_auto_generated_html_tags(),
+            'line_patterns': [],
+        }
+
+    def _cleanup_images_dir(self):
+        """テキストモード時に画像ディレクトリを削除する"""
+        import shutil
+        if os.path.exists(self.images_dir):
+            shutil.rmtree(self.images_dir)
     
     def _process_document_charts(self):
         """Word文書内のチャートデータを抽出してMarkdownテーブルとして出力する
@@ -3297,21 +3331,17 @@ def main():
             shape_metadata=args.shape_metadata,
             output_format=args.format
         )
-        output_file = converter.convert()
+        # テキストモード設定
+        if args.text:
+            from utils import set_text_only
+            set_text_only(True)
 
-        txt_file = None
-        if args.text and output_file and output_file.endswith('.md'):
-            from o2md import convert_md_to_text
-            auto_patterns = {'heading_patterns': [], 'html_tags': [], 'line_patterns': []}
-            auto_patterns['heading_patterns'] = converter.get_auto_generated_patterns()
-            auto_patterns['html_tags'] = converter.get_auto_generated_html_tags()
-            txt_file = convert_md_to_text(output_file, auto_patterns=auto_patterns)
+        output_file = converter.convert()
 
         print("\n変換完了!")
         print(f"出力ファイル: {output_file}")
-        print(f"画像フォルダ: {converter.images_dir}")
-        if txt_file:
-            print(f"テキストファイル: {txt_file}")
+        if os.path.exists(converter.images_dir) and os.listdir(converter.images_dir):
+            print(f"画像フォルダ: {converter.images_dir}")
         if args.use_heading_text:
             print("見出しテキストリンクモード: 有効")
         
