@@ -725,7 +725,10 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
             return ""
         rgb = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb)
-        return self._run_ocr(pil_img)
+        result = self._run_ocr(pil_img)
+        if result:
+            result = self._strip_bbox_tags(result)
+        return result
 
     @staticmethod
     def _html_table_to_markdown(html_table: str) -> str:
@@ -770,12 +773,19 @@ class SarashinaOCRProcessor(BaseOCRProcessor):
             return SarashinaOCRProcessor._html_table_to_markdown(match.group(0))
         return re.sub(pattern, replacer, text, flags=re.DOTALL)
 
+    @staticmethod
+    def _strip_bbox_tags(text: str) -> str:
+        """sarashina出力に含まれる<bbox>...</bbox>タグを除去"""
+        import re
+        return re.sub(r'<bbox>.*?</bbox>', '', text, flags=re.DOTALL).strip()
+
     def ocr_full_image(self, img: np.ndarray) -> str:
         """画像全体からOCRでテキストを抽出（End-to-End）"""
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb)
         result = self._run_ocr(pil_img)
         if result:
+            result = self._strip_bbox_tags(result)
             result = self._convert_html_tables(result)
         return result
 
