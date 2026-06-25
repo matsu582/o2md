@@ -37,7 +37,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ocr = [
+manga-ocr = [
     "manga-ocr>=0.1.14",
 ]
 sarashina = [
