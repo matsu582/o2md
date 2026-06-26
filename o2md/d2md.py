@@ -3348,7 +3348,9 @@ def main():
         print("\n変換完了!")
         print(f"出力ファイル: {output_file}")
         if os.path.exists(converter.images_dir) and os.listdir(converter.images_dir):
-            print(f"画像フォルダ: {converter.images_dir}")
+            image_count = len([f for f in os.listdir(converter.images_dir) if os.path.isfile(os.path.join(converter.images_dir, f))])
+            if image_count > 0:
+                print(f"出力画像: {image_count}枚")
         if args.use_heading_text:
             print("見出しテキストリンクモード: 有効")
         

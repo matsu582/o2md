@@ -709,7 +709,7 @@ def main():
             print("変換完了!")
             print(f"出力ファイル: {output_file}")
 
-            # 画像ディレクトリの情報を表示（画像OCR変換時は除外）
+            # 出力画像数を表示（画像OCR変換時は除外）
             if detect_file_type(args.file) != 'image':
                 if args.output_dir:
                     images_dir = os.path.join(args.output_dir, "images")
@@ -717,7 +717,9 @@ def main():
                     images_dir = os.path.join(os.getcwd(), "output", "images")
 
                 if os.path.exists(images_dir) and os.listdir(images_dir):
-                    print(f"画像フォルダ: {images_dir}")
+                    image_count = len([f for f in os.listdir(images_dir) if os.path.isfile(os.path.join(images_dir, f))])
+                    if image_count > 0:
+                        print(f"出力画像: {image_count}枚")
 
             if args.use_heading_text:
                 print("見出しテキストリンクモード: 有効")
