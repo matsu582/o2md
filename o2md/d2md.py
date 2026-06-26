@@ -178,6 +178,10 @@ class WordToMarkdownConverter:
         # 1. 見出し構造を解析（参照リンク生成のため）
         self._analyze_headings()
         
+        # 見出しがある場合は総セクション数を表示
+        if self.headings:
+            print(_("総セクション数: {count}").format(count=len(self.headings)))
+        
         # 1.5. numbering定義を解析（デバッグ用）
         self._analyze_numbering_definitions()
         
@@ -493,6 +497,8 @@ class WordToMarkdownConverter:
         # 要素を順番に処理
         # 直前の要素を追跡するための変数
         previous_element_type = None
+        heading_counter = 0
+        total_headings = len(self.headings)
         
         for element in self.doc.element.body:
             if element.tag.endswith('}p'):  # 段落
@@ -507,6 +513,11 @@ class WordToMarkdownConverter:
                     
                     # 見出しかどうかを記録
                     if self._is_heading(paragraph):
+                        if total_headings > 0:
+                            heading_counter += 1
+                            heading_text = paragraph.text.strip()
+                            print(_("セクション {current}/{total} を処理中: {name}").format(
+                                current=heading_counter, total=total_headings, name=heading_text))
                         previous_element_type = 'heading'
                     elif self._is_list_item(paragraph):
                         previous_element_type = 'list'

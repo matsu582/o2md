@@ -83,6 +83,12 @@ msgstr "DOC→DOCX変換完了: {file}"
 msgid "DOC→DOCX変換に失敗しました。"
 msgstr "DOC→DOCX変換に失敗しました。"
 
+msgid "総セクション数: {count}"
+msgstr "総セクション数: {count}"
+
+msgid "セクション {current}/{total} を処理中: {name}"
+msgstr "セクション {current}/{total} を処理中: {name}"
+
 # --- PowerPoint変換 ---
 
 msgid "PPT→PPTX変換完了: {file}"
