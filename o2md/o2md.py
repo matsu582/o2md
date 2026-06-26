@@ -717,7 +717,8 @@ def main():
                     images_dir = os.path.join(os.getcwd(), "output", "images")
 
                 if os.path.exists(images_dir) and os.listdir(images_dir):
-                    image_count = len([f for f in os.listdir(images_dir) if os.path.isfile(os.path.join(images_dir, f))])
+                    base_name = Path(args.file).stem
+                    image_count = len([f for f in os.listdir(images_dir) if os.path.isfile(os.path.join(images_dir, f)) and f.startswith(base_name)])
                     if image_count > 0:
                         print(f"出力画像: {image_count}枚")
 
