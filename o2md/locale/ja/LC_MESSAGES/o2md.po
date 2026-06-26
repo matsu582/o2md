@@ -60,9 +60,6 @@ msgstr "ページ {current}/{total} を処理中..."
 
 # --- Excel変換 ---
 
-msgid "XLS→XLSX変換中: {file}"
-msgstr "XLS→XLSX変換中: {file}"
-
 msgid "XLS→XLSX変換完了: {file}"
 msgstr "XLS→XLSX変換完了: {file}"
 
@@ -80,9 +77,6 @@ msgstr "シート {current}/{total} を処理中: {name}"
 msgid "Word文書変換開始: {file}"
 msgstr "Word文書変換開始: {file}"
 
-msgid "DOC→DOCX変換中: {file}"
-msgstr "DOC→DOCX変換中: {file}"
-
 msgid "DOC→DOCX変換完了: {file}"
 msgstr "DOC→DOCX変換完了: {file}"
 
@@ -90,9 +84,6 @@ msgid "DOC→DOCX変換に失敗しました。"
 msgstr "DOC→DOCX変換に失敗しました。"
 
 # --- PowerPoint変換 ---
-
-msgid "PPT→PPTX変換中: {file}"
-msgstr "PPT→PPTX変換中: {file}"
 
 msgid "PPT→PPTX変換完了: {file}"
 msgstr "PPT→PPTX変換完了: {file}"

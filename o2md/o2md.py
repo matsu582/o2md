@@ -368,7 +368,6 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             
             # XLSファイルの場合は事前にXLSXに変換
             if file_path.lower().endswith('.xls'):
-                print(_("XLS→XLSX変換中: {file}").format(file=file_path))
                 converted_file = convert_xls_to_xlsx(file_path)
                 if converted_file is None:
                     raise RuntimeError("XLS→XLSX変換に失敗しました。")
@@ -392,7 +391,6 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             
             # DOCファイルの場合は事前にDOCXに変換
             if file_path.lower().endswith('.doc'):
-                print(_("DOC→DOCX変換中: {file}").format(file=file_path))
                 converted_file = convert_doc_to_docx(file_path)
                 if converted_file is None:
                     raise RuntimeError("DOC→DOCX変換に失敗しました。")
