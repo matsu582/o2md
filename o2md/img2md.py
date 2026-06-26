@@ -18,12 +18,15 @@ OCRエンジン:
 pdf2md_ocrモジュールのOCRエンジンを再利用して画像からテキストを抽出する。
 """
 
+import logging
 import os
 import sys
 import shutil
 import argparse
 from pathlib import Path
 from typing import Optional
+
+from o2md.i18n import _
 
 import cv2
 import numpy as np
@@ -35,6 +38,9 @@ IMAGE_EXTENSIONS = (
 )
 
 # グローバル変数
+logger = logging.getLogger(__name__)
+
+# グローバルverboseフラグ
 _VERBOSE = False
 
 
@@ -42,6 +48,10 @@ def set_verbose(verbose: bool):
     """デバッグ出力の有効/無効を設定"""
     global _VERBOSE
     _VERBOSE = verbose
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.WARNING,
+        format='[%(levelname)s] %(message)s',
+    )
 
 
 def is_verbose() -> bool:
@@ -88,8 +98,12 @@ class ImageToMarkdownConverter:
             self.output_dir = os.path.join(os.getcwd(), "output")
 
         self.images_dir = os.path.join(self.output_dir, "images")
+
+        # ディレクトリ作成
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.images_dir, exist_ok=True)
+
+        self.output_image_count = 0
 
     def get_auto_generated_patterns(self) -> list:
         """このコンバータが自動付与する見出しの正規表現パターンを返す"""
@@ -105,8 +119,8 @@ class ImageToMarkdownConverter:
         Returns:
             出力ファイルのパス（.mdまたは.txt）
         """
-        from utils import is_text_only
-        print(f"[INFO] 画像OCR変換開始: {self.file_path}")
+        from o2md.utils import is_text_only
+        print(_("画像OCR変換開始: {file}").format(file=self.file_path))
 
         # 画像を読み込み
         img = self._load_image()
@@ -116,20 +130,12 @@ class ImageToMarkdownConverter:
         # OCRでテキスト抽出
         ocr_text = self._extract_text_with_ocr(img)
 
-        # 画像を出力ディレクトリにコピー（テキストモード時はスキップ）
-        image_filename = f"{self.base_name}{self.file_ext}"
-        if not is_text_only():
-            dest_image_path = os.path.join(self.images_dir, image_filename)
-            shutil.copy2(self.file_path, dest_image_path)
-            debug_print(f"[INFO] 画像をコピー: {dest_image_path}")
-
-        # Markdown生成
-        md_lines = self._build_markdown(image_filename, ocr_text)
-        md_content = '\n'.join(md_lines)
-
-        # テキストモード: 直接.txtを出力（.mdは生成しない）
+        # テキストモード: 画像コピー不要、直接.txtを出力
         if is_text_only():
-            from o2md import strip_markdown
+            from o2md.o2md import strip_markdown
+            image_filename = f"images/{self.base_name}{self.file_ext}"
+            md_lines = self._build_markdown(image_filename, ocr_text)
+            md_content = '\n'.join(md_lines)
             auto_patterns = self._get_auto_patterns()
             text_content = strip_markdown(md_content, auto_patterns=auto_patterns)
             output_path = os.path.join(
@@ -139,8 +145,13 @@ class ImageToMarkdownConverter:
                 f.write(text_content)
             # テキストモード時は画像ディレクトリを削除
             self._cleanup_images_dir()
-            print(f"[SUCCESS] 変換完了: {output_path}")
+            logger.info(f"変換完了: {output_path}")
             return output_path
+
+        # 通常モード: 画像をoutput/images/にコピー
+        image_filename = self._copy_image_to_output()
+        md_lines = self._build_markdown(image_filename, ocr_text)
+        md_content = '\n'.join(md_lines)
 
         # 通常モード: .md出力
         output_path = os.path.join(
@@ -149,8 +160,26 @@ class ImageToMarkdownConverter:
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(md_content)
 
-        print(f"[SUCCESS] 変換完了: {output_path}")
+        logger.info(f"変換完了: {output_path}")
         return output_path
+
+    def _copy_image_to_output(self) -> str:
+        """画像ファイルをoutput/images/にコピーする
+
+        Returns:
+            images/からの相対ファイル名（Markdownリンク用）
+        """
+        dest_filename = f"{self.base_name}{self.file_ext}"
+        dest_path = os.path.join(self.images_dir, dest_filename)
+        shutil.copy2(self.file_path, dest_path)
+        self.output_image_count += 1
+        logger.debug(f"画像をコピー: {dest_path}")
+        return f"images/{dest_filename}"
+
+    def _cleanup_images_dir(self):
+        """テキストモード時に画像ディレクトリを削除する"""
+        if os.path.exists(self.images_dir):
+            shutil.rmtree(self.images_dir)
 
     def _get_auto_patterns(self) -> dict:
         """strip_markdownに渡すパターン情報を返す"""
@@ -159,11 +188,6 @@ class ImageToMarkdownConverter:
             'html_tags': [],
             'line_patterns': [],
         }
-
-    def _cleanup_images_dir(self):
-        """テキストモード時に画像ディレクトリを削除する"""
-        if os.path.exists(self.images_dir):
-            shutil.rmtree(self.images_dir)
 
     def _load_image(self) -> Optional[np.ndarray]:
         """画像ファイルを読み込む
@@ -176,14 +200,14 @@ class ImageToMarkdownConverter:
             buf = np.fromfile(self.file_path, dtype=np.uint8)
             img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
             if img is None:
-                print(f"[ERROR] 画像のデコードに失敗: {self.file_path}")
+                logger.error(f"画像のデコードに失敗: {self.file_path}")
                 return None
-            debug_print(
+            logger.debug(
                 f"[INFO] 画像読み込み完了: {img.shape[1]}x{img.shape[0]}"
             )
             return img
         except Exception as e:
-            print(f"[ERROR] 画像読み込みエラー: {e}")
+            logger.error(f"画像読み込みエラー: {e}")
             return None
 
     def _extract_text_with_ocr(self, img: np.ndarray) -> str:
@@ -196,7 +220,7 @@ class ImageToMarkdownConverter:
             抽出されたテキスト
         """
         try:
-            from pdf2md_ocr import (
+            from o2md.pdf2md_ocr import (
                 process_pdf_page_with_detection,
                 set_verbose as ocr_set_verbose,
             )
@@ -208,19 +232,19 @@ class ImageToMarkdownConverter:
                 tessdata_dir=self.tessdata_dir,
             )
             if text:
-                debug_print(
+                logger.debug(
                     f"[INFO] OCRテキスト抽出完了: {len(text)}文字"
                 )
             else:
-                print("[WARNING] OCRでテキストが抽出されませんでした")
+                logger.warning("OCRでテキストが抽出されませんでした")
             return text.strip() if text else ""
 
         except ImportError as e:
-            print(f"[WARNING] pdf2md_ocrモジュールが利用できません: {e}")
+            logger.warning(f"pdf2md_ocrモジュールが利用できません: {e}")
             # フォールバック: 直接tesseractを呼び出し
             return self._ocr_fallback(img)
         except Exception as e:
-            print(f"[WARNING] OCR処理中にエラー: {e}")
+            logger.warning(f"OCR処理中にエラー: {e}")
             return self._ocr_fallback(img)
 
     def _ocr_fallback(self, img: np.ndarray) -> str:
@@ -242,10 +266,10 @@ class ImageToMarkdownConverter:
             )
             return text.strip() if text else ""
         except ImportError:
-            print("[ERROR] pytesseractがインストールされていません")
+            logger.error("pytesseractがインストールされていません")
             return ""
         except Exception as e:
-            print(f"[ERROR] フォールバックOCRエラー: {e}")
+            logger.error(f"フォールバックOCRエラー: {e}")
             return ""
 
     def _build_markdown(
@@ -263,7 +287,7 @@ class ImageToMarkdownConverter:
         md = []
         md.append(f"# {self.base_name}")
         md.append("")
-        md.append(f"![{self.base_name}](images/{image_filename})")
+        md.append(f"![{self.base_name}]({image_filename})")
         md.append("")
 
         if ocr_text:
@@ -312,20 +336,20 @@ def main():
     set_verbose(args.verbose)
 
     if not os.path.exists(args.image_file):
-        print(f"エラー: ファイル '{args.image_file}' が見つかりません。")
+        print(_("エラー: ファイル '{file}' が見つかりません。").format(file=args.image_file))
         sys.exit(1)
 
     ext = Path(args.image_file).suffix.lower()
     if ext not in IMAGE_EXTENSIONS:
         print(
-            f"エラー: 対応していない画像形式です: {ext}\n"
-            f"対応形式: {', '.join(IMAGE_EXTENSIONS)}"
+            _("エラー: 対応していない画像形式です: {ext}").format(ext=ext) + "\n"
+            + _("対応形式: {formats}").format(formats=', '.join(IMAGE_EXTENSIONS))
         )
         sys.exit(1)
 
     # テキストモード設定
     if args.text:
-        from utils import set_text_only
+        from o2md.utils import set_text_only
         set_text_only(True)
 
     converter = ImageToMarkdownConverter(
@@ -336,10 +360,9 @@ def main():
     )
     output_file = converter.convert()
 
-    print(f"\n変換完了!")
-    print(f"出力ファイル: {output_file}")
-    if os.path.exists(converter.images_dir) and os.listdir(converter.images_dir):
-        print(f"画像フォルダ: {converter.images_dir}")
+    print("\n" + "=" * 50)
+    print(_("出力ファイル: {output_file}").format(output_file=output_file))
+    print("=" * 50)
 
 
 if __name__ == "__main__":

@@ -1,45 +1,48 @@
 # Office to Markdown Converter (o2md)
 
-Excel、Word、PowerPoint、PDF、一太郎、画像ファイルを自動判定して**それっぽい**Markdownに変換するツール。
+A tool that auto-detects Excel, Word, PowerPoint, PDF, Ichitaro, and image files and converts them to **roughly adequate** Markdown.
 
-本ツールは[Devin](https://app.devin.ai)を利用して作成しています。
+This tool was built using [Devin](https://app.devin.ai).
 
-ちゃんとしたきゃ、[markitdown](https://github.com/microsoft/markitdown)や[docling](https://github.com/docling-project/docling)を使いましょう。
+For production-grade conversion, consider [markitdown](https://github.com/microsoft/markitdown) or [docling](https://github.com/docling-project/docling).
 
-docling、markitdown との機能比較は [o2md_comparison.md](o2md_comparison.md) を参照してください。
+For a feature comparison with docling and markitdown, see [o2md_comparison.md](o2md_comparison.md).
 
-## 概要
+[Japanese documentation (README_jp.md)](README_jp.md)
 
-o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）、PDF、一太郎文書（.jtd/.jtt）、および画像ファイル（JPEG/PNG/GIF/BMP/TIFF/WebP）を**それっぽい**Markdown形式に変換するPythonツールです。ファイルの種類を自動判定し、適切な変換エンジンを使用して処理します。
-画像ファイルや画像ベースのPDF（スキャン文書等）は、OCR（Tesseract/manga-ocr/sarashina2.2-ocr）によりテキスト抽出を行います。
-古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換は**LibreOffice**に依存しています。LibreOfficeがない環境でもテキストのみの変換は正常に動作します。
+## Overview
 
-### 主な特徴
+o2md is a Python tool that converts Microsoft Office documents (Excel, Word, PowerPoint), PDFs, Ichitaro documents (.jtd/.jtt), and image files (JPEG/PNG/GIF/BMP/TIFF/WebP) to **roughly adequate** Markdown. It auto-detects file types and selects the appropriate conversion engine.
+o2md does not use trendy machine learning-based conversion; instead, it performs good old-fashioned logic-based conversion.
+Image files and image-based PDFs (scanned documents, etc.) are processed with OCR (Tesseract/manga-ocr/sarashina2.2-ocr) for text extraction.
+Legacy formats (.xls, .doc, .ppt) and shape/image rendering depend on **LibreOffice**. Text-only conversion works without LibreOffice.
 
-- **統合インターフェース**: 1つのコマンドで全てのOffice文書とPDFを変換
-- **自動ファイル判定**: ファイル拡張子に基づいて自動的に適切な変換方法を選択
-- **新旧両形式対応**: `.xlsx`/`.xls`、`.docx`/`.doc`、`.pptx`/`.ppt`に対応
-- **SVG/PNG出力対応**: 図形やグラフをSVG（デフォルト）またはPNG形式で出力
-- **Excel変換** (x2md.py): 表、グラフ、図形を含むワークシートを変換
-- **Word変換** (d2md.py): 見出し、表、画像、リストを含む文書を変換
-- **PowerPoint変換** (p2md.py): スライド、図形、表、テキストを変換
-- **PDF変換** (pdf2md.py): PDFを画像とテキストに変換（[Tesseract](https://github.com/tesseract-ocr/tesseract)/[manga-ocr](https://github.com/kha-white/manga-ocr)/[sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr)によるOCR対応）
-- **一太郎変換** (jtd2md.py): 一太郎文書のOLE2バイナリを独自解析し、テキスト・テーブル・太字を変換
-- **画像OCR変換** (img2md.py): 画像ファイルからOCRでテキスト抽出しMarkdownに変換（Tesseract/manga-ocr/sarashina対応）
-- **画像処理**: 図形やグラフを自動的に画像として抽出・埋め込み
-- **複雑な要素の処理**: 表と図形が混在するスライドは全体を画像化
+### Key Features
 
-※[sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr)すごいです。オススメです。GPU等あるなら是非www
+- **Unified interface**: Convert all Office documents and PDFs with a single command
+- **Auto file detection**: Automatically selects the appropriate conversion method based on file extension
+- **Legacy format support**: Supports `.xlsx`/`.xls`, `.docx`/`.doc`, `.pptx`/`.ppt`
+- **SVG/PNG output**: Export shapes and charts as SVG (default) or PNG
+- **Excel** (`x2md`): Convert worksheets including tables, charts, and shapes
+- **Word** (`d2md`): Convert documents with headings, tables, images, and lists
+- **PowerPoint** (`p2md`): Convert slides with shapes, tables, and text
+- **PDF** (`pdf2md`): Convert PDFs with text extraction and OCR ([Tesseract](https://github.com/tesseract-ocr/tesseract)/[manga-ocr](https://github.com/kha-white/manga-ocr)/[sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr))
+- **Ichitaro** (`jtd2md`): Parse OLE2 binary format to extract text, tables, and bold text
+- **Image OCR** (`img2md`): Extract text from images via OCR and convert to Markdown (Tesseract/manga-ocr/sarashina)
+- **Image extraction**: Automatically extract and embed shapes and charts as images
+- **Complex element handling**: Slides with mixed tables and shapes are rendered as full-slide images
 
-## インストール
+*[sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr) is amazing. Highly recommended if you have a GPU!*
 
-### 前提条件
+## Installation
 
-- Python 3.10 以上
-- [uv](https://docs.astral.sh/uv/) (推奨) または pip
-- [LibreOffice](https://www.libreoffice.org/) (図形の画像処理と古い形式の変換に必要、オプショナル)
+### Prerequisites
 
-### 1. uv のインストール（未インストールの場合）
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- [LibreOffice](https://www.libreoffice.org/) (optional, required for shape rendering and legacy format conversion)
+
+### 1. Install uv (if not installed)
 
 ```bash
 # macOS / Linux
@@ -49,24 +52,49 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-### 2. プロジェクトのセットアップ
+### 2. Project Setup
 
 ```bash
-# リポジトリをクローン
+# Clone the repository
 git clone https://github.com/matsu582/o2md.git
 cd o2md
 
-# 依存関係をインストール（uv sync で pyproject.toml から自動インストール）
+# Install dependencies
 uv sync
 
-# 開発用依存関係も含める場合
+# Include manga-ocr
+uv sync --extra manga-ocr
+
+# Include sarashina2.2-ocr
+uv sync --extra sarashina
+
+# Include docling (AI table detection)
+uv sync --extra docling
+
+# Include all optional dependencies
 uv sync --all-extras
 ```
 
-### 3. LibreOffice のインストール（オプショナル）
+### 3. Install Tesseract OCR (Optional)
 
-古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換に必要です。
-インストールしない場合でも、テキストのみの変換は正常に動作します。
+Used by default for OCR text extraction from PDFs and images.
+Without Tesseract, OCR is unavailable (manga-ocr or sarashina2.2-ocr can be used as alternatives).
+
+```bash
+# macOS
+brew install tesseract tesseract-lang
+
+# Ubuntu/Debian
+sudo apt-get install tesseract-ocr tesseract-ocr-jpn tesseract-ocr-eng
+
+# Windows
+# Download from https://github.com/UB-Mannheim/tesseract/wiki
+```
+
+### 4. Install LibreOffice (Optional)
+
+Required for legacy format (.xls, .doc, .ppt) conversion and shape/image rendering.
+Text-only conversion works without LibreOffice.
 
 ```bash
 # macOS
@@ -76,283 +104,314 @@ brew install libreoffice
 sudo apt-get install libreoffice
 
 # Windows
-# https://www.libreoffice.org/download/download/ からダウンロード
+# Download from https://www.libreoffice.org/download/download/
 ```
 
-### LibreOfficeがない場合の動作
+### Behavior Without LibreOffice
 
-LibreOfficeがインストールされていない環境では、起動時に警告メッセージが表示され、以下のように縮退動作します。
+Without LibreOffice, a warning is displayed at startup and the following degraded behavior applies:
 
-| 機能 | LibreOfficeあり | LibreOfficeなし |
+| Feature | With LibreOffice | Without LibreOffice |
 | --- | --- | --- |
-| .docx / .xlsx / .pptx のテキスト変換 | ✔ | ✔ |
-| .doc / .xls / .ppt の変換 | ✔ | ✖（エラー表示） |
-| 図形・ベクター画像の変換 | ✔ | ✖（スキップ） |
-| スライドの画像レンダリング | ✔ | ✖（スキップ） |
-| チャートの画像変換 | ✔ | ✖（スキップ） |
+| .docx / .xlsx / .pptx text conversion | OK | OK |
+| .doc / .xls / .ppt conversion | OK | Error |
+| Shape/vector image conversion | OK | Skipped |
+| Slide image rendering | OK | Skipped |
+| Chart image conversion | OK | Skipped |
 
-> **ヒント**: 旧形式ファイル（.doc, .xls, .ppt）は、事前に新形式（.docx, .xlsx, .pptx）に変換しておくと、LibreOfficeなしでもテキスト変換が可能です。
+> **Tip**: Legacy files (.doc, .xls, .ppt) can be pre-converted to newer formats (.docx, .xlsx, .pptx) for text conversion without LibreOffice.
 
-## 使用方法
+## Usage
 
-### 基本的な使用方法
-
-```bash
-# Excelファイルを変換
-uv run python o2md.py input_files/data.xlsx
-
-# Wordファイルを変換
-uv run python o2md.py input_files/document.docx
-
-# PowerPointファイルを変換
-uv run python o2md.py input_files/presentation.pptx
-
-# PDFファイルを変換
-uv run python o2md.py input_files/document.pdf
-
-# 一太郎ファイルを変換
-uv run python o2md.py input_files/document.jtd
-
-# 画像ファイルを変換（OCRでテキスト抽出）
-uv run python o2md.py input_files/photo.jpg
-```
-
-### オプション
+### Basic Usage
 
 ```bash
-# 出力ディレクトリを指定
-uv run python o2md.py input_files/data.xlsx -o custom_output
+# Convert Excel file
+uv run o2md input_files/data.xlsx
 
-# Word文書で見出しテキストをリンクに使用
-uv run python o2md.py input_files/document.docx --use-heading-text
+# Convert Word file
+uv run o2md input_files/document.docx
 
-# PNG形式で画像を出力（デフォルトはSVG）
-uv run python o2md.py input_files/data.xlsx --format png
+# Convert PowerPoint file
+uv run o2md input_files/presentation.pptx
 
-# PDF変換でOCRエンジンを指定（デフォルト: tesseract）
-uv run python o2md.py input_files/document.pdf --ocr-engine tesseract
-uv run python o2md.py input_files/document.pdf --ocr-engine manga-ocr
-uv run python o2md.py input_files/document.pdf --ocr-engine sarashina
+# Convert PDF file
+uv run o2md input_files/document.pdf
 
-# tessdata_bestを使用する場合（高精度モード）
-uv run python o2md.py input_files/document.pdf --tessdata-dir ~/tessdata_best
+# Convert Ichitaro file
+uv run o2md input_files/document.jtd
 
-# テキスト抽出モード（.txtのみを出力）
-uv run python o2md.py input_files/data.xlsx --text
-uv run python o2md.py input_files/document.docx --text
-uv run python o2md.py input_files/presentation.pptx --text
-uv run python o2md.py input_files/document.pdf --text
-uv run python o2md.py input_files/photo.jpg --text
+# Convert image file (OCR text extraction)
+uv run o2md input_files/photo.jpg
 ```
 
-### フォルダ一括変換
+### Individual Commands
+
+Each conversion engine can also be used as a standalone command:
 
 ```bash
-# フォルダ内の全対象ファイルを一括変換（フォルダ直下のみ）
-uv run python o2md.py ./input_files/
-
-# サブフォルダも再帰的に処理
-uv run python o2md.py ./input_files/ -r
-
-# 出力先を指定
-uv run python o2md.py ./input_files/ -r -o output_all
+uv run d2md input_files/document.docx
+uv run x2md input_files/data.xlsx
+uv run p2md input_files/presentation.pptx
+uv run pdf2md input_files/document.pdf
+uv run jtd2md input_files/document.jtd
+uv run img2md input_files/photo.jpg
 ```
 
-フォルダ指定時の出力構造:
+### Options
+
+```bash
+# Specify output directory
+uv run o2md input_files/data.xlsx -o custom_output
+
+# Use heading text for links in Word documents
+uv run o2md input_files/document.docx --use-heading-text
+
+# Output images in PNG format (default: SVG)
+uv run o2md input_files/data.xlsx --format png
+
+# Specify OCR engine for PDF/image conversion (default: tesseract)
+uv run o2md input_files/document.pdf --ocr-engine tesseract
+uv run o2md input_files/document.pdf --ocr-engine manga-ocr
+uv run o2md input_files/document.pdf --ocr-engine sarashina
+
+# Use tessdata_best for high-accuracy OCR
+uv run o2md input_files/document.pdf --tessdata-dir ~/tessdata_best
+
+# Text extraction mode (output .txt only)
+uv run o2md input_files/data.xlsx --text
+uv run o2md input_files/document.docx --text
+uv run o2md input_files/presentation.pptx --text
+uv run o2md input_files/document.pdf --text
+uv run o2md input_files/photo.jpg --text
+```
+
+### Batch Folder Conversion
+
+```bash
+# Convert all supported files in a folder (top-level only)
+uv run o2md ./input_files/
+
+# Recursively process subfolders
+uv run o2md ./input_files/ -r
+
+# Specify output directory
+uv run o2md ./input_files/ -r -o output_all
+```
+
+Output structure for folder input:
 ```
 input_files/
   pdfs/a.pdf
   b.xlsx
-↓
+->
 output/
   pdfs/a.md + images/
   b.md
 ```
 
-### 古い形式のファイル
+### Legacy Format Files
 
 ```bash
-# 古い形式も自動的に新形式に変換してから処理
-uv run python o2md.py input_files/old_file.xls
-uv run python o2md.py input_files/old_doc.doc
-uv run python o2md.py input_files/old_presentation.ppt
+# Legacy formats are automatically converted to newer formats before processing
+uv run o2md input_files/old_file.xls
+uv run o2md input_files/old_doc.doc
+uv run o2md input_files/old_presentation.ppt
 ```
 
-## コマンドラインオプション
+## Command-Line Options
 
-| オプション           | 説明                                                    |
-| -------------------- | ------------------------------------------------------- |
-| `file`               | 変換するOfficeファイルまたはフォルダ（必須）                |
-| `-o, --output-dir`   | 出力ディレクトリを指定（デフォルト: `./output`）        |
-| `-r, --recursive`    | [フォルダ指定時] サブフォルダも再帰的に処理              |
-| `--format`           | 画像出力形式を指定（`svg`または`png`、デフォルト: `svg`）|
-| `--use-heading-text` | [Word専用] 章番号の代わりに見出しテキストをリンクに使用 |
-| `--shape-metadata`   | [Word/Excel専用] 図形のメタデータを出力                 |
-| `--ocr-engine`       | [PDF/画像] OCRエンジンを指定（`tesseract`/`manga-ocr`/`sarashina`、デフォルト: `tesseract`）|
-| `--tessdata-dir`     | [PDF専用] tessdataディレクトリを指定（tessdata_best使用時）|
-| `--docling`          | [PDF専用] doclingによる表検出を有効にする（罫線のない表も検出可能）|
-| `--text`             | テキスト抽出モード（.txtのみを出力）                            |
-| `-v, --verbose`      | 詳細なデバッグ出力を表示                                |
-| `-h, --help`         | ヘルプメッセージを表示                                  |
+| Option               | Description                                              |
+| -------------------- | -------------------------------------------------------- |
+| `file`               | Office file or folder to convert (required)              |
+| `-o, --output-dir`   | Output directory (default: `./output`)                   |
+| `-r, --recursive`    | [Folder mode] Recursively process subfolders             |
+| `--format`           | Image output format (`svg` or `png`, default: `svg`)     |
+| `--use-heading-text` | [Word only] Use heading text instead of chapter numbers for links |
+| `--shape-metadata`   | [Word/Excel only] Output shape metadata                  |
+| `--ocr-engine`       | [PDF/Image] OCR engine (`tesseract`/`manga-ocr`/`sarashina`, default: `tesseract`) |
+| `--tessdata-dir`     | [PDF only] Specify tessdata directory (for tessdata_best) |
+| `--docling`          | [PDF only] Enable docling table detection (detects borderless tables) |
+| `--text`             | Text extraction mode (output .txt only)                  |
+| `-v, --verbose`      | Show detailed debug output                               |
+| `-h, --help`         | Show help message                                        |
 
-## 対応ファイル形式
+## Supported File Formats
 
-| ファイル種類 | 拡張子          | 変換エンジン | 主な機能                     |
-| ------------ | --------------- | ------------ | ---------------------------- |
-| Excel        | `.xlsx`, `.xls` | x2md.py      | 表、グラフ、図形、数式       |
-| Word         | `.docx`, `.doc` | d2md.py      | 見出し、表、画像、リスト     |
-| PowerPoint   | `.pptx`, `.ppt` | p2md.py      | スライド、図形、表、テキスト |
-| PDF          | `.pdf`          | pdf2md.py    | 画像変換、テキスト抽出、OCR  |
-| 一太郎       | `.jtd`, `.jtt`  | jtd2md.py    | テキスト、表、太字、見出し   |
-| 画像         | `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tiff`, `.tif`, `.webp` | img2md.py | OCRテキスト抽出、画像埋め込み |
+| File Type    | Extensions      | Command    | Key Features                 |
+| ------------ | --------------- | ---------- | ---------------------------- |
+| Excel        | `.xlsx`, `.xls` | `x2md`     | Tables, charts, shapes, formulas |
+| Word         | `.docx`, `.doc` | `d2md`     | Headings, tables, images, lists |
+| PowerPoint   | `.pptx`, `.ppt` | `p2md`     | Slides, shapes, tables, text |
+| PDF          | `.pdf`          | `pdf2md`   | Image conversion, text extraction, OCR |
+| Ichitaro     | `.jtd`, `.jtt`  | `jtd2md`   | Text, tables, bold, headings |
+| Image        | `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tiff`, `.tif`, `.webp` | `img2md` | OCR text extraction, image embedding |
 
-## 出力形式
+## Output Format
 
-変換後、以下のファイルが生成されます：
+After conversion, the following files are generated:
 
 ```
 output/
-├── [元のファイル名].md    # Markdownファイル
-└── images/               # 画像フォルダ
-    ├── [ファイル名]_image_001.svg  # デフォルトはSVG形式
-    ├── [ファイル名]_image_002.svg
-    └── ...
++-- [filename].md           # Markdown file
++-- images/                  # Image folder
+    +-- [filename]_image_001.svg  # SVG by default
+    +-- [filename]_image_002.svg
+    +-- ...
 ```
 
-SVG形式はベクター形式のため、拡大しても品質が劣化しません。PNG形式が必要な場合は`--format png`オプションを使用してください。
+SVG is a vector format that maintains quality at any zoom level. Use `--format png` if PNG is needed.
 
-## 変換機能の詳細
+## Conversion Details
 
-### Excel変換 (x2md.py)
+### Excel (`x2md`)
 
-- ワークシート内の表を Markdownテーブルに変換
-- グラフを個別に画像として抽出（棒グラフ、折れ線グラフ、円グラフ、散布図に対応）
-- グラフデータをMarkdownテーブルとして出力（画像の下にデータを配置）
-- 図形（オートシェイプ、画像など）を画像化
-- 数式の値を出力
-- 複数シートの処理
-- 図形クラスタリングによる分離レンダリング
-- 罫線ベースのテーブル検出
+- Convert worksheet tables to Markdown tables
+- Extract charts as individual images (bar, line, pie, scatter)
+- Output chart data as Markdown tables below chart images
+- Convert shapes (autoshapes, images, etc.) to images
+- Output formula values
+- Multi-sheet processing
+- Shape clustering with isolated rendering
+- Border-based table detection
 
-### Word変換 (d2md.py)
+### Word (`d2md`)
 
-- 見出しレベルを維持（`#`, `##`, `###` など）
-- 段落とテキスト装飾（太字、斜体、下線、取り消し線、上付き/下付き文字）
-- 箇条書きと番号付きリスト
-- 表を Markdownテーブルに変換
-- 埋め込み画像の抽出
-- ハイパーリンクの保持
-- 目次の自動生成
-- 章参照のリンク変換（「第1章」→ `[第1章](#anchor)`）
-- 数式変換（OMML → LaTeX）
-- 図形・キャンバスの画像化
-- チャートを文書内の元の位置に画像として出力（棒グラフ、折れ線グラフ、円グラフ、散布図に対応）
-- チャートデータをMarkdownテーブルとして出力（画像の下にデータを配置）
+- Preserve heading levels (`#`, `##`, `###`, etc.)
+- Paragraph and text decoration (bold, italic, underline, strikethrough, superscript/subscript)
+- Bullet and numbered lists
+- Convert tables to Markdown tables
+- Extract embedded images
+- Preserve hyperlinks
+- Auto-generate table of contents
+- Chapter reference link conversion
+- Equation conversion (OMML -> LaTeX)
+- Shape and canvas image rendering
+- Charts rendered as images at their original position (bar, line, pie, scatter)
+- Chart data output as Markdown tables below chart images
 
-### PowerPoint変換 (p2md.py)
+### PowerPoint (`p2md`)
 
-- スライドごとに見出し設定
-- テキストボックスの段落とリスト
-- 表を Markdownテーブルに変換
-- 図形群を1つの画像として出力
-- 発表者ノートの抽出
-- **複合スライド対応**: 表や図形が混在する場合、スライド全体を画像化してテキストを併記
-- .pptファイル対応: LibreOfficeで自動変換
+- Per-slide heading generation
+- Text box paragraphs and lists
+- Convert tables to Markdown tables
+- Render shape groups as single images
+- Extract speaker notes
+- **Complex slide handling**: Slides with mixed tables and shapes are rendered as full-slide images with text alongside
+- .ppt file support: Auto-conversion via LibreOffice
 
-#### PowerPoint複合スライドの処理
+#### Complex Slide Handling
 
-スライドに以下の要素が混在する場合、スライド全体が画像化されます：
+Slides are rendered as full images when they contain mixed elements:
 
-- テキストボックス + 図形
-- 表 + 図形
-- 複雑なレイアウト（視覚的な装飾を含む図形）
+- Text boxes + shapes
+- Tables + shapes
+- Complex layouts (shapes with visual decorations)
 
-**視覚的装飾の判定基準**:
-- 塗りつぶし（SOLID）がある
-- 枠線の幅が0より大きい
+**Visual decoration criteria**:
+- Has solid fill
+- Has border width > 0
 
-これにより、吹き出しやカラフルな矩形などの装飾要素が適切に画像化されます。
+This ensures callouts, colored rectangles, and other decorative elements are properly rendered as images.
 
-### 一太郎変換 (jtd2md.py)
+### Ichitaro (`jtd2md`)
 
-- OLE2 Compound Document形式のバイナリを独自パーサーで解析
-- DocumentTextストリームからUTF-16BEテキストを抽出
-- 罫線情報によるテーブル構造の検出とMarkdownテーブル出力
-- フォントサイズによる見出し推定（本文より大きいフォント → `##`）
-- TAG 0020（文字書式）の有無による太字検出（`**太字**`）
-- Markdownビューワ対応の行末スペース付与
-- 脚注テキストの抽出
-- OLE2メタデータ（作成日時等）の出力
+- Parse OLE2 Compound Document binary format
+- Extract UTF-16BE text from DocumentText stream
+- Detect table structure from border information and output as Markdown tables
+- Estimate headings from font size (larger than body text -> `##`)
+- Detect bold text via TAG 0020 (character formatting) (`**bold**`)
+- Add trailing spaces for Markdown viewer compatibility
+- Extract footnote text
+- Output OLE2 metadata (creation date, etc.)
 
-### 画像OCR変換 (img2md.py)
+### Image OCR (`img2md`)
 
-- 画像ファイル（JPEG/PNG/GIF/BMP/TIFF/WebP）からOCRでテキスト抽出
-- 元画像をimagesフォルダにコピーし、Markdown内に画像リンクを埋め込み
-- OCRエンジン選択: Tesseract（デフォルト）/ manga-ocr / sarashina2.2-ocr
-- 日本語パス対応（cv2.imdecodeによる読み込み）
-- `--text`オプション対応（.txtのみ出力）
+- Extract text from images (JPEG/PNG/GIF/BMP/TIFF/WebP) via OCR
+- Copy original image to images folder and embed image link in Markdown
+- OCR engine selection: Tesseract (default) / manga-ocr / sarashina2.2-ocr
+- Japanese path support (via cv2.imdecode)
+- `--text` option support (output .txt only)
 
-### PDF変換 (pdf2md.py)
+### PDF (`pdf2md`)
 
-- 埋め込みテキスト・表の抽出
-- スキャンページ（画像ベースPDF）は画像化してOCRでテキスト抽出
-  - [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)（デフォルト）: 文書向けOCR、日本語+英語対応
-  - [manga-ocr](https://github.com/kha-white/manga-ocr) + [comic-text-detector](https://github.com/dmMaze/comic-text-detector): マンガ/コミック向けOCR
-  - [sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr): End-to-End VLMによる高精度OCR（GPU推奨）
-- **[tessdata_best](https://github.com/tesseract-ocr/tessdata_best)対応**: `--tessdata-dir`オプションで高精度モデルを指定可能
-- **[docling](https://github.com/docling-project/docling)表検出対応**: `--docling`オプションで罫線のない表も検出可能
-  - [TableFormer](https://github.com/docling-project/docling)モデルを使用した高精度な表検出
-  - スライドPDFや図形として描画された表に対応
-  - 検出した表は`<details>`タグで囲んで出力
-- 出力形式: ページごとの画像 + Markdownファイル
+- Extract embedded text and tables
+- Scan pages (image-based PDFs) are rendered as images with OCR text extraction
+  - [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) (default): Document OCR, Japanese + English
+  - [manga-ocr](https://github.com/kha-white/manga-ocr) + [comic-text-detector](https://github.com/dmMaze/comic-text-detector): Manga/comic OCR
+  - [sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr): End-to-End VLM high-accuracy OCR (GPU recommended)
+- **[tessdata_best](https://github.com/tesseract-ocr/tessdata_best) support**: Specify high-accuracy models via `--tessdata-dir`
+- **[docling](https://github.com/docling-project/docling) table detection**: `--docling` option detects borderless tables
+  - High-accuracy table detection using [TableFormer](https://github.com/docling-project/docling) model
+  - Supports slide PDFs and tables drawn as shapes
+  - Detected tables are wrapped in `<details>` tags
+- Output: Per-page images + Markdown file
 
-## 制限事項
+## Limitations
 
-### Excel (x2md.py)
-- マクロは変換されません
-- 複雑な条件付き書式は保持されません
-- ピボットテーブルは静的なテーブルとして出力されます
-- LibreOfficeの制限により図形の描画に差異が発生する場合があります。
+### Excel (`x2md`)
+- Macros are not converted
+- Complex conditional formatting is not preserved
+- Pivot tables are output as static tables
+- Shape rendering may differ due to LibreOffice limitations
 
-### Word (d2md.py)
-- 複雑なレイアウト（段組み、テキストボックス）は簡略化されます
-- 脚注と文末注は通常のテキストとして処理されます
-- LibreOfficeの制限により図形の描画に差異が発生する場合があります。
-- コメントは変換されません
+### Word (`d2md`)
+- Complex layouts (columns, text boxes) are simplified
+- Footnotes and endnotes are processed as regular text
+- Shape rendering may differ due to LibreOffice limitations
+- Comments are not converted
 
-### PowerPoint (p2md.py)
-- アニメーションは変換されません
-- 埋め込み動画は変換されません（静止画のみ）
-- スライドマスターのデザイン要素は反映されません
-- LibreOfficeの制限により図形の描画に差異が発生する場合があります。
+### PowerPoint (`p2md`)
+- Animations are not converted
+- Embedded videos are not converted (still images only)
+- Slide master design elements are not reflected
+- Shape rendering may differ due to LibreOffice limitations
 
-### PDF (pdf2md.py)
-- 暗号化されたPDFは処理できません
-- 複雑なレイアウトのPDFではテキスト抽出の精度が低下する場合があります
-- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)を使用するには事前にTesseractのインストールが必要です
-  - macOS: `brew install tesseract tesseract-lang`
-  - Ubuntu/Debian: `sudo apt-get install tesseract-ocr tesseract-ocr-jpn tesseract-ocr-eng`
-- [tessdata_best](https://github.com/tesseract-ocr/tessdata_best)を使用する場合は別途ダウンロードが必要です（`--tessdata-dir`オプションで指定）
-- [docling](https://github.com/docling-project/docling)表検出を使用するには追加のインストールが必要です
-  - `uv pip install -e '.[docling]'`でdoclingをインストール
-  - macOS ARM64の場合は`uv pip install rapidocr-torch`も必要
-  - 処理時間: 1ページあたり約7-15秒（CPUのみの場合）
-- [sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr)を使用するには追加のインストールが必要です
-  - `uv pip install '.[sarashina]'`でインストール
-  - GPU推奨（CUDA 8GB+ / Apple Silicon MPS 16GB+統合メモリ）
-  - 初回実行時にモデル（約7.8GB）を自動ダウンロード
-  - 画像→構造化Markdownを直接出力（テキスト検出不要）
-  - 日本語縦書き・表・数式に対応
+### PDF (`pdf2md`)
+- Encrypted PDFs cannot be processed
+- Text extraction accuracy may decrease for complex PDF layouts
+- [tessdata_best](https://github.com/tesseract-ocr/tessdata_best) requires separate download (`--tessdata-dir` option)
+- [docling](https://github.com/docling-project/docling) table detection requires additional installation
+  - Install with `uv sync --extra docling`
+  - Processing time: ~7-15 seconds per page (CPU only)
+- [manga-ocr](https://github.com/kha-white/manga-ocr) requires additional installation
+  - Install with `uv sync --extra manga-ocr`
+- [sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr) requires additional installation
+  - Install with `uv sync --extra sarashina`
+  - GPU recommended (CUDA 8GB+ / Apple Silicon MPS 16GB+ unified memory)
+  - Model (~7.8GB) is auto-downloaded on first run
+  - Direct image-to-structured-Markdown output (no text detection needed)
+  - Supports Japanese vertical text, tables, and formulas
 
-### 一太郎 (jtd2md.py)
-- 一太郎 ver8以降のOLE2形式のみ対応（ver5-7の古い形式は非対応）
-- 画像・図形の抽出は非対応
-- 太字検出は段落単位（インラインの文字装飾は非対応）
-- セル結合のある複雑な表はレイアウトが崩れる場合があります
+### Ichitaro (`jtd2md`)
+- Only OLE2 format (Ichitaro ver8+) is supported (ver5-7 legacy format is not supported)
+- Image/shape extraction is not supported
+- Bold detection is per-paragraph (inline character decoration is not supported)
+- Complex tables with merged cells may have layout issues
 
-### 画像OCR変換 (img2md.py)
-- OCRの精度は画像の品質・解像度に依存します
-- 手書き文字の認識精度は低い場合があります
-- Tesseract OCRを使用するには事前にインストールが必要です
-- sarashina2.2-ocrを使用するには`uv pip install '.[sarashina]'`が必要です（GPU推奨）
+### Image OCR (`img2md`)
+- OCR accuracy depends on image quality and resolution
+- Handwritten text recognition accuracy may be low
+- Tesseract OCR requires prior system installation
+- manga-ocr requires `uv sync --extra manga-ocr`
+- sarashina2.2-ocr requires `uv sync --extra sarashina` (GPU recommended)
 
+## Project Structure
+
+```
+o2md/
++-- pyproject.toml          # Project configuration and dependencies
++-- o2md/                   # Main package
+|   +-- __init__.py
+|   +-- o2md.py             # Unified CLI (auto file detection and conversion)
+|   +-- x2md.py             # Excel conversion engine
+|   +-- d2md.py             # Word conversion engine
+|   +-- p2md.py             # PowerPoint conversion engine
+|   +-- pdf2md.py           # PDF conversion engine
+|   +-- jtd2md.py           # Ichitaro conversion engine
+|   +-- img2md.py           # Image OCR conversion engine
+|   +-- utils.py            # Shared utilities
+|   +-- omml_converter/     # OMML to LaTeX conversion
++-- tests/                  # Test suite
++-- input_files/            # Test input files
+```

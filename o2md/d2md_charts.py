@@ -14,11 +14,12 @@ chart.xmlのキャッシュ値から取得する方式を採用。
 - 散布図 (scatterChart)
 """
 
+import logging
 import zipfile
 import xml.etree.ElementTree as ET
 from typing import List, Optional, Any
 
-from chart_utils import ChartData, SeriesData
+from o2md.chart_utils import ChartData, SeriesData
 
 
 CHART_NS = "http://schemas.openxmlformats.org/drawingml/2006/chart"
@@ -38,6 +39,8 @@ CHART_TYPE_MAP = {
     'doughnutChart': 'doughnut',
 }
 
+
+logger = logging.getLogger(__name__)
 
 def extract_charts_from_docx(docx_path: str) -> List[ChartData]:
     """
@@ -68,12 +71,12 @@ def extract_charts_from_docx(docx_path: str) -> List[ChartData]:
                         if chart_data:
                             charts.append(chart_data)
                 except Exception as e:
-                    print(f"[WARNING] チャートファイル解析エラー: {chart_file} - {e}")
+                    logger.warning(f"チャートファイル解析エラー: {chart_file} - {e}")
                     
     except zipfile.BadZipFile:
-        print(f"[WARNING] 無効なZIPファイル: {docx_path}")
+        logger.warning(f"無効なZIPファイル: {docx_path}")
     except Exception as e:
-        print(f"[WARNING] チャート抽出エラー: {e}")
+        logger.warning(f"チャート抽出エラー: {e}")
     
     return charts
 

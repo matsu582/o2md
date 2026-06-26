@@ -16,6 +16,7 @@ PDFToMarkdownConverterクラスの図抽出機能を提供します。
 - 処理フェーズごとにサブメソッドに分割
 """
 
+import logging
 import os
 import re
 from typing import List, Dict, Any, Tuple, Optional, Set
@@ -35,10 +36,12 @@ except ImportError as e:
     ) from e
 
 
+logger = logging.getLogger(__name__)
+
 def debug_print(*args, **kwargs):
     """デバッグ出力（pdf2mdモジュールに委譲）"""
     try:
-        from pdf2md import debug_print as _dp
+        from o2md.pdf2md import debug_print as _dp
         _dp(*args, **kwargs)
     except ImportError:
         pass
@@ -177,7 +180,7 @@ class _FiguresMixin:
         # 本文行が10行以上ある場合は囲み記事と判定
         # （短い行や空白行が多い場合でも、本文行が十分にあれば囲み記事）
         if body_line_count >= 10:
-            debug_print(f"[DEBUG] 囲み記事検出: {body_line_count}本文行/{total_line_count}行")
+            logger.debug(f"[DEBUG] 囲み記事検出: {body_line_count}本文行/{total_line_count}行")
             return True
         
         return False
@@ -235,34 +238,34 @@ class _FiguresMixin:
                     text_based_y = max(header_lines_y) + 15.0
                     position_based_y = page_height * 0.08
                     header_y_max = max(text_based_y, position_based_y)
-                    debug_print(f"[DEBUG] page={page_num+1}: ヘッダー領域検出 y_max={header_y_max:.1f}")
+                    logger.debug(f"[DEBUG] page={page_num+1}: ヘッダー領域検出 y_max={header_y_max:.1f}")
                 if footer_lines_y:
                     text_based_y = min(footer_lines_y) - 15.0
                     position_based_y = page_height * 0.92
                     footer_y_min = min(text_based_y, position_based_y)
-                    debug_print(f"[DEBUG] page={page_num+1}: フッター領域検出 y_min={footer_y_min:.1f}")
+                    logger.debug(f"[DEBUG] page={page_num+1}: フッター領域検出 y_min={footer_y_min:.1f}")
                     
             except Exception as e:
-                debug_print(f"[DEBUG] ヘッダー/フッター領域計算エラー: {e}")
+                logger.debug(f"[DEBUG] ヘッダー/フッター領域計算エラー: {e}")
         
         # doc-wideの値をフォールバックとして使用
         if header_y_max is None and self._doc_header_y_max is not None:
             header_y_max = self._doc_header_y_max
-            debug_print(f"[DEBUG] page={page_num+1}: doc-wideヘッダー領域をフォールバック適用")
+            logger.debug(f"[DEBUG] page={page_num+1}: doc-wideヘッダー領域をフォールバック適用")
         if footer_y_min is None and self._doc_footer_y_min is not None:
             footer_y_min = self._doc_footer_y_min
-            debug_print(f"[DEBUG] page={page_num+1}: doc-wideフッター領域をフォールバック適用")
+            logger.debug(f"[DEBUG] page={page_num+1}: doc-wideフッター領域をフォールバック適用")
         
         # 外れ値ガード
         if header_y_max is not None and self._doc_header_y_max is not None:
             if header_y_max > self._doc_header_y_max * 3.0:
-                debug_print(f"[DEBUG] page={page_num+1}: ヘッダー領域が外れ値、doc-wide値にフォールバック")
+                logger.debug(f"[DEBUG] page={page_num+1}: ヘッダー領域が外れ値、doc-wide値にフォールバック")
                 header_y_max = self._doc_header_y_max
         if footer_y_min is not None and self._doc_footer_y_min is not None:
             page_footer_dist = page_height - footer_y_min
             doc_footer_dist = page_height - self._doc_footer_y_min
             if page_footer_dist > doc_footer_dist * 3.0:
-                debug_print(f"[DEBUG] page={page_num+1}: フッター領域が外れ値、doc-wide値にフォールバック")
+                logger.debug(f"[DEBUG] page={page_num+1}: フッター領域が外れ値、doc-wide値にフォールバック")
                 footer_y_min = self._doc_footer_y_min
         
         return header_y_max, footer_y_min
@@ -292,11 +295,11 @@ class _FiguresMixin:
                     if area >= 200:
                         # PPT由来の背景矩形を除外（ページ面積の90%以上を覆うdrawing）
                         if area >= page_area * 0.9:
-                            debug_print(f"[DEBUG] page={page_num+1}: 背景矩形を除外（面積比={area/page_area:.2f}）")
+                            logger.debug(f"[DEBUG] page={page_num+1}: 背景矩形を除外（面積比={area/page_area:.2f}）")
                             continue
                         all_elements.append({"bbox": bbox, "type": "drawing"})
         except Exception as e:
-            debug_print(f"[DEBUG] 描画取得エラー: {e}")
+            logger.debug(f"[DEBUG] 描画取得エラー: {e}")
         
         # 生テキストが存在するかどうかを確認（背景画像除外の判定に使用）
         raw_text = page.get_text().strip()
@@ -311,7 +314,7 @@ class _FiguresMixin:
                 xref = img_info[0]
                 # ヘッダ装飾画像を除外（繰り返し出現する小さな上部画像）
                 if xref in repeated_xrefs:
-                    debug_print(f"[DEBUG] page={page_num+1}: ヘッダ装飾画像を除外（xref={xref}）")
+                    logger.debug(f"[DEBUG] page={page_num+1}: ヘッダ装飾画像を除外（xref={xref}）")
                     continue
                 for img_rect in page.get_image_rects(xref):
                     bbox = (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1)
@@ -319,11 +322,11 @@ class _FiguresMixin:
                     if area >= 100:
                         # 生テキストが存在するページでは、全面画像を背景として除外
                         if has_raw_text and area >= page_area * 0.9:
-                            debug_print(f"[DEBUG] page={page_num+1}: 背景画像を除外（面積比={area/page_area:.2f}）")
+                            logger.debug(f"[DEBUG] page={page_num+1}: 背景画像を除外（面積比={area/page_area:.2f}）")
                             continue
                         all_elements.append({"bbox": bbox, "type": "image"})
         except Exception as e:
-            debug_print(f"[DEBUG] 画像取得エラー: {e}")
+            logger.debug(f"[DEBUG] 画像取得エラー: {e}")
         
         all_bboxes = [e["bbox"] for e in all_elements]
         return all_elements, all_bboxes
@@ -357,7 +360,7 @@ class _FiguresMixin:
                             "y_center": (line_bbox[1] + line_bbox[3]) / 2
                         })
         except Exception as e:
-            debug_print(f"[DEBUG] 図キャプション検出エラー: {e}")
+            logger.debug(f"[DEBUG] 図キャプション検出エラー: {e}")
         return figure_caption_lines
 
     def _fig_has_caption_between(
@@ -441,14 +444,14 @@ class _FiguresMixin:
                         "significant_image_count": 1 if is_significant else 0,
                         "image_bboxes": [bbox] if is_image else [],
                     }
-                    debug_print(f"[DEBUG] page={page_num+1}: 単独画像を候補として追加")
+                    logger.debug(f"[DEBUG] page={page_num+1}: 単独画像を候補として追加")
                 else:
                     if in_header:
-                        debug_print(f"[DEBUG] page={page_num+1}: 単独画像がヘッダー領域内のため除外")
+                        logger.debug(f"[DEBUG] page={page_num+1}: 単独画像がヘッダー領域内のため除外")
                     if in_footer:
-                        debug_print(f"[DEBUG] page={page_num+1}: 単独画像がフッター領域内のため除外")
+                        logger.debug(f"[DEBUG] page={page_num+1}: 単独画像がフッター領域内のため除外")
             else:
-                debug_print(f"[DEBUG] page={page_num+1}: 単独画像が小さすぎるため除外")
+                logger.debug(f"[DEBUG] page={page_num+1}: 単独画像が小さすぎるため除外")
 
         def boxes_close(idx1, idx2):
             b1, b2 = all_bboxes[idx1], all_bboxes[idx2]
@@ -460,7 +463,7 @@ class _FiguresMixin:
                     return False
             
             if self._fig_has_caption_between(b1, b2, figure_caption_lines):
-                debug_print(f"[DEBUG] キャプション制約: bbox間にキャプションあり")
+                logger.debug(f"[DEBUG] キャプション制約: bbox間にキャプションあり")
                 return False
             
             x0_1, y0_1, x1_1, y1_1 = b1
@@ -533,7 +536,7 @@ class _FiguresMixin:
                     # drawingクラスタとimageクラスタに分割
                     split_clusters.append(drawing_indices)
                     split_clusters.append(image_indices)
-                    debug_print(f"[DEBUG] page={page_num+1}: 混在クラスタを分割（y_gap={y_gap:.1f}）")
+                    logger.debug(f"[DEBUG] page={page_num+1}: 混在クラスタを分割（y_gap={y_gap:.1f}）")
                 else:
                     split_clusters.append(cluster)
             
@@ -579,7 +582,7 @@ class _FiguresMixin:
                     is_in_footer = overlap_with_footer > cluster_height * 0.5 or raw_y1 > footer_y_min + (page_height - footer_y_min) * 0.5
             if is_in_header or is_in_footer:
                 region = "ヘッダー" if is_in_header else "フッター"
-                debug_print(f"[DEBUG] page={page_num+1}: {region}領域内のクラスタを除外")
+                logger.debug(f"[DEBUG] page={page_num+1}: {region}領域内のクラスタを除外")
                 continue
             
             is_image_only = all(t == "image" for t in cluster_types)
@@ -659,11 +662,11 @@ class _FiguresMixin:
                 cand_bbox = cand["union_bbox"]
                 if self._fig_bbox_contains(cand_bbox, single_bbox) or self._fig_bbox_contains(single_bbox, cand_bbox):
                     is_duplicate = True
-                    debug_print(f"[DEBUG] page={page_num+1}: 単独画像候補が既存候補と重複のため追加しない")
+                    logger.debug(f"[DEBUG] page={page_num+1}: 単独画像候補が既存候補と重複のため追加しない")
                     break
             if not is_duplicate:
                 all_figure_candidates.append(single_image_candidate)
-                debug_print(f"[DEBUG] page={page_num+1}: 単独画像候補をall_figure_candidatesに追加")
+                logger.debug(f"[DEBUG] page={page_num+1}: 単独画像候補をall_figure_candidatesに追加")
         
         return all_figure_candidates, single_image_candidate
 
@@ -777,7 +780,7 @@ class _FiguresMixin:
                 table_lines.append(line)
         
         if len(table_lines) < 3:
-            debug_print(f"[DEBUG] 表行数不足: {len(table_lines)} < 3")
+            logger.debug(f"[DEBUG] 表行数不足: {len(table_lines)} < 3")
             return False
         
         y_groups = {}
@@ -795,20 +798,20 @@ class _FiguresMixin:
                 col_counts.append(len(x_positions))
         
         if len(col_counts) < 3:
-            debug_print(f"[DEBUG] 複数列行数不足: {len(col_counts)} < 3")
+            logger.debug(f"[DEBUG] 複数列行数不足: {len(col_counts)} < 3")
             return False
         
         most_common = max(set(col_counts), key=col_counts.count)
         consistent = sum(1 for c in col_counts if c == most_common)
         consistency_ratio = consistent / len(col_counts)
         
-        debug_print(f"[DEBUG] 表の列数一貫性: {consistent}/{len(col_counts)} = {consistency_ratio:.2f}")
+        logger.debug(f"[DEBUG] 表の列数一貫性: {consistent}/{len(col_counts)} = {consistency_ratio:.2f}")
         
         if consistency_ratio < 0.8:
             return False
         
         if most_common < 3:
-            debug_print(f"[DEBUG] 2列表のためMarkdownテーブルとして出力不可")
+            logger.debug(f"[DEBUG] 2列表のためMarkdownテーブルとして出力不可")
             return False
         
         return True
@@ -818,7 +821,7 @@ class _FiguresMixin:
         page_text_lines: List[Dict], column_count: int, page_num: int
     ) -> List[Dict]:
         """表領域と重なる図候補をフィルタリング"""
-        debug_print(f"[DEBUG] page={page_num+1}: 表フィルタ前の候補数={len(all_figure_candidates)}")
+        logger.debug(f"[DEBUG] page={page_num+1}: 表フィルタ前の候補数={len(all_figure_candidates)}")
         table_filtered = []
         table_image_candidates = []
         
@@ -837,9 +840,9 @@ class _FiguresMixin:
             if is_table and matched_table_bbox:
                 is_two_col = (column_count >= 2)
                 if self._fig_can_output_as_markdown_table(matched_table_bbox, page_text_lines, is_two_col):
-                    debug_print(f"[DEBUG] page={page_num+1}: 図候補をMarkdown表として除外")
+                    logger.debug(f"[DEBUG] page={page_num+1}: 図候補をMarkdown表として除外")
                 else:
-                    debug_print(f"[DEBUG] page={page_num+1}: 図候補を表画像として出力")
+                    logger.debug(f"[DEBUG] page={page_num+1}: 図候補を表画像として出力")
                     union = cand_bbox
                     
                     union_top = union[1]
@@ -851,7 +854,7 @@ class _FiguresMixin:
                         if line_bbox[1] >= union_top - 5 and line_bbox[3] <= union_top + 20:
                             if re.match(r'^表\s*\d', line_text):
                                 clip_y0 = line_bbox[3] + 2
-                                debug_print(f"[DEBUG] 表画像: キャプション検出 '{line_text[:20]}'")
+                                logger.debug(f"[DEBUG] 表画像: キャプション検出 '{line_text[:20]}'")
                                 break
                     
                     clip_x0 = union[0] - 2
@@ -872,15 +875,15 @@ class _FiguresMixin:
                             # キャプション（図/表で始まる）の場合
                             if re.match(r'^(図|表)\s*\d', line_text):
                                 clip_y1 = line_bbox[1] - 2
-                                debug_print(f"[DEBUG] 表画像: 下キャプション検出 '{line_text[:20]}'")
+                                logger.debug(f"[DEBUG] 表画像: 下キャプション検出 '{line_text[:20]}'")
                                 break
                             # 本文テキスト（句読点を含む長いテキスト）の場合
                             elif self._fig_is_body_text_line(line_text, line_width, col_width):
                                 clip_y1 = line_bbox[1] - 2
-                                debug_print(f"[DEBUG] 表画像: 下部本文検出 '{line_text[:20]}'")
+                                logger.debug(f"[DEBUG] 表画像: 下部本文検出 '{line_text[:20]}'")
                                 break
                     
-                    debug_print(f"[DEBUG] 表画像: clip_bbox=({clip_x0:.1f}, {clip_y0:.1f}, {clip_x1:.1f}, {clip_y1:.1f})")
+                    logger.debug(f"[DEBUG] 表画像: clip_bbox=({clip_x0:.1f}, {clip_y0:.1f}, {clip_x1:.1f}, {clip_y1:.1f})")
                     
                     table_clip_bbox = (clip_x0, clip_y0, clip_x1, clip_y1)
                     cand["clip_bbox"] = table_clip_bbox
@@ -889,7 +892,7 @@ class _FiguresMixin:
             else:
                 table_filtered.append(cand)
         
-        debug_print(f"[DEBUG] page={page_num+1}: 表フィルタ後の候補数={len(table_filtered)}, 表画像候補数={len(table_image_candidates)}")
+        logger.debug(f"[DEBUG] page={page_num+1}: 表フィルタ後の候補数={len(table_filtered)}, 表画像候補数={len(table_image_candidates)}")
         return table_filtered + table_image_candidates
 
     def _fig_has_body_barrier(
@@ -922,7 +925,7 @@ class _FiguresMixin:
             if caption_pattern.match(line["text"]):
                 if gap_top - 30 <= line_center_y <= gap_bottom + 30:
                     if x_overlap_start - 20 < line_center_x < x_overlap_end + 20:
-                        debug_print(f"[DEBUG] 図キャプションバリア検出: '{line['text'][:30]}...'")
+                        logger.debug(f"[DEBUG] 図キャプションバリア検出: '{line['text'][:30]}...'")
                         return True
             
             if y_min < line_center_y < y_max:
@@ -936,7 +939,7 @@ class _FiguresMixin:
         col_width: float
     ) -> List[Dict]:
         """同一カラム内のクラスタを安全にマージ"""
-        debug_print(f"[DEBUG] クラスタ再マージ開始: {len(all_figure_candidates)}個のクラスタ")
+        logger.debug(f"[DEBUG] クラスタ再マージ開始: {len(all_figure_candidates)}個のクラスタ")
         merged = True
         while merged:
             merged = False
@@ -962,22 +965,22 @@ class _FiguresMixin:
                     
                     x_overlap_ratio = self._fig_get_x_overlap_ratio(bbox1, bbox2)
                     if x_overlap_ratio < 0.3:
-                        debug_print(f"[DEBUG] クラスタ{i}と{j}: x重なり不足 {x_overlap_ratio:.2f}")
+                        logger.debug(f"[DEBUG] クラスタ{i}と{j}: x重なり不足 {x_overlap_ratio:.2f}")
                         continue
                     
                     y_gap = max(0, max(bbox1[1], bbox2[1]) - min(bbox1[3], bbox2[3]))
                     
                     if y_gap <= 80:
-                        debug_print(f"[DEBUG] クラスタ{i}と{j}: y_gap={y_gap:.1f}")
+                        logger.debug(f"[DEBUG] クラスタ{i}と{j}: y_gap={y_gap:.1f}")
                         if not self._fig_has_body_barrier(bbox1, bbox2, page_text_lines, col_width):
-                            debug_print(f"[DEBUG] クラスタ{i}と{j}: マージ候補")
+                            logger.debug(f"[DEBUG] クラスタ{i}と{j}: マージ候補")
                             if y_gap < best_y_gap:
                                 best_y_gap = y_gap
                                 best_merge = j
                         else:
-                            debug_print(f"[DEBUG] クラスタ{i}と{j}: 本文バリアあり")
+                            logger.debug(f"[DEBUG] クラスタ{i}と{j}: 本文バリアあり")
                     else:
-                        debug_print(f"[DEBUG] クラスタ{i}と{j}: y_gap超過 {y_gap:.1f}")
+                        logger.debug(f"[DEBUG] クラスタ{i}と{j}: y_gap超過 {y_gap:.1f}")
                 
                 if best_merge is not None:
                     cand2 = all_figure_candidates[best_merge]
@@ -991,7 +994,7 @@ class _FiguresMixin:
                         max(bbox1[3], bbox2[3])
                     )
                     
-                    debug_print(f"[DEBUG] クラスタ{i}と{best_merge}をマージ")
+                    logger.debug(f"[DEBUG] クラスタ{i}と{best_merge}をマージ")
                     # マージ時に重要なフィールドを保持
                     merged_image_bboxes = cand1.get("image_bboxes", []) + cand2.get("image_bboxes", [])
                     new_candidates.append({
@@ -1012,7 +1015,7 @@ class _FiguresMixin:
             
             all_figure_candidates = new_candidates
         
-        debug_print(f"[DEBUG] クラスタ再マージ完了: {len(all_figure_candidates)}個のクラスタ")
+        logger.debug(f"[DEBUG] クラスタ再マージ完了: {len(all_figure_candidates)}個のクラスタ")
         return all_figure_candidates
 
     def _fig_merge_left_right(
@@ -1020,7 +1023,7 @@ class _FiguresMixin:
         col_width: float, gutter_x: float
     ) -> List[Dict]:
         """左右クラスタのマージ処理"""
-        debug_print(f"[DEBUG] 左右クラスタマージ開始: {len(all_figure_candidates)}個のクラスタ")
+        logger.debug(f"[DEBUG] 左右クラスタマージ開始: {len(all_figure_candidates)}個のクラスタ")
         lr_merged = True
         while lr_merged:
             lr_merged = False
@@ -1051,7 +1054,7 @@ class _FiguresMixin:
                     left_has_elements = left_image_count > 0 or left_drawing_count > 0
                     right_has_elements = right_image_count > 0 or right_drawing_count > 0
                     if not left_has_elements or not right_has_elements:
-                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 要素なし")
+                        logger.debug(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 要素なし")
                         continue
                     
                     left_bbox = left_cand["union_bbox"]
@@ -1059,7 +1062,7 @@ class _FiguresMixin:
                     
                     y_overlap_ratio = self._fig_get_y_overlap_ratio(left_bbox, right_bbox)
                     if y_overlap_ratio < 0.9:
-                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: Y重なり不足 {y_overlap_ratio:.2f}")
+                        logger.debug(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: Y重なり不足 {y_overlap_ratio:.2f}")
                         continue
                     
                     left_right_edge = left_bbox[2]
@@ -1068,22 +1071,22 @@ class _FiguresMixin:
                     
                     if not (gutter_x - 50 < left_right_edge < gutter_x + 50 and
                             gutter_x - 50 < right_left_edge < gutter_x + 50):
-                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: ガター近傍でない")
+                        logger.debug(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: ガター近傍でない")
                         continue
                     
                     if x_gap > 100:
-                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: X gap超過 {x_gap:.1f}")
+                        logger.debug(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: X gap超過 {x_gap:.1f}")
                         continue
                     
                     if self._fig_has_body_barrier(left_bbox, right_bbox, page_text_lines, col_width):
-                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 本文バリアあり")
+                        logger.debug(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 本文バリアあり")
                         continue
                     
                     # 両方のクラスタにキャプションがある場合はマージしない（別々の図）
                     left_caption = self._fig_find_caption_below(left_bbox, page_text_lines)
                     right_caption = self._fig_find_caption_below(right_bbox, page_text_lines)
                     if left_caption and right_caption:
-                        debug_print(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 両方にキャプションあり")
+                        logger.debug(f"[DEBUG] 左右マージ候補{left_idx},{right_idx}: 両方にキャプションあり")
                         continue
                     
                     if y_overlap_ratio > best_y_overlap:
@@ -1102,7 +1105,7 @@ class _FiguresMixin:
                         max(left_bbox[3], right_bbox[3])
                     )
                     
-                    debug_print(f"[DEBUG] 左右クラスタ{left_idx}と{best_right_idx}をマージ (Y重なり={best_y_overlap:.2f})")
+                    logger.debug(f"[DEBUG] 左右クラスタ{left_idx}と{best_right_idx}をマージ (Y重なり={best_y_overlap:.2f})")
                     # マージ時に重要なフィールドを保持
                     merged_image_bboxes = left_cand.get("image_bboxes", []) + right_cand.get("image_bboxes", [])
                     new_candidates.append({
@@ -1132,7 +1135,7 @@ class _FiguresMixin:
             
             all_figure_candidates = new_candidates
         
-        debug_print(f"[DEBUG] 左右クラスタマージ完了: {len(all_figure_candidates)}個のクラスタ")
+        logger.debug(f"[DEBUG] 左右クラスタマージ完了: {len(all_figure_candidates)}個のクラスタ")
         return all_figure_candidates
 
     def _fig_find_caption_below(
@@ -1229,30 +1232,30 @@ class _FiguresMixin:
                     # 本文行の下端より下にclip_y0を設定
                     new_clip_y0 = line_bbox[3] + 2.0
                     if new_clip_y0 < graphics_bbox[1]:
-                        debug_print(f"[DEBUG] スライド文書: 本文行を避けてclip_y0を{clip_y0:.1f}→{new_clip_y0:.1f}に調整")
+                        logger.debug(f"[DEBUG] スライド文書: 本文行を避けてclip_y0を{clip_y0:.1f}→{new_clip_y0:.1f}に調整")
                         clip_y0 = new_clip_y0
         
         if header_y_max is not None and clip_y0 < header_y_max:
             clip_y0 = header_y_max
-            debug_print(f"[DEBUG] ヘッダー領域クリップ: clip_y0を{clip_y0:.1f}に設定")
+            logger.debug(f"[DEBUG] ヘッダー領域クリップ: clip_y0を{clip_y0:.1f}に設定")
         if footer_y_min is not None and clip_y1 > footer_y_min:
             clip_y1 = footer_y_min
-            debug_print(f"[DEBUG] フッター領域クリップ: clip_y1を{clip_y1:.1f}に設定")
+            logger.debug(f"[DEBUG] フッター領域クリップ: clip_y1を{clip_y1:.1f}に設定")
         
         # 2段組み文書の場合のみカラム制約を適用
         # 単一カラム文書では図形が中央付近に配置されることがあるため、制約を適用しない
         if is_two_column:
             if column == "left":
                 clip_x1 = min(clip_x1, gutter_x - 5)
-                debug_print(f"[DEBUG] 左カラム: clip_x1を{clip_x1:.1f}にクランプ")
+                logger.debug(f"[DEBUG] 左カラム: clip_x1を{clip_x1:.1f}にクランプ")
             elif column == "right":
                 old_clip_x0 = clip_x0
                 clip_x0 = max(clip_x0, gutter_x + 5)
-                debug_print(f"[DEBUG] 右カラム: clip_x0を{old_clip_x0:.1f}→{clip_x0:.1f}にクランプ")
+                logger.debug(f"[DEBUG] 右カラム: clip_x0を{old_clip_x0:.1f}→{clip_x0:.1f}にクランプ")
         
         # スライド文書または埋め込み画像の場合、上下トリムをスキップ
         if is_embedded_image or is_slide_document:
-            debug_print(f"[DEBUG] {'スライド文書' if is_slide_document else '埋め込み画像'}: 上下トリムをスキップ")
+            logger.debug(f"[DEBUG] {'スライド文書' if is_slide_document else '埋め込み画像'}: 上下トリムをスキップ")
             return (clip_x0, clip_y0, clip_x1, clip_y1)
         
         caption = self._fig_find_caption_below(graphics_bbox, text_lines)
@@ -1260,14 +1263,14 @@ class _FiguresMixin:
             caption_y0 = caption["bbox"][1]
             new_clip_y1 = caption_y0 - 5.0
             clip_y1 = min(clip_y1, new_clip_y1)
-            debug_print(f"[DEBUG] キャプション検出: clip_y1を{clip_y1:.1f}にトリム")
+            logger.debug(f"[DEBUG] キャプション検出: clip_y1を{clip_y1:.1f}にトリム")
         
         body_above = self._fig_find_body_text_above(graphics_bbox, text_lines, col_width)
         if body_above:
             body_y1 = body_above["bbox"][3]
             new_clip_y0 = body_y1 + 5.0
             clip_y0 = max(clip_y0, new_clip_y0)
-            debug_print(f"[DEBUG] 本文検出: clip_y0を{clip_y0:.1f}にトリム")
+            logger.debug(f"[DEBUG] 本文検出: clip_y0を{clip_y0:.1f}にトリム")
         
         # 見出しテキストを検出してclip_y0を調整
         heading_pattern = re.compile(r'^(\d+\.\s+|第[一二三四五六七八九十0-9]+)')
@@ -1282,13 +1285,13 @@ class _FiguresMixin:
                     if x_overlap > 20:
                         new_clip_y0 = line_bbox[3] + 5.0
                         clip_y0 = max(clip_y0, new_clip_y0)
-                        debug_print(f"[DEBUG] 見出し検出: clip_y0を{clip_y0:.1f}にトリム（見出し: {line_text[:20]}）")
+                        logger.debug(f"[DEBUG] 見出し検出: clip_y0を{clip_y0:.1f}にトリム（見出し: {line_text[:20]}）")
         
         if clip_y1 - clip_y0 < 50:
             center_y = (clip_y0 + clip_y1) / 2
             clip_y0 = center_y - 25
             clip_y1 = center_y + 25
-            debug_print(f"[DEBUG] 最小高さ確保: clip_y0={clip_y0:.1f}, clip_y1={clip_y1:.1f}")
+            logger.debug(f"[DEBUG] 最小高さ確保: clip_y0={clip_y0:.1f}, clip_y1={clip_y1:.1f}")
         
         return (clip_x0, clip_y0, clip_x1, clip_y1)
 
@@ -1329,7 +1332,7 @@ class _FiguresMixin:
                 
                 if is_table_image and "clip_bbox" in fig_info:
                     clip_bbox = fig_info["clip_bbox"]
-                    debug_print(f"[DEBUG] 表画像: 既存のclip_bboxを使用")
+                    logger.debug(f"[DEBUG] 表画像: 既存のclip_bboxを使用")
                 else:
                     # 画像のみクラスタ（drawing_count=0）の場合の処理
                     drawing_count_for_clip = fig_info.get("drawing_count", 0)
@@ -1368,13 +1371,13 @@ class _FiguresMixin:
                                                 # 比率が0.8〜1.2の範囲ならタイル画像
                                                 if 0.8 <= w_ratio <= 1.2 and 0.8 <= h_ratio <= 1.2:
                                                     has_tile_image = True
-                                                    debug_print(f"[DEBUG] page={page_num+1}: タイル画像を検出 ratio=({w_ratio:.2f}, {h_ratio:.2f})")
+                                                    logger.debug(f"[DEBUG] page={page_num+1}: タイル画像を検出 ratio=({w_ratio:.2f}, {h_ratio:.2f})")
                                             break
                             
                             # タイル画像がある場合はグレー領域を自動検出してレンダリング
                             # テキストを巻き込まないように、グレー領域の境界を検出
                             if has_tile_image:
-                                debug_print(f"[DEBUG] page={page_num+1}: タイル画像のためグレー領域を自動検出")
+                                logger.debug(f"[DEBUG] page={page_num+1}: タイル画像のためグレー領域を自動検出")
                                 
                                 # ページをレンダリングしてグレー領域の境界を検出
                                 detect_mat = fitz.Matrix(1.0, 1.0)
@@ -1442,7 +1445,7 @@ class _FiguresMixin:
                                 
                                 # グレー領域が検出された場合のみレンダリング
                                 if gray_x0 is not None and gray_y0 is not None:
-                                    debug_print(f"[DEBUG] page={page_num+1}: グレー領域検出 ({gray_x0}, {gray_y0}, {gray_x1}, {gray_y1})")
+                                    logger.debug(f"[DEBUG] page={page_num+1}: グレー領域検出 ({gray_x0}, {gray_y0}, {gray_x1}, {gray_y1})")
                                     
                                     self.image_counter += 1
                                     image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
@@ -1463,6 +1466,7 @@ class _FiguresMixin:
                                         image_path = os.path.join(self.images_dir, f"{image_filename}.png")
                                         pix.save(image_path)
                                     
+                                    self.output_image_count += 1
                                     figures.append({
                                         "path": image_path,
                                         "filename": os.path.basename(image_path),
@@ -1471,7 +1475,7 @@ class _FiguresMixin:
                                         "texts": [],
                                         "column": column
                                     })
-                                    debug_print(f"[DEBUG] page={page_num+1}: グレー領域をレンダリング {image_filename}")
+                                    logger.debug(f"[DEBUG] page={page_num+1}: グレー領域をレンダリング {image_filename}")
                                     continue
                             else:
                                 # 各埋め込み画像を個別に抽出
@@ -1479,7 +1483,7 @@ class _FiguresMixin:
                                 for img_bbox in image_bboxes_for_clip:
                                     img_area = (img_bbox[2] - img_bbox[0]) * (img_bbox[3] - img_bbox[1])
                                     if img_area < page_area * 0.005:
-                                        debug_print(f"[DEBUG] page={page_num+1}: 小さな画像を除外（面積比={img_area/page_area:.2%}）")
+                                        logger.debug(f"[DEBUG] page={page_num+1}: 小さな画像を除外（面積比={img_area/page_area:.2%}）")
                                         continue
                                     
                                     xref = None
@@ -1496,7 +1500,7 @@ class _FiguresMixin:
                                                 break
                                     
                                     if xref is None:
-                                        debug_print(f"[DEBUG] page={page_num+1}: 画像のxrefが見つからない bbox={img_bbox}")
+                                        logger.debug(f"[DEBUG] page={page_num+1}: 画像のxrefが見つからない bbox={img_bbox}")
                                         continue
                                     
                                     self.image_counter += 1
@@ -1540,6 +1544,7 @@ class _FiguresMixin:
                                                 with open(image_path, "wb") as f:
                                                     f.write(img_data)
                                         
+                                        self.output_image_count += 1
                                         figures.append({
                                             "path": image_path,
                                             "filename": os.path.basename(image_path),
@@ -1549,9 +1554,9 @@ class _FiguresMixin:
                                             "column": column
                                         })
                                         extracted_any = True
-                                        debug_print(f"[DEBUG] page={page_num+1}: 埋め込み画像を直接抽出 {image_filename}")
+                                        logger.debug(f"[DEBUG] page={page_num+1}: 埋め込み画像を直接抽出 {image_filename}")
                                     except Exception as e:
-                                        debug_print(f"[DEBUG] page={page_num+1}: 画像抽出エラー xref={xref}: {e}")
+                                        logger.debug(f"[DEBUG] page={page_num+1}: 画像抽出エラー xref={xref}: {e}")
                                         continue
                                 if extracted_any:
                                     continue
@@ -1592,15 +1597,16 @@ class _FiguresMixin:
                                     fig_body_text_chars += len(line_text)
                         
                         body_text_ratio = fig_body_text_chars / total_body_text_chars
-                        debug_print(f"[DEBUG] page={page_num+1}: 大きな図形（面積比={area_ratio:.1%}）の本文テキスト比={body_text_ratio:.1%}")
+                        logger.debug(f"[DEBUG] page={page_num+1}: 大きな図形（面積比={area_ratio:.1%}）の本文テキスト比={body_text_ratio:.1%}")
                         if body_text_ratio >= 0.5:
-                            debug_print(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, 本文テキスト比={body_text_ratio:.1%}）")
+                            logger.debug(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, 本文テキスト比={body_text_ratio:.1%}）")
                             continue
                 
                 self.image_counter += 1
+                self.output_image_count += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
                 
-                debug_print(f"[DEBUG] 図候補出力: page={page_num+1}, column={column}")
+                logger.debug(f"[DEBUG] 図候補出力: page={page_num+1}, column={column}")
                 
                 clip_rect = fitz.Rect(clip_bbox)
                 matrix = fitz.Matrix(2.0, 2.0)
@@ -1666,10 +1672,10 @@ class _FiguresMixin:
                     "is_table_image": is_table_image
                 })
                 
-                debug_print(f"[DEBUG] 図を抽出: {image_path} ({fig_info['cluster_size']}要素, {len(figure_texts)}テキスト, {column})")
+                logger.debug(f"[DEBUG] 図を抽出: {image_path} ({fig_info['cluster_size']}要素, {len(figure_texts)}テキスト, {column})")
                 
             except Exception as e:
-                debug_print(f"[DEBUG] 図抽出エラー: {e}")
+                logger.debug(f"[DEBUG] 図抽出エラー: {e}")
                 continue
         
         figures.sort(key=lambda x: x["y_position"])
@@ -1718,9 +1724,9 @@ class _FiguresMixin:
                     rows = table.extract()
                     if rows and len(rows) >= 2 and len(rows[0]) >= 2:
                         line_based_table_bboxes.append(bbox)
-                        debug_print(f"[DEBUG] page={page_num+1}: 罫線ベース表検出")
+                        logger.debug(f"[DEBUG] page={page_num+1}: 罫線ベース表検出")
         except Exception as e:
-            debug_print(f"[DEBUG] find_tables()エラー: {e}")
+            logger.debug(f"[DEBUG] find_tables()エラー: {e}")
         
         # フェーズ2: 描画要素と画像の収集
         all_elements, all_bboxes = self._fig_collect_graphics_elements(page, page_num)
@@ -1772,7 +1778,7 @@ class _FiguresMixin:
         table_bboxes = self._fig_detect_table_bboxes_from_text(page_text_lines, page_width)
         
         if table_bboxes:
-            debug_print(f"[DEBUG] page={page_num+1}: 表領域を{len(table_bboxes)}個検出")
+            logger.debug(f"[DEBUG] page={page_num+1}: 表領域を{len(table_bboxes)}個検出")
         
         all_figure_candidates = self._fig_filter_table_regions(
             all_figure_candidates, table_bboxes, page_text_lines, column_count, page_num
@@ -1784,7 +1790,7 @@ class _FiguresMixin:
         filtered_candidates = []
         for cand in all_figure_candidates:
             if self._fig_is_text_box_candidate(cand, page_text_lines, col_width):
-                debug_print(f"[DEBUG] page={page_num+1}: 囲み記事候補を除外")
+                logger.debug(f"[DEBUG] page={page_num+1}: 囲み記事候補を除外")
                 continue
             filtered_candidates.append(cand)
         all_figure_candidates = filtered_candidates
@@ -1805,7 +1811,7 @@ class _FiguresMixin:
                     slide_filtered.append(cand)
                     continue
                 if cand_area < min_area_threshold:
-                    debug_print(f"[DEBUG] page={page_num+1}: スライド装飾要素を除外（面積比={cand_area/page_area:.2%}）")
+                    logger.debug(f"[DEBUG] page={page_num+1}: スライド装飾要素を除外（面積比={cand_area/page_area:.2%}）")
                     continue
                 slide_filtered.append(cand)
             all_figure_candidates = slide_filtered
@@ -1839,13 +1845,13 @@ class _FiguresMixin:
                 line_width = line_bbox[2] - line_bbox[0]
                 if self._fig_is_body_text_line(line_text, line_width, col_width):
                     total_body_text_chars += len(line_text)
-            debug_print(f"[DEBUG] page={page_num+1}: フェーズ7.5開始 - 図形候補数={len(all_figure_candidates)}, 本文テキスト文字数={total_body_text_chars}")
+            logger.debug(f"[DEBUG] page={page_num+1}: フェーズ7.5開始 - 図形候補数={len(all_figure_candidates)}, 本文テキスト文字数={total_body_text_chars}")
             slide_text_filtered = []
             for cand_idx, cand in enumerate(all_figure_candidates):
                 bbox = cand.get("union_bbox", (0, 0, 0, 0))
                 fig_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
                 area_ratio = fig_area / page_area if page_area > 0 else 0
-                debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} bbox={bbox}, 面積比={area_ratio:.1%}")
+                logger.debug(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} bbox={bbox}, 面積比={area_ratio:.1%}")
                 
                 # 面積比が50%未満の図形は除外しない（小さな図形は保持）
                 if area_ratio < 0.5:
@@ -1858,7 +1864,7 @@ class _FiguresMixin:
                 significant_image_count = cand.get("significant_image_count", 0)
                 image_count = cand.get("image_count", 0)
                 if significant_image_count > 0 or image_count >= 3:
-                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 埋め込み画像{image_count}個（有意={significant_image_count}個）を含むため除外しない")
+                    logger.debug(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 埋め込み画像{image_count}個（有意={significant_image_count}個）を含むため除外しない")
                     slide_text_filtered.append(cand)
                     continue
                 
@@ -1877,32 +1883,32 @@ class _FiguresMixin:
                 
                 if total_body_text_chars > 0:
                     body_text_ratio = fig_body_text_chars / total_body_text_chars
-                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 本文テキスト比={body_text_ratio:.1%} ({fig_body_text_chars}/{total_body_text_chars})")
+                    logger.debug(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 本文テキスト比={body_text_ratio:.1%} ({fig_body_text_chars}/{total_body_text_chars})")
                     if body_text_ratio >= 0.5:
-                        debug_print(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, 本文テキスト比={body_text_ratio:.1%}）")
+                        logger.debug(f"[DEBUG] page={page_num+1}: ページ全体を覆う図形を除外（面積比={area_ratio:.1%}, 本文テキスト比={body_text_ratio:.1%}）")
                         continue
                 else:
                     # 本文テキストがない場合は除外しない（図中ラベルのみのページ）
-                    debug_print(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 本文テキストなし、除外しない")
+                    logger.debug(f"[DEBUG] page={page_num+1}: 図形候補{cand_idx+1} 本文テキストなし、除外しない")
                 
                 slide_text_filtered.append(cand)
             all_figure_candidates = slide_text_filtered
         
         # スライド文書で全ての図形候補が除外された場合、個別の埋め込み画像を抽出
         if not all_figure_candidates and is_slide_document:
-            debug_print(f"[DEBUG] page={page_num+1}: 図形候補が全て除外されたため、個別の埋め込み画像を抽出")
+            logger.debug(f"[DEBUG] page={page_num+1}: 図形候補が全て除外されたため、個別の埋め込み画像を抽出")
             individual_images = self._extract_slide_individual_images(
                 page, page_num, page_text_lines, header_y_max, footer_y_min
             )
             if individual_images:
-                debug_print(f"[DEBUG] page={page_num+1}: 個別画像を{len(individual_images)}個抽出")
+                logger.debug(f"[DEBUG] page={page_num+1}: 個別画像を{len(individual_images)}個抽出")
                 return individual_images
             return []
         
         if not all_figure_candidates:
             return []
         
-        debug_print(f"[DEBUG] ページ {page_num + 1}: {len(all_bboxes)}個の要素を{len(all_figure_candidates)}個の図にグループ化")
+        logger.debug(f"[DEBUG] ページ {page_num + 1}: {len(all_bboxes)}個の要素を{len(all_figure_candidates)}個の図にグループ化")
         
         # フェーズ8: 画像レンダリング
         is_two_column = (column_count >= 2)
@@ -2103,11 +2109,11 @@ class _FiguresMixin:
                                             near_image = True
                                             break
                                     if not near_image:
-                                        debug_print(f"[DEBUG] スライド文書: 本文行を除外（画像近傍外）: {line_text_stripped[:30]}...")
+                                        logger.debug(f"[DEBUG] スライド文書: 本文行を除外（画像近傍外）: {line_text_stripped[:30]}...")
                                         continue
                                 else:
                                     # 埋め込み画像がない場合、本文テキストは全て除外
-                                    debug_print(f"[DEBUG] スライド文書: 本文行を除外（画像なし）: {line_text_stripped[:30]}...")
+                                    logger.debug(f"[DEBUG] スライド文書: 本文行を除外（画像なし）: {line_text_stripped[:30]}...")
                                     continue
                         
                         if line_text_stripped:
@@ -2119,7 +2125,7 @@ class _FiguresMixin:
             texts = [item[2] for item in text_with_positions]
         
         except Exception as e:
-            debug_print(f"[DEBUG] bbox内テキスト抽出エラー: {e}")
+            logger.debug(f"[DEBUG] bbox内テキスト抽出エラー: {e}")
         
         return texts, expanded_bbox
 
@@ -2272,7 +2278,7 @@ class _FiguresMixin:
                         total_image_area += img_area
                         image_count += 1
         except Exception as e:
-            debug_print(f"[DEBUG] page={page_num+1}: 画像確認エラー: {e}")
+            logger.debug(f"[DEBUG] page={page_num+1}: 画像確認エラー: {e}")
         
         total_image_ratio = total_image_area / page_area if page_area > 0 else 0
         
@@ -2280,10 +2286,10 @@ class _FiguresMixin:
         # 枠線のみのページ（テキストが主体）は画像を出力しない
         # 閾値を3%に下げて、ページ24のような4.5%の画像も出力できるようにする
         if total_image_ratio < 0.03:
-            debug_print(f"[DEBUG] page={page_num+1}: フォールバック - 画像総面積{total_image_ratio:.1%}、画像出力スキップ")
+            logger.debug(f"[DEBUG] page={page_num+1}: フォールバック - 画像総面積{total_image_ratio:.1%}、画像出力スキップ")
             return []
         
-        debug_print(f"[DEBUG] page={page_num+1}: フォールバック - 画像{image_count}個（総面積{total_image_ratio:.1%}）を抽出")
+        logger.debug(f"[DEBUG] page={page_num+1}: フォールバック - 画像{image_count}個（総面積{total_image_ratio:.1%}）を抽出")
         return self._extract_individual_embedded_images(
             page, page_num, header_y_max, footer_y_min
         )
@@ -2318,6 +2324,7 @@ class _FiguresMixin:
         
         try:
             self.image_counter += 1
+            self.output_image_count += 1
             image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
             
             clip_rect = fitz.Rect(clip_bbox)
@@ -2335,7 +2342,7 @@ class _FiguresMixin:
                 image_path = os.path.join(self.images_dir, f"{image_filename}.png")
                 pix.save(image_path)
             
-            debug_print(f"[DEBUG] page={page_num+1}: ページ全体画像を抽出 {image_filename}")
+            logger.debug(f"[DEBUG] page={page_num+1}: ページ全体画像を抽出 {image_filename}")
             
             return [{
                 "path": image_path,
@@ -2347,7 +2354,7 @@ class _FiguresMixin:
             }]
             
         except Exception as e:
-            debug_print(f"[DEBUG] page={page_num+1}: ページ全体画像抽出エラー: {e}")
+            logger.debug(f"[DEBUG] page={page_num+1}: ページ全体画像抽出エラー: {e}")
             return []
     
     def _extract_individual_embedded_images(
@@ -2388,17 +2395,17 @@ class _FiguresMixin:
                 
                 # 小さすぎる画像は除外
                 if area < min_area:
-                    debug_print(f"[DEBUG] page={page_num+1}: 小さな画像を除外（面積={area:.0f}）")
+                    logger.debug(f"[DEBUG] page={page_num+1}: 小さな画像を除外（面積={area:.0f}）")
                     continue
                 
                 # ヘッダー領域の画像は除外
                 if header_y_max and bbox[3] < header_y_max:
-                    debug_print(f"[DEBUG] page={page_num+1}: ヘッダー領域の画像を除外")
+                    logger.debug(f"[DEBUG] page={page_num+1}: ヘッダー領域の画像を除外")
                     continue
                 
                 # フッター領域の画像は除外
                 if footer_y_min and bbox[1] > footer_y_min:
-                    debug_print(f"[DEBUG] page={page_num+1}: フッター領域の画像を除外")
+                    logger.debug(f"[DEBUG] page={page_num+1}: フッター領域の画像を除外")
                     continue
                 
                 # 重複するbboxは除外（重なり率90%以上）
@@ -2406,7 +2413,7 @@ class _FiguresMixin:
                 for accepted_bbox in accepted_bboxes:
                     overlap_ratio = self._fig_bbox_overlap_ratio(bbox, accepted_bbox)
                     if overlap_ratio >= 0.9:
-                        debug_print(f"[DEBUG] page={page_num+1}: 重複画像を除外（重なり率={overlap_ratio:.1%}）")
+                        logger.debug(f"[DEBUG] page={page_num+1}: 重複画像を除外（重なり率={overlap_ratio:.1%}）")
                         is_duplicate = True
                         break
                 if is_duplicate:
@@ -2415,6 +2422,7 @@ class _FiguresMixin:
                 accepted_bboxes.append(bbox)
                 
                 self.image_counter += 1
+                self.output_image_count += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
                 
                 clip_rect = fitz.Rect(bbox)
@@ -2446,10 +2454,10 @@ class _FiguresMixin:
                     "column": "full"
                 })
                 
-                debug_print(f"[DEBUG] page={page_num+1}: 個別画像を抽出 {image_filename}")
+                logger.debug(f"[DEBUG] page={page_num+1}: 個別画像を抽出 {image_filename}")
                 
         except Exception as e:
-            debug_print(f"[DEBUG] page={page_num+1}: 個別画像抽出エラー: {e}")
+            logger.debug(f"[DEBUG] page={page_num+1}: 個別画像抽出エラー: {e}")
         
         images.sort(key=lambda x: x["y_position"])
         return images
@@ -2483,6 +2491,7 @@ class _FiguresMixin:
                             continue
                         
                         self.image_counter += 1
+                        self.output_image_count += 1
                         image_filename = f"{self.base_name}_img_{page_num + 1:03d}_{self.image_counter:03d}"
                         
                         clip_rect = fitz.Rect(bbox)
@@ -2508,11 +2517,11 @@ class _FiguresMixin:
                         })
                         
                 except Exception as e:
-                    debug_print(f"[DEBUG] 画像抽出エラー (xref={xref}): {e}")
+                    logger.debug(f"[DEBUG] 画像抽出エラー (xref={xref}): {e}")
                     continue
                     
         except Exception as e:
-            debug_print(f"[DEBUG] 画像リスト取得エラー: {e}")
+            logger.debug(f"[DEBUG] 画像リスト取得エラー: {e}")
         
         images.sort(key=lambda x: x["y_position"])
         return images

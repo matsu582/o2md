@@ -17,8 +17,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from d2md import WordToMarkdownConverter, convert_doc_to_docx
-from utils import get_libreoffice_path
+from o2md.d2md import WordToMarkdownConverter, convert_doc_to_docx
+from o2md.utils import get_libreoffice_path
 
 
 class TestWordToMarkdownConverter:

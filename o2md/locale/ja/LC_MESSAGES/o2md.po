@@ -1,0 +1,140 @@
+# Japanese translations for o2md (source language)
+# Copyright (C) 2024 matsu582
+# This file is distributed under the MIT license.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: o2md 0.1.0\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+# --- 共通メッセージ ---
+
+msgid "ファイルタイプを検出: {file_type}"
+msgstr "ファイルタイプを検出: {file_type}"
+
+msgid "出力ファイル: {output_file}"
+msgstr "出力ファイル: {output_file}"
+
+msgid "出力画像: {count}枚"
+msgstr "出力画像: {count}枚"
+
+msgid "エラー: {message}"
+msgstr "エラー: {message}"
+
+msgid "変換エラー: {message}"
+msgstr "変換エラー: {message}"
+
+msgid "テキストモード: .txtのみを出力します"
+msgstr "テキストモード: .txtのみを出力します"
+
+msgid "見出しテキストリンクモード: 有効"
+msgstr "見出しテキストリンクモード: 有効"
+
+# --- フォルダ一括変換 ---
+
+msgid "フォルダ一括変換開始: {folder}"
+msgstr "フォルダ一括変換開始: {folder}"
+
+msgid "対象ファイル数: {total}"
+msgstr "対象ファイル数: {total}"
+
+msgid "成功: {count}ファイル"
+msgstr "成功: {count}ファイル"
+
+msgid "失敗: {count}ファイル"
+msgstr "失敗: {count}ファイル"
+
+# --- PDF変換 ---
+
+msgid "PDF文書変換開始: {file}"
+msgstr "PDF文書変換開始: {file}"
+
+msgid "総ページ数: {total_pages}"
+msgstr "総ページ数: {total_pages}"
+
+msgid "ページ {current}/{total} を処理中..."
+msgstr "ページ {current}/{total} を処理中..."
+
+# --- Excel変換 ---
+
+msgid "XLS→XLSX変換完了: {file}"
+msgstr "XLS→XLSX変換完了: {file}"
+
+msgid "Excel文書変換開始: {file}"
+msgstr "Excel文書変換開始: {file}"
+
+msgid "総シート数: {total_sheets}"
+msgstr "総シート数: {total_sheets}"
+
+msgid "シート {current}/{total} を処理中: {name}"
+msgstr "シート {current}/{total} を処理中: {name}"
+
+# --- Word変換 ---
+
+msgid "Word文書変換開始: {file}"
+msgstr "Word文書変換開始: {file}"
+
+msgid "DOC→DOCX変換完了: {file}"
+msgstr "DOC→DOCX変換完了: {file}"
+
+msgid "DOC→DOCX変換に失敗しました。"
+msgstr "DOC→DOCX変換に失敗しました。"
+
+msgid "総セクション数: {count}"
+msgstr "総セクション数: {count}"
+
+msgid "セクション {current}/{total} を処理中: {name}"
+msgstr "セクション {current}/{total} を処理中: {name}"
+
+# --- PowerPoint変換 ---
+
+msgid "PPT→PPTX変換完了: {file}"
+msgstr "PPT→PPTX変換完了: {file}"
+
+msgid "PowerPoint文書変換開始: {file}"
+msgstr "PowerPoint文書変換開始: {file}"
+
+msgid "スライド {current}/{total} を処理中..."
+msgstr "スライド {current}/{total} を処理中..."
+
+# --- 一太郎変換 ---
+
+msgid "一太郎文書変換開始: {file}"
+msgstr "一太郎文書変換開始: {file}"
+
+# --- 画像OCR変換 ---
+
+msgid "画像OCR変換開始: {file}"
+msgstr "画像OCR変換開始: {file}"
+
+msgid "エラー: 対応していない画像形式です: {ext}"
+msgstr "エラー: 対応していない画像形式です: {ext}"
+
+msgid "対応形式: {formats}"
+msgstr "対応形式: {formats}"
+
+# --- ファイルエラー ---
+
+msgid "ファイルが見つかりません: {file}"
+msgstr "ファイルが見つかりません: {file}"
+
+msgid "サポートされていないファイル形式です: {file}"
+msgstr "サポートされていないファイル形式です: {file}"
+
+msgid "フォルダが見つかりません: {folder}"
+msgstr "フォルダが見つかりません: {folder}"
+
+msgid "エラー: ファイル '{file}' が見つかりません。"
+msgstr "エラー: ファイル '{file}' が見つかりません。"
+
+msgid "エラー: .pdf形式のファイルを指定してください。"
+msgstr "エラー: .pdf形式のファイルを指定してください。"
+
+msgid "エラー: .docxまたは.doc形式のファイルを指定してください。"
+msgstr "エラー: .docxまたは.doc形式のファイルを指定してください。"
+
+msgid "エラー: .pptまたは.pptx形式のファイルを指定してください。"
+msgstr "エラー: .pptまたは.pptx形式のファイルを指定してください。"

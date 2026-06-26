@@ -14,7 +14,7 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils import get_libreoffice_path, col_letter
+from o2md.utils import get_libreoffice_path, col_letter
 
 
 class TestGetLibreOfficePath:
@@ -208,35 +208,35 @@ class TestTextOnly:
 
     def setup_method(self):
         """各テスト前にフラグをリセット"""
-        from utils import set_text_only
+        from o2md.utils import set_text_only
         set_text_only(False)
 
     def teardown_method(self):
         """各テスト後にフラグをリセット"""
-        from utils import set_text_only
+        from o2md.utils import set_text_only
         set_text_only(False)
 
     def test_default_is_false(self):
         """デフォルトではテキストオンリーモードは無効"""
-        from utils import is_text_only
+        from o2md.utils import is_text_only
         assert is_text_only() is False
 
     def test_set_text_only_true(self):
         """有効化するとTrueを返す"""
-        from utils import set_text_only, is_text_only
+        from o2md.utils import set_text_only, is_text_only
         set_text_only(True)
         assert is_text_only() is True
 
     def test_set_text_only_false(self):
         """無効化するとFalseに戻る"""
-        from utils import set_text_only, is_text_only
+        from o2md.utils import set_text_only, is_text_only
         set_text_only(True)
         set_text_only(False)
         assert is_text_only() is False
 
     def test_libreoffice_available_in_text_mode(self):
         """テキストモード時もLibreOfficeは利用可能（画像処理を行うため）"""
-        from utils import set_text_only, is_libreoffice_available, is_libreoffice_installed
+        from o2md.utils import set_text_only, is_libreoffice_available, is_libreoffice_installed
         set_text_only(True)
         # テキストモードでもLibreOfficeの利用可否はインストール状態に依存
         assert is_libreoffice_available() == is_libreoffice_installed()

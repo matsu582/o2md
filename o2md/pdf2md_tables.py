@@ -12,14 +12,17 @@ PDFToMarkdownConverterクラスの表検出・処理機能を提供します。
 - フル幅領域での表検出
 """
 
+import logging
 import re
 from typing import List, Dict, Tuple, Set, Any
 
 
+logger = logging.getLogger(__name__)
+
 def debug_print(*args, **kwargs):
     """デバッグ出力（pdf2mdモジュールに委譲）"""
     try:
-        from pdf2md import debug_print as _dp
+        from o2md.pdf2md import debug_print as _dp
         _dp(*args, **kwargs)
     except ImportError:
         pass
@@ -247,12 +250,12 @@ class _TablesMixin:
                         if score > best_score:
                             best_score = score
                             best_tables = tables.tables
-                            debug_print(
+                            logger.debug(
                                 f"[DEBUG] find_tables戦略: {params}, "
                                 f"score={score:.1f}, tables={len(tables.tables)}"
                             )
                 except Exception as e:
-                    debug_print(f"[DEBUG] find_tables戦略エラー: {params}, {e}")
+                    logger.debug(f"[DEBUG] find_tables戦略エラー: {params}, {e}")
                     continue
             
             if not best_tables:
@@ -317,7 +320,7 @@ class _TablesMixin:
                         max(t.bbox[2] for t in group),
                         max(t.bbox[3] for t in group)
                     )
-                    debug_print(f"[DEBUG] 近接表を結合: {len(group)}個の表, bbox={bbox}")
+                    logger.debug(f"[DEBUG] 近接表を結合: {len(group)}個の表, bbox={bbox}")
                 
                 if not rows:
                     continue
@@ -342,7 +345,7 @@ class _TablesMixin:
                     empty_ratio = empty_cell_count / total_cell_count
                     # 空セル比率が50%以上かつ高さが50px以下の場合は除外
                     if empty_ratio >= 0.5 and table_height <= 50:
-                        debug_print(f"[DEBUG] 罫線ベース表スキップ（空セル多/高さ小）: bbox={bbox}, empty_ratio={empty_ratio:.2f}, height={table_height:.1f}")
+                        logger.debug(f"[DEBUG] 罫線ベース表スキップ（空セル多/高さ小）: bbox={bbox}, empty_ratio={empty_ratio:.2f}, height={table_height:.1f}")
                         continue
                 
                 # 各行を処理（改行を含むセルはスペースで結合）
@@ -370,7 +373,7 @@ class _TablesMixin:
                 ):
                     if len(processed_rows) >= 2:
                         processed_rows = processed_rows[1:]
-                        debug_print(
+                        logger.debug(
                             "[DEBUG] 空白ヘッダー行をスキップ"
                         )
                 
@@ -399,10 +402,10 @@ class _TablesMixin:
                     "y_end": bbox[3]
                 })
                 
-                debug_print(f"[DEBUG] 罫線ベース表検出: bbox={bbox}, rows={len(rows)}, cols={col_count}")
+                logger.debug(f"[DEBUG] 罫線ベース表検出: bbox={bbox}, rows={len(rows)}, cols={col_count}")
                 
         except Exception as e:
-            debug_print(f"[DEBUG] find_tables()エラー: {e}")
+            logger.debug(f"[DEBUG] find_tables()エラー: {e}")
         
         return detected_tables
 
@@ -605,7 +608,7 @@ class _TablesMixin:
         # 段組みレイアウトの場合は表検出をスキップ
         column_count = self._detect_column_layout(text_dict)
         if column_count >= 2:
-            debug_print("[DEBUG] 段組みレイアウトのため表検出をスキップ")
+            logger.debug("[DEBUG] 段組みレイアウトのため表検出をスキップ")
             return []
         
         page_width = text_dict.get("width", 612)

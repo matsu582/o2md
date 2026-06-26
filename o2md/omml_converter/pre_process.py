@@ -6,11 +6,14 @@ DOCX ファイル内の数式 (OMML) を LaTeX 形式に変換する前処理を
 markitdown (MIT License) の実装を参考にしています。
 """
 
+import logging
 import re
 import zipfile
 from io import BytesIO
 from typing import BinaryIO
 from xml.etree import ElementTree as ET
+
+logger = logging.getLogger(__name__)
 
 from .omml import OMML_NS, oMath2Latex
 
@@ -39,7 +42,7 @@ def _convert_omath_element_to_latex(element: ET.Element) -> str:
         latex = oMath2Latex(element).latex
         return latex if latex else ""
     except Exception as e:
-        print(f"[WARNING] 数式変換エラー: {e}")
+        logger.warning(f"数式変換エラー: {e}")
         return ""
 
 
@@ -59,7 +62,7 @@ def _process_math_in_xml(content: bytes) -> bytes:
     try:
         root = ET.fromstring(content)
     except ET.ParseError as e:
-        print(f"[WARNING] XML パースエラー: {e}")
+        logger.warning(f"XML パースエラー: {e}")
         return content
     
     # oMathPara (ブロック数式) を処理
@@ -147,7 +150,7 @@ def pre_process_docx(input_docx: BinaryIO) -> BinaryIO:
                         zip_output.writestr(name, updated_content)
                     except Exception as e:
                         # 処理エラーの場合は元のコンテンツを書き込む
-                        print(f"[WARNING] {name} の前処理エラー: {e}")
+                        logger.warning(f"{name} の前処理エラー: {e}")
                         zip_output.writestr(name, content)
                 else:
                     zip_output.writestr(name, content)
