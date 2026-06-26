@@ -595,9 +595,10 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
             # 個別ファイルの結果を表示
             print("\n" + "=" * 50)
             print(f"出力ファイル: {output_file}")
-            file_type = detect_file_type(fpath)
-            if file_type != 'image' and img_count > 0:
-                print(f"出力画像: {img_count}枚")
+            if not is_text_only():
+                file_type = detect_file_type(fpath)
+                if file_type != 'image' and img_count > 0:
+                    print(f"出力画像: {img_count}枚")
             print("=" * 50)
         except Exception as e:
             logger.error(f"変換失敗: {rel} - {e}")
@@ -720,8 +721,8 @@ def main():
             print("\n" + "=" * 50)
             print(f"出力ファイル: {output_file}")
 
-            # 出力画像数を表示（画像OCR変換時は除外）
-            if detect_file_type(args.file) != 'image':
+            # 出力画像数を表示（画像OCR変換時・テキストモード時は除外）
+            if not args.text and detect_file_type(args.file) != 'image':
                 if output_image_count > 0:
                     print(f"出力画像: {output_image_count}枚")
 
