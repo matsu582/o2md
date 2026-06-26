@@ -18,6 +18,8 @@ import sys
 import re
 import tempfile
 import subprocess
+
+from o2md.i18n import _
 import math
 import shutil
 import zipfile
@@ -91,7 +93,7 @@ def debug_print(*args, **kwargs):
         print(*args, **kwargs)
 
 class WordToMarkdownConverter:
-    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None, shape_metadata=False, output_format='png'):
+    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None, shape_metadata=False, output_format='png', display_name: str | None = None):
         """Word文書をMarkdownに変換するコンバータ
         
         Args:
@@ -100,8 +102,10 @@ class WordToMarkdownConverter:
             output_dir: 出力ディレクトリ（省略時はデフォルト）
             shape_metadata: 図形メタデータ出力フラグ
             output_format: 出力画像形式 ('png' または 'svg')
+            display_name: 進行状況表示用のファイル名（DOC→DOCX変換時の元ファイルパス）
         """
         self.word_file = word_file_path
+        self.display_name = display_name or word_file_path
         
         # 数式前処理: OMML を LaTeX に変換
         if MATH_SUPPORT and has_math_content(word_file_path):
@@ -169,10 +173,14 @@ class WordToMarkdownConverter:
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        print(f"Word文書変換開始: {self.word_file}")
+        print(_("Word文書変換開始: {file}").format(file=self.display_name))
         
         # 1. 見出し構造を解析（参照リンク生成のため）
         self._analyze_headings()
+        
+        # 見出しがある場合は総セクション数を表示
+        if self.headings:
+            print(_("総セクション数: {count}").format(count=len(self.headings)))
         
         # 1.5. numbering定義を解析（デバッグ用）
         self._analyze_numbering_definitions()
@@ -489,6 +497,8 @@ class WordToMarkdownConverter:
         # 要素を順番に処理
         # 直前の要素を追跡するための変数
         previous_element_type = None
+        heading_counter = 0
+        total_headings = len(self.headings)
         
         for element in self.doc.element.body:
             if element.tag.endswith('}p'):  # 段落
@@ -503,6 +513,11 @@ class WordToMarkdownConverter:
                     
                     # 見出しかどうかを記録
                     if self._is_heading(paragraph):
+                        if total_headings > 0:
+                            heading_counter += 1
+                            heading_text = paragraph.text.strip()
+                            print(_("セクション {current}/{total} を処理中: {name}").format(
+                                current=heading_counter, total=total_headings, name=heading_text))
                         previous_element_type = 'heading'
                     elif self._is_list_item(paragraph):
                         previous_element_type = 'list'
@@ -3317,11 +3332,11 @@ def main():
     set_verbose(args.verbose)
     
     if not os.path.exists(args.word_file):
-        print(f"エラー: ファイル '{args.word_file}' が見つかりません。")
+        print(_("エラー: ファイル '{file}' が見つかりません。").format(file=args.word_file))
         sys.exit(1)
     
     if not args.word_file.endswith(('.docx', '.doc')):
-        print("エラー: .docxまたは.doc形式のファイルを指定してください。")
+        print(_("エラー: .docxまたは.doc形式のファイルを指定してください。"))
         sys.exit(1)
     
     # DOCファイルの場合は事前にDOCXに変換
@@ -3332,10 +3347,10 @@ def main():
         logger.info("DOCファイルが指定されました。DOCXに変換します...")
         converted_file = convert_doc_to_docx(args.word_file)
         if converted_file is None:
-            print("DOC→DOCX変換に失敗しました。")
+            print(_("DOC→DOCX変換に失敗しました。"))
             sys.exit(1)
         processing_file = converted_file
-        print(f"DOC→DOCX変換完了: {converted_file}")
+        print(_("DOC→DOCX変換完了: {file}").format(file=converted_file))
     
     try:
         converter = WordToMarkdownConverter(
@@ -3353,15 +3368,15 @@ def main():
         output_file = converter.convert()
 
         print("\n" + "=" * 50)
-        print(f"出力ファイル: {output_file}")
+        print(_("出力ファイル: {output_file}").format(output_file=output_file))
         if converter.output_image_count > 0:
-            print(f"出力画像: {converter.output_image_count}枚")
+            print(_("出力画像: {count}枚").format(count=converter.output_image_count))
         if args.use_heading_text:
-            print("見出しテキストリンクモード: 有効")
+            print(_("見出しテキストリンクモード: 有効"))
         print("=" * 50)
         
     except Exception as e:
-        print(f"変換エラー: {e}")
+        print(_("変換エラー: {message}").format(message=e))
         sys.exit(1)
     finally:
         # 一時的に作成したDOCXファイルとその親ディレクトリを必ず削除

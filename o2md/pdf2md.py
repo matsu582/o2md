@@ -18,6 +18,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Set
 
+from o2md.i18n import _
+
 # PyMuPDFのレイアウト推奨メッセージを抑制
 os.environ.setdefault("PYMUPDF_SUGGEST_LAYOUT_ANALYZER", "0")
 
@@ -202,7 +204,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        print(f"PDF文書変換開始: {self.pdf_file}")
+        print(_("PDF文書変換開始: {file}").format(file=self.pdf_file))
         
         # ドキュメントタイトルを先頭に追加
         self.markdown_lines.append(f"# {self.base_name}")
@@ -216,7 +218,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         try:
             total_pages = len(doc)
-            print(f"総ページ数: {total_pages}")
+            print(_("総ページ数: {total_pages}").format(total_pages=total_pages))
             
             # スライド文書（PPT由来のPDFなど）かどうかを判定
             self._is_slide_document = self._detect_slide_document(doc)
@@ -246,7 +248,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 self._compute_doc_wide_header_footer(doc, header_footer_patterns)
             
             for page_num in range(total_pages):
-                print(f"ページ {page_num + 1}/{total_pages} を処理中...")
+                print(_("ページ {current}/{total} を処理中...").format(current=page_num + 1, total=total_pages))
                 page = doc[page_num]
                 self._convert_page(page, page_num, header_footer_patterns)
         finally:
@@ -2278,11 +2280,11 @@ def main():
     set_verbose(args.verbose)
     
     if not os.path.exists(args.pdf_file):
-        print(f"エラー: ファイル '{args.pdf_file}' が見つかりません。")
+        print(_("エラー: ファイル '{file}' が見つかりません。").format(file=args.pdf_file))
         sys.exit(1)
     
     if not args.pdf_file.lower().endswith('.pdf'):
-        print("エラー: .pdf形式のファイルを指定してください。")
+        print(_("エラー: .pdf形式のファイルを指定してください。"))
         sys.exit(1)
     
     try:
@@ -2302,13 +2304,13 @@ def main():
         output_file = converter.convert()
 
         print("\n" + "=" * 50)
-        print(f"出力ファイル: {output_file}")
+        print(_("出力ファイル: {output_file}").format(output_file=output_file))
         if converter.output_image_count > 0:
-            print(f"出力画像: {converter.output_image_count}枚")
+            print(_("出力画像: {count}枚").format(count=converter.output_image_count))
         print("=" * 50)
         
     except Exception as e:
-        print(f"変換エラー: {e}")
+        print(_("変換エラー: {message}").format(message=e))
         import traceback
         traceback.print_exc()
         sys.exit(1)

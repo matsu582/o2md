@@ -20,6 +20,8 @@ import subprocess
 import shutil
 import warnings
 
+from o2md.i18n import _
+
 warnings.filterwarnings("ignore", message="DrawingML support is incomplete", category=UserWarning)
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any, Set
@@ -229,7 +231,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         - テキストモード時は.txtを直接出力、通常時は.md出力
         """
         from o2md.utils import is_text_only
-        print(f"Excel文書変換開始: {self.excel_file}")
+        print(_("Excel文書変換開始: {file}").format(file=self.excel_file))
 
         # ドキュメントタイトルを先頭に追加
         self.markdown_lines.append(f"# {self.base_name}")
@@ -245,7 +247,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         # シートを変換
         visible_sheets = [s for s in self.workbook.sheetnames if self.workbook[s].sheet_state != 'hidden']
         total_sheets = len(visible_sheets)
-        print(f"総シート数: {total_sheets}")
+        print(_("総シート数: {total_sheets}").format(total_sheets=total_sheets))
         sheet_idx = 0
         for sheet_name in self.workbook.sheetnames:
             try:
@@ -257,7 +259,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                     continue
                 
                 sheet_idx += 1
-                print(f"シート {sheet_idx}/{total_sheets} を処理中: {sheet_name}")
+                print(_("シート {current}/{total} を処理中: {name}").format(current=sheet_idx, total=total_sheets, name=sheet_name))
                 self._convert_sheet(sheet)
             except Exception as e:
                 logger.warning(f"シート処理中にエラーが発生しました: {sheet_name} -> {e}")
@@ -2946,9 +2948,9 @@ def main():
         output_file = converter.convert()
 
         print("\n" + "=" * 50)
-        print(f"出力ファイル: {output_file}")
+        print(_("出力ファイル: {output_file}").format(output_file=output_file))
         if converter.output_image_count > 0:
-            print(f"出力画像: {converter.output_image_count}枚")
+            print(_("出力画像: {count}枚").format(count=converter.output_image_count))
         print("=" * 50)
 
     except Exception as e:

@@ -52,8 +52,10 @@ coverage.xml
 cover/
 
 # Translations
-*.mo
 *.pot
+# .moファイルは除外するが、locale配下のランタイム用.moは含める
+*.mo
+!o2md/locale/**/*.mo
 
 # Django stuff:
 *.log
