@@ -129,6 +129,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
         
         self.markdown_lines = []
         self.image_counter = 0
+        self.output_image_count = 0
         
         # manga-ocrインスタンス（遅延初期化）
         self._ocr = None
@@ -2098,6 +2099,7 @@ class PDFToMarkdownConverter(_FiguresMixin, _TablesMixin, _TextMixin):
                 pix.save(image_path)
             
             self.image_counter += 1
+            self.output_image_count += 1
             logger.debug(f"[DEBUG] 画像を保存: {image_path}")
             return image_path
             
@@ -2301,10 +2303,8 @@ def main():
 
         print("\n変換完了!")
         print(f"出力ファイル: {output_file}")
-        if os.path.exists(converter.images_dir) and os.listdir(converter.images_dir):
-            image_count = len([f for f in os.listdir(converter.images_dir) if os.path.isfile(os.path.join(converter.images_dir, f)) and f.startswith(converter.base_name)])
-            if image_count > 0:
-                print(f"出力画像: {image_count}枚")
+        if converter.output_image_count > 0:
+            print(f"出力画像: {converter.output_image_count}枚")
         
     except Exception as e:
         print(f"変換エラー: {e}")

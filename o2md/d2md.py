@@ -139,6 +139,7 @@ class WordToMarkdownConverter:
         self.vector_image_counter = 0  # ベクター画像専用カウンター
         self.regular_image_counter = 0  # 通常画像専用カウンター
         self.shape_image_counter = 0  # 個別図形専用カウンター
+        self.output_image_count = 0  # 実際に出力した画像ファイル数
         self.shape_metadata = shape_metadata  # 図形メタデータ出力フラグ
         self.output_format = output_format.lower() if output_format else 'png'
         
@@ -1216,6 +1217,7 @@ class WordToMarkdownConverter:
                 convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
             
             if convert_success:
+                self.output_image_count += 1
                 # Markdownに追加（ファイル名をURLエンコード）
                 encoded_filename = urllib.parse.quote(image_filename)
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
@@ -1453,6 +1455,7 @@ class WordToMarkdownConverter:
                 convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
             
             if convert_success:
+                self.output_image_count += 1
                 # Markdownに追加（ファイル名をURLエンコード）
                 encoded_filename = urllib.parse.quote(image_filename)
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
@@ -1520,6 +1523,7 @@ class WordToMarkdownConverter:
                 with open(image_path, 'wb') as f:
                     f.write(image_data)
             
+            self.output_image_count += 1
             # 処理済み情報を更新
             self.processed_images[rel.rId]['filename'] = image_filename
             self.processed_images[rel.rId]['path'] = image_path
@@ -2124,6 +2128,7 @@ class WordToMarkdownConverter:
                 convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
             
             if convert_success:
+                self.output_image_count += 1
                 # Markdownに追加（ファイル名をURLエンコード）
                 encoded_filename = urllib.parse.quote(image_filename)
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
@@ -2186,6 +2191,7 @@ class WordToMarkdownConverter:
                 convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
             
             if convert_success:
+                self.output_image_count += 1
                 # Markdownに追加（ファイル名をURLエンコード）
                 encoded_filename = urllib.parse.quote(image_filename)
                 self.markdown_lines.append(f"![](images/{encoded_filename})")
@@ -2248,6 +2254,7 @@ class WordToMarkdownConverter:
                 convert_success = self._convert_pdf_to_png(temp_pdf_path, image_path)
             
             if convert_success:
+                self.output_image_count += 1
                 # 生成された画像の詳細を確認
                 self._debug_image_info(image_path)
                 
@@ -3347,10 +3354,8 @@ def main():
 
         print("\n変換完了!")
         print(f"出力ファイル: {output_file}")
-        if os.path.exists(converter.images_dir) and os.listdir(converter.images_dir):
-            image_count = len([f for f in os.listdir(converter.images_dir) if os.path.isfile(os.path.join(converter.images_dir, f)) and f.startswith(converter.base_name)])
-            if image_count > 0:
-                print(f"出力画像: {image_count}枚")
+        if converter.output_image_count > 0:
+            print(f"出力画像: {converter.output_image_count}枚")
         if args.use_heading_text:
             print("見出しテキストリンクモード: 有効")
         

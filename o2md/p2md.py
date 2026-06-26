@@ -125,6 +125,7 @@ class PowerPointToMarkdownConverter:
         
         self.markdown_lines = []
         self.image_counter = 0
+        self.output_image_count = 0
         self.slide_counter = 0
         self.output_format = output_format.lower() if output_format else 'png'
         
@@ -1006,6 +1007,7 @@ class PowerPointToMarkdownConverter:
             # PDFの該当ページ（スライドインデックスは0から始まる）を画像に変換
             success, actual_path = self._convert_pdf_page_to_image(pdf_path, slide_idx - 1, image_path)
             if success:
+                self.output_image_count += 1
                 # Markdownに追加（altテキストを改善）
                 actual_filename = os.path.basename(actual_path)
                 encoded_filename = urllib.parse.quote(actual_filename)
@@ -1293,10 +1295,8 @@ def main():
 
         print("\n変換完了!")
         print(f"出力ファイル: {output_file}")
-        if os.path.exists(converter.images_dir) and os.listdir(converter.images_dir):
-            image_count = len([f for f in os.listdir(converter.images_dir) if os.path.isfile(os.path.join(converter.images_dir, f)) and f.startswith(converter.base_name)])
-            if image_count > 0:
-                print(f"出力画像: {image_count}枚")
+        if converter.output_image_count > 0:
+            print(f"出力画像: {converter.output_image_count}枚")
         
     except Exception as e:
         print(f"変換エラー: {e}")

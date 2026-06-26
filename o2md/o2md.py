@@ -464,7 +464,12 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
         if converter and hasattr(converter, 'get_auto_generated_line_patterns'):
             auto_patterns['line_patterns'] = converter.get_auto_generated_line_patterns()
 
-        return output_file, auto_patterns
+        # 出力画像カウントを取得
+        output_image_count = 0
+        if converter and hasattr(converter, 'output_image_count'):
+            output_image_count = converter.output_image_count
+
+        return output_file, auto_patterns, output_image_count
         
     finally:
         # PowerPointの一時ファイルクリーンアップ
@@ -579,7 +584,7 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
 
         print(f"\n[{idx}/{total}] {rel}")
         try:
-            output_file, auto_patterns = convert_office_to_markdown(
+            output_file, auto_patterns, _img_count = convert_office_to_markdown(
                 fpath,
                 output_dir=file_output_dir,
                 **kwargs
@@ -699,7 +704,7 @@ def main():
     else:
         # 単一ファイル変換
         try:
-            output_file, auto_patterns = convert_office_to_markdown(
+            output_file, auto_patterns, output_image_count = convert_office_to_markdown(
                 args.file,
                 output_dir=args.output_dir,
                 **common_kwargs
@@ -711,16 +716,8 @@ def main():
 
             # 出力画像数を表示（画像OCR変換時は除外）
             if detect_file_type(args.file) != 'image':
-                if args.output_dir:
-                    images_dir = os.path.join(args.output_dir, "images")
-                else:
-                    images_dir = os.path.join(os.getcwd(), "output", "images")
-
-                if os.path.exists(images_dir) and os.listdir(images_dir):
-                    base_name = Path(args.file).stem
-                    image_count = len([f for f in os.listdir(images_dir) if os.path.isfile(os.path.join(images_dir, f)) and f.startswith(base_name)])
-                    if image_count > 0:
-                        print(f"出力画像: {image_count}枚")
+                if output_image_count > 0:
+                    print(f"出力画像: {output_image_count}枚")
 
             if args.use_heading_text:
                 print("見出しテキストリンクモード: 有効")

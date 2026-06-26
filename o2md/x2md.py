@@ -157,6 +157,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
 
         self.markdown_lines = self._LoggingList(self)
         self.image_counter = 0
+        self.output_image_count = 0
 
         self._init_per_sheet_state()
 
@@ -996,6 +997,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             os.unlink(temp_pdf)
             
             if success:
+                self.output_image_count += 1
                 logger.info(f"チャート画像生成: {image_filename}")
                 return image_filename
             
@@ -2943,10 +2945,8 @@ def main():
         print("\n" + "=" * 50)
         print("変換完了!")
         print(f"出力ファイル: {output_file}")
-        if os.path.exists(converter.images_dir) and os.listdir(converter.images_dir):
-            image_count = len([f for f in os.listdir(converter.images_dir) if os.path.isfile(os.path.join(converter.images_dir, f)) and f.startswith(converter.base_name)])
-            if image_count > 0:
-                print(f"出力画像: {image_count}枚")
+        if converter.output_image_count > 0:
+            print(f"出力画像: {converter.output_image_count}枚")
         print("=" * 50)
 
     except Exception as e:

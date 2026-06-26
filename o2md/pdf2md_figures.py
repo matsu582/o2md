@@ -1466,6 +1466,7 @@ class _FiguresMixin:
                                         image_path = os.path.join(self.images_dir, f"{image_filename}.png")
                                         pix.save(image_path)
                                     
+                                    self.output_image_count += 1
                                     figures.append({
                                         "path": image_path,
                                         "filename": os.path.basename(image_path),
@@ -1543,6 +1544,7 @@ class _FiguresMixin:
                                                 with open(image_path, "wb") as f:
                                                     f.write(img_data)
                                         
+                                        self.output_image_count += 1
                                         figures.append({
                                             "path": image_path,
                                             "filename": os.path.basename(image_path),
@@ -1601,6 +1603,7 @@ class _FiguresMixin:
                             continue
                 
                 self.image_counter += 1
+                self.output_image_count += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
                 
                 logger.debug(f"[DEBUG] 図候補出力: page={page_num+1}, column={column}")
@@ -2321,6 +2324,7 @@ class _FiguresMixin:
         
         try:
             self.image_counter += 1
+            self.output_image_count += 1
             image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
             
             clip_rect = fitz.Rect(clip_bbox)
@@ -2418,6 +2422,7 @@ class _FiguresMixin:
                 accepted_bboxes.append(bbox)
                 
                 self.image_counter += 1
+                self.output_image_count += 1
                 image_filename = f"{self.base_name}_fig_{page_num + 1:03d}_{self.image_counter:03d}"
                 
                 clip_rect = fitz.Rect(bbox)
@@ -2486,6 +2491,7 @@ class _FiguresMixin:
                             continue
                         
                         self.image_counter += 1
+                        self.output_image_count += 1
                         image_filename = f"{self.base_name}_img_{page_num + 1:03d}_{self.image_counter:03d}"
                         
                         clip_rect = fitz.Rect(bbox)
