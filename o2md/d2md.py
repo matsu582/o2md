@@ -93,7 +93,7 @@ def debug_print(*args, **kwargs):
         print(*args, **kwargs)
 
 class WordToMarkdownConverter:
-    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None, shape_metadata=False, output_format='png'):
+    def __init__(self, word_file_path: str, use_heading_text=False, output_dir=None, shape_metadata=False, output_format='png', display_name: str | None = None):
         """Word文書をMarkdownに変換するコンバータ
         
         Args:
@@ -102,8 +102,10 @@ class WordToMarkdownConverter:
             output_dir: 出力ディレクトリ（省略時はデフォルト）
             shape_metadata: 図形メタデータ出力フラグ
             output_format: 出力画像形式 ('png' または 'svg')
+            display_name: 進行状況表示用のファイル名（DOC→DOCX変換時の元ファイルパス）
         """
         self.word_file = word_file_path
+        self.display_name = display_name or word_file_path
         
         # 数式前処理: OMML を LaTeX に変換
         if MATH_SUPPORT and has_math_content(word_file_path):
@@ -171,7 +173,7 @@ class WordToMarkdownConverter:
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        print(_("Word文書変換開始: {file}").format(file=self.word_file))
+        print(_("Word文書変換開始: {file}").format(file=self.display_name))
         
         # 1. 見出し構造を解析（参照リンク生成のため）
         self._analyze_headings()

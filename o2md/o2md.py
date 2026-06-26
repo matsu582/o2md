@@ -402,12 +402,15 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             use_heading_text = kwargs.get('use_heading_text', False)
             shape_metadata = kwargs.get('shape_metadata', False)
             output_format = kwargs.get('output_format', 'png')
+            # DOC→DOCX変換時は元のファイルパスを表示用に渡す
+            display_name = file_path if processing_file != file_path else None
             converter = WordToMarkdownConverter(
                 processing_file, 
                 use_heading_text=use_heading_text,
                 output_dir=output_dir,
                 shape_metadata=shape_metadata,
-                output_format=output_format
+                output_format=output_format,
+                display_name=display_name
             )
             output_file = converter.convert()
             
