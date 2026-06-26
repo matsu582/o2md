@@ -103,10 +103,11 @@ class PowerPointToMarkdownConverter:
         
         # pptファイルの場合はpptxに変換
         if pptx_file_path.lower().endswith('.ppt'):
-            logger.info(f".pptファイルを検出。.pptxに変換します...")
+            print(_("PPT→PPTX変換中: {file}").format(file=pptx_file_path))
             self.pptx_file = self._convert_ppt_to_pptx(pptx_file_path)
             if not self.pptx_file:
                 raise RuntimeError("pptからpptxへの変換に失敗しました")
+            print(_("PPT→PPTX変換完了: {file}").format(file=pptx_file_path))
             self._temp_pptx_file = self.pptx_file  # 後でクリーンアップするためにフラグを立てる
         else:
             self.pptx_file = pptx_file_path

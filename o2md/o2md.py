@@ -368,13 +368,13 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             
             # XLSファイルの場合は事前にXLSXに変換
             if file_path.lower().endswith('.xls'):
-                logger.info("XLSファイルが指定されました。XLSXに変換します...")
+                print(_("XLS→XLSX変換中: {file}").format(file=file_path))
                 converted_file = convert_xls_to_xlsx(file_path)
                 if converted_file is None:
                     raise RuntimeError("XLS→XLSX変換に失敗しました。")
                 processing_file = converted_file
                 converted_temp_dir = Path(converted_file).parent
-                logger.info(f"XLS→XLSX変換完了: {converted_file}")
+                print(_("XLS→XLSX変換完了: {file}").format(file=file_path))
             
             shape_metadata = kwargs.get('shape_metadata', False)
             output_format = kwargs.get('output_format', 'png')
@@ -392,12 +392,12 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             
             # DOCファイルの場合は事前にDOCXに変換
             if file_path.lower().endswith('.doc'):
-                logger.info("DOCファイルが指定されました。DOCXに変換します...")
+                print(_("DOC→DOCX変換中: {file}").format(file=file_path))
                 converted_file = convert_doc_to_docx(file_path)
                 if converted_file is None:
                     raise RuntimeError("DOC→DOCX変換に失敗しました。")
                 processing_file = converted_file
-                logger.info(f"DOC→DOCX変換完了: {converted_file}")
+                print(_("DOC→DOCX変換完了: {file}").format(file=file_path))
             
             use_heading_text = kwargs.get('use_heading_text', False)
             shape_metadata = kwargs.get('shape_metadata', False)
