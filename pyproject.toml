@@ -74,6 +74,15 @@ img2md = "o2md.img2md:main"
 [tool.hatch.build.targets.wheel]
 packages = ["o2md"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "o2md/",
+    "pyproject.toml",
+    "README.md",
+    "README_JP.md",
+    "LICENSE",
+]
+
 [tool.pytest.ini_options]
 filterwarnings = [
     "ignore::DeprecationWarning",
