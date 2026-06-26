@@ -97,7 +97,13 @@ class ImageToMarkdownConverter:
         else:
             self.output_dir = os.path.join(os.getcwd(), "output")
 
+        self.images_dir = os.path.join(self.output_dir, "images")
+
+        # ディレクトリ作成
         os.makedirs(self.output_dir, exist_ok=True)
+        os.makedirs(self.images_dir, exist_ok=True)
+
+        self.output_image_count = 0
 
     def get_auto_generated_patterns(self) -> list:
         """このコンバータが自動付与する見出しの正規表現パターンを返す"""
@@ -124,9 +130,9 @@ class ImageToMarkdownConverter:
         # OCRでテキスト抽出
         ocr_text = self._extract_text_with_ocr(img)
 
-        # Markdown生成（元画像への相対パスを使用）
-        image_rel_path = os.path.relpath(self.file_path, self.output_dir)
-        md_lines = self._build_markdown(image_rel_path, ocr_text)
+        # 画像をoutput/images/にコピー
+        image_filename = self._copy_image_to_output()
+        md_lines = self._build_markdown(image_filename, ocr_text)
         md_content = '\n'.join(md_lines)
 
         # テキストモード: 直接.txtを出力（.mdは生成しない）
@@ -139,6 +145,8 @@ class ImageToMarkdownConverter:
             )
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(text_content)
+            # テキストモード時は画像ディレクトリを削除
+            self._cleanup_images_dir()
             logger.info(f"変換完了: {output_path}")
             return output_path
 
@@ -151,6 +159,24 @@ class ImageToMarkdownConverter:
 
         logger.info(f"変換完了: {output_path}")
         return output_path
+
+    def _copy_image_to_output(self) -> str:
+        """画像ファイルをoutput/images/にコピーする
+
+        Returns:
+            images/からの相対ファイル名（Markdownリンク用）
+        """
+        dest_filename = f"{self.base_name}{self.file_ext}"
+        dest_path = os.path.join(self.images_dir, dest_filename)
+        shutil.copy2(self.file_path, dest_path)
+        self.output_image_count += 1
+        logger.debug(f"画像をコピー: {dest_path}")
+        return f"images/{dest_filename}"
+
+    def _cleanup_images_dir(self):
+        """テキストモード時に画像ディレクトリを削除する"""
+        if os.path.exists(self.images_dir):
+            shutil.rmtree(self.images_dir)
 
     def _get_auto_patterns(self) -> dict:
         """strip_markdownに渡すパターン情報を返す"""
