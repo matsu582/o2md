@@ -3352,12 +3352,13 @@ def main():
 
         output_file = converter.convert()
 
-        print("\n変換完了!")
+        print("\n" + "=" * 50)
         print(f"出力ファイル: {output_file}")
         if converter.output_image_count > 0:
             print(f"出力画像: {converter.output_image_count}枚")
         if args.use_heading_text:
             print("見出しテキストリンクモード: 有効")
+        print("=" * 50)
         
     except Exception as e:
         print(f"変換エラー: {e}")

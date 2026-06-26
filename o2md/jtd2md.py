@@ -790,8 +790,9 @@ def main():
 
     output_file = converter.convert()
 
-    print(f"\n変換完了!")
+    print("\n" + "=" * 50)
     print(f"出力ファイル: {output_file}")
+    print("=" * 50)
 
 
 if __name__ == "__main__":

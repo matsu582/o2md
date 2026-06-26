@@ -2946,7 +2946,6 @@ def main():
         output_file = converter.convert()
 
         print("\n" + "=" * 50)
-        print("変換完了!")
         print(f"出力ファイル: {output_file}")
         if converter.output_image_count > 0:
             print(f"出力画像: {converter.output_image_count}枚")

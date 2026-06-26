@@ -1293,10 +1293,11 @@ def main():
 
         output_file = converter.convert()
 
-        print("\n変換完了!")
+        print("\n" + "=" * 50)
         print(f"出力ファイル: {output_file}")
         if converter.output_image_count > 0:
             print(f"出力画像: {converter.output_image_count}枚")
+        print("=" * 50)
         
     except Exception as e:
         print(f"変換エラー: {e}")

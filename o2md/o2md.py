@@ -584,13 +584,21 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
 
         print(f"\n[{idx}/{total}] {rel}")
         try:
-            output_file, auto_patterns, _img_count = convert_office_to_markdown(
+            output_file, auto_patterns, img_count = convert_office_to_markdown(
                 fpath,
                 output_dir=file_output_dir,
                 **kwargs
             )
             # テキストモードでは各コンバータが直接.txtを出力するため追加処理不要
             results['success'].append({'file': str(rel), 'output': output_file})
+
+            # 個別ファイルの結果を表示
+            print("\n" + "=" * 50)
+            print(f"出力ファイル: {output_file}")
+            file_type = detect_file_type(fpath)
+            if file_type != 'image' and img_count > 0:
+                print(f"出力画像: {img_count}枚")
+            print("=" * 50)
         except Exception as e:
             logger.error(f"変換失敗: {rel} - {e}")
             results['failed'].append({'file': str(rel), 'error': str(e)})
@@ -682,7 +690,6 @@ def main():
             )
 
             print("\n" + "=" * 50)
-            print("フォルダ一括変換完了!")
             print(f"成功: {len(results['success'])}ファイル")
             if results['failed']:
                 print(f"失敗: {len(results['failed'])}ファイル")
@@ -711,7 +718,6 @@ def main():
             )
 
             print("\n" + "=" * 50)
-            print("変換完了!")
             print(f"出力ファイル: {output_file}")
 
             # 出力画像数を表示（画像OCR変換時は除外）
