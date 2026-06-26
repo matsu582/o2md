@@ -130,14 +130,12 @@ class ImageToMarkdownConverter:
         # OCRでテキスト抽出
         ocr_text = self._extract_text_with_ocr(img)
 
-        # 画像をoutput/images/にコピー
-        image_filename = self._copy_image_to_output()
-        md_lines = self._build_markdown(image_filename, ocr_text)
-        md_content = '\n'.join(md_lines)
-
-        # テキストモード: 直接.txtを出力（.mdは生成しない）
+        # テキストモード: 画像コピー不要、直接.txtを出力
         if is_text_only():
             from o2md.o2md import strip_markdown
+            image_filename = f"images/{self.base_name}{self.file_ext}"
+            md_lines = self._build_markdown(image_filename, ocr_text)
+            md_content = '\n'.join(md_lines)
             auto_patterns = self._get_auto_patterns()
             text_content = strip_markdown(md_content, auto_patterns=auto_patterns)
             output_path = os.path.join(
@@ -149,6 +147,11 @@ class ImageToMarkdownConverter:
             self._cleanup_images_dir()
             logger.info(f"変換完了: {output_path}")
             return output_path
+
+        # 通常モード: 画像をoutput/images/にコピー
+        image_filename = self._copy_image_to_output()
+        md_lines = self._build_markdown(image_filename, ocr_text)
+        md_content = '\n'.join(md_lines)
 
         # 通常モード: .md出力
         output_path = os.path.join(
