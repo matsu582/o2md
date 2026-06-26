@@ -352,7 +352,6 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
         )
     
     print(f"ファイルタイプを検出: {file_type}")
-    print(f"変換開始: {file_path}")
     
     converter = None
     output_file = None
