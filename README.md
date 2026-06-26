@@ -8,7 +8,7 @@ For production-grade conversion, consider [markitdown](https://github.com/micros
 
 For a feature comparison with docling and markitdown, see [o2md_comparison.md](o2md_comparison.md).
 
-[Japanese documentation (README_jp.md)](README_jp.md)
+[Japanese documentation (README_JP.md)](README_JP.md)
 
 ## Overview
 
