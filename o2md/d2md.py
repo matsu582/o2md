@@ -18,6 +18,8 @@ import sys
 import re
 import tempfile
 import subprocess
+
+from o2md.i18n import _
 import math
 import shutil
 import zipfile
@@ -169,7 +171,7 @@ class WordToMarkdownConverter:
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        print(f"Word文書変換開始: {self.word_file}")
+        print(_("Word文書変換開始: {file}").format(file=self.word_file))
         
         # 1. 見出し構造を解析（参照リンク生成のため）
         self._analyze_headings()
@@ -3317,11 +3319,11 @@ def main():
     set_verbose(args.verbose)
     
     if not os.path.exists(args.word_file):
-        print(f"エラー: ファイル '{args.word_file}' が見つかりません。")
+        print(_("エラー: ファイル '{file}' が見つかりません。").format(file=args.word_file))
         sys.exit(1)
     
     if not args.word_file.endswith(('.docx', '.doc')):
-        print("エラー: .docxまたは.doc形式のファイルを指定してください。")
+        print(_("エラー: .docxまたは.doc形式のファイルを指定してください。"))
         sys.exit(1)
     
     # DOCファイルの場合は事前にDOCXに変換
@@ -3332,10 +3334,10 @@ def main():
         logger.info("DOCファイルが指定されました。DOCXに変換します...")
         converted_file = convert_doc_to_docx(args.word_file)
         if converted_file is None:
-            print("DOC→DOCX変換に失敗しました。")
+            print(_("DOC→DOCX変換に失敗しました。"))
             sys.exit(1)
         processing_file = converted_file
-        print(f"DOC→DOCX変換完了: {converted_file}")
+        print(_("DOC→DOCX変換完了: {file}").format(file=converted_file))
     
     try:
         converter = WordToMarkdownConverter(
@@ -3353,15 +3355,15 @@ def main():
         output_file = converter.convert()
 
         print("\n" + "=" * 50)
-        print(f"出力ファイル: {output_file}")
+        print(_("出力ファイル: {output_file}").format(output_file=output_file))
         if converter.output_image_count > 0:
-            print(f"出力画像: {converter.output_image_count}枚")
+            print(_("出力画像: {count}枚").format(count=converter.output_image_count))
         if args.use_heading_text:
-            print("見出しテキストリンクモード: 有効")
+            print(_("見出しテキストリンクモード: 有効"))
         print("=" * 50)
         
     except Exception as e:
-        print(f"変換エラー: {e}")
+        print(_("変換エラー: {message}").format(message=e))
         sys.exit(1)
     finally:
         # 一時的に作成したDOCXファイルとその親ディレクトリを必ず削除

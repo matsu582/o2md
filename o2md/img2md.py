@@ -26,6 +26,8 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
+from o2md.i18n import _
+
 import cv2
 import numpy as np
 
@@ -112,7 +114,7 @@ class ImageToMarkdownConverter:
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        print(f"画像OCR変換開始: {self.file_path}")
+        print(_("画像OCR変換開始: {file}").format(file=self.file_path))
 
         # 画像を読み込み
         img = self._load_image()
@@ -305,14 +307,14 @@ def main():
     set_verbose(args.verbose)
 
     if not os.path.exists(args.image_file):
-        print(f"エラー: ファイル '{args.image_file}' が見つかりません。")
+        print(_("エラー: ファイル '{file}' が見つかりません。").format(file=args.image_file))
         sys.exit(1)
 
     ext = Path(args.image_file).suffix.lower()
     if ext not in IMAGE_EXTENSIONS:
         print(
-            f"エラー: 対応していない画像形式です: {ext}\n"
-            f"対応形式: {', '.join(IMAGE_EXTENSIONS)}"
+            _("エラー: 対応していない画像形式です: {ext}").format(ext=ext) + "\n"
+            + _("対応形式: {formats}").format(formats=', '.join(IMAGE_EXTENSIONS))
         )
         sys.exit(1)
 
@@ -330,7 +332,7 @@ def main():
     output_file = converter.convert()
 
     print("\n" + "=" * 50)
-    print(f"出力ファイル: {output_file}")
+    print(_("出力ファイル: {output_file}").format(output_file=output_file))
     print("=" * 50)
 
 

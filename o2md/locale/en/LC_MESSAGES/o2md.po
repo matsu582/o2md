@@ -1,0 +1,128 @@
+# English translations for o2md
+# Copyright (C) 2024 matsu582
+# This file is distributed under the MIT license.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: o2md 0.1.0\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+# --- 共通メッセージ ---
+
+msgid "ファイルタイプを検出: {file_type}"
+msgstr "Detected file type: {file_type}"
+
+msgid "出力ファイル: {output_file}"
+msgstr "Output file: {output_file}"
+
+msgid "出力画像: {count}枚"
+msgstr "Output images: {count}"
+
+msgid "エラー: {message}"
+msgstr "Error: {message}"
+
+msgid "変換エラー: {message}"
+msgstr "Conversion error: {message}"
+
+msgid "テキストモード: .txtのみを出力します"
+msgstr "Text mode: output .txt only"
+
+msgid "見出しテキストリンクモード: 有効"
+msgstr "Heading text link mode: enabled"
+
+# --- フォルダ一括変換 ---
+
+msgid "フォルダ一括変換開始: {folder}"
+msgstr "Starting batch conversion: {folder}"
+
+msgid "対象ファイル数: {total}"
+msgstr "Target files: {total}"
+
+msgid "成功: {count}ファイル"
+msgstr "Success: {count} file(s)"
+
+msgid "失敗: {count}ファイル"
+msgstr "Failed: {count} file(s)"
+
+# --- PDF変換 ---
+
+msgid "PDF文書変換開始: {file}"
+msgstr "Starting PDF conversion: {file}"
+
+msgid "総ページ数: {total_pages}"
+msgstr "Total pages: {total_pages}"
+
+msgid "ページ {current}/{total} を処理中..."
+msgstr "Processing page {current}/{total}..."
+
+# --- Excel変換 ---
+
+msgid "Excel文書変換開始: {file}"
+msgstr "Starting Excel conversion: {file}"
+
+msgid "総シート数: {total_sheets}"
+msgstr "Total sheets: {total_sheets}"
+
+msgid "シート {current}/{total} を処理中: {name}"
+msgstr "Processing sheet {current}/{total}: {name}"
+
+# --- Word変換 ---
+
+msgid "Word文書変換開始: {file}"
+msgstr "Starting Word conversion: {file}"
+
+msgid "DOC→DOCX変換完了: {file}"
+msgstr "DOC to DOCX conversion complete: {file}"
+
+msgid "DOC→DOCX変換に失敗しました。"
+msgstr "DOC to DOCX conversion failed."
+
+# --- PowerPoint変換 ---
+
+msgid "PowerPoint文書変換開始: {file}"
+msgstr "Starting PowerPoint conversion: {file}"
+
+msgid "スライド {current}/{total} を処理中..."
+msgstr "Processing slide {current}/{total}..."
+
+# --- 一太郎変換 ---
+
+msgid "一太郎文書変換開始: {file}"
+msgstr "Starting Ichitaro conversion: {file}"
+
+# --- 画像OCR変換 ---
+
+msgid "画像OCR変換開始: {file}"
+msgstr "Starting image OCR conversion: {file}"
+
+msgid "エラー: 対応していない画像形式です: {ext}"
+msgstr "Error: Unsupported image format: {ext}"
+
+msgid "対応形式: {formats}"
+msgstr "Supported formats: {formats}"
+
+# --- ファイルエラー ---
+
+msgid "ファイルが見つかりません: {file}"
+msgstr "File not found: {file}"
+
+msgid "サポートされていないファイル形式です: {file}"
+msgstr "Unsupported file format: {file}"
+
+msgid "フォルダが見つかりません: {folder}"
+msgstr "Folder not found: {folder}"
+
+msgid "エラー: ファイル '{file}' が見つかりません。"
+msgstr "Error: File '{file}' not found."
+
+msgid "エラー: .pdf形式のファイルを指定してください。"
+msgstr "Error: Please specify a .pdf file."
+
+msgid "エラー: .docxまたは.doc形式のファイルを指定してください。"
+msgstr "Error: Please specify a .docx or .doc file."
+
+msgid "エラー: .pptまたは.pptx形式のファイルを指定してください。"
+msgstr "Error: Please specify a .ppt or .pptx file."

@@ -61,6 +61,8 @@ import gc
 import argparse
 from pathlib import Path
 
+from o2md.i18n import _, setup_i18n
+
 # 各変換クラスをインポート
 try:
     from o2md.x2md import ExcelToMarkdownConverter, convert_xls_to_xlsx
@@ -341,17 +343,17 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
         FileNotFoundError: ファイルが見つからない
     """
     if not os.path.exists(file_path):
-        raise FileNotFoundError(f"ファイルが見つかりません: {file_path}")
+        raise FileNotFoundError(_("ファイルが見つかりません: {file}").format(file=file_path))
     
     file_type = detect_file_type(file_path)
     
     if file_type == 'unknown':
         raise ValueError(
-            f"サポートされていないファイル形式です: {file_path}\n"
-            "対応形式: .xlsx, .xls, .docx, .doc, .pptx, .ppt, .pdf, .jtd, .jtt, .jpg, .jpeg, .png, .gif, .bmp, .tiff, .tif, .webp"
+            _("サポートされていないファイル形式です: {file}").format(file=file_path) + "\n"
+            + _("対応形式: {formats}").format(formats=".xlsx, .xls, .docx, .doc, .pptx, .ppt, .pdf, .jtd, .jtt, .jpg, .jpeg, .png, .gif, .bmp, .tiff, .tif, .webp")
         )
     
-    print(f"ファイルタイプを検出: {file_type}")
+    print(_("ファイルタイプを検出: {file_type}").format(file_type=file_type))
     
     converter = None
     output_file = None
@@ -558,7 +560,7 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
     """
     folder = Path(folder_path).resolve()
     if not folder.is_dir():
-        raise NotADirectoryError(f"フォルダが見つかりません: {folder_path}")
+        raise NotADirectoryError(_("フォルダが見つかりません: {folder}").format(folder=folder_path))
 
     base_output = Path(output_dir) if output_dir else Path("output")
     target_files = collect_target_files(str(folder), recursive=recursive)
@@ -568,8 +570,8 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
         return {'success': [], 'failed': []}
 
     total = len(target_files)
-    print(f"フォルダ一括変換開始: {folder}")
-    print(f"対象ファイル数: {total}")
+    print(_("フォルダ一括変換開始: {folder}").format(folder=folder))
+    print(_("対象ファイル数: {total}").format(total=total))
     print("=" * 50)
 
     results = {'success': [], 'failed': []}
@@ -593,11 +595,11 @@ def convert_folder(folder_path: str, output_dir: str = None, recursive: bool = F
 
             # 個別ファイルの結果を表示
             print("\n" + "=" * 50)
-            print(f"出力ファイル: {output_file}")
+            print(_("出力ファイル: {output_file}").format(output_file=output_file))
             if not is_text_only():
                 file_type = detect_file_type(fpath)
                 if file_type != 'image' and img_count > 0:
-                    print(f"出力画像: {img_count}枚")
+                    print(_("出力画像: {count}枚").format(count=img_count))
             print("=" * 50)
         except Exception as e:
             logger.error(f"変換失敗: {rel} - {e}")
@@ -653,10 +655,15 @@ def main():
                        help='[PDF専用] doclingによる表検出を有効にする')
     parser.add_argument('--text', action='store_true',
                        help='テキスト抽出モード（.txtのみ出力、.mdは生成しない）')
+    parser.add_argument('--lang', choices=['ja', 'en'], default=None,
+                       help='表示言語を指定（デフォルト: ja）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力し、debug_workbooks/pdfs/diagnosticsフォルダを保存')
 
     args = parser.parse_args()
+
+    # 多言語設定の初期化（他の出力より先に実行）
+    setup_i18n(args.lang)
 
     set_verbose(args.verbose)
 
@@ -664,7 +671,7 @@ def main():
     from o2md.utils import set_text_only, is_libreoffice_available, warn_libreoffice_not_available
     if args.text:
         set_text_only(True)
-        print("テキストモード: .txtのみを出力します")
+        print(_("テキストモード: .txtのみを出力します"))
 
     # LibreOfficeの利用可否をチェックし、利用できない場合は警告を表示
     if not is_libreoffice_available():
@@ -690,21 +697,21 @@ def main():
             )
 
             print("\n" + "=" * 50)
-            print(f"成功: {len(results['success'])}ファイル")
+            print(_("成功: {count}ファイル").format(count=len(results['success'])))
             if results['failed']:
-                print(f"失敗: {len(results['failed'])}ファイル")
+                print(_("失敗: {count}ファイル").format(count=len(results['failed'])))
                 for item in results['failed']:
-                    print(f"  - {item['file']}: {item['error']}")
+                    print("  - {file}: {error}".format(file=item['file'], error=item['error']))
             print("=" * 50)
 
             if results['failed']:
                 sys.exit(1)
 
         except NotADirectoryError as e:
-            print(f"エラー: {e}")
+            print(_("エラー: {message}").format(message=e))
             sys.exit(1)
         except Exception as e:
-            print(f"変換エラー: {e}")
+            print(_("変換エラー: {message}").format(message=e))
             import traceback
             traceback.print_exc()
             sys.exit(1)
@@ -718,26 +725,26 @@ def main():
             )
 
             print("\n" + "=" * 50)
-            print(f"出力ファイル: {output_file}")
+            print(_("出力ファイル: {output_file}").format(output_file=output_file))
 
             # 出力画像数を表示（画像OCR変換時・テキストモード時は除外）
             if not args.text and detect_file_type(args.file) != 'image':
                 if output_image_count > 0:
-                    print(f"出力画像: {output_image_count}枚")
+                    print(_("出力画像: {count}枚").format(count=output_image_count))
 
             if args.use_heading_text:
-                print("見出しテキストリンクモード: 有効")
+                print(_("見出しテキストリンクモード: 有効"))
 
             print("=" * 50)
 
         except ValueError as e:
-            print(f"エラー: {e}")
+            print(_("エラー: {message}").format(message=e))
             sys.exit(1)
         except FileNotFoundError as e:
-            print(f"エラー: {e}")
+            print(_("エラー: {message}").format(message=e))
             sys.exit(1)
         except Exception as e:
-            print(f"変換エラー: {e}")
+            print(_("変換エラー: {message}").format(message=e))
             import traceback
             traceback.print_exc()
             sys.exit(1)

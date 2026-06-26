@@ -18,6 +18,8 @@ import logging
 import os
 import sys
 import argparse
+
+from o2md.i18n import _
 from pathlib import Path
 from typing import Optional
 
@@ -566,7 +568,7 @@ class JtdToMarkdownConverter:
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        print(f"一太郎文書変換開始: {self.file_path}")
+        print(_("一太郎文書変換開始: {file}").format(file=self.file_path))
 
         # 構造化コンテンツ抽出（テーブル対応）
         blocks = extract_jtd_structured(self.file_path)
@@ -791,7 +793,7 @@ def main():
     output_file = converter.convert()
 
     print("\n" + "=" * 50)
-    print(f"出力ファイル: {output_file}")
+    print(_("出力ファイル: {output_file}").format(output_file=output_file))
     print("=" * 50)
 
 
