@@ -158,6 +158,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         self.markdown_lines = self._LoggingList(self)
         self.image_counter = 0
         self.output_image_count = 0
+        self._counted_image_files = set()
 
         self._init_per_sheet_state()
 
@@ -997,7 +998,9 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             os.unlink(temp_pdf)
             
             if success:
-                self.output_image_count += 1
+                if image_filename not in self._counted_image_files:
+                    self._counted_image_files.add(image_filename)
+                    self.output_image_count += 1
                 logger.info(f"チャート画像生成: {image_filename}")
                 return image_filename
             
