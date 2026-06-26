@@ -656,7 +656,7 @@ def main():
     parser.add_argument('--text', action='store_true',
                        help='テキスト抽出モード（.txtのみ出力、.mdは生成しない）')
     parser.add_argument('--lang', choices=['ja', 'en'], default=None,
-                       help='表示言語を指定（デフォルト: ja）')
+                       help='表示言語を指定（未指定時はLANG環境変数から判定、デフォルト: ja）')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='デバッグ情報を出力し、debug_workbooks/pdfs/diagnosticsフォルダを保存')
 

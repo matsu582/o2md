@@ -2,7 +2,7 @@
 多言語対応モジュール
 
 gettextを使用してユーザー向けメッセージの多言語化を実現する。
-デフォルト言語は日本語(ja)。--langオプションまたはO2MD_LANG環境変数で切替可能。
+デフォルト言語は日本語(ja)。--langオプションまたはLANG環境変数で切替可能。
 """
 
 import gettext
@@ -17,25 +17,33 @@ _current_lang = None
 _LOCALE_DIR = Path(__file__).parent / "locale"
 
 
+def _parse_lang_env(env_lang: str) -> str:
+    """LANG環境変数から言語コードを抽出する
+
+    例: 'ja_JP.UTF-8' → 'ja', 'en_US.UTF-8' → 'en', 'C' → 'ja'
+    """
+    if not env_lang or env_lang in ("C", "POSIX"):
+        return "ja"
+    # 'ja_JP.UTF-8' → 'ja_JP' → 'ja'
+    lang_part = env_lang.split(".")[0]  # エンコーディング除去
+    lang_code = lang_part.split("_")[0]  # 国コード除去
+    if lang_code == "en":
+        return "en"
+    return "ja"
+
+
 def setup_i18n(lang: str | None = None) -> None:
     """多言語設定を初期化する
 
     Args:
         lang: 言語コード ('ja', 'en' など)。
-              Noneの場合、O2MD_LANG環境変数→LANGの順で判定。
+              Noneの場合、LANG環境変数から判定。
               未指定時は'ja'をデフォルトとする。
     """
     global _translation, _current_lang
 
-    if lang is None:
-        lang = os.environ.get("O2MD_LANG", "").strip()
-
     if not lang:
-        env_lang = os.environ.get("LANG", "")
-        if env_lang.startswith("en"):
-            lang = "en"
-        else:
-            lang = "ja"
+        lang = _parse_lang_env(os.environ.get("LANG", ""))
 
     _current_lang = lang
 
