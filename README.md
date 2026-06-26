@@ -42,19 +42,50 @@ Legacy formats (.xls, .doc, .ppt) and shape/image rendering depend on **LibreOff
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 - [LibreOffice](https://www.libreoffice.org/) (optional, required for shape rendering and legacy format conversion)
 
-### 1. Install uv (if not installed)
+### Install from PyPI
 
 ```bash
-# macOS / Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# Basic install
+pip install o2md
 
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+# With manga-ocr
+pip install o2md[manga-ocr]
+
+# With sarashina2.2-ocr
+pip install o2md[sarashina]
+
+# With docling (AI table detection)
+pip install o2md[docling]
+
+# All optional dependencies
+pip install o2md[manga-ocr,sarashina,docling]
 ```
 
-### 2. Project Setup
+Using uv:
 
 ```bash
+# Basic install
+uv pip install o2md
+
+# With manga-ocr
+uv pip install o2md[manga-ocr]
+
+# With sarashina2.2-ocr
+uv pip install o2md[sarashina]
+
+# All optional dependencies
+uv pip install o2md[manga-ocr,sarashina,docling]
+```
+
+### Local Development Setup
+
+```bash
+# Install uv (if not installed)
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
 # Clone the repository
 git clone https://github.com/matsu582/o2md.git
 cd o2md
@@ -75,7 +106,7 @@ uv sync --extra docling
 uv sync --all-extras
 ```
 
-### 3. Install Tesseract OCR (Optional)
+### Install Tesseract OCR (Optional)
 
 Used by default for OCR text extraction from PDFs and images.
 Without Tesseract, OCR is unavailable (manga-ocr or sarashina2.2-ocr can be used as alternatives).
@@ -91,7 +122,7 @@ sudo apt-get install tesseract-ocr tesseract-ocr-jpn tesseract-ocr-eng
 # Download from https://github.com/UB-Mannheim/tesseract/wiki
 ```
 
-### 4. Install LibreOffice (Optional)
+### Install LibreOffice (Optional)
 
 Required for legacy format (.xls, .doc, .ppt) conversion and shape/image rendering.
 Text-only conversion works without LibreOffice.
@@ -125,23 +156,36 @@ Without LibreOffice, a warning is displayed at startup and the following degrade
 
 ### Basic Usage
 
+After installing from PyPI:
+
 ```bash
 # Convert Excel file
-uv run o2md input_files/data.xlsx
+o2md data.xlsx
 
 # Convert Word file
-uv run o2md input_files/document.docx
+o2md document.docx
 
 # Convert PowerPoint file
-uv run o2md input_files/presentation.pptx
+o2md presentation.pptx
 
 # Convert PDF file
-uv run o2md input_files/document.pdf
+o2md document.pdf
 
 # Convert Ichitaro file
-uv run o2md input_files/document.jtd
+o2md document.jtd
 
 # Convert image file (OCR text extraction)
+o2md photo.jpg
+```
+
+When running from a local clone (development):
+
+```bash
+uv run o2md input_files/data.xlsx
+uv run o2md input_files/document.docx
+uv run o2md input_files/presentation.pptx
+uv run o2md input_files/document.pdf
+uv run o2md input_files/document.jtd
 uv run o2md input_files/photo.jpg
 ```
 
@@ -150,6 +194,15 @@ uv run o2md input_files/photo.jpg
 Each conversion engine can also be used as a standalone command:
 
 ```bash
+# PyPI install
+d2md document.docx
+x2md data.xlsx
+p2md presentation.pptx
+pdf2md document.pdf
+jtd2md document.jtd
+img2md photo.jpg
+
+# Local clone
 uv run d2md input_files/document.docx
 uv run x2md input_files/data.xlsx
 uv run p2md input_files/presentation.pptx
@@ -162,41 +215,43 @@ uv run img2md input_files/photo.jpg
 
 ```bash
 # Specify output directory
-uv run o2md input_files/data.xlsx -o custom_output
+o2md data.xlsx -o custom_output
 
 # Use heading text for links in Word documents
-uv run o2md input_files/document.docx --use-heading-text
+o2md document.docx --use-heading-text
 
 # Output images in PNG format (default: SVG)
-uv run o2md input_files/data.xlsx --format png
+o2md data.xlsx --format png
 
 # Specify OCR engine for PDF/image conversion (default: tesseract)
-uv run o2md input_files/document.pdf --ocr-engine tesseract
-uv run o2md input_files/document.pdf --ocr-engine manga-ocr
-uv run o2md input_files/document.pdf --ocr-engine sarashina
+o2md document.pdf --ocr-engine tesseract
+o2md document.pdf --ocr-engine manga-ocr
+o2md document.pdf --ocr-engine sarashina
 
 # Use tessdata_best for high-accuracy OCR
-uv run o2md input_files/document.pdf --tessdata-dir ~/tessdata_best
+o2md document.pdf --tessdata-dir ~/tessdata_best
 
 # Text extraction mode (output .txt only)
-uv run o2md input_files/data.xlsx --text
-uv run o2md input_files/document.docx --text
-uv run o2md input_files/presentation.pptx --text
-uv run o2md input_files/document.pdf --text
-uv run o2md input_files/photo.jpg --text
+o2md data.xlsx --text
+o2md document.docx --text
+o2md presentation.pptx --text
+o2md document.pdf --text
+o2md photo.jpg --text
 ```
+
+> **Note**: When running from a local clone, prefix commands with `uv run` (e.g., `uv run o2md data.xlsx`).
 
 ### Batch Folder Conversion
 
 ```bash
 # Convert all supported files in a folder (top-level only)
-uv run o2md ./input_files/
+o2md ./input_files/
 
 # Recursively process subfolders
-uv run o2md ./input_files/ -r
+o2md ./input_files/ -r
 
 # Specify output directory
-uv run o2md ./input_files/ -r -o output_all
+o2md ./input_files/ -r -o output_all
 ```
 
 Output structure for folder input:
@@ -214,9 +269,9 @@ output/
 
 ```bash
 # Legacy formats are automatically converted to newer formats before processing
-uv run o2md input_files/old_file.xls
-uv run o2md input_files/old_doc.doc
-uv run o2md input_files/old_presentation.ppt
+o2md old_file.xls
+o2md old_doc.doc
+o2md old_presentation.ppt
 ```
 
 ## Command-Line Options
@@ -372,12 +427,12 @@ This ensures callouts, colored rectangles, and other decorative elements are pro
 - Text extraction accuracy may decrease for complex PDF layouts
 - [tessdata_best](https://github.com/tesseract-ocr/tessdata_best) requires separate download (`--tessdata-dir` option)
 - [docling](https://github.com/docling-project/docling) table detection requires additional installation
-  - Install with `uv sync --extra docling`
+  - Install with `pip install o2md[docling]` or `uv sync --extra docling`
   - Processing time: ~7-15 seconds per page (CPU only)
 - [manga-ocr](https://github.com/kha-white/manga-ocr) requires additional installation
-  - Install with `uv sync --extra manga-ocr`
+  - Install with `pip install o2md[manga-ocr]` or `uv sync --extra manga-ocr`
 - [sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr) requires additional installation
-  - Install with `uv sync --extra sarashina`
+  - Install with `pip install o2md[sarashina]` or `uv sync --extra sarashina`
   - GPU recommended (CUDA 8GB+ / Apple Silicon MPS 16GB+ unified memory)
   - Model (~7.8GB) is auto-downloaded on first run
   - Direct image-to-structured-Markdown output (no text detection needed)
@@ -393,8 +448,8 @@ This ensures callouts, colored rectangles, and other decorative elements are pro
 - OCR accuracy depends on image quality and resolution
 - Handwritten text recognition accuracy may be low
 - Tesseract OCR requires prior system installation
-- manga-ocr requires `uv sync --extra manga-ocr`
-- sarashina2.2-ocr requires `uv sync --extra sarashina` (GPU recommended)
+- manga-ocr requires `pip install o2md[manga-ocr]` or `uv sync --extra manga-ocr`
+- sarashina2.2-ocr requires `pip install o2md[sarashina]` or `uv sync --extra sarashina` (GPU recommended)
 
 ## Project Structure
 
