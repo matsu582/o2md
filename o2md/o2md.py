@@ -335,8 +335,9 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             - output_format: 出力画像形式 ('png' または 'svg'、デフォルト: 'png')
             
     Returns:
-        (出力ファイルのパス, プログラム生成パターン情報の辞書) のタプル
+        (出力ファイルのパス, プログラム生成パターン情報の辞書, 出力画像数) の3-tuple
         パターン情報: {'heading_patterns': list[re.Pattern], 'html_tags': list[str]}
+        出力画像数: int（実際にimages/に保存した画像ファイル数）
         
     Raises:
         ValueError: サポートされていないファイル形式
