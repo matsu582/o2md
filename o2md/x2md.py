@@ -241,6 +241,10 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 logger.warning(f"目次生成失敗: {e}")
 
         # シートを変換
+        visible_sheets = [s for s in self.workbook.sheetnames if self.workbook[s].sheet_state != 'hidden']
+        total_sheets = len(visible_sheets)
+        print(f"総シート数: {total_sheets}")
+        sheet_idx = 0
         for sheet_name in self.workbook.sheetnames:
             try:
                 sheet = self.workbook[sheet_name]
@@ -250,7 +254,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                     logger.info(f"シートをスキップ（非表示）: {sheet_name}")
                     continue
                 
-                logger.info(f"シート変換中: {sheet_name}")
+                sheet_idx += 1
+                print(f"シート {sheet_idx}/{total_sheets} を処理中: {sheet_name}")
                 self._convert_sheet(sheet)
             except Exception as e:
                 logger.warning(f"シート処理中にエラーが発生しました: {sheet_name} -> {e}")
