@@ -14,6 +14,7 @@
 - 制御コード(001C, 001F等)でセクション/書式を管理
 """
 
+import logging
 import os
 import sys
 import argparse
@@ -49,6 +50,8 @@ HEADER_MAGIC_CTEXT = b"CTextV.01"
 HEADER_MAGIC_TEXT = b"TextV.01"
 
 
+logger = logging.getLogger(__name__)
+
 # グローバルverboseフラグ
 _VERBOSE = False
 
@@ -57,6 +60,10 @@ def set_verbose(verbose: bool):
     """verboseモードを設定"""
     global _VERBOSE
     _VERBOSE = verbose
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.WARNING,
+        format='[%(levelname)s] %(message)s',
+    )
 
 
 def is_verbose() -> bool:
@@ -101,7 +108,7 @@ def _find_content_start(data: bytes) -> int:
     if len(data) < 0x20:
         return -1
     if data[:8] != HEADER_MAGIC_SSMG:
-        debug_print(f"[警告] SsmgV.01ヘッダが見つかりません: {data[:8]}")
+        logger.debug(f"[警告] SsmgV.01ヘッダが見つかりません: {data[:8]}")
         return -1
 
     # CTextV.01 または TextV.01 の位置を探す
@@ -111,7 +118,7 @@ def _find_content_start(data: bytes) -> int:
     else:
         ctext_pos = data.find(HEADER_MAGIC_TEXT)
         if ctext_pos < 0:
-            debug_print("[警告] CTextV.01/TextV.01ヘッダが見つかりません")
+            logger.debug("[警告] CTextV.01/TextV.01ヘッダが見つかりません")
             return -1
         header_magic = HEADER_MAGIC_TEXT
 
@@ -120,7 +127,7 @@ def _find_content_start(data: bytes) -> int:
     if start % 2 != 0:
         start += 1
 
-    debug_print(f"[JTD] テキストコンテンツ開始位置: 0x{start:04x}")
+    logger.debug(f"[JTD] テキストコンテンツ開始位置: 0x{start:04x}")
     return start
 
 
@@ -249,7 +256,7 @@ def _extract_text_from_stream(data: bytes) -> list[str]:
     # 末尾のバイナリゴミ行を除去
     lines = _trim_trailing_binary(lines)
 
-    debug_print(f"[JTD] 抽出行数: {len(lines)}")
+    logger.debug(f"[JTD] 抽出行数: {len(lines)}")
     return lines
 
 
@@ -336,20 +343,20 @@ def extract_jtd_text(file_path: str) -> str:
         # DocumentTextストリームからメインテキストを抽出
         if ole.exists(STREAM_DOCUMENT_TEXT):
             raw = ole.openstream(STREAM_DOCUMENT_TEXT).read()
-            debug_print(
+            logger.debug(
                 f"[JTD] {STREAM_DOCUMENT_TEXT}ストリーム: {len(raw)} バイト"
             )
             doc_lines = _extract_text_from_stream(raw)
             all_lines.extend(doc_lines)
         else:
-            debug_print(
+            logger.debug(
                 f"[警告] {STREAM_DOCUMENT_TEXT}ストリームが見つかりません"
             )
 
         # Footnoteストリームから脚注テキストを抽出
         if ole.exists(STREAM_FOOTNOTE):
             fn_raw = ole.openstream(STREAM_FOOTNOTE).read()
-            debug_print(
+            logger.debug(
                 f"[JTD] {STREAM_FOOTNOTE}ストリーム: {len(fn_raw)} バイト"
             )
             fn_lines = _extract_text_from_stream(fn_raw)
@@ -464,7 +471,7 @@ def extract_jtd_structured(file_path: str) -> list[dict]:
     try:
         if ole.exists(STREAM_DOCUMENT_TEXT):
             raw = ole.openstream(STREAM_DOCUMENT_TEXT).read()
-            debug_print(
+            logger.debug(
                 f"[JTD] {STREAM_DOCUMENT_TEXT}ストリーム: {len(raw)} バイト"
             )
             blocks = _extract_structured_content(raw)
@@ -559,7 +566,7 @@ class JtdToMarkdownConverter:
             出力ファイルのパス（.mdまたは.txt）
         """
         from o2md.utils import is_text_only
-        print(f"[INFO] 一太郎文書変換開始: {self.file_path}")
+        print(f"一太郎文書変換開始: {self.file_path}")
 
         # 構造化コンテンツ抽出（テーブル対応）
         blocks = extract_jtd_structured(self.file_path)
@@ -583,8 +590,8 @@ class JtdToMarkdownConverter:
             )
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(text_content)
-            print(f"[INFO] 変換完了: {output_path}")
-            print(f"[INFO] 抽出行数: {total_lines}")
+            logger.info(f"変換完了: {output_path}")
+            logger.info(f"抽出行数: {total_lines}")
             return output_path
 
         # 通常モード: .md出力
@@ -594,8 +601,8 @@ class JtdToMarkdownConverter:
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(md_content)
 
-        print(f"[INFO] 変換完了: {output_path}")
-        print(f"[INFO] 抽出行数: {total_lines}")
+        logger.info(f"変換完了: {output_path}")
+        logger.info(f"抽出行数: {total_lines}")
         return output_path
 
     def _get_auto_patterns(self) -> dict:
@@ -783,8 +790,9 @@ def main():
 
     output_file = converter.convert()
 
-    print(f"\n変換完了!")
+    print("\n" + "=" * 50)
     print(f"出力ファイル: {output_file}")
+    print("=" * 50)
 
 
 if __name__ == "__main__":

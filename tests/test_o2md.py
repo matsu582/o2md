@@ -130,7 +130,7 @@ class TestConvertOfficeToMarkdown:
             pytest.skip("Excelテストファイルが存在しません")
         
         excel_file = sample_files['excel']
-        output_file, _ = convert_office_to_markdown(
+        output_file, *_ = convert_office_to_markdown(
             excel_file,
             output_dir=temp_output_dir
         )
@@ -149,7 +149,7 @@ class TestConvertOfficeToMarkdown:
             pytest.skip("Wordテストファイルが存在しません")
         
         word_file = sample_files['word']
-        output_file, _ = convert_office_to_markdown(
+        output_file, *_ = convert_office_to_markdown(
             word_file,
             output_dir=temp_output_dir
         )
@@ -168,7 +168,7 @@ class TestConvertOfficeToMarkdown:
             pytest.skip("PowerPointテストファイルが存在しません")
         
         pptx_file = sample_files['powerpoint']
-        output_file, _ = convert_office_to_markdown(
+        output_file, *_ = convert_office_to_markdown(
             pptx_file,
             output_dir=temp_output_dir
         )
@@ -187,7 +187,7 @@ class TestConvertOfficeToMarkdown:
             pytest.skip("Wordテストファイルが存在しません")
         
         word_file = sample_files['word']
-        output_file, _ = convert_office_to_markdown(
+        output_file, *_ = convert_office_to_markdown(
             word_file,
             output_dir=temp_output_dir,
             use_heading_text=True
@@ -205,7 +205,7 @@ class TestConvertOfficeToMarkdown:
         custom_output = os.path.join(temp_output_dir, "custom_output")
         excel_file = sample_files['excel']
         
-        output_file, _ = convert_office_to_markdown(
+        output_file, *_ = convert_office_to_markdown(
             excel_file,
             output_dir=custom_output
         )
@@ -220,7 +220,7 @@ class TestConvertOfficeToMarkdown:
             pytest.skip("Excelテストファイルが存在しません")
         
         excel_file = sample_files['excel']
-        output_file, _ = convert_office_to_markdown(
+        output_file, *_ = convert_office_to_markdown(
             excel_file,
             output_dir=temp_output_dir
         )
@@ -245,7 +245,7 @@ class TestConvertOfficeToMarkdown:
         
         output_files = []
         for file_path in available_files[:2]:
-            output_file, _ = convert_office_to_markdown(
+            output_file, *_ = convert_office_to_markdown(
                 file_path,
                 output_dir=temp_output_dir
             )
