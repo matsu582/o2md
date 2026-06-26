@@ -274,7 +274,9 @@ class _GraphicsMixin:
                                                                 img_name = result
                                                                 cluster_row = 1
                                                             
-                                                            self.output_image_count += 1
+                                                            if img_name not in self._counted_image_files:
+                                                                self._counted_image_files.add(img_name)
+                                                                self.output_image_count += 1
                                                             isolated_produced = True
                                                             
                                                             # 各クラスタのレンダリング直後に図形IDを保存
@@ -955,9 +957,12 @@ class _GraphicsMixin:
             # 保存された画像ファイル名（ベース名）を返します。呼び出し元は
             # この具体的なファイル名を使用してmarkdownを生成し、リンクが
             # 常にディスク上の既存ファイルを指すようにします。
-            self.output_image_count += 1
+            basename = os.path.basename(image_filename)
+            if basename not in self._counted_image_files:
+                self._counted_image_files.add(basename)
+                self.output_image_count += 1
             logger.info(f"画像を処理: {image_filename}")
-            return os.path.basename(image_filename)
+            return basename
         except Exception as e:
             try:
                 import traceback
@@ -1717,6 +1722,11 @@ class _GraphicsMixin:
                 fmt_name = self.output_format.upper()
                 logger.warning(f"{fmt_name} 変換が失敗しました")
                 return False
+            
+            # 出力画像カウンターを更新（重複防止）
+            if result_filename not in self._counted_image_files:
+                self._counted_image_files.add(result_filename)
+                self.output_image_count += 1
             
             # 4. 画像をMarkdownに登録または挿入
             if insert_images:
@@ -3679,7 +3689,9 @@ class _GraphicsMixin:
                             print(f"[WARN][_iso_v2] ImageMagick PNG conversion failed: {proc.stderr}")
                         return None
                     
-                    self.output_image_count += 1
+                    if png_filename not in self._counted_image_files:
+                        self._counted_image_files.add(png_filename)
+                        self.output_image_count += 1
                     logger.debug(f"[DEBUG][_iso_v2] Successfully rendered group: {png_filename}")
                     logger.debug(f"[DEBUG][_iso_v2] Debug files: {debug_xlsx_filename}, {debug_pdf_filename}")
                     
