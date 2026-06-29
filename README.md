@@ -31,6 +31,7 @@ Legacy formats (.xls, .doc, .ppt) and shape/image rendering depend on **LibreOff
 - **Image OCR** (`img2md`): Extract text from images via OCR and convert to Markdown (Tesseract/manga-ocr/sarashina)
 - **Image extraction**: Automatically extract and embed shapes and charts as images
 - **Complex element handling**: Slides with mixed tables and shapes are rendered as full-slide images
+- **Search engine filter** (`o2md-filter`): Convert documents to plain text for search engine indexing (stdin support with auto file type detection)
 
 *[sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr) is amazing. Highly recommended if you have a GPU!*
 
@@ -210,6 +211,35 @@ uv run pdf2md input_files/document.pdf
 uv run jtd2md input_files/document.jtd
 uv run img2md input_files/photo.jpg
 ```
+
+### Plain Text Filter (`o2md-filter`)
+
+A pipeline filter that converts documents to plain text for search engine indexing. Outputs only plain text to stdout (no Markdown formatting, no progress messages).
+
+```bash
+# File path input
+o2md-filter document.xlsx
+o2md-filter report.pdf
+o2md-filter manual.docx
+
+# stdin input (auto file type detection via magic bytes)
+cat document.xlsx | o2md-filter
+cat report.pdf | o2md-filter
+
+# Specify OCR engine
+o2md-filter scanned.pdf --ocr-engine manga-ocr
+o2md-filter image.jpg --ocr-engine sarashina
+
+# Search engine integration example
+find /docs -name "*.xlsx" -o -name "*.pdf" | while read f; do
+  o2md-filter "$f" | index-tool --source "$f"
+done
+```
+
+| Option | Description |
+| --- | --- |
+| `file` | File to convert (omit to read from stdin) |
+| `--ocr-engine` | OCR engine (`tesseract`/`manga-ocr`/`sarashina`, default: `tesseract`) |
 
 ### Options
 
@@ -465,6 +495,7 @@ o2md/
 |   +-- pdf2md.py           # PDF conversion engine
 |   +-- jtd2md.py           # Ichitaro conversion engine
 |   +-- img2md.py           # Image OCR conversion engine
+|   +-- filter.py           # Plain text filter for search engines
 |   +-- utils.py            # Shared utilities
 |   +-- omml_converter/     # OMML to LaTeX conversion
 +-- tests/                  # Test suite
