@@ -194,12 +194,14 @@ def resolve_file_type(file_path: str, type_hint: str = None) -> str:
     return 'unknown'
 
 
-def filter_file(file_path: str, file_type: str) -> str:
+def filter_file(file_path: str) -> str:
     """ファイルをプレーンテキストに変換する
 
+    convert_office_to_markdownがファイル拡張子からタイプを判定するため、
+    呼び出し前に正しい拡張子を設定しておく必要がある。
+
     Args:
-        file_path: 変換対象ファイルパス
-        file_type: ファイルタイプ
+        file_path: 変換対象ファイルパス（正しい拡張子であること）
 
     Returns:
         プレーンテキスト文字列
@@ -287,7 +289,7 @@ def main():
                       file=sys.stderr)
                 sys.exit(1)
 
-            text = filter_file(args.file, file_type)
+            text = filter_file(args.file)
 
         else:
             # stdinから読み込み
@@ -325,12 +327,12 @@ def main():
 
                 # 正しい拡張子にリネーム（convert_office_to_markdownが
                 # 拡張子でタイプ判定するため）
-                correct_suffix = _type_to_extension(file_type)
+                correct_suffix = _type_to_extension(file_type, base_type)
                 new_path = tmp_path + correct_suffix
                 os.rename(tmp_path, new_path)
                 tmp_path = new_path
 
-                text = filter_file(tmp_path, file_type)
+                text = filter_file(tmp_path)
             finally:
                 if os.path.exists(tmp_path):
                     os.unlink(tmp_path)
@@ -346,16 +348,32 @@ def main():
     original_stdout.write(text)
 
 
-def _type_to_extension(file_type: str) -> str:
-    """確定したファイルタイプから正しい拡張子を返す
+def _type_to_extension(file_type: str, base_type: str = 'zip') -> str:
+    """確定したファイルタイプとコンテナ形式から正しい拡張子を返す
+
+    OLE形式の場合はレガシー拡張子(.xls, .doc, .ppt)を返し、
+    ZIP形式の場合はモダン拡張子(.xlsx, .docx, .pptx)を返す。
+    これにより convert_office_to_markdown が古い形式を検出して
+    LibreOfficeによる変換ステップを実行できる。
 
     Args:
         file_type: 'excel', 'word', 'powerpoint', 'pdf', 'ichitaro', 'image'
+        base_type: コンテナ形式 ('ole', 'zip', 'pdf', 'image', 'unknown')
 
     Returns:
         拡張子文字列（ドット付き）
     """
-    ext_map = {
+    if base_type == 'ole':
+        ole_ext_map = {
+            'excel': '.xls',
+            'word': '.doc',
+            'powerpoint': '.ppt',
+            'ichitaro': '.jtd',
+        }
+        if file_type in ole_ext_map:
+            return ole_ext_map[file_type]
+
+    zip_ext_map = {
         'excel': '.xlsx',
         'word': '.docx',
         'powerpoint': '.pptx',
@@ -363,7 +381,7 @@ def _type_to_extension(file_type: str) -> str:
         'ichitaro': '.jtd',
         'image': '.png',
     }
-    return ext_map.get(file_type, '.bin')
+    return zip_ext_map.get(file_type, '.bin')
 
 
 def _get_suffix_for_type(base_type: str, type_hint: str = None) -> str:
