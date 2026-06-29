@@ -15,7 +15,7 @@ RUN apk add --no-cache \
 
 # venv作成（system-site-packagesでcv2を参照）+ o2md インストール
 RUN python3 -m venv --system-site-packages /opt/o2md-venv \
-    && /opt/o2md-venv/bin/pip install --no-cache-dir --no-deps o2md \
+    && /opt/o2md-venv/bin/pip install --no-cache-dir --no-deps o2md==0.1.2 \
     && /opt/o2md-venv/bin/pip install --no-cache-dir \
        olefile openpyxl pdfplumber pymupdf pytesseract \
        python-docx python-pptx requests pdfminer.six \
