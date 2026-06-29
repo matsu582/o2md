@@ -191,7 +191,7 @@ def resolve_file_type(file_path: str) -> str:
     return 'unknown'
 
 
-def filter_file(file_path: str) -> str:
+def filter_file(file_path: str, ocr_engine: str = 'tesseract') -> str:
     """ファイルをプレーンテキストに変換する
 
     convert_office_to_markdownがファイル拡張子からタイプを判定するため、
@@ -199,6 +199,7 @@ def filter_file(file_path: str) -> str:
 
     Args:
         file_path: 変換対象ファイルパス（正しい拡張子であること）
+        ocr_engine: OCRエンジン ('tesseract', 'manga-ocr', 'sarashina')
 
     Returns:
         プレーンテキスト文字列
@@ -213,6 +214,7 @@ def filter_file(file_path: str) -> str:
         output_file, auto_patterns, _ = convert_office_to_markdown(
             file_path,
             output_dir=tmp_dir,
+            ocr_engine=ocr_engine,
         )
 
         # 出力ファイルを読み込み
@@ -248,21 +250,17 @@ def main():
 
     parser.add_argument('file', nargs='?', default=None,
                         help='変換対象ファイル（省略時はstdinから読み込み）')
-    parser.add_argument('--lang', choices=['ja', 'en'], default=None,
-                        help='表示言語（進行状況メッセージ用、stderr出力）')
+    parser.add_argument('--ocr-engine', choices=['manga-ocr', 'tesseract', 'sarashina'],
+                        default='tesseract',
+                        help='OCRエンジンを指定（デフォルト: tesseract）')
 
     args = parser.parse_args()
 
-    # 進行状況メッセージはstderrに出力するようloggingを設定
+    # loggingを抑制
     logging.basicConfig(
-        level=logging.WARNING,
-        format='[%(levelname)s] %(message)s',
+        level=logging.CRITICAL,
         stream=sys.stderr,
     )
-
-    # 多言語設定
-    from o2md.i18n import setup_i18n
-    setup_i18n(args.lang)
 
     # 変換中の進捗メッセージを全て抑制（stdoutは結果専用）
     original_stdout = sys.stdout
@@ -282,7 +280,7 @@ def main():
                       file=sys.stderr)
                 sys.exit(1)
 
-            text = filter_file(args.file)
+            text = filter_file(args.file, ocr_engine=args.ocr_engine)
 
         else:
             # stdinから読み込み
@@ -324,7 +322,7 @@ def main():
                 os.rename(tmp_path, new_path)
                 tmp_path = new_path
 
-                text = filter_file(tmp_path)
+                text = filter_file(tmp_path, ocr_engine=args.ocr_engine)
             finally:
                 if os.path.exists(tmp_path):
                     os.unlink(tmp_path)
