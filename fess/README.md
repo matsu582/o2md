@@ -123,7 +123,6 @@ o2md-filterに置き換えることで対応形式が広がりますが、トレ
 | `application/vnd.ms-powerpoint` | .ppt |
 | `application/pdf` | .pdf |
 | `application/x-js-taro` | .jtd（一太郎） |
-| `application/octet-stream` | 不明な形式（o2md-filterが自動判別） |
 | `image/jpeg`, `image/png`, `image/webp`, `image/tiff`, `image/bmp`, `image/gif` | 画像（OCR） |
 
 ## MCPサーバー連携

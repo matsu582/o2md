@@ -84,7 +84,7 @@
                         <arg>o2mdExtractor</arg>
                 </postConstruct>
                 <postConstruct name="addExtractor">
-                        <arg>["application/x-js-taro", "application/octet-stream"]</arg>
+                        <arg>["application/x-js-taro"]</arg>
                         <arg>o2mdExtractor</arg>
                 </postConstruct>
                 <postConstruct name="addExtractor">
