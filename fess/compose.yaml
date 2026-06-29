@@ -7,7 +7,8 @@ services:
     environment:
       - SEARCH_ENGINE_HTTP_URL=http://search01:9200
       - FESS_DICTIONARY_PATH=/usr/share/opensearch/config/dictionary/
-      - FESS_ADMIN_PASSWORD=admin
+      # 本番環境では必ず変更してください
+      - FESS_ADMIN_PASSWORD=${FESS_ADMIN_PASSWORD:-admin}
     ports:
       - "8080:8080"
     networks:
@@ -24,6 +25,7 @@ services:
     environment:
       - discovery.type=single-node
       - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      # 本番環境ではセキュリティプラグインを有効化してください
       - DISABLE_SECURITY_PLUGIN=true
       - FESS_DICTIONARY_PATH=/usr/share/opensearch/config/dictionary/
     ports:

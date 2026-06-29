@@ -18,7 +18,8 @@ RUN python3 -m venv --system-site-packages /opt/o2md-venv \
     && /opt/o2md-venv/bin/pip install --no-cache-dir --no-deps o2md \
     && /opt/o2md-venv/bin/pip install --no-cache-dir \
        olefile openpyxl pdfplumber pymupdf pytesseract \
-       python-docx python-pptx requests pdfminer.six
+       python-docx python-pptx requests pdfminer.six \
+       "Pillow>=12.0.0" "numpy>=2.0.0"
 
 ENV PATH="/opt/o2md-venv/bin:${PATH}"
 
