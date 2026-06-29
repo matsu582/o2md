@@ -1,0 +1,31 @@
+services:
+  fess:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fess
+    ports:
+      - "8080:8080"
+    depends_on:
+      - search01
+    environment:
+      - SEARCH_ENGINE_HTTP_URL=http://search01:9200
+      - FESS_DICTIONARY_PATH=/usr/share/opensearch/config/dictionary/
+      - FESS_HEAP_SIZE=1g
+    volumes:
+      - fess-data:/var/lib/fess
+      - /path/to/documents:/documents
+
+  search01:
+    image: ghcr.io/codelibs/fess-opensearch:3.6.0
+    container_name: search01
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - DISABLE_SECURITY_PLUGIN=true
+    volumes:
+      - search-data:/usr/share/opensearch/data
+
+volumes:
+  fess-data:
+  search-data:
