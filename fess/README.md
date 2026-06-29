@@ -8,10 +8,12 @@ Javaコード不要、XML設定ファイルの追加のみで動作します。
 ```
 Fess クローラー
   → ファイル検出（MIMEタイプ判定）
-    → CommandExtractor（o2md-filter $INPUT_FILE）
-      → stdout からテキスト取得
-        → OpenSearch にインデックス登録
+    → CommandExtractor（o2md-filter $INPUT_FILE $OUTPUT_FILE）
+      → OpenSearch にインデックス登録
 ```
+
+`o2md-filter`は第2引数に出力ファイルパスを指定できるため、
+CommandExtractorから直接呼び出せます。
 
 ## ネイティブ環境での組み込み
 
@@ -27,19 +29,14 @@ apt-get install libreoffice
 apt-get install tesseract-ocr tesseract-ocr-jpn tesseract-ocr-eng
 ```
 
-### 2. extractor.xml の配置
-
-Fessの`extractor.xml`を設定ディレクトリにコピー:
+### 2. XML設定ファイルの配置
 
 ```bash
-cp /opt/fess/lib/fess-crawler-*.jar内のcrawler/extractor.xml \
-   /opt/fess/app/WEB-INF/classes/crawler/extractor.xml
-```
-
-または本リポジトリの `fess/extractor.xml` を配置:
-
-```bash
+# extractor.xml（MIMEタイプ→o2md-filter マッピング）
 cp fess/extractor.xml /opt/fess/app/WEB-INF/classes/crawler/extractor.xml
+
+# contentlength.xml（大容量ファイル対応、デフォルト10MB→50MB）
+cp fess/contentlength.xml /opt/fess/app/WEB-INF/classes/crawler/contentlength.xml
 ```
 
 ### 3. Fess を再起動
@@ -50,33 +47,25 @@ systemctl restart fess
 
 ## Docker 環境での組み込み
 
-### カスタム Dockerfile を使用
-
-`fess/Dockerfile` を使用してo2md-filterを含むカスタムFessイメージをビルドします。
-
-```bash
-cd fess
-docker build -t fess-o2md .
-```
-
-`compose.yaml` で使用:
-
-```yaml
-services:
-  fess:
-    image: fess-o2md
-    # ... 他の設定
-```
-
-### Docker Compose 完全構成例
+### 起動手順
 
 ```bash
 # OpenSearch起動に必要なカーネル設定
 sudo sysctl -w vm.max_map_count=262144
 
 cd fess
+# compose.yaml内の /path/to/documents を実際のパスに変更
 docker compose up -d
 ```
+
+### 設定ファイル
+
+| ファイル | 役割 |
+| --- | --- |
+| `Dockerfile` | o2md-filter + LibreOffice + Tesseract入りカスタムFessイメージ |
+| `extractor.xml` | MIMEタイプごとのExtractor登録（postConstruct形式） |
+| `contentlength.xml` | ContentLengthHelperの上限を50MBに拡大 |
+| `compose.yaml` | Fess + OpenSearch のDocker Compose構成 |
 
 ## 対象MIMEタイプ
 
@@ -89,17 +78,15 @@ docker compose up -d
 | `application/vnd.openxmlformats-officedocument.presentationml.presentation` | .pptx |
 | `application/vnd.ms-powerpoint` | .ppt |
 | `application/pdf` | .pdf |
-| `image/jpeg` | .jpg |
-| `image/png` | .png |
-| `image/webp` | .webp |
-| `image/gif` | .gif |
-| `image/bmp` | .bmp |
-| `image/tiff` | .tiff |
+| `application/x-js-taro` | .jtd（一太郎） |
+| `application/octet-stream` | 不明な形式（o2md-filterが自動判別） |
+| `image/jpeg`, `image/png`, `image/webp`, `image/tiff`, `image/bmp`, `image/gif` | 画像（OCR） |
 
 ## 注意事項
 
-- `o2md-filter` はファイルパスを受け取りstdoutにプレーンテキストを出力します
+- `o2md-filter`は第2引数で出力ファイルを指定できます（`o2md-filter input.pdf output.txt`）。省略時はstdoutに出力します
+- Fess 15.7の`extractor.xml`は`postConstruct`形式でExtractorを登録する必要があります（`<property name="extractorMap">`形式は不可）
 - LibreOfficeがない場合、`.doc`/`.xls`/`.ppt` の変換はエラーになります
 - Tesseractがない場合、画像/スキャンPDFのOCRは利用できません
-- OCRエンジンをmanga-ocrに変更する場合: `o2md-filter --ocr-engine manga-ocr $INPUT_FILE`
+- デフォルトのファイルサイズ上限は10MBです。大容量ファイルを扱う場合は`contentlength.xml`で`defaultMaxLength`を変更してください
 - `compose.yaml`はローカル開発・検証用です。本番環境ではOpenSearchのセキュリティプラグインを有効化してください

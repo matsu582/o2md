@@ -2,7 +2,7 @@ FROM ghcr.io/codelibs/fess:15.7.0
 
 USER root
 
-# Python ランタイム + OCR/LibreOffice + opencv
+# Python + OCR/LibreOffice
 RUN apk add --no-cache \
     python3 \
     py3-pip \
@@ -18,10 +18,10 @@ RUN python3 -m venv --system-site-packages /opt/o2md-venv \
     && /opt/o2md-venv/bin/pip install --no-cache-dir --no-deps o2md \
     && /opt/o2md-venv/bin/pip install --no-cache-dir \
        olefile openpyxl pdfplumber pymupdf pytesseract \
-       python-docx python-pptx requests
+       python-docx python-pptx requests pdfminer.six
 
-# o2md-filter へのPATH設定
 ENV PATH="/opt/o2md-venv/bin:${PATH}"
 
-# extractor.xml を配置
-COPY extractor.xml /opt/fess/app/WEB-INF/classes/crawler/extractor.xml
+# Fessクローラー設定の上書き
+COPY extractor.xml /usr/share/fess/app/WEB-INF/classes/crawler/extractor.xml
+COPY contentlength.xml /usr/share/fess/app/WEB-INF/classes/crawler/contentlength.xml

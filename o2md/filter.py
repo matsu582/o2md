@@ -237,10 +237,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用例:
-  o2md-filter document.xlsx          # ファイル指定
-  o2md-filter report.pdf             # PDF
-  cat file.docx | o2md-filter        # stdinから入力（自動判別）
-  cat file.pdf | o2md-filter          # stdinからPDF
+  o2md-filter document.xlsx              # ファイル指定→stdout
+  o2md-filter report.pdf                 # PDF→stdout
+  o2md-filter input.xlsx output.txt      # ファイル出力
+  cat file.docx | o2md-filter            # stdinから入力（自動判別）
 
 対応形式:
   Excel (.xlsx, .xls), Word (.docx, .doc), PowerPoint (.pptx, .ppt),
@@ -250,6 +250,8 @@ def main():
 
     parser.add_argument('file', nargs='?', default=None,
                         help='変換対象ファイル（省略時はstdinから読み込み）')
+    parser.add_argument('output', nargs='?', default=None,
+                        help='出力先ファイルパス（省略時はstdoutに出力）')
     parser.add_argument('--ocr-engine', choices=['manga-ocr', 'tesseract', 'sarashina'],
                         default='tesseract',
                         help='OCRエンジンを指定（デフォルト: tesseract）')
@@ -335,8 +337,12 @@ def main():
         sys.stdout.close()
         sys.stdout = original_stdout
 
-    # 結果をstdoutに出力
-    original_stdout.write(text)
+    # 結果を出力
+    if args.output:
+        with open(args.output, 'w', encoding='utf-8') as out_f:
+            out_f.write(text)
+    else:
+        original_stdout.write(text)
 
 
 def _type_to_extension(file_type: str, base_type: str = 'zip') -> str:
