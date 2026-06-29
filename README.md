@@ -214,7 +214,7 @@ uv run img2md input_files/photo.jpg
 
 ### Plain Text Filter (`o2md-filter`)
 
-A pipeline filter that converts documents to plain text for search engine indexing. Outputs only plain text to stdout (no Markdown formatting, no progress messages).
+A pipeline filter that converts documents to plain text for search engine indexing. Outputs only plain text to stdout.
 
 ```bash
 # File path input
