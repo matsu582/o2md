@@ -67,6 +67,34 @@ docker compose up -d
 | `contentlength.xml` | ContentLengthHelperの上限を50MBに拡大 |
 | `compose.yaml` | Fess + OpenSearch のDocker Compose構成 |
 
+## Fess標準（Apache Tika）との比較
+
+Fessはデフォルトで[Apache Tika](https://tika.apache.org/)をテキスト抽出エンジンとして使用します。
+o2md-filterに置き換えることで以下の違いがあります。
+
+| ファイル形式 | Fess標準（Tika） | o2md-filter |
+| --- | --- | --- |
+| .xlsx / .docx / .pptx | テキスト抽出可能 | テキスト抽出可能 |
+| .xls / .doc / .ppt | テキスト抽出可能 | テキスト抽出可能（LibreOffice経由） |
+| .pdf（テキストベース） | テキスト抽出可能 | テキスト抽出可能 |
+| .pdf（スキャン/画像ベース） | テキスト抽出不可 | OCRでテキスト抽出可能 |
+| .jtd（一太郎） | テキスト抽出不可 | 独自パーサーでテキスト抽出可能 |
+| 画像（jpg/png/webp等） | テキスト抽出不可 | OCRでテキスト抽出可能 |
+| Excelの複数シート | 全シート抽出 | 全シート抽出（シート名付き） |
+| 日本語文書の精度 | Tikaの日本語対応に依存 | 日本語に最適化された処理 |
+
+### 動作検証結果
+
+21ファイル（xlsx×6, pdf×8, jtd×3, doc×1, jpg×1, webp×1）でFessインデックス→検索を検証:
+
+| 項目 | Fess標準 | o2md-filter |
+| --- | --- | --- |
+| インデックス成功数 | 20/21 | 21/21 |
+| 一太郎(.jtd)の検索 | 不可（テキスト抽出不可） | 可能（「土砂災害」→3件ヒット） |
+| スキャンPDFの検索 | 不可（テキスト抽出不可） | 可能（OCR経由で「漫画」→1件ヒット） |
+| 画像(jpg/webp)の検索 | 不可 | 可能（OCR経由） |
+| Office文書の検索 | 可能 | 可能 |
+
 ## 対象MIMEタイプ
 
 | MIMEタイプ | ファイル形式 |
