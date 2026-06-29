@@ -82,6 +82,47 @@ docker compose up -d
 | `application/octet-stream` | 不明な形式（o2md-filterが自動判別） |
 | `image/jpeg`, `image/png`, `image/webp`, `image/tiff`, `image/bmp`, `image/gif` | 画像（OCR） |
 
+## MCPサーバー連携
+
+[fess-webapp-mcp](https://github.com/codelibs/fess-webapp-mcp)プラグインにより、FessがMCPサーバーとして動作します。
+Dockerfileにプラグインが含まれているため、追加設定なしで`POST /mcp`エンドポイントが利用可能です。
+
+### MCPツール
+
+| ツール | 説明 |
+| --- | --- |
+| `search` | キーワード検索（`q`, `num`, `start`, `sort`） |
+| `suggest` | オートコンプリート |
+| `get_document` | ドキュメントIDで個別取得 |
+| `get_index_stats` | インデックス統計情報 |
+
+### Claude Desktopとの連携
+
+```json
+{
+  "mcpServers": {
+    "fess": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8080/mcp"]
+    }
+  }
+}
+```
+
+### 動作確認
+
+```bash
+# ping
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}'
+
+# 検索
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search","arguments":{"q":"検索キーワード","num":5}}}'
+```
+
 ## 注意事項
 
 - `o2md-filter`は第2引数で出力ファイルを指定できます（`o2md-filter input.pdf output.txt`）。省略時はstdoutに出力します

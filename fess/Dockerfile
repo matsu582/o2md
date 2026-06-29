@@ -22,6 +22,12 @@ RUN python3 -m venv --system-site-packages /opt/o2md-venv \
 
 ENV PATH="/opt/o2md-venv/bin:${PATH}"
 
+# fess-webapp-mcp プラグイン（MCPサーバー機能）
+# https://github.com/codelibs/fess-webapp-mcp
+ARG FESS_MCP_VERSION=15.7.0
+ADD https://repo1.maven.org/maven2/org/codelibs/fess/fess-webapp-mcp/${FESS_MCP_VERSION}/fess-webapp-mcp-${FESS_MCP_VERSION}.jar \
+    /usr/share/fess/app/WEB-INF/lib/fess-webapp-mcp-${FESS_MCP_VERSION}.jar
+
 # Fessクローラー設定の上書き
 COPY extractor.xml /usr/share/fess/app/WEB-INF/classes/crawler/extractor.xml
 COPY contentlength.xml /usr/share/fess/app/WEB-INF/classes/crawler/contentlength.xml
