@@ -264,9 +264,9 @@ def main():
     from o2md.i18n import setup_i18n
     setup_i18n(args.lang)
 
-    # printをstderrにリダイレクト（変換中の進捗メッセージはstderrへ）
+    # 変換中の進捗メッセージを全て抑制（stdoutは結果専用）
     original_stdout = sys.stdout
-    sys.stdout = sys.stderr
+    sys.stdout = open(os.devnull, 'w')
 
     try:
         if args.file:
@@ -334,6 +334,7 @@ def main():
         sys.exit(1)
     finally:
         # stdoutを元に戻す
+        sys.stdout.close()
         sys.stdout = original_stdout
 
     # 結果をstdoutに出力
