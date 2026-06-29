@@ -10,7 +10,6 @@ services:
       - search01
     environment:
       - SEARCH_ENGINE_HTTP_URL=http://search01:9200
-      - FESS_DICTIONARY_PATH=/usr/share/opensearch/config/dictionary/
       - FESS_HEAP_SIZE=1g
     volumes:
       - fess-data:/var/lib/fess
@@ -23,6 +22,7 @@ services:
       - discovery.type=single-node
       - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
       - DISABLE_SECURITY_PLUGIN=true
+      - FESS_DICTIONARY_PATH=/usr/share/opensearch/config/dictionary/
     volumes:
       - search-data:/usr/share/opensearch/data
 

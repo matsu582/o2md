@@ -50,7 +50,7 @@ systemctl restart fess
 
 ## Docker 環境での組み込み
 
-### 方法A: カスタム Dockerfile を使用
+### カスタム Dockerfile を使用
 
 `fess/Dockerfile` を使用してo2md-filterを含むカスタムFessイメージをビルドします。
 
@@ -68,26 +68,12 @@ services:
     # ... 他の設定
 ```
 
-### 方法B: 既存の docker-fess に Volume マウント
-
-`extractor.xml` をホストからマウントする方法:
-
-```yaml
-services:
-  fess:
-    image: ghcr.io/codelibs/fess:15.7.0
-    volumes:
-      - ./fess/extractor.xml:/opt/fess/app/WEB-INF/classes/crawler/extractor.xml
-      - /path/to/documents:/documents
-    environment:
-      - FESS_HEAP_SIZE=1g
-```
-
-ただし、この方法ではコンテナ内に`o2md-filter`がインストールされていないため、方法Aが推奨です。
-
 ### Docker Compose 完全構成例
 
 ```bash
+# OpenSearch起動に必要なカーネル設定
+sudo sysctl -w vm.max_map_count=262144
+
 cd fess
 docker compose up -d
 ```
@@ -116,3 +102,4 @@ docker compose up -d
 - LibreOfficeがない場合、`.doc`/`.xls`/`.ppt` の変換はエラーになります
 - Tesseractがない場合、画像/スキャンPDFのOCRは利用できません
 - OCRエンジンをmanga-ocrに変更する場合: `o2md-filter --ocr-engine manga-ocr $INPUT_FILE`
+- `compose.yaml`はローカル開発・検証用です。本番環境ではOpenSearchのセキュリティプラグインを有効化してください
