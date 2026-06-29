@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE components PUBLIC "-//DBFLUTE//DTD LastaDi 1.0//EN"
+        "http://dbflute.org/meta/lastadi10.dtd">
+<components namespace="fessCrawler">
+        <include path="crawler/container.xml" />
+
+        <component name="tikaExtractor"
+                class="org.codelibs.fess.crawler.extractor.impl.TikaExtractor">
+                <property name="maxCompressionRatio">1</property>
+                <property name="maxUncompressionSize">10000000</property>
+        </component>
+        <component name="textExtractor"
+                class="org.codelibs.fess.crawler.extractor.impl.TextExtractor" />
+        <component name="htmlExtractor"
+                class="org.codelibs.fess.crawler.extractor.impl.HtmlExtractor">
+                <property name="featureMap">
+                        <component class="java.util.LinkedHashMap">
+                                <postConstruct name="put">
+                                        <arg>"http://xml.org/sax/features/namespaces"</arg>
+                                        <arg>"false"</arg>
+                                </postConstruct>
+                        </component>
+                </property>
+                <property name="propertyMap">
+                        <component class="java.util.LinkedHashMap">
+                        </component>
+                </property>
+                <postConstruct name="addMetadata">
+                        <arg>"title"</arg>
+                        <arg>"//TITLE"</arg>
+                </postConstruct>
+        </component>
+        <component name="xmlExtractor"
+                class="org.codelibs.fess.crawler.extractor.impl.XmlExtractor" />
+        <component name="pdfExtractor"
+                class="org.codelibs.fess.crawler.extractor.impl.PdfExtractor" />
+        <component name="emlExtractor"
+                class="org.codelibs.fess.crawler.extractor.impl.EmlExtractor"/>
+        <component name="filenameExtractor"
+                class="org.codelibs.fess.crawler.extractor.impl.FilenameExtractor" />
+
+        <!-- o2md-filterによるテキスト抽出（CommandExtractor） -->
+        <component name="o2mdExtractor"
+                class="org.codelibs.fess.crawler.extractor.impl.CommandExtractor">
+                <property name="command">"o2md-filter $INPUT_FILE $OUTPUT_FILE"</property>
+                <property name="executionTimeout">120000</property>
+        </component>
+
+        <component name="extractorFactory"
+                class="org.codelibs.fess.crawler.extractor.ExtractorFactory">
+                <postConstruct name="addExtractor">
+                        <arg>["application/xml", "application/xhtml+xml", "text/xml"]</arg>
+                        <arg>xmlExtractor</arg>
+                </postConstruct>
+                <postConstruct name="addExtractor">
+                        <arg>["text/html"]</arg>
+                        <arg>htmlExtractor</arg>
+                </postConstruct>
+                <postConstruct name="addExtractor">
+                        <arg>["message/rfc822"]</arg>
+                        <arg>emlExtractor</arg>
+                </postConstruct>
+                <postConstruct name="addExtractor">
+                        <arg>["text/plain", "text/csv", "text/tab-separated-values"]</arg>
+                        <arg>textExtractor</arg>
+                </postConstruct>
+                <postConstruct name="addExtractor">
+                        <arg>["application/pdf"]</arg>
+                        <arg>o2mdExtractor</arg>
+                </postConstruct>
+                <postConstruct name="addExtractor">
+                        <arg>["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             "application/vnd.ms-excel"]</arg>
+                        <arg>o2mdExtractor</arg>
+                </postConstruct>
+                <postConstruct name="addExtractor">
+                        <arg>["application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                             "application/msword"]</arg>
+                        <arg>o2mdExtractor</arg>
+                </postConstruct>
+                <postConstruct name="addExtractor">
+                        <arg>["application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                             "application/vnd.ms-powerpoint"]</arg>
+                        <arg>o2mdExtractor</arg>
+                </postConstruct>
+                <postConstruct name="addExtractor">
+                        <arg>["application/x-js-taro", "application/octet-stream"]</arg>
+                        <arg>o2mdExtractor</arg>
+                </postConstruct>
+                <postConstruct name="addExtractor">
+                        <arg>["image/jpeg", "image/png", "image/webp",
+                             "image/tiff", "image/bmp", "image/gif"]</arg>
+                        <arg>o2mdExtractor</arg>
+                </postConstruct>
+                <postConstruct name="addExtractor">
+                        <arg>["application/zip", "application/x-tar", "application/gzip"]</arg>
+                        <arg>tikaExtractor</arg>
+                </postConstruct>
+        </component>
+
+</components>

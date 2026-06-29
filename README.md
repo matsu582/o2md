@@ -32,6 +32,7 @@ Legacy formats (.xls, .doc, .ppt) and shape/image rendering depend on **LibreOff
 - **Image extraction**: Automatically extract and embed shapes and charts as images
 - **Complex element handling**: Slides with mixed tables and shapes are rendered as full-slide images
 - **Search engine filter** (`o2md-filter`): Convert documents to plain text for search engine indexing (stdin support with auto file type detection)
+- **Fess integration**: Integrate o2md-filter with [Fess](https://github.com/codelibs/fess) full-text search server and use as an MCP server for AI assistants (see [fess/README.md](fess/README.md))
 
 *[sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr) is amazing. Highly recommended if you have a GPU!*
 
