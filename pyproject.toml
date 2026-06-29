@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "o2md"
-version = "0.1.0"
+version = "0.1.1"
 description = "Convert Office documents, PDFs, and images to Markdown"
 readme = "README.md"
 license = {text = "MIT"}
@@ -64,6 +64,7 @@ Repository = "https://github.com/matsu582/o2md"
 
 [project.scripts]
 o2md = "o2md.o2md:main"
+o2md-filter = "o2md.filter:main"
 d2md = "o2md.d2md:main"
 x2md = "o2md.x2md:main"
 p2md = "o2md.p2md:main"
