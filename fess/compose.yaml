@@ -1,0 +1,42 @@
+services:
+  fess:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fess
+    environment:
+      - SEARCH_ENGINE_HTTP_URL=http://search01:9200
+      - FESS_DICTIONARY_PATH=/usr/share/opensearch/config/dictionary/
+      # 本番環境では必ず変更してください
+      - FESS_ADMIN_PASSWORD=${FESS_ADMIN_PASSWORD:-admin}
+    ports:
+      - "8080:8080"
+    networks:
+      - search_net
+    depends_on:
+      search01:
+        condition: service_healthy
+    volumes:
+      - /path/to/documents:/documents
+
+  search01:
+    image: ghcr.io/codelibs/fess-opensearch:3.6.0
+    container_name: search01
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      # 本番環境ではセキュリティプラグインを有効化してください
+      - DISABLE_SECURITY_PLUGIN=true
+      - FESS_DICTIONARY_PATH=/usr/share/opensearch/config/dictionary/
+    ports:
+      - "9200:9200"
+    networks:
+      - search_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+networks:
+  search_net:
