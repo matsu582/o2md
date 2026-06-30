@@ -12,7 +12,7 @@ For a feature comparison with docling and markitdown, see [o2md_comparison.md](o
 
 ## Overview
 
-o2md is a Python tool that converts Microsoft Office documents (Excel, Word, PowerPoint), PDFs, Ichitaro documents (.jtd/.jtt), and image files (JPEG/PNG/GIF/BMP/TIFF/WebP) to **roughly adequate** Markdown. It auto-detects file types and selects the appropriate conversion engine.
+o2md is a Python tool that converts Microsoft Office documents (Excel, Word, PowerPoint), PDFs, Ichitaro documents (.jtd/.jtt/.jsw/.jaw/.jtw/.jbw/.juw/.jfw/.jvw), and image files (JPEG/PNG/GIF/BMP/TIFF/WebP) to **roughly adequate** Markdown. It auto-detects file types and selects the appropriate conversion engine.
 o2md does not use trendy machine learning-based conversion; instead, it performs good old-fashioned logic-based conversion.
 Image files and image-based PDFs (scanned documents, etc.) are processed with OCR (Tesseract/manga-ocr/sarashina2.2-ocr) for text extraction.
 Legacy formats (.xls, .doc, .ppt) and shape/image rendering depend on **LibreOffice**. Text-only conversion works without LibreOffice.
@@ -27,7 +27,7 @@ Legacy formats (.xls, .doc, .ppt) and shape/image rendering depend on **LibreOff
 - **Word** (`d2md`): Convert documents with headings, tables, images, and lists
 - **PowerPoint** (`p2md`): Convert slides with shapes, tables, and text
 - **PDF** (`pdf2md`): Convert PDFs with text extraction and OCR ([Tesseract](https://github.com/tesseract-ocr/tesseract)/[manga-ocr](https://github.com/kha-white/manga-ocr)/[sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr))
-- **Ichitaro** (`jtd2md`): Parse OLE2 binary format to extract text, tables, and bold text
+- **Ichitaro** (`jtd2md`): Parse OLE2 binary format (ver8+) and legacy binary format (ver4-7) to extract text, tables, and bold text
 - **Image OCR** (`img2md`): Extract text from images via OCR and convert to Markdown (Tesseract/manga-ocr/sarashina)
 - **Image extraction**: Automatically extract and embed shapes and charts as images
 - **Complex element handling**: Slides with mixed tables and shapes are rendered as full-slide images
@@ -330,7 +330,7 @@ o2md old_presentation.ppt
 | Word         | `.docx`, `.doc` | `d2md`     | Headings, tables, images, lists |
 | PowerPoint   | `.pptx`, `.ppt` | `p2md`     | Slides, shapes, tables, text |
 | PDF          | `.pdf`          | `pdf2md`   | Image conversion, text extraction, OCR |
-| Ichitaro     | `.jtd`, `.jtt`  | `jtd2md`   | Text, tables, bold, headings |
+| Ichitaro     | `.jtd`, `.jtt`, `.jsw`, `.jaw`, `.jtw`, `.jbw`, `.juw`, `.jfw`, `.jvw` | `jtd2md`   | Text, tables, bold, headings |
 | Image        | `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tiff`, `.tif`, `.webp` | `img2md` | OCR text extraction, image embedding |
 
 ## Output Format
@@ -470,7 +470,8 @@ This ensures callouts, colored rectangles, and other decorative elements are pro
   - Supports Japanese vertical text, tables, and formulas
 
 ### Ichitaro (`jtd2md`)
-- Only OLE2 format (Ichitaro ver8+) is supported (ver5-7 legacy format is not supported)
+- OLE2 format (Ichitaro ver8+) and legacy binary format (ver4-7) are supported
+- Legacy format (ver4-6) text extraction has not been tested with real files due to their scarcity; only synthetic unit tests have been performed
 - Image/shape extraction is not supported
 - Bold detection is per-paragraph (inline character decoration is not supported)
 - Complex tables with merged cells may have layout issues
@@ -495,6 +496,7 @@ o2md/
 |   +-- p2md.py             # PowerPoint conversion engine
 |   +-- pdf2md.py           # PDF conversion engine
 |   +-- jtd2md.py           # Ichitaro conversion engine
+|   +-- jtd2md_legacy.py    # Ichitaro legacy (ver4-7) conversion engine
 |   +-- img2md.py           # Image OCR conversion engine
 |   +-- filter.py           # Plain text filter for search engines
 |   +-- utils.py            # Shared utilities
