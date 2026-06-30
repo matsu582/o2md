@@ -71,6 +71,7 @@ p2md = "o2md.p2md:main"
 pdf2md = "o2md.pdf2md:main"
 jtd2md = "o2md.jtd2md:main"
 img2md = "o2md.img2md:main"
+mpp2md = "o2md.mpp2md:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["o2md"]
@@ -78,6 +79,7 @@ packages = ["o2md"]
 [tool.hatch.build.targets.sdist]
 include = [
     "o2md/",
+    "native/mpp-reader/",
     "pyproject.toml",
     "README.md",
     "README_JP.md",
