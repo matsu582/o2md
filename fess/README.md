@@ -181,3 +181,4 @@ curl -X POST http://localhost:8080/mcp \
 - Tesseractがない場合、画像/スキャンPDFのOCRは利用できません
 - デフォルトのファイルサイズ上限は10MBです。大容量ファイルを扱う場合は`contentlength.xml`で`defaultMaxLength`を変更してください
 - `compose.yaml`はローカル開発・検証用です。本番環境ではOpenSearchのセキュリティプラグインを有効化してください
+- 旧一太郎ファイル(.jsw/.jaw/.jtw/.jbw/.juw/.jfw/.jvw)の変換機能は、実ファイルが入手困難なため実ファイルでのテストを行っていません。合成テストデータによるユニットテストのみ実施しています
