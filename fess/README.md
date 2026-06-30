@@ -3,6 +3,8 @@
 Fessの`CommandExtractor`を利用して、`o2md-filter`をテキスト抽出エンジンとして組み込む手順です。
 Javaコード不要、XML設定ファイルの追加のみで動作します。
 
+※一太郎専用のFess用のExtractorを作成しています。一太郎だけを使用したい場合はそちらを使用してください。[fess-1taroextractor](https://github.com/matsu582/fess-1taroextractor)
+
 ## 構成概要
 
 ```
