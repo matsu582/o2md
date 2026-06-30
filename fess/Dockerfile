@@ -32,3 +32,6 @@ ADD https://repo1.maven.org/maven2/org/codelibs/fess/fess-webapp-mcp/${FESS_MCP_
 # Fessクローラー設定の上書き
 COPY extractor.xml /usr/share/fess/app/WEB-INF/classes/crawler/extractor.xml
 COPY contentlength.xml /usr/share/fess/app/WEB-INF/classes/crawler/contentlength.xml
+
+# 旧一太郎拡張子のMIMEタイプ定義（Tika用）
+COPY custom-mimetypes.xml /usr/share/fess/app/WEB-INF/classes/org/apache/tika/mime/custom-mimetypes.xml

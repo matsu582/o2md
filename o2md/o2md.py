@@ -317,6 +317,8 @@ def detect_file_type(file_path: str) -> str:
         return 'pdf'
     elif file_path_lower.endswith(('.jtd', '.jtt')):
         return 'ichitaro'
+    elif file_path_lower.endswith(('.jsw', '.jaw', '.jtw', '.jbw', '.juw', '.jfw', '.jvw')):
+        return 'ichitaro'
     elif file_path_lower.endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp')):
         return 'image'
     else:
@@ -440,11 +442,19 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             output_file = converter.convert()
 
         elif file_type == 'ichitaro':
-            # 一太郎変換
-            converter = JtdToMarkdownConverter(
-                file_path,
-                output_dir=output_dir,
-            )
+            # 一太郎変換 (旧形式/新形式を自動判定)
+            from o2md.jtd2md_legacy import is_legacy_jtd_file, is_ver7_file
+            if is_legacy_jtd_file(file_path) and not is_ver7_file(file_path):
+                from o2md.jtd2md import LegacyJtdToMarkdownConverter
+                converter = LegacyJtdToMarkdownConverter(
+                    file_path,
+                    output_dir=output_dir,
+                )
+            else:
+                converter = JtdToMarkdownConverter(
+                    file_path,
+                    output_dir=output_dir,
+                )
             output_file = converter.convert()
 
         elif file_type == 'image':
@@ -518,6 +528,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
 SUPPORTED_EXTENSIONS = (
     '.xlsx', '.xls', '.docx', '.doc', '.pptx', '.ppt', '.pdf',
     '.jtd', '.jtt',
+    '.jsw', '.jaw', '.jtw', '.jbw', '.juw', '.jfw', '.jvw',
     '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp',
 )
 

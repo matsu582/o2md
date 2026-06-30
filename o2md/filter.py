@@ -63,6 +63,10 @@ def detect_type_from_bytes(header: bytes) -> str:
     if header[:4] == b'\xd0\xcf\x11\xe0':
         return 'ole'
 
+    # 旧一太郎判定 (ver4-6: DOC\x00シグネチャ)
+    if header[:4] == b'DOC\x00':
+        return 'legacy_ichitaro'
+
     # ZIP系 (xlsx/docx/pptx)
     if header[:4] == _ZIP_SIGNATURE:
         return 'zip'
@@ -185,6 +189,8 @@ def resolve_file_type(file_path: str) -> str:
         return detect_zip_subtype(file_path)
     elif base_type == 'ole':
         return detect_ole_subtype(file_path)
+    elif base_type == 'legacy_ichitaro':
+        return 'ichitaro'
     elif base_type in ('pdf', 'image'):
         return base_type
 
@@ -244,7 +250,8 @@ def main():
 
 対応形式:
   Excel (.xlsx, .xls), Word (.docx, .doc), PowerPoint (.pptx, .ppt),
-  PDF (.pdf), 一太郎 (.jtd, .jtt), 画像 (.jpg, .png, etc.)
+  PDF (.pdf), 一太郎 (.jtd, .jtt, .jsw, .jaw, .jtw, .jbw, .juw, .jfw, .jvw),
+  画像 (.jpg, .png, etc.)
         """
     )
 
@@ -360,6 +367,9 @@ def _type_to_extension(file_type: str, base_type: str = 'zip') -> str:
     Returns:
         拡張子文字列（ドット付き）
     """
+    if base_type == 'legacy_ichitaro':
+        return '.jsw'
+
     if base_type == 'ole':
         ole_ext_map = {
             'excel': '.xls',
@@ -395,6 +405,7 @@ def _get_suffix_for_type(base_type: str) -> str:
         'ole': '.bin',
         'zip': '.zip',
         'image': '.png',
+        'legacy_ichitaro': '.jsw',
     }
     return type_suffix_map.get(base_type, '.bin')
 
