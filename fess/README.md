@@ -37,6 +37,10 @@ cp fess/extractor.xml /opt/fess/app/WEB-INF/classes/crawler/extractor.xml
 
 # contentlength.xml（大容量ファイル対応、デフォルト10MB→50MB）
 cp fess/contentlength.xml /opt/fess/app/WEB-INF/classes/crawler/contentlength.xml
+
+# custom-mimetypes.xml（旧一太郎拡張子のMIMEタイプ定義）
+mkdir -p /opt/fess/app/WEB-INF/classes/org/apache/tika/mime/
+cp fess/custom-mimetypes.xml /opt/fess/app/WEB-INF/classes/org/apache/tika/mime/custom-mimetypes.xml
 ```
 
 ### 3. Fess を再起動
@@ -65,6 +69,7 @@ docker compose up -d
 | `Dockerfile` | o2md-filter + LibreOffice + Tesseract入りカスタムFessイメージ |
 | `extractor.xml` | MIMEタイプごとのExtractor登録（postConstruct形式） |
 | `contentlength.xml` | ContentLengthHelperの上限を50MBに拡大 |
+| `custom-mimetypes.xml` | 旧一太郎拡張子のMIMEタイプ定義（Tika用） |
 | `compose.yaml` | Fess + OpenSearch のDocker Compose構成 |
 
 ## Fess標準（Apache Tika）との比較
@@ -80,7 +85,9 @@ o2md-filterに置き換えることで対応形式が広がりますが、トレ
 | .xls / .doc / .ppt | テキスト抽出可能 | テキスト抽出可能（LibreOffice経由） |
 | .pdf（テキストベース） | テキスト抽出可能 | テキスト抽出可能 |
 | .pdf（スキャン/画像ベース） | テキスト抽出不可 | OCRでテキスト抽出可能 |
-| .jtd（一太郎） | テキスト抽出不可 | 独自パーサーでテキスト抽出可能 |
+| .jtd/.jtt（一太郎ver8+） | テキスト抽出不可 | 独自パーサーでテキスト抽出可能 |
+| .jsw/.jaw/.jtw/.jbw/.juw（一太郎ver4-6） | テキスト抽出不可 | 独自パーサーでテキスト抽出可能 |
+| .jfw/.jvw（一太郎ver7） | テキスト抽出不可 | 独自パーサーでテキスト抽出可能 |
 | 画像（jpg/png/webp等） | テキスト抽出不可 | OCRでテキスト抽出可能 |
 
 ### 処理速度
@@ -101,7 +108,7 @@ o2md-filterに置き換えることで対応形式が広がりますが、トレ
 
 ### o2md-filterの特徴
 
-- **一太郎対応**: OLE2バイナリの独自パーサーによりTikaでは不可能な.jtdのテキスト抽出が可能
+- **一太郎対応**: OLE2バイナリの独自パーサーによりTikaでは不可能な.jtd/.jttのテキスト抽出が可能。旧形式(.jsw/.jaw/.jtw/.jbw/.juw/.jfw/.jvw)にも対応
 - **OCR対応**: スキャンPDF・画像からテキスト抽出可能（Tesseract/manga-ocr/sarashina選択可）
 - **日本語最適化**: 日本語文書のテキスト抽出に特化した処理
 - **処理速度が遅い**: ファイルごとにPythonプロセスを起動するため、大量ファイルのクロール時にTikaより時間がかかる
@@ -122,7 +129,7 @@ o2md-filterに置き換えることで対応形式が広がりますが、トレ
 | `application/vnd.openxmlformats-officedocument.presentationml.presentation` | .pptx |
 | `application/vnd.ms-powerpoint` | .ppt |
 | `application/pdf` | .pdf |
-| `application/x-js-taro` | .jtd（一太郎） |
+| `application/x-js-taro` | .jtd/.jtt（一太郎ver8+）, .jsw/.jaw/.jtw/.jbw/.juw（ver4-6）, .jfw/.jvw（ver7） |
 | `image/jpeg`, `image/png`, `image/webp`, `image/tiff`, `image/bmp`, `image/gif` | 画像（OCR） |
 
 ## MCPサーバー連携
