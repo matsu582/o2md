@@ -34,13 +34,15 @@ from o2md.jtd2md_table import (
     extract_tables_from_events,
     table_to_markdown,
     _split_sections,
-    _is_table_section,
-    extract_font_size_from_para,
 )
+from o2md.jtd2md_legacy import LEGACY_JTD_EXTENSIONS
 
 
-# 一太郎ファイルの対応拡張子
+# 一太郎ファイルの対応拡張子 (ver8以降)
 JTD_EXTENSIONS = ('.jtd', '.jtt')
+
+# 旧一太郎を含む全対応拡張子
+ALL_JTD_EXTENSIONS = JTD_EXTENSIONS + LEGACY_JTD_EXTENSIONS
 
 # OLE2ストリーム名
 STREAM_DOCUMENT_TEXT = "DocumentText"
@@ -756,13 +758,103 @@ class JtdToMarkdownConverter:
             return {}
 
 
+class LegacyJtdToMarkdownConverter:
+    """旧一太郎ファイル(ver4-6)をMarkdownに変換するコンバータ
+
+    独自バイナリ形式の旧一太郎ファイル(.jsw, .jaw, .jtw, .jbw, .juw)から
+    テキストを抽出してMarkdown形式で出力する
+    """
+
+    def __init__(
+        self,
+        file_path: str,
+        output_dir: Optional[str] = None,
+    ):
+        """
+        Args:
+            file_path: 旧一太郎ファイルのパス
+            output_dir: 出力ディレクトリ(省略時はカレントディレクトリ)
+        """
+        self.file_path = file_path
+        self.base_name = Path(file_path).stem
+
+        if output_dir:
+            self.output_dir = output_dir
+        else:
+            self.output_dir = os.path.join(os.getcwd(), "output")
+
+        os.makedirs(self.output_dir, exist_ok=True)
+
+    def get_auto_generated_patterns(self) -> list:
+        """このコンバータが自動付与する見出しの正規表現パターンを返す"""
+        import re
+        return [
+            re.compile(r'^' + re.escape(self.base_name) + r'$'),
+        ]
+
+    def get_auto_generated_line_patterns(self) -> list:
+        """このコンバータが自動付与するメタデータ行の正規表現パターンを返す"""
+        return []
+
+    def convert(self) -> str:
+        """変換メイン処理
+
+        Returns:
+            出力ファイルのパス（.mdまたは.txt）
+        """
+        from o2md.utils import is_text_only
+        from o2md.jtd2md_legacy import extract_legacy_jtd_lines
+
+        print(_("旧一太郎文書変換開始: {file}").format(file=self.file_path))
+
+        lines = extract_legacy_jtd_lines(self.file_path)
+
+        # Markdown生成
+        md_lines = []
+        md_lines.append(f"# {self.base_name}")
+        md_lines.append("")
+        for line in lines:
+            md_lines.append(line)
+
+        md_content = '\n'.join(md_lines)
+
+        # テキストモード
+        if is_text_only():
+            from o2md.o2md import strip_markdown
+            auto_patterns = {
+                'heading_patterns': self.get_auto_generated_patterns(),
+                'html_tags': [],
+                'line_patterns': self.get_auto_generated_line_patterns(),
+            }
+            text_content = strip_markdown(
+                md_content, auto_patterns=auto_patterns
+            )
+            output_path = os.path.join(
+                self.output_dir, f"{self.base_name}.txt"
+            )
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(text_content)
+            logger.info(f"変換完了: {output_path}")
+            return output_path
+
+        # 通常モード: .md出力
+        output_path = os.path.join(
+            self.output_dir, f"{self.base_name}.md"
+        )
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(md_content)
+
+        logger.info(f"変換完了: {output_path}")
+        return output_path
+
+
 def main():
     """コマンドラインエントリポイント"""
     parser = argparse.ArgumentParser(
-        description='一太郎文書 (.jtd/.jtt) をMarkdownに変換'
+        description='一太郎文書をMarkdownに変換 (ver4-12対応)'
     )
     parser.add_argument(
-        'file', help='変換する一太郎ファイル (.jtd/.jtt)'
+        'file', help='変換する一太郎ファイル (.jtd/.jtt/.jsw/.jaw/.jtw/.jbw/.juw/.jfw/.jvw)'
     )
     parser.add_argument(
         '-o', '--output-dir', type=str,
@@ -781,10 +873,22 @@ def main():
 
     set_verbose(args.verbose)
 
-    converter = JtdToMarkdownConverter(
-        args.file,
-        output_dir=args.output_dir,
-    )
+    # 旧形式ファイルの判定
+    from o2md.jtd2md_legacy import is_legacy_jtd_file, is_ver7_file
+
+    if is_legacy_jtd_file(args.file) and not is_ver7_file(args.file):
+        # ver4-6: 旧形式パーサを使用
+        converter = LegacyJtdToMarkdownConverter(
+            args.file,
+            output_dir=args.output_dir,
+        )
+    else:
+        # ver7以降: OLE2パーサを使用 (ver7はOLE2形式)
+        converter = JtdToMarkdownConverter(
+            args.file,
+            output_dir=args.output_dir,
+        )
+
     # テキストモード設定
     if args.text:
         from o2md.utils import set_text_only
