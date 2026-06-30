@@ -61,7 +61,7 @@ _NEWLINE_RANGES = (
 )
 
 # 罫線文字変換テーブル (0xFD後のバイト → Shift-JISバイトペア)
-# xdoc2txtの逆アセンブリ結果に基づく対応表
+# 旧一太郎バイナリ解析結果に基づく対応表
 _KEISEN_TABLE: dict[int, bytes] = {
     0x21: b'\x84\x9f',  # ─ (横線)
     0x22: b'\x84\xa0',  # │ (縦線)
