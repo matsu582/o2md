@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "o2md"
-version = "0.1.2"
+version = "0.1.3"
 description = "Convert Office documents, PDFs, and images to Markdown"
 readme = "README.md"
 license = {text = "MIT"}
