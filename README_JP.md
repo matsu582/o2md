@@ -346,7 +346,7 @@ o2md old_presentation.ppt
 | PDF          | `.pdf`          | `pdf2md`   | 画像変換、テキスト抽出、OCR  |
 | 一太郎       | `.jtd`, `.jtt`, `.jsw`, `.jaw`, `.jtw`, `.jbw`, `.juw`, `.jfw`, `.jvw` | `jtd2md`   | テキスト、表、太字、見出し   |
 | 画像         | `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tiff`, `.tif`, `.webp` | `img2md` | OCRテキスト抽出、画像埋め込み |
-|| MS Project   | `.mpp`, `.mpt`, `.mpx` | `mpp2md`   | タスク、スケジュール、進捗、担当者 |
+| MS Project   | `.mpp`, `.mpt`, `.mpx` | `mpp2md`   | タスク、スケジュール、進捗、担当者 |
 
 ## 出力形式
 
