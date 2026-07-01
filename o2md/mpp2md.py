@@ -60,8 +60,6 @@ def _init_jpype():
     
     try:
         from jpype import isJVMStarted, startJVM, getDefaultJVMPath
-        from pathlib import Path
-        import subprocess
         
         if not isJVMStarted():
             debug_print(_("JVM初期化中..."))
@@ -73,41 +71,13 @@ def _init_jpype():
                         "JDK 11以上をインストールしてください。"
                     )
                 )
-            # Gradleから依存JARを取得
-            native_dir = Path(__file__).parent.parent / "native" / "mpp-reader"
-            if not native_dir.exists():
-                raise RuntimeError(
-                    _(f"native/mpp-reader ディレクトリが見つかりません: {native_dir}")
-                )
             
-            # copyDeps タスクを実行（依存JARをbuild/libsにコピー）
-            debug_print(_("Gradleから依存JARを取得中..."))
-            result = subprocess.run(
-                ["./gradlew", "copyDeps", "-q"],
-                cwd=str(native_dir),
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            
-            if result.returncode != 0:
-                debug_print(_(f"Gradle警告: {result.stderr}"))
-            
-            # build/libs から JAR を集める
-            libs_dir = native_dir / "build" / "libs"
-            jar_paths = []
-            if libs_dir.exists():
-                for jar in sorted(libs_dir.glob("*.jar")):
-                    jar_paths.append(str(jar))
-            
-            if not jar_paths:
-                # フォールバック：既知の依存を使用
-                from o2md.mpxj_jar_manager import get_mpxj_classpath
-                classpath = get_mpxj_classpath()
-            else:
-                classpath = ":".join(jar_paths)
-            
-            debug_print(_(f"クラスパス ({len(jar_paths)} JARs)"))
+# CLASSPATH 環境変数があれば優先、なければ JAR を自動取得
+            import os
+            classpath = os.environ.get('CLASSPATH', '')
+            if not classpath:
+                from o2md.jar_manager import ensure_mpxj_jars
+                classpath = ensure_mpxj_jars(verbose=is_verbose())
             
             # JVMを起動
             startJVM(jvm_path, "-Xmx4G", classpath=classpath)
@@ -241,6 +211,11 @@ def read_project_mpxj(file_path: str) -> dict:
         if isinstance(java_reader, classes['MPPReader']):
             debug_print(_("MPPReader detected - disabling presentation data"))
             java_reader.setReadPresentationData(False)
+            # RTF パーサーキットが無い場合の対応
+            try:
+                java_reader.setPreserveNullTasks(True)
+            except:
+                pass  # RTFパーサキットなくても動作
         
         # プロジェクト読み込み
         project = proxy.read()
@@ -692,10 +667,17 @@ class MppToMarkdownConverter:
         return output_path
 
     def _write_text(self, content: str) -> str:
-        """テキストファイルに書き込む"""
+        """Markdown書式を除去してテキストファイルに書き込む"""
+        from o2md.o2md import strip_markdown
+        auto_patterns = {
+            'heading_patterns': self.get_auto_generated_patterns(),
+            'html_tags': self.get_auto_generated_html_tags(),
+            'line_patterns': self.get_auto_generated_line_patterns(),
+        }
+        text_content = strip_markdown(content, auto_patterns=auto_patterns)
         output_path = os.path.join(self.output_dir, f"{self.base_name}.txt")
         with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(content)
+            f.write(text_content)
         return output_path
 
 
