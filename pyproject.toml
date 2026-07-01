@@ -34,9 +34,13 @@ dependencies = [
     "opencv-python>=4.10.0",
     "pytesseract>=0.3.13",
     "olefile>=0.47",
+    "jpype1>=1.5.0",
 ]
 
 [project.optional-dependencies]
+mpp = [
+    "jpype1>=1.5.0",
+]
 manga-ocr = [
     "manga-ocr>=0.1.14",
 ]
