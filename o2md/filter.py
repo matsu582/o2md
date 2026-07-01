@@ -50,7 +50,7 @@ def detect_type_from_bytes(header: bytes) -> str:
         header: ファイル先頭のバイト列（最低4バイト）
 
     Returns:
-        'excel', 'word', 'powerpoint', 'pdf', 'ole', 'zip', 'image', 'unknown'
+        'excel', 'word', 'powerpoint', 'pdf', 'ole', 'zip', 'msproject', 'image', 'unknown'
     """
     if len(header) < 4:
         return 'unknown'
@@ -171,7 +171,7 @@ def resolve_file_type(file_path: str) -> str:
         file_path: ファイルパス
 
     Returns:
-        'excel', 'word', 'powerpoint', 'pdf', 'ichitaro', 'image', 'unknown'
+        'excel', 'word', 'powerpoint', 'pdf', 'ichitaro', 'msproject', 'image', 'unknown'
     """
     # 拡張子で判定可能ならそれを使用
     from o2md.o2md import detect_file_type
@@ -251,7 +251,7 @@ def main():
 対応形式:
   Excel (.xlsx, .xls), Word (.docx, .doc), PowerPoint (.pptx, .ppt),
   PDF (.pdf), 一太郎 (.jtd, .jtt, .jsw, .jaw, .jtw, .jbw, .juw, .jfw, .jvw),
-  画像 (.jpg, .png, etc.)
+  MS Project (.mpp, .mpt, .mpx), 画像 (.jpg, .png, etc.)
         """
     )
 
@@ -361,7 +361,7 @@ def _type_to_extension(file_type: str, base_type: str = 'zip') -> str:
     LibreOfficeによる変換ステップを実行できる。
 
     Args:
-        file_type: 'excel', 'word', 'powerpoint', 'pdf', 'ichitaro', 'image'
+        file_type: 'excel', 'word', 'powerpoint', 'pdf', 'ichitaro', 'msproject', 'image'
         base_type: コンテナ形式 ('ole', 'zip', 'pdf', 'image', 'unknown')
 
     Returns:
@@ -386,6 +386,7 @@ def _type_to_extension(file_type: str, base_type: str = 'zip') -> str:
         'powerpoint': '.pptx',
         'pdf': '.pdf',
         'ichitaro': '.jtd',
+        'msproject': '.mpp',
         'image': '.png',
     }
     return zip_ext_map.get(file_type, '.bin')
