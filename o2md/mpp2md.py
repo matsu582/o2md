@@ -17,6 +17,7 @@ MS Projectファイル (.mpp, .mpt, .mpx, .xml) をMarkdownに変換するツー
 
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -72,8 +73,7 @@ def _init_jpype():
                     )
                 )
             
-# CLASSPATH 環境変数があれば優先、なければ JAR を自動取得
-            import os
+            # CLASSPATH 環境変数があれば優先、なければ JAR を自動取得
             classpath = os.environ.get('CLASSPATH', '')
             if not classpath:
                 from o2md.jar_manager import ensure_mpxj_jars
@@ -214,7 +214,7 @@ def read_project_mpxj(file_path: str) -> dict:
             # RTF パーサーキットが無い場合の対応
             try:
                 java_reader.setPreserveNullTasks(True)
-            except:
+            except Exception:
                 pass  # RTFパーサキットなくても動作
         
         # プロジェクト読み込み
@@ -460,7 +460,6 @@ def resources_to_markdown_table(resources: list[dict], tasks: list[dict] = None)
                 if duration_str and duration_str != '-':
                     try:
                         # "124日" から "124" を抽出
-                        import re
                         match = re.match(r'(\d+(?:\.\d+)?)', duration_str)
                         if match:
                             duration_days = float(match.group(1))

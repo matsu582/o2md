@@ -28,7 +28,7 @@ Legacy formats (.xls, .doc, .ppt) and shape/image rendering depend on **LibreOff
 - **PowerPoint** (`p2md`): Convert slides with shapes, tables, and text
 - **PDF** (`pdf2md`): Convert PDFs with text extraction and OCR ([Tesseract](https://github.com/tesseract-ocr/tesseract)/[manga-ocr](https://github.com/kha-white/manga-ocr)/[sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr))
 - **Ichitaro** (`jtd2md`): Parse OLE2 binary format (ver8+) and legacy binary format (ver4-7) to extract text, tables, and bold text
-- **MS Project** (`mpp2md`): Convert project files (.mpp/.mpt/.mpx) to Markdown tables with tasks, schedules, progress, and resource assignments. Uses mpxj via GraalVM Native Image (no JRE required at runtime)
+- **MS Project** (`mpp2md`): Convert project files (.mpp/.mpt/.mpx) to Markdown tables with tasks, schedules, progress, and resource assignments. Uses mpxj via JPype (requires JDK 11+, optional dependency: `pip install o2md[mpp]`)
 - **Image OCR** (`img2md`): Extract text from images via OCR and convert to Markdown (Tesseract/manga-ocr/sarashina)
 - **Image extraction**: Automatically extract and embed shapes and charts as images
 - **Complex element handling**: Slides with mixed tables and shapes are rendered as full-slide images
@@ -60,8 +60,11 @@ pip install o2md[sarashina]
 # With docling (AI table detection)
 pip install o2md[docling]
 
+# With MS Project support (requires JDK 11+)
+pip install o2md[mpp]
+
 # All optional dependencies
-pip install o2md[manga-ocr,sarashina,docling]
+pip install o2md[manga-ocr,sarashina,docling,mpp]
 ```
 
 Using uv:
@@ -76,8 +79,11 @@ uv pip install o2md[manga-ocr]
 # With sarashina2.2-ocr
 uv pip install o2md[sarashina]
 
+# With MS Project support (requires JDK 11+)
+uv pip install o2md[mpp]
+
 # All optional dependencies
-uv pip install o2md[manga-ocr,sarashina,docling]
+uv pip install o2md[manga-ocr,sarashina,docling,mpp]
 ```
 
 ### Local Development Setup
@@ -104,6 +110,9 @@ uv sync --extra sarashina
 
 # Include docling (AI table detection)
 uv sync --extra docling
+
+# Include MS Project support (requires JDK 11+)
+uv sync --extra mpp
 
 # Include all optional dependencies
 uv sync --all-extras
@@ -426,8 +435,9 @@ This ensures callouts, colored rectangles, and other decorative elements are pro
 - Support task hierarchy with indent-based nesting (summary tasks in bold)
 - Resource list table output
 - Project metadata (title, author, start/end dates)
-- Uses mpxj library compiled to native binary via GraalVM Native Image
-- No JRE required at runtime
+- Uses mpxj library via JPype (JDK 11+ required)
+- Optional dependency: `pip install o2md[mpp]`
+- JARs are auto-downloaded from Maven Central on first use
 - MSPDI XML (.xml) format also supported via `mpp2md` command directly
 
 ### Image OCR (`img2md`)
@@ -496,9 +506,9 @@ This ensures callouts, colored rectangles, and other decorative elements are pro
 - Complex tables with merged cells may have layout issues
 
 ### MS Project (`mpp2md`)
-- Requires mpp-reader native binary (bundled in o2md/bin/ or available on PATH)
-- Native binary is platform-specific (Linux x86_64); other platforms require building from source
-- Build requires GraalVM with native-image: `cd native/mpp-reader && ./gradlew nativeCompile`
+- Requires JDK/JRE 11+ and jpype1: `pip install o2md[mpp]`
+- MPXJ JARs (~30MB) are auto-downloaded from Maven Central on first use
+- Network access required for initial JAR download
 
 ### Image OCR (`img2md`)
 - OCR accuracy depends on image quality and resolution
@@ -522,14 +532,11 @@ o2md/
 |   +-- jtd2md.py           # Ichitaro conversion engine
 |   +-- jtd2md_legacy.py    # Ichitaro legacy (ver4-7) conversion engine
 |   +-- mpp2md.py           # MS Project conversion engine
+|   +-- jar_manager.py      # MPXJ JAR auto-download manager
 |   +-- img2md.py           # Image OCR conversion engine
 |   +-- filter.py           # Plain text filter for search engines
-|   +-- bin/                # Native binaries
-|       +-- mpp-reader      # MS Project reader (GraalVM Native Image)
 |   +-- utils.py            # Shared utilities
 |   +-- omml_converter/     # OMML to LaTeX conversion
-+-- native/                 # Native binary build sources
-|   +-- mpp-reader/         # MS Project reader (Java + Gradle + GraalVM)
 +-- tests/                  # Test suite
 +-- input_files/            # Test input files
 ```

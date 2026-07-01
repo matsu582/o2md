@@ -65,7 +65,7 @@ def ensure_mpxj_jars(verbose: bool = False) -> str:
         verbose: 詳細ログを出力するか
 
     Returns:
-        クラスパス文字列 (複数JARは: で区切られている)
+        クラスパス文字列 (OSに応じた区切り文字で連結)
 
     Raises:
         RuntimeError: 必須 JAR のダウンロード失敗時

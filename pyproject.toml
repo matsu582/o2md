@@ -82,7 +82,6 @@ packages = ["o2md"]
 [tool.hatch.build.targets.sdist]
 include = [
     "o2md/",
-    "native/mpp-reader/",
     "pyproject.toml",
     "README.md",
     "README_JP.md",
