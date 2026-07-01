@@ -127,7 +127,7 @@ def _java_date_to_string(java_date, formatter=None) -> str:
 
 def _java_duration_to_string(java_duration) -> str:
     """JavaのDurationをPython文字列に変換"""
-    if not java_duration:
+    if java_duration is None:
         return '-'
     
     try:
@@ -155,7 +155,7 @@ def _java_duration_to_string(java_duration) -> str:
 
 def _java_percent_to_string(java_percent) -> str:
     """JavaのNumber (百分比)をPython文字列に変換"""
-    if not java_percent:
+    if java_percent is None:
         return '-'
     
     try:
@@ -582,10 +582,10 @@ class MppToMarkdownConverter:
         label_finish = _('終了日')
         
         return [
-            re.compile(r'^\*\*' + re.escape(label_project) + r'\*\*:'),
-            re.compile(r'^\*\*' + re.escape(label_author) + r'\*\*:'),
-            re.compile(r'^\*\*' + re.escape(label_start) + r'\*\*:'),
-            re.compile(r'^\*\*' + re.escape(label_finish) + r'\*\*:'),
+            re.compile(r'^- \*\*' + re.escape(label_project) + r'\*\*:'),
+            re.compile(r'^- \*\*' + re.escape(label_author) + r'\*\*:'),
+            re.compile(r'^- \*\*' + re.escape(label_start) + r'\*\*:'),
+            re.compile(r'^- \*\*' + re.escape(label_finish) + r'\*\*:'),
         ]
 
     def convert(self) -> str:

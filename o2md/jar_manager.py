@@ -9,6 +9,7 @@ Maven Central から o2md パッケージのインストール済みフォルダ
 Gradle/Maven コマンド実行に依存しない Pure Python 実装。
 """
 
+import os
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -106,4 +107,4 @@ def ensure_mpxj_jars(verbose: bool = False) -> str:
             f"ダウンロードに失敗した可能性があります。"
         )
 
-    return ":".join(str(jar) for jar in jar_files)
+    return os.pathsep.join(str(jar) for jar in jar_files)

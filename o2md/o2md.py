@@ -118,9 +118,11 @@ try:
     from o2md.mpp2md import MppToMarkdownConverter
     from o2md import mpp2md
 except ImportError as e:
-    raise ImportError(
-        "mpp2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
-    ) from e
+    # MS Project変換はオプション機能（jpype1が必要）。
+    # 未インストールでも他の変換機能は利用可能にする。
+    MppToMarkdownConverter = None
+    mpp2md = None
+    _MPP_IMPORT_ERROR = e
 
 
 logger = logging.getLogger(__name__)
@@ -147,7 +149,8 @@ def set_verbose(verbose: bool):
     pdf2md.set_verbose(verbose)
     jtd2md.set_verbose(verbose)
     img2md.set_verbose(verbose)
-    mpp2md.set_verbose(verbose)
+    if mpp2md is not None:
+        mpp2md.set_verbose(verbose)
 
 def is_verbose() -> bool:
     """verboseモードかどうかを返す"""
@@ -470,7 +473,12 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             output_file = converter.convert()
 
         elif file_type == 'msproject':
-            # MS Project変換
+            # MS Project変換（オプション機能: jpype1が必要）
+            if MppToMarkdownConverter is None:
+                raise ImportError(
+                    "MS Project変換にはjpype1が必要です。"
+                    "pip install 'o2md[mpp]' でインストールしてください。"
+                ) from _MPP_IMPORT_ERROR
             converter = MppToMarkdownConverter(
                 file_path,
                 output_dir=output_dir,
