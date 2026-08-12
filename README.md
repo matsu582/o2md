@@ -347,7 +347,7 @@ o2md old_presentation.ppt
 | PowerPoint   | `.pptx`, `.ppt` | `p2md`     | Slides, shapes, tables, text |
 | PDF          | `.pdf`          | `pdf2md`   | Image conversion, text extraction, OCR |
 | Ichitaro     | `.jtd`, `.jtt`, `.jsw`, `.jaw`, `.jtw`, `.jbw`, `.juw`, `.jfw`, `.jvw` | `jtd2md`   | Text, tables, bold, headings |
-| MS Project   | `.mpp`, `.mpt`, `.mpx` | `mpp2md`   | Tasks, schedules, progress, resources |
+| MS Project   | `.mpp`, `.mpt`, `.mpx`, `.xml` (MSPDI) | `mpp2md`   | Tasks, schedules, progress, resources |
 | Image        | `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tiff`, `.tif`, `.webp` | `img2md` | OCR text extraction, image embedding |
 
 ## Output Format
@@ -439,6 +439,7 @@ This ensures callouts, colored rectangles, and other decorative elements are pro
 - Optional dependency: `pip install o2md[mpp]`
 - JARs are auto-downloaded from Maven Central on first use
 - MSPDI XML (.xml) format also supported via `mpp2md` command directly
+- MSPDI XML (.xml) is also detected by the integrated `o2md` and `o2md-filter` commands
 
 ### Image OCR (`img2md`)
 

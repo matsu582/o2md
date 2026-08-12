@@ -29,10 +29,18 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any
 from PIL import Image
 import io
+from docx.oxml import parse_xml
+from docx.table import Table
+from docx.text.paragraph import Paragraph
+from docx.text.run import Run
 
-from o2md.utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed
+from o2md.utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed, is_text_only
 from o2md.d2md_charts import extract_charts_from_docx
 from o2md.chart_utils import chart_data_to_markdown
+from o2md.d2md_fields import convert_paragraph as convert_field_paragraph
+from o2md.d2md_notes import NoteManager
+from o2md.d2md_numbering import NumberingResolver
+from o2md.d2md_tables import render_table
 
 # 数式変換モジュール (オプション)
 try:
@@ -114,7 +122,9 @@ class WordToMarkdownConverter:
                 processed_docx = pre_process_docx(f)
             self.doc = Document(processed_docx)
         else:
-            self.doc = Document(word_file_path)
+            self.doc = self._load_document_with_optional_degradation(word_file_path)
+        self.note_manager = NoteManager(word_file_path)
+        self.numbering_resolver = None
         self.base_name = Path(word_file_path).stem
         
         # 出力ディレクトリの設定
@@ -153,6 +163,71 @@ class WordToMarkdownConverter:
             self.output_format = 'png'
         
         logger.info(f"出力画像形式: {self.output_format.upper()}")
+
+    def _load_document_with_optional_degradation(self, word_file_path):
+        """壊れた任意パートを除外してDOCX本文を読み込む。"""
+        try:
+            return Document(word_file_path)
+        except Exception as exc:
+            load_error = exc
+            logger.warning("DOCXの任意パートを除外して再読み込みします: %s", exc)
+        optional_prefixes = (
+            "word/numbering.xml",
+            "word/footnotes.xml",
+            "word/endnotes.xml",
+            "word/charts/",
+            "word/diagrams/",
+        )
+        try:
+            with zipfile.ZipFile(word_file_path) as source:
+                buffer = io.BytesIO()
+                with zipfile.ZipFile(buffer, "w") as target:
+                    for item in source.infolist():
+                        data = source.read(item.filename)
+                        if (
+                            item.filename.startswith(optional_prefixes)
+                            and item.filename.endswith(".xml")
+                        ):
+                            try:
+                                ET.fromstring(data)
+                            except ET.ParseError as part_error:
+                                logger.warning(
+                                    "DOCX任意パートをスキップします: %s (%s)",
+                                    item.filename,
+                                    part_error,
+                                )
+                                if item.filename.endswith("numbering.xml"):
+                                    data = (
+                                        b'<w:numbering xmlns:w="'
+                                        b'http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>'
+                                    )
+                                elif item.filename.endswith("footnotes.xml"):
+                                    data = (
+                                        b'<w:footnotes xmlns:w="'
+                                        b'http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>'
+                                    )
+                                elif item.filename.endswith("endnotes.xml"):
+                                    data = (
+                                        b'<w:endnotes xmlns:w="'
+                                        b'http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>'
+                                    )
+                                elif item.filename.startswith("word/charts/"):
+                                    data = (
+                                        b'<c:chartSpace xmlns:c="'
+                                        b'http://schemas.openxmlformats.org/drawingml/2006/chart"/>'
+                                    )
+                                elif item.filename.startswith("word/diagrams/"):
+                                    data = (
+                                        b'<dgm:diagram xmlns:dgm="'
+                                        b'http://schemas.openxmlformats.org/drawingml/2006/diagram"/>'
+                                    )
+                                else:
+                                    continue
+                        target.writestr(item, data)
+                buffer.seek(0)
+                return Document(buffer)
+        except (OSError, zipfile.BadZipFile, ET.ParseError) as fallback_error:
+            raise RuntimeError(f"DOCX本文の読み込みに失敗しました: {fallback_error}") from load_error
         
     def get_auto_generated_patterns(self) -> list:
         """このコンバータが自動付与する見出しの正規表現パターンを返す"""
@@ -172,7 +247,6 @@ class WordToMarkdownConverter:
         Returns:
             出力ファイルのパス（.mdまたは.txt）
         """
-        from o2md.utils import is_text_only
         print(_("Word文書変換開始: {file}").format(file=self.display_name))
         
         # 1. 見出し構造を解析（参照リンク生成のため）
@@ -194,6 +268,14 @@ class WordToMarkdownConverter:
         
         # 2.6. チャートデータを抽出してMarkdownテーブルとして出力
         self._process_document_charts()
+
+        note_definitions = self.note_manager.definitions(
+            text_only=is_text_only(),
+            renderer=self._render_note,
+        )
+        if note_definitions:
+            self.markdown_lines.append("")
+            self.markdown_lines.extend(note_definitions)
         
         # 3. コンテンツを構築
         markdown_content = "\n".join(self.markdown_lines)
@@ -233,6 +315,25 @@ class WordToMarkdownConverter:
         import shutil
         if os.path.exists(self.images_dir):
             shutil.rmtree(self.images_dir)
+
+    def _render_note(self, note_node) -> str:
+        """脚注内のブロックを本文と同じ変換処理でMarkdown化する。"""
+        note_root = parse_xml(ET.tostring(note_node, encoding="utf-8"))
+        lines = []
+        for child in note_root:
+            if child.tag.endswith("}p"):
+                before = self.markdown_lines
+                self.markdown_lines = []
+                self._convert_paragraph(Paragraph(child, self.doc._body))
+                lines.extend(self.markdown_lines)
+                self.markdown_lines = before
+            elif child.tag.endswith("}tbl"):
+                before = self.markdown_lines
+                self.markdown_lines = []
+                self._convert_table(Table(child, self.doc._body))
+                lines.extend(self.markdown_lines)
+                self.markdown_lines = before
+        return "\n".join(line for line in lines if line).strip()
     
     def _process_document_charts(self):
         """Word文書内のチャートデータを抽出してMarkdownテーブルとして出力する
@@ -399,16 +500,6 @@ class WordToMarkdownConverter:
             numId = numId_elem[0].get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')
             ilvl = int(ilvl_elem[0].get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')) if ilvl_elem else 0
             
-            # numbering_types辞書を使用して番号付けスタイルを取得
-            if hasattr(self, 'numbering_types') and numId in self.numbering_types:
-                numbering_info = self.numbering_types[numId]
-                if ilvl < len(numbering_info):
-                    level_info = numbering_info[ilvl]
-                    # 数値形式の場合のみ章番号として使用
-                    if level_info.get('numFmt') == 'decimal':
-                        # 実際の番号を計算（簡易実装）
-                        return str(ilvl + 1)  # レベルベースの簡易計算
-                        
             return None
             
         except Exception:
@@ -586,6 +677,28 @@ class WordToMarkdownConverter:
         Returns:
             str: テキスト（フォーマット情報付き）
         """
+        has_special_content = False
+        for element in paragraph._element.iter():
+            local_name = element.tag.rsplit("}", 1)[-1]
+            if local_name == "instrText" and element.text:
+                has_special_content = True
+                break
+            if local_name in {
+                "fldChar",
+                "fldSimple",
+                "footnoteReference",
+                "endnoteReference",
+            }:
+                has_special_content = True
+                break
+        if has_special_content:
+            return convert_field_paragraph(
+                paragraph,
+                formatter=lambda value, element: self._format_field_text(
+                    paragraph, value, element, preserve_format
+                ),
+                reference_handler=self.note_manager.reference,
+            )
         text_parts = []
         for run in paragraph.runs:
             try:
@@ -601,6 +714,18 @@ class WordToMarkdownConverter:
                     text_parts.append(run.text)
         
         return ''.join(text_parts)
+
+    def _format_field_text(self, paragraph, text, element, preserve_format=True):
+        """field内のテキストに既存のrun装飾を適用する。"""
+        if not preserve_format or element is None or not element.tag.endswith("}r"):
+            return text
+        try:
+            if element.xpath(".//w:vanish"):
+                return ""
+            return self._apply_run_formatting(Run(element, paragraph), text)
+        except Exception as exc:
+            logger.warning("field内runの装飾処理に失敗しました: %s", exc)
+            return text
     
     def _apply_run_formatting(self, run, text: str) -> str:
         """Run のフォーマット情報を Markdown 記法に変換
@@ -899,16 +1024,12 @@ class WordToMarkdownConverter:
             numId = numId_elem[0].get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val') if numId_elem else '0'
             ilvl = int(ilvl_elem[0].get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')) if ilvl_elem else 0
             
-            # numbering_types辞書を使用して正確に判定
-            if hasattr(self, 'numbering_types') and numId in self.numbering_types:
-                numbering_info = self.numbering_types[numId]
-                is_bullet = numbering_info['type'] == 'bullet'
-                
-                logger.debug(f"[DEBUG] numId={numId} -> type={numbering_info['type']}, format='{numbering_info['format']}'")
+            marker = self.numbering_resolver.marker(paragraph) if self.numbering_resolver else None
+            if marker:
+                ilvl, label, is_bullet = marker
             else:
-                # フォールバック：従来の判定方法
                 is_bullet = self._is_bullet_numbering(numId)
-                logger.debug(f"[DEBUG] numId={numId} -> フォールバック判定: {'bullet' if is_bullet else 'number'}")
+                label = "1."
             
             if is_bullet:
                 # 箇条書きリスト
@@ -919,7 +1040,7 @@ class WordToMarkdownConverter:
                 # 段落番号（番号付きリスト）
                 indent = "  " * ilvl  # インデントレベル対応
                 text = re.sub(r'^\d+\.\s*', '', text)
-                return f"{indent}1. {text}"
+                return f"{indent}{label} {text}"
         
         # フォールバック：テキストパターンで判定
         if re.match(r'^\d+\.', text):
@@ -974,9 +1095,6 @@ class WordToMarkdownConverter:
     def _analyze_numbering_definitions(self):
         """numbering.xmlから番号付け定義を解析"""
         try:
-            # numbering_types辞書を初期化
-            self.numbering_types = {}
-            
             # Word文書からnumbering.xmlを取得
             numbering_part = None
             for rel in self.doc.part.rels.values():
@@ -985,67 +1103,21 @@ class WordToMarkdownConverter:
                     break
             
             if numbering_part:
-                numbering_xml = numbering_part.blob.decode('utf-8')
-                logger.debug(f"[DEBUG] numbering.xml の一部: {numbering_xml[:500]}")
-                
-                # 各numIdのlvlText（表示形式）を解析
-                import xml.etree.ElementTree as ET
-                root = ET.fromstring(numbering_xml)
-                
-                # numId -> abstractNumId のマッピングを作成
-                num_to_abstract = {}
-                for num in root.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}num'):
-                    num_id = num.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}numId')
-                    abstract_num_id = num.find('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNumId')
-                    if abstract_num_id is not None:
-                        abstract_id = abstract_num_id.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')
-                        num_to_abstract[num_id] = abstract_id
-                        logger.debug(f"[DEBUG] numId={num_id} -> abstractNumId={abstract_id}")
-                
-                # abstractNum定義から実際の番号形式を解析
-                for abstract_num in root.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNum'):
-                    abstract_id = abstract_num.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNumId')
-                    
-                    # レベル0の番号形式を取得（名前空間を考慮）
-                    lvl_elements = abstract_num.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}lvl')
-                    lvl_element = None
-                    
-                    # ilvl="0"のlvl要素を探す
-                    for lvl in lvl_elements:
-                        ilvl_val = lvl.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ilvl')
-                        if ilvl_val == '0':
-                            lvl_element = lvl
-                            break
-                    
-                    if lvl_element is not None:
-                        lvl_text = lvl_element.find('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}lvlText')
-                        num_fmt = lvl_element.find('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}numFmt')
-                        
-                        format_text = lvl_text.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val') if lvl_text is not None else ''
-                        format_type = num_fmt.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val') if num_fmt is not None else ''
-                        
-                        # 番号形式を判定
-                        is_bullet = False
-                        if format_type == 'bullet' or format_text in ['·', '•', '-', '○', '■', 'l']:
-                            is_bullet = True
-                        elif '%1' in format_text and format_type in ['decimal', 'lowerLetter', 'upperLetter']:
-                            is_bullet = False
-                        
-                        # 該当するnumIdに情報を保存
-                        for num_id, mapped_abstract_id in num_to_abstract.items():
-                            if mapped_abstract_id == abstract_id:
-                                self.numbering_types[num_id] = {
-                                    'type': 'bullet' if is_bullet else 'number',
-                                    'format': format_text,
-                                    'format_type': format_type,
-                                    'abstract_id': abstract_id
-                                }
-                                logger.debug(f"[DEBUG] numId={num_id}: type={'bullet' if is_bullet else 'number'}, format='{format_text}', format_type='{format_type}'")
+                numbering_xml = numbering_part.blob
+                self.numbering_resolver = NumberingResolver(
+                    numbering_xml,
+                    getattr(self.doc.styles, "_element", None),
+                )
+                if not self.numbering_resolver.valid:
+                    logger.warning("numbering.xmlの解析に失敗したため、従来の番号判定を使用します")
+                return
+            else:
+                logger.warning("numbering.xmlが見つからないため、従来の番号判定を使用します")
+                self.numbering_resolver = None
                         
         except Exception as e:
-            logger.debug(f"[DEBUG] numbering解析エラー: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.warning("numbering.xmlの解析でエラーが発生しました。従来の番号判定を使用します: %s", e)
+            self.numbering_resolver = None
     
     def _convert_table(self, table):
         """表を変換"""
@@ -1060,27 +1132,9 @@ class WordToMarkdownConverter:
             self.markdown_lines.append("")
             return
         
-        # ヘッダー行
-        header_row = table.rows[0]
-        header_cells = [self._process_table_cell_text(cell) for cell in header_row.cells]
-        
-        # Markdownテーブル形式で出力
-        self.markdown_lines.append("| " + " | ".join(header_cells) + " |")
-        self.markdown_lines.append("| " + " | ".join(["---"] * len(header_cells)) + " |")
-        
-        # データ行
-        for row in table.rows[1:]:
-            cells = [self._process_table_cell_text(cell) for cell in row.cells]
-            # セル数を調整
-            while len(cells) < len(header_cells):
-                cells.append("")
-            cells = cells[:len(header_cells)]
-            
-            self.markdown_lines.append("| " + " | ".join(cells) + " |")
-        
-        # 表の後に空行を追加（次の要素との間隔確保）
+        lines = render_table(table, self._process_table_cell_text)
+        self.markdown_lines.extend(lines)
         self.markdown_lines.append("")
-        
         self.markdown_lines.append("")
     
     def _process_table_cell_text(self, cell):
@@ -1094,7 +1148,7 @@ class WordToMarkdownConverter:
         # 段落ごとのテキストを取得
         paragraph_texts = []
         for paragraph in paragraphs:
-            text = paragraph.text.strip()
+            text = self._get_paragraph_text_without_hidden(paragraph).strip()
             if text:  # 空でない段落のみを処理
                 paragraph_texts.append(text)
         
@@ -3401,4 +3455,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

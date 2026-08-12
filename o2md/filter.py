@@ -27,6 +27,7 @@ import tempfile
 import logging
 
 from o2md.utils import set_text_only
+from o2md.mspdi import is_mspdi_xml
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,9 @@ def detect_type_from_bytes(header: bytes) -> str:
     """
     if len(header) < 4:
         return 'unknown'
+
+    if is_mspdi_xml(header):
+        return 'msproject'
 
     # PDF判定
     if header[:4] == b'%PDF':
@@ -181,7 +185,7 @@ def resolve_file_type(file_path: str) -> str:
 
     # マジックバイトで判定
     with open(file_path, 'rb') as f:
-        header = f.read(12)
+        header = f.read(16384)
 
     base_type = detect_type_from_bytes(header)
 
@@ -307,7 +311,7 @@ def main():
                 sys.exit(1)
 
             # マジックバイトでタイプ判定
-            base_type = detect_type_from_bytes(stdin_data[:12])
+            base_type = detect_type_from_bytes(stdin_data[:16384])
 
             # 一時ファイルに保存して処理
             suffix = _get_suffix_for_type(base_type)
@@ -386,7 +390,7 @@ def _type_to_extension(file_type: str, base_type: str = 'zip') -> str:
         'powerpoint': '.pptx',
         'pdf': '.pdf',
         'ichitaro': '.jtd',
-        'msproject': '.mpp',
+        'msproject': '.xml' if base_type == 'msproject' else '.mpp',
         'image': '.png',
     }
     return zip_ext_map.get(file_type, '.bin')
@@ -407,6 +411,7 @@ def _get_suffix_for_type(base_type: str) -> str:
         'zip': '.zip',
         'image': '.png',
         'legacy_ichitaro': '.jsw',
+        'msproject': '.xml',
     }
     return type_suffix_map.get(base_type, '.bin')
 

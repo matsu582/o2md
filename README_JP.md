@@ -345,7 +345,7 @@ o2md old_presentation.ppt
 | PowerPoint   | `.pptx`, `.ppt` | `p2md`     | スライド、図形、表、テキスト |
 | PDF          | `.pdf`          | `pdf2md`   | 画像変換、テキスト抽出、OCR  |
 | 一太郎       | `.jtd`, `.jtt`, `.jsw`, `.jaw`, `.jtw`, `.jbw`, `.juw`, `.jfw`, `.jvw` | `jtd2md`   | テキスト、表、太字、見出し   |
-| MS Project   | `.mpp`, `.mpt`, `.mpx` | `mpp2md`   | タスク、スケジュール、進捗、担当者 |
+| MS Project   | `.mpp`, `.mpt`, `.mpx`, `.xml` (MSPDI) | `mpp2md`   | タスク、スケジュール、進捗、担当者 |
 | 画像         | `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tiff`, `.tif`, `.webp` | `img2md` | OCRテキスト抽出、画像埋め込み |
 
 ## 出力形式
@@ -437,6 +437,7 @@ SVG形式はベクター形式のため、拡大しても品質が劣化しま�
 - オプション依存: `pip install o2md[mpp]`
 - JARはMaven Centralから初回実行時に自動ダウンロード
 - MSPDI XML（.xml）形式も`mpp2md`コマンドで直接対応
+- MSPDI XML（.xml）は統合`o2md`と`o2md-filter`でも判定できます
 
 ### 画像OCR変換 (`img2md`)
 
