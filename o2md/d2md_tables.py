@@ -121,8 +121,10 @@ def render_table(table, process_cell):
 
         header = [
             " ".join(
-                header_cell_text(row, column)
+                text
                 for row in range(header_count)
+                for text in [header_cell_text(row, column)]
+                if text
             ).strip()
             for column in range(columns)
         ]

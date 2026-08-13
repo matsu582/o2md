@@ -346,6 +346,24 @@ def test_word_table_header_inherits_horizontal_merge_labels():
     )
 
 
+def test_word_table_three_headers_skip_empty_middle_cells():
+    document = Document()
+    table = document.add_table(rows=3, cols=2)
+    values = [
+        ("上段A", "上段B"),
+        ("中段A", ""),
+        ("下段A", "下段B"),
+    ]
+    for row, values_row in zip(table.rows, values):
+        for cell, value in zip(row.cells, values_row):
+            cell.text = value
+        row._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
+
+    lines = render_table(table, lambda cell: cell.text)
+
+    assert lines[0] == "| 上段A 中段A 下段A | 上段B 下段B |"
+
+
 def test_excel_sheet_failure_isolated_and_all_failure_raises(tmp_path):
     from openpyxl import Workbook
 
