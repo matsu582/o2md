@@ -95,10 +95,7 @@ def convert_paragraph(
             target = str(switches.get("l") or args[0])
             if switches.get("l"):
                 target = "#" + target
-            else:
-                target = normalize_markdown_url(target)
-            if switches.get("l"):
-                target = normalize_markdown_url(target)
+            target = normalize_markdown_url(target)
             value = f"[{result}]({target})" if result else ""
         else:
             value = result

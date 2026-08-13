@@ -762,6 +762,45 @@ def test_word_table_header_inherits_horizontal_merge_labels():
     )
 
 
+def test_word_table_header_deduplicates_vertical_merge_labels():
+    document = Document()
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "縦結合見出し"
+    table.cell(0, 1).text = "上段見出し"
+    table.cell(1, 0).text = "縦結合見出し"
+    table.cell(1, 1).text = "下段見出し"
+    rows = table._tbl.tr_lst
+    for row in rows:
+        row.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
+    merge = OxmlElement("w:vMerge")
+    merge.set(qn("w:val"), "restart")
+    rows[0].tc_lst[0].get_or_add_tcPr().append(merge)
+    merge = OxmlElement("w:vMerge")
+    merge.set(qn("w:val"), "continue")
+    rows[1].tc_lst[0].get_or_add_tcPr().append(merge)
+
+    lines = render_table(table, lambda cell: cell.text)
+
+    assert lines[0] == "| 縦結合見出し | 上段見出し 下段見出し |"
+    assert all(line.count("|") == 3 for line in lines)
+
+
+def test_word_table_header_keeps_consecutive_distinct_labels():
+    document = Document()
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "上段ラベル"
+    table.cell(0, 1).text = "上段列2"
+    table.cell(1, 0).text = "下段ラベル"
+    table.cell(1, 1).text = "下段列2"
+    for row in table._tbl.tr_lst:
+        row.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
+
+    lines = render_table(table, lambda cell: cell.text)
+
+    assert lines[0] == "| 上段ラベル 下段ラベル | 上段列2 下段列2 |"
+    assert all(line.count("|") == 3 for line in lines)
+
+
 def test_word_table_three_headers_skip_empty_middle_cells():
     document = Document()
     table = document.add_table(rows=3, cols=2)

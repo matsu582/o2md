@@ -130,15 +130,14 @@ def render_table(table, process_cell):
         header_count += 1
     rendered_rows = [row_text(row) for row in rows]
     if header_count > 1:
-        def header_cell_text(row: int, column: int) -> str:
-            return rendered_rows[row][column]
-
         header = [
             " ".join(
                 text
                 for row in range(header_count)
-                for text in [header_cell_text(row, column)]
-                if text
+                for text in [rendered_rows[row][column]]
+                if text and (
+                    row == 0 or text != rendered_rows[row - 1][column]
+                )
             ).strip()
             for column in range(columns)
         ]
