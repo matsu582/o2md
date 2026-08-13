@@ -10,11 +10,13 @@ import pytest
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from lxml import etree
 
 from o2md.d2md_fields import convert_paragraph, normalize_markdown_url
 from o2md.d2md_notes import NoteManager
 from o2md.d2md_numbering import NumberingResolver
 from o2md.d2md_tables import render_table
+from o2md.d2md import WordToMarkdownConverter
 from o2md.filter import detect_type_from_bytes
 import o2md.filter as filter_cli
 from o2md.mspdi import is_mspdi_xml
@@ -23,6 +25,65 @@ from o2md.x2md import ExcelToMarkdownConverter
 
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+PIC = "http://schemas.openxmlformats.org/drawingml/2006/picture"
+WPS = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+
+
+def _drawing_with_kind(kind, width=100, height=100):
+    drawing = OxmlElement("w:drawing")
+    container = OxmlElement("wp:anchor" if kind == "wsp" else "wp:inline")
+    extent = OxmlElement("wp:extent")
+    extent.set("cx", str(width))
+    extent.set("cy", str(height))
+    container.append(extent)
+    if kind == "wsp":
+        container.append(etree.Element(f"{{{WPS}}}wsp"))
+    else:
+        pic = etree.Element(f"{{{PIC}}}pic")
+        pic.append(etree.Element(f"{{{PIC}}}blipFill"))
+        container.append(pic)
+    drawing.append(container)
+    return drawing
+
+
+def _fake_composite_converter(document, calls):
+    converter = object.__new__(WordToMarkdownConverter)
+    converter.doc = document
+    converter._composite_skip_paragraphs = set()
+    converter._process_mixed_drawings_as_vector = lambda drawings, texts: (
+        calls.append((drawings, texts)) or True
+    )
+    return converter
+
+
+def test_word_composite_figure_keeps_picture_and_shape_in_one_render():
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph._p.append(_drawing_with_kind("wsp"))
+    paragraph._p.append(_drawing_with_kind("pic"))
+    calls = []
+    converter = _fake_composite_converter(document, calls)
+
+    assert converter._process_composite_figure(paragraph) is True
+    assert len(calls) == 1
+    assert len(calls[0][0]) == 2
+    assert calls[0][0][0].xpath('.//*[local-name()="wsp"]')
+    assert calls[0][0][1].xpath('.//*[local-name()="pic"]')
+
+
+def test_word_composite_figure_merges_safe_adjacent_shape_and_picture():
+    document = Document()
+    shape_paragraph = document.add_paragraph()
+    shape_paragraph._p.append(_drawing_with_kind("wsp", 100, 100))
+    picture_paragraph = document.add_paragraph()
+    picture_paragraph._p.append(_drawing_with_kind("pic", 200, 200))
+    calls = []
+    converter = _fake_composite_converter(document, calls)
+
+    assert converter._process_composite_figure(shape_paragraph) is True
+    assert len(calls) == 1
+    assert len(calls[0][0]) == 2
+    assert picture_paragraph._p in converter._composite_skip_paragraphs
 
 
 def _numbering_xml():

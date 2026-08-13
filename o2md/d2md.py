@@ -152,6 +152,7 @@ class WordToMarkdownConverter:
         self.processed_images = {}  # ハッシュベース重複検出用辞書
         self._emitted_plain_paragraphs = set()  # 本文として出力したテキスト（重複チェック用）
         self._shape_processed_paragraphs = set()  # 図形として処理済みの段落（テキスト出力スキップ用）
+        self._composite_skip_paragraphs = set()  # 合成済み図形の重複処理を防ぐ段落
         self._shape_texts_by_image = {}  # 画像ファイル名 -> 図形内テキストのマップ
         self._emitted_shape_texts = set()  # 図形処理時に出力したテキスト（重複チェック用）
         self.referenced_images = set()  # 実際に文書内で参照されている画像のrId
@@ -1243,6 +1244,9 @@ class WordToMarkdownConverter:
         Returns:
             bool: 図形として処理された場合はTrue（テキスト出力をスキップすべき）
         """
+        if paragraph._p in self._composite_skip_paragraphs:
+            return True
+
         # Word図形キャンバスがある場合は複合図形として処理
         # 処理が行われた場合のみ早期終了、そうでなければ通常の画像処理にフォールバック
         if self._has_word_processing_canvas(paragraph):
@@ -2132,7 +2136,8 @@ class WordToMarkdownConverter:
         段落単位で図形を分類し、以下のルールで処理:
         1. wpg/wpcがある段落では、グループのみを処理（個別wspは無視）
         2. wspのみの段落では、すべてのdrawingを1つの画像にまとめる
-        3. pic（通常の画像）がある段落では、段落グループ化をスキップ
+        3. pic（通常の画像）と図形が同じ段落にある場合は合成する
+        4. 図形だけの段落に続く画像段落は、位置とサイズが安全に対応する場合だけ合成する
         
         Returns:
             bool: 処理が行われた場合はTrue、スキップした場合はFalse
@@ -2178,6 +2183,17 @@ class WordToMarkdownConverter:
                     has_picture = True
                     logger.debug("[DEBUG] 段落内にpic（通常の画像）を検出")
             
+            # 画像とキャンバス/図形が混在する場合は、全drawingを合成対象にする。
+            # ここを先に処理しないと、背景画像または前景図形のどちらかが失われる。
+            if has_picture and (canvas_drawings or shape_only_drawings):
+                shape_texts = self._extract_shape_texts_from_drawing(drawings)
+                if self._process_mixed_drawings_as_vector(drawings, shape_texts):
+                    return True
+                logger.warning(
+                    "画像と図形の合成に失敗したため、画像のみのフォールバックへ移行します"
+                )
+                return False
+
             # wpc/wpgがある場合は、それらのみを処理（個別wspは無視）
             if canvas_drawings:
                 processed = False
@@ -2190,14 +2206,24 @@ class WordToMarkdownConverter:
                         logger.error("ベクター処理失敗")
                 return processed
             
-            # pic（通常の画像）がある段落では、段落グループ化をスキップ
-            # 通常の画像処理ロジックに任せる
-            if has_picture:
-                logger.info("段落内にpic（通常の画像）があるため、段落グループ化をスキップ")
-                return False
-            
             # wspのみの段落では、すべてのdrawingを1つの画像にまとめる
             if shape_only_drawings:
+                adjacent_picture = self._find_safe_adjacent_picture(paragraph)
+                if adjacent_picture is not None:
+                    picture_paragraph, picture_drawings = adjacent_picture
+                    combined_drawings = [*drawings, *picture_drawings]
+                    shape_texts = self._extract_shape_texts_from_drawing(
+                        combined_drawings
+                    )
+                    if self._process_mixed_drawings_as_vector(
+                        combined_drawings, shape_texts
+                    ):
+                        self._composite_skip_paragraphs.add(picture_paragraph._p)
+                        return True
+                    logger.warning(
+                        "隣接段落との図形合成に失敗したため、図形のみのフォールバックへ移行します"
+                    )
+
                 if len(shape_only_drawings) == 1:
                     # 1つだけの場合は従来通り処理
                     logger.info("単一のWord Processing Shape として処理")
@@ -2222,6 +2248,66 @@ class WordToMarkdownConverter:
         except Exception as e:
             logger.error(f"複合図形処理エラー: {e}")
             return False
+
+    def _find_safe_adjacent_picture(self, paragraph):
+        """図形段落に対応する隣接画像段落を保守的に探す。
+
+        Wordでは同じ図のアンカー図形と画像が別段落に保存されることがある。
+        直後の空段落が画像だけを持ち、図形のサイズが画像内に収まる場合だけ
+        同じ図とみなす。本文や別の図形をまたぐ結合は行わない。
+        """
+        if paragraph.text.strip():
+            return None
+
+        next_element = paragraph._p.getnext()
+        if next_element is None or not next_element.tag.endswith("}p"):
+            return None
+
+        candidate = self._find_paragraph_by_element(next_element)
+        if candidate is None or candidate.text.strip():
+            return None
+
+        candidate_drawings = candidate._element.xpath(".//w:drawing")
+        if not candidate_drawings:
+            return None
+        if any(
+            drawing.xpath('.//*[local-name()="wpg"]')
+            or drawing.xpath('.//*[local-name()="wpc"]')
+            for drawing in candidate_drawings
+        ):
+            return None
+        picture_drawings = [
+            drawing
+            for drawing in candidate_drawings
+            if drawing.xpath('.//*[local-name()="pic"]')
+        ]
+        if len(picture_drawings) != 1:
+            return None
+
+        shape_drawings = paragraph._element.xpath(".//w:drawing")
+        if len(shape_drawings) != 1:
+            return None
+        shape_extent = self._drawing_extent(shape_drawings[0], "anchor")
+        picture_extent = self._drawing_extent(picture_drawings[0], "inline")
+        if shape_extent is None or picture_extent is None:
+            return None
+        if shape_extent[0] > picture_extent[0] or shape_extent[1] > picture_extent[1]:
+            return None
+
+        return candidate, candidate_drawings
+
+    @staticmethod
+    def _drawing_extent(drawing, drawing_type):
+        """drawingのwp:extentをEMU単位の(width, height)で返す。"""
+        extents = drawing.xpath(
+            f'.//*[local-name()="{drawing_type}"]/*[local-name()="extent"]'
+        )
+        if not extents:
+            return None
+        try:
+            return int(extents[0].get("cx")), int(extents[0].get("cy"))
+        except (TypeError, ValueError):
+            return None
     
     def _process_shape_as_vector(self, shape_element, drawing_element):
         """個別のWord図形をベクター画像として処理"""
