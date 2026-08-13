@@ -196,6 +196,24 @@ def test_numbering_resolver_uses_start_for_unseen_parent_level():
     assert resolver.marker(_paragraph_with_num(1, "13"))[1] == "4.a."
 
 
+def test_numbering_resolver_normalizes_simple_non_decimal_labels():
+    blob = f"""<w:numbering xmlns:w="{W}">
+      <w:abstractNum w:abstractNumId="4">
+        <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="upperRoman"/><w:lvlText w:val="%1."/></w:lvl>
+        <w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="decimalEnclosedCircle"/><w:lvlText w:val="%2)"/></w:lvl>
+        <w:lvl w:ilvl="2"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="第%3章"/></w:lvl>
+        <w:lvl w:ilvl="3"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="・"/></w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="14"><w:abstractNumId w:val="4"/></w:num>
+    </w:numbering>""".encode()
+    resolver = NumberingResolver(blob)
+
+    assert resolver.marker(_paragraph_with_num(0, "14"))[1] == "1."
+    assert resolver.marker(_paragraph_with_num(1, "14"))[1] == "1."
+    assert resolver.marker(_paragraph_with_num(2, "14"))[1] == "第1章"
+    assert resolver.marker(_paragraph_with_num(3, "14"))[1:] == ("-", True)
+
+
 def test_field_paragraph_keeps_bold_run_with_note_reference(tmp_path):
     path = tmp_path / "source.docx"
     document = Document()

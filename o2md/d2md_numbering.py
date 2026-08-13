@@ -201,4 +201,14 @@ class NumberingResolver:
         )
         if definition.bullet or definition.num_fmt in ("bullet", "none"):
             return ilvl, "-", True
+        placeholders = re.findall(r"%([1-9])", definition.level_text)
+        if not placeholders:
+            return ilvl, "-", True
+        if len(placeholders) == 1 and re.fullmatch(
+            r"%[1-9][\W_]*", definition.level_text
+        ):
+            number = state[int(placeholders[0]) - 1] or levels.get(
+                int(placeholders[0]) - 1, definition
+            ).start
+            return ilvl, f"{number}.", False
         return ilvl, label, False
