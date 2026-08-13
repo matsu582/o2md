@@ -404,6 +404,43 @@ def test_word_table_complex_merges_and_headers_keep_grid():
     assert "0-2" in lines[0]
 
 
+def test_word_table_vmerge_does_not_shift_following_unmerged_row():
+    document = Document()
+    table = document.add_table(rows=3, cols=3)
+    for row_index, row in enumerate(table.rows):
+        for col_index, cell in enumerate(row.cells):
+            cell.text = f"{row_index}-{col_index}"
+    first = table._tbl.tr_lst[0].tc_lst[0]
+    merge = OxmlElement("w:vMerge")
+    merge.set(qn("w:val"), "restart")
+    first.get_or_add_tcPr().append(merge)
+
+    lines = render_table(table, lambda cell: cell.text)
+
+    assert lines[0] == "| 0-0 | 0-1 | 0-2 |"
+    assert lines[2] == "| 1-0 | 1-1 | 1-2 |"
+
+
+def test_word_table_hmerge_uses_each_row_cell_declaration():
+    document = Document()
+    table = document.add_table(rows=2, cols=3)
+    for row_index, row in enumerate(table.rows):
+        for col_index, cell in enumerate(row.cells):
+            cell.text = f"{row_index}-{col_index}"
+    cells = table._tbl.tr_lst[0].tc_lst
+    restart = OxmlElement("w:hMerge")
+    restart.set(qn("w:val"), "restart")
+    cells[0].get_or_add_tcPr().append(restart)
+    continuation = OxmlElement("w:hMerge")
+    continuation.set(qn("w:val"), "continue")
+    cells[1].get_or_add_tcPr().append(continuation)
+
+    lines = render_table(table, lambda cell: cell.text)
+
+    assert lines[0] == "| 0-0 |  | 0-2 |"
+    assert lines[2] == "| 1-0 | 1-1 | 1-2 |"
+
+
 def test_word_table_header_inherits_horizontal_merge_labels():
     document = Document()
     table = document.add_table(rows=2, cols=4)

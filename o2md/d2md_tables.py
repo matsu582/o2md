@@ -32,16 +32,6 @@ def _int_value(element, name: str, default: int = 0) -> int:
         return default
 
 
-def _cell_position(tc_pr, cursor: int, active: set[int]) -> int:
-    """縦結合中の列を飛ばしてセルの開始位置を求める。"""
-    merge = tc_pr.find(qn("vMerge")) if tc_pr is not None else None
-    is_continuation = merge is not None and merge.get(qn("val"), "continue") != "restart"
-    if not is_continuation:
-        while cursor in active:
-            cursor += 1
-    return cursor
-
-
 def _cell_span(tc_pr) -> int:
     """横結合幅を取得する。"""
     if tc_pr is None:
@@ -62,41 +52,53 @@ def render_table(table, process_cell):
 
     rows: list[list[Slot]] = []
     header_flags: list[bool] = []
-    active_vertical: set[int] = set()
     for tr in tbl.tr_lst:
         tr_pr = tr.trPr
         before = _int_value(tr_pr.find(qn("gridBefore")) if tr_pr is not None else None, "val")
         after = _int_value(tr_pr.find(qn("gridAfter")) if tr_pr is not None else None, "val")
         slots = [Slot(covered=True) for _ in range(columns)]
         cursor = before
-        content_end = max(before, columns - after)
-        next_vertical: set[int] = set()
-        for tc in tr.tc_lst:
+        hmerge_spans = {}
+        hmerge_continuations = set()
+        for index, tc in enumerate(tr.tc_lst):
+            tc_pr = tc.tcPr
+            merge = tc_pr.find(qn("hMerge")) if tc_pr is not None else None
+            if merge is None or merge.get(qn("val"), "continue") != "restart":
+                continue
+            span = _cell_span(tc_pr)
+            following = index + 1
+            while following < len(tr.tc_lst):
+                next_pr = tr.tc_lst[following].tcPr
+                next_merge = next_pr.find(qn("hMerge")) if next_pr is not None else None
+                if next_merge is None or next_merge.get(qn("val"), "continue") == "restart":
+                    break
+                span += _cell_span(next_pr)
+                hmerge_continuations.add(following)
+                following += 1
+            hmerge_spans[index] = span
+        for index, tc in enumerate(tr.tc_lst):
             tc_pr = tc.tcPr
             merge = tc_pr.find(qn("vMerge")) if tc_pr is not None else None
             horizontal = tc_pr.find(qn("hMerge")) if tc_pr is not None else None
-            cursor = _cell_position(tc_pr, cursor, active_vertical)
-            if cursor >= content_end:
-                break
-            span = _cell_span(tc_pr)
+            if index in hmerge_continuations:
+                continue
+            span = hmerge_spans.get(index, _cell_span(tc_pr))
             if horizontal is not None and horizontal.get(qn("val"), "continue") != "restart":
-                span = 1
+                span = _cell_span(tc_pr)
                 cell = None
             else:
                 cell = _Cell(tc, table)
             is_vertical_continuation = (
                 merge is not None and merge.get(qn("val"), "continue") != "restart"
             )
-            for index in range(cursor, min(content_end, cursor + span)):
-                slots[index] = Slot(
-                    cell=cell if index == cursor and not is_vertical_continuation else None,
-                    covered=index != cursor or is_vertical_continuation,
-                    covered_by=cell if index != cursor and not is_vertical_continuation else None,
+            required = cursor + span
+            for slot_index in range(cursor, min(required, len(slots))):
+                slots[slot_index] = Slot(
+                    cell=cell if slot_index == cursor and not is_vertical_continuation else None,
+                    covered=slot_index != cursor or is_vertical_continuation,
+                    covered_by=cell if slot_index != cursor and not is_vertical_continuation else None,
                 )
-                if merge is not None:
-                    next_vertical.add(index)
             cursor += span
-        active_vertical = next_vertical
         rows.append(slots)
         header_flags.append(
             tr_pr is not None and tr_pr.find(qn("tblHeader")) is not None
