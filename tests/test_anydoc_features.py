@@ -191,6 +191,27 @@ def test_table_cell_formatting_preserves_runs_and_fields(tmp_path):
     assert "フィールド結果" in output
 
 
+def test_table_cell_line_breaks_are_markdown_safe(tmp_path):
+    path = tmp_path / "table-cell-breaks.docx"
+    document = Document()
+    table = document.add_table(rows=1, cols=1)
+    paragraph = table.cell(0, 0).paragraphs[0]
+    paragraph.add_run("行内")
+    paragraph.add_run().add_break()
+    paragraph.add_run("改行")
+    table.cell(0, 0).add_paragraph("段落")
+    document.save(path)
+
+    from o2md.d2md import WordToMarkdownConverter
+
+    output_path = WordToMarkdownConverter(
+        str(path), output_dir=str(tmp_path)
+    ).convert()
+    output = Path(output_path).read_text()
+    assert "| 行内<br>改行<br>段落 |" in output
+    assert "行内\n改行" not in output
+
+
 def test_table_keeps_legacy_spacing_after_table(tmp_path):
     path = tmp_path / "table-spacing.docx"
     document = Document()
@@ -289,6 +310,40 @@ def test_word_table_complex_merges_and_headers_keep_grid():
     assert all(line.count("|") == 5 for line in lines)
     assert "0-0" in lines[0]
     assert "0-2" in lines[0]
+
+
+def test_word_table_header_inherits_horizontal_merge_labels():
+    document = Document()
+    table = document.add_table(rows=2, cols=4)
+    values = [
+        ("見出しA", "横結合対象", "見出しC", "見出しD"),
+        ("補助見出しA", "補助見出しB", "補助見出しC", "補助見出しD"),
+    ]
+    for row, values_row in zip(table.rows, values):
+        for cell, value in zip(row.cells, values_row):
+            cell.text = value
+    rows = table._tbl.tr_lst
+    for row in rows:
+        tr_pr = row.get_or_add_trPr()
+        tr_pr.append(OxmlElement("w:tblHeader"))
+    table._tbl.tblGrid.append(OxmlElement("w:gridCol"))
+    first = rows[0].tc_lst[0]
+    first.get_or_add_tcPr().append(OxmlElement("w:gridSpan"))
+    first.tcPr.gridSpan.set(qn("w:val"), "2")
+    rows[0].remove(rows[0].tc_lst[1])
+    tr_pr = rows[1].get_or_add_trPr()
+    before = OxmlElement("w:gridBefore")
+    before.set(qn("w:val"), "1")
+    after = OxmlElement("w:gridAfter")
+    after.set(qn("w:val"), "0")
+    tr_pr.extend([before, after])
+
+    lines = render_table(table, lambda cell: cell.text)
+
+    assert lines[0] == (
+        "| 見出しA | 見出しA 補助見出しA | 見出しC 補助見出しB | "
+        "見出しD 補助見出しC | 補助見出しD |"
+    )
 
 
 def test_excel_sheet_failure_isolated_and_all_failure_raises(tmp_path):

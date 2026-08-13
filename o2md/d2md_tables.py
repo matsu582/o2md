@@ -19,6 +19,7 @@ class Slot:
 
     cell: object | None = None
     covered: bool = False
+    covered_by: object | None = None
 
 
 def _int_value(element, name: str, default: int = 0) -> int:
@@ -90,6 +91,7 @@ def render_table(table, process_cell):
                 slots[index] = Slot(
                     cell=cell if index == cursor and not is_vertical_continuation else None,
                     covered=index != cursor or is_vertical_continuation,
+                    covered_by=cell if index != cursor and not is_vertical_continuation else None,
                 )
                 if merge is not None:
                     next_vertical.add(index)
@@ -110,8 +112,18 @@ def render_table(table, process_cell):
         header_count += 1
     rendered_rows = [row_text(row) for row in rows]
     if header_count > 1:
+        def header_cell_text(row: int, column: int) -> str:
+            text = rendered_rows[row][column]
+            covered_by = rows[row][column].covered_by
+            if not text and covered_by is not None:
+                return process_cell(covered_by)
+            return text
+
         header = [
-            " ".join(rendered_rows[row][column] for row in range(header_count)).strip()
+            " ".join(
+                header_cell_text(row, column)
+                for row in range(header_count)
+            ).strip()
             for column in range(columns)
         ]
         rendered_rows = [header] + rendered_rows[header_count:]

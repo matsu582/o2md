@@ -1154,6 +1154,7 @@ class WordToMarkdownConverter:
         
         # 段落間を<br>で結合
         cell_text = "<br>".join(paragraph_texts)
+        cell_text = cell_text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
         
         # 章番号のリンク変換を適用
         cell_text = self._convert_chapter_references(cell_text)
