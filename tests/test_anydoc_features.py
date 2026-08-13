@@ -104,6 +104,98 @@ def test_unknown_field_result_is_kept_and_hyperlink_is_rendered():
     assert convert_paragraph(paragraph) == "[リンク](https://example.test)"
 
 
+def test_hyperlink_element_resolves_external_and_internal_targets():
+    document = Document()
+    paragraph = document.add_paragraph()
+    external = OxmlElement("w:hyperlink")
+    external.set("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id", "rId9")
+    external_run = OxmlElement("w:r")
+    external_text = OxmlElement("w:t")
+    external_text.text = "外部リンク"
+    external_run.append(external_text)
+    external.append(external_run)
+    internal = OxmlElement("w:hyperlink")
+    internal.set(qn("w:anchor"), "開始位置")
+    internal_run = OxmlElement("w:r")
+    internal_text = OxmlElement("w:t")
+    internal_text.text = "内部リンク"
+    internal_run.append(internal_text)
+    internal.append(internal_run)
+    paragraph._p.append(external)
+    paragraph._p.append(internal)
+
+    assert convert_paragraph(
+        paragraph,
+        hyperlink_resolver={"rId9": "https://example.test"}.get,
+    ) == "[外部リンク](https://example.test)[内部リンク](#開始位置)"
+
+
+def test_hyperlink_unresolved_target_keeps_text_and_nested_containers():
+    document = Document()
+    paragraph = document.add_paragraph()
+    sdt = OxmlElement("w:sdt")
+    content = OxmlElement("w:sdtContent")
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = "content control"
+    run.append(text)
+    content.append(run)
+    sdt.append(content)
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink_run = OxmlElement("w:r")
+    hyperlink_text = OxmlElement("w:t")
+    hyperlink_text.text = "リンク文字"
+    hyperlink_run.append(hyperlink_text)
+    hyperlink.append(hyperlink_run)
+    paragraph._p.extend([sdt, hyperlink])
+
+    assert convert_paragraph(paragraph) == "content controlリンク文字"
+
+
+def test_hyperlink_inside_field_keeps_link_text_and_markup():
+    document = Document()
+    paragraph = document.add_paragraph()
+    begin = OxmlElement("w:r")
+    begin_char = OxmlElement("w:fldChar")
+    begin_char.set(qn("w:fldCharType"), "begin")
+    begin.append(begin_char)
+    instruction = OxmlElement("w:r")
+    instr_text = OxmlElement("w:instrText")
+    instr_text.text = " REF target "
+    instruction.append(instr_text)
+    separate = OxmlElement("w:r")
+    separate_char = OxmlElement("w:fldChar")
+    separate_char.set(qn("w:fldCharType"), "separate")
+    separate.append(separate_char)
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("w:anchor"), "target")
+    link_run = OxmlElement("w:r")
+    link_text = OxmlElement("w:t")
+    link_text.text = "リンク"
+    link_run.append(link_text)
+    hyperlink.append(link_run)
+    end = OxmlElement("w:r")
+    end_char = OxmlElement("w:fldChar")
+    end_char.set(qn("w:fldCharType"), "end")
+    end.append(end_char)
+    paragraph._p.extend([begin, instruction, separate, hyperlink, end])
+
+    assert convert_paragraph(paragraph) == "[リンク](#target)"
+
+
+def test_numbering_resolver_uses_start_for_unseen_parent_level():
+    blob = f"""<w:numbering xmlns:w="{W}">
+      <w:abstractNum w:abstractNumId="3">
+        <w:lvl w:ilvl="0"><w:start w:val="4"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
+        <w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1.%2."/></w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="13"><w:abstractNumId w:val="3"/></w:num>
+    </w:numbering>""".encode()
+    resolver = NumberingResolver(blob)
+
+    assert resolver.marker(_paragraph_with_num(1, "13"))[1] == "4.a."
+
+
 def test_field_paragraph_keeps_bold_run_with_note_reference(tmp_path):
     path = tmp_path / "source.docx"
     document = Document()

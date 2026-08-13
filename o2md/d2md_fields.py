@@ -56,21 +56,26 @@ def _field_text(element, formatter):
     return "".join(parts)
 
 
-def convert_paragraph(paragraph, formatter=None, reference_handler=None) -> str:
+def convert_paragraph(
+    paragraph,
+    formatter=None,
+    reference_handler=None,
+    hyperlink_resolver=None,
+) -> str:
     """段落内の通常テキストとfield resultを順序どおりに抽出する。"""
     formatter = formatter or (lambda text, _element: text)
     stack = []
     output = []
 
-    def add_text(text, element):
+    def add_text(text, element, sink):
         if not text:
             return
         if stack:
             stack[-1]["result"].append(formatter(text, element))
         else:
-            output.append(formatter(text, element))
+            sink.append(formatter(text, element))
 
-    def finish(field):
+    def finish(field, sink):
         result = "".join(field["result"])
         kind, args, switches = parse_instruction(field["instruction"])
         if kind == "HYPERLINK" and (args or switches.get("l")):
@@ -85,42 +90,80 @@ def convert_paragraph(paragraph, formatter=None, reference_handler=None) -> str:
         if stack:
             stack[-1]["result"].append(value)
         else:
-            output.append(value)
+            sink.append(value)
+
+    def convert_nodes(nodes):
+        nested_output = []
+        for child in nodes:
+            if child.tag == QN("pPr"):
+                continue
+            if child.tag == QN("hyperlink"):
+                saved_stack = stack[:]
+                stack.clear()
+                text = convert_nodes(child)
+                stack.extend(saved_stack)
+                if not text:
+                    continue
+                anchor = child.get(QN("anchor"))
+                relation_id = child.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+                target = hyperlink_resolver(relation_id) if hyperlink_resolver and relation_id else None
+                if anchor:
+                    target = "#" + anchor
+                value = f"[{text}]({target})" if target else text
+                if stack:
+                    stack[-1]["result"].append(value)
+                else:
+                    nested_output.append(value)
+                continue
+            if child.tag in {
+                QN("smartTag"),
+                QN("sdt"),
+                QN("sdtContent"),
+                QN("ins"),
+                QN("del"),
+                QN("customXml"),
+                QN("moveFrom"),
+                QN("moveTo"),
+            }:
+                nested_output.append(convert_nodes(child))
+                continue
+            if child.tag == QN("fldSimple"):
+                field = {"instruction": child.get(QN("instr"), ""), "result": []}
+                for nested in child.iter():
+                    if nested.tag == QN("t") and nested.text:
+                        field["result"].append(formatter(nested.text, child))
+                finish(field, nested_output)
+                continue
+            if child.tag != QN("r"):
+                continue
+            fld_char = child.find(QN("fldChar"))
+            if fld_char is not None:
+                kind = fld_char.get(QN("fldCharType"))
+                if kind == "begin":
+                    stack.append({"instruction": "", "result": [], "separate": False})
+                elif kind == "separate" and stack:
+                    stack[-1]["separate"] = True
+                elif kind == "end" and stack:
+                    finish(stack.pop(), nested_output)
+                continue
+            instruction = child.find(QN("instrText"))
+            if instruction is not None and instruction.text:
+                if stack:
+                    stack[-1]["instruction"] += instruction.text
+                continue
+            reference = child.find(f".//{QN('footnoteReference')}")
+            endnote = child.find(f".//{QN('endnoteReference')}")
+            if reference_handler and (reference is not None or endnote is not None):
+                note_element = reference if reference is not None else endnote
+                note_type = "fn" if reference is not None else "en"
+                note_id = note_element.get(QN("id"))
+                add_text(reference_handler(note_type, note_id), child, nested_output)
+                continue
+            add_text(_field_text(child, lambda text, _element: text), child, nested_output)
+        return "".join(nested_output)
 
     for child in paragraph._element:
         if child.tag == QN("pPr"):
             continue
-        if child.tag == QN("fldSimple"):
-            field = {"instruction": child.get(QN("instr"), ""), "result": []}
-            for nested in child.iter():
-                if nested.tag == QN("t") and nested.text:
-                    field["result"].append(formatter(nested.text, child))
-            finish(field)
-            continue
-        if child.tag != QN("r"):
-            continue
-        fld_char = child.find(QN("fldChar"))
-        if fld_char is not None:
-            kind = fld_char.get(QN("fldCharType"))
-            if kind == "begin":
-                stack.append({"instruction": "", "result": [], "separate": False})
-            elif kind == "separate" and stack:
-                stack[-1]["separate"] = True
-            elif kind == "end" and stack:
-                finish(stack.pop())
-            continue
-        instruction = child.find(QN("instrText"))
-        if instruction is not None and instruction.text:
-            if stack:
-                stack[-1]["instruction"] += instruction.text
-            continue
-        reference = child.find(f".//{QN('footnoteReference')}")
-        endnote = child.find(f".//{QN('endnoteReference')}")
-        if reference_handler and (reference is not None or endnote is not None):
-            note_element = reference if reference is not None else endnote
-            note_type = "fn" if reference is not None else "en"
-            note_id = note_element.get(QN("id"))
-            add_text(reference_handler(note_type, note_id), child)
-            continue
-        add_text(_field_text(child, lambda text, _element: text), child)
+        output.append(convert_nodes([child]))
     return "".join(output)

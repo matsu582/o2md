@@ -191,7 +191,8 @@ class NumberingResolver:
         state[ilvl] = max(definition.start, state[ilvl] + 1)
         values = {
             index + 1: format_number(
-                state[index], levels.get(index, definition).num_fmt
+                state[index] or levels.get(index, definition).start,
+                levels.get(index, definition).num_fmt,
             )
             for index in range(9)
         }

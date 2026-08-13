@@ -124,6 +124,7 @@ class WordToMarkdownConverter:
         else:
             self.doc = self._load_document_with_optional_degradation(word_file_path)
         self.note_manager = NoteManager(word_file_path)
+        self.hyperlink_targets = self._load_hyperlink_targets(word_file_path)
         self.numbering_resolver = None
         self.base_name = Path(word_file_path).stem
         
@@ -163,6 +164,22 @@ class WordToMarkdownConverter:
             self.output_format = 'png'
         
         logger.info(f"出力画像形式: {self.output_format.upper()}")
+
+    def _load_hyperlink_targets(self, word_file_path):
+        """document.xmlの外部ハイパーリンクrelationshipを読み込む。"""
+        try:
+            with zipfile.ZipFile(word_file_path) as package:
+                rels = package.read("word/_rels/document.xml.rels")
+            root = ET.fromstring(rels)
+        except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError):
+            return {}
+        targets = {}
+        for relation in root:
+            relation_id = relation.get("Id")
+            target = relation.get("Target")
+            if relation_id and target and relation.get("TargetMode") == "External":
+                targets[relation_id] = urllib.parse.unquote(target)
+        return targets
 
     def _load_document_with_optional_degradation(self, word_file_path):
         """壊れた任意パートを除外してDOCX本文を読み込む。"""
@@ -688,6 +705,7 @@ class WordToMarkdownConverter:
                 "fldSimple",
                 "footnoteReference",
                 "endnoteReference",
+                "hyperlink",
             }:
                 has_special_content = True
                 break
@@ -698,6 +716,7 @@ class WordToMarkdownConverter:
                     paragraph, value, element, preserve_format
                 ),
                 reference_handler=self.note_manager.reference,
+                hyperlink_resolver=self.hyperlink_targets.get,
             )
         text_parts = []
         for run in paragraph.runs:
