@@ -104,6 +104,35 @@ def test_unknown_field_result_is_kept_and_hyperlink_is_rendered():
     assert convert_paragraph(paragraph) == "[リンク](https://example.test)"
 
 
+def test_field_literals_and_adjacent_simple_fields_are_preserved():
+    document = Document()
+    paragraph = document.add_paragraph("前")
+
+    first = OxmlElement("w:fldSimple")
+    first.set(qn("w:instr"), " STYLEREF 1 \\s ")
+    first_result = OxmlElement("w:r")
+    first_text = OxmlElement("w:t")
+    first_text.text = "9"
+    first_result.append(first_text)
+    first.append(first_result)
+
+    separator = OxmlElement("w:r")
+    separator.append(OxmlElement("w:noBreakHyphen"))
+
+    second = OxmlElement("w:fldSimple")
+    second.set(qn("w:instr"), " SEQ 図 \\* ARABIC ")
+    second_result = OxmlElement("w:r")
+    second_text = OxmlElement("w:t")
+    second_text.text = "1"
+    second_result.append(second_text)
+    second.append(second_result)
+
+    paragraph._p.extend([first, separator, second])
+    paragraph.add_run("後")
+
+    assert convert_paragraph(paragraph) == "前9-1後"
+
+
 def test_hyperlink_element_resolves_external_and_internal_targets():
     document = Document()
     paragraph = document.add_paragraph()

@@ -49,6 +49,8 @@ def _field_text(element, formatter):
     for child in element.iter():
         if child.tag == QN("t") and child.text:
             parts.append(formatter(child.text, element))
+        elif child.tag == QN("noBreakHyphen"):
+            parts.append("-")
         elif child.tag == QN("tab"):
             parts.append("\t")
         elif child.tag == QN("br"):
