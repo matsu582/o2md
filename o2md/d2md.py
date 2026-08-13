@@ -38,7 +38,10 @@ from docx.text.run import Run
 from o2md.utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed, is_text_only
 from o2md.d2md_charts import extract_charts_from_docx
 from o2md.chart_utils import chart_data_to_markdown
-from o2md.d2md_fields import convert_paragraph as convert_field_paragraph
+from o2md.d2md_fields import (
+    convert_paragraph as convert_field_paragraph,
+    normalize_markdown_url,
+)
 from o2md.d2md_notes import NoteManager
 from o2md.d2md_numbering import NumberingResolver
 from o2md.d2md_tables import render_table
@@ -179,7 +182,7 @@ class WordToMarkdownConverter:
             relation_id = relation.get("Id")
             target = relation.get("Target")
             if relation_id and target and relation.get("TargetMode") == "External":
-                targets[relation_id] = urllib.parse.unquote(target)
+                targets[relation_id] = normalize_markdown_url(target)
         return targets
 
     def _load_document_with_optional_degradation(self, word_file_path):

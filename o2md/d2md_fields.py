@@ -17,6 +17,17 @@ def qn(name: str) -> str:
 QN = qn
 
 
+def normalize_markdown_url(target: str) -> str:
+    """Markdownリンク先で解釈を壊す文字をパーセントエンコードする。"""
+    decoded = urllib.parse.unquote(target)
+    return "".join(
+        urllib.parse.quote(char, safe="")
+        if char in ' ()<>"' or ord(char) < 0x20 or 0x7F <= ord(char) <= 0x9F
+        else char
+        for char in decoded
+    )
+
+
 def parse_instruction(instruction: str) -> tuple[str, list[str], dict[str, str | bool]]:
     """field instructionを種別、引数、スイッチへ分解する。"""
     try:
@@ -85,7 +96,9 @@ def convert_paragraph(
             if switches.get("l"):
                 target = "#" + target
             else:
-                target = urllib.parse.unquote(target)
+                target = normalize_markdown_url(target)
+            if switches.get("l"):
+                target = normalize_markdown_url(target)
             value = f"[{result}]({target})" if result else ""
         else:
             value = result
@@ -110,7 +123,9 @@ def convert_paragraph(
                 relation_id = child.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
                 target = hyperlink_resolver(relation_id) if hyperlink_resolver and relation_id else None
                 if anchor:
-                    target = "#" + anchor
+                    target = normalize_markdown_url("#" + anchor)
+                elif target:
+                    target = normalize_markdown_url(target)
                 value = f"[{text}]({target})" if target else text
                 if stack:
                     stack[-1]["result"].append(value)

@@ -11,7 +11,7 @@ from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
-from o2md.d2md_fields import convert_paragraph
+from o2md.d2md_fields import convert_paragraph, normalize_markdown_url
 from o2md.d2md_notes import NoteManager
 from o2md.d2md_numbering import NumberingResolver
 from o2md.d2md_tables import render_table
@@ -102,6 +102,80 @@ def test_unknown_field_result_is_kept_and_hyperlink_is_rendered():
     end.append(end_char)
     paragraph._p.extend([begin, instruction, separate, result, end])
     assert convert_paragraph(paragraph) == "[リンク](https://example.test)"
+
+
+@pytest.mark.parametrize(
+    ("target", "expected"),
+    [
+        ("https://example.test/Shared%20Documents/file%20(1).html", "https://example.test/Shared%20Documents/file%20%281%29.html"),
+        ("https://example.test/日本語/%E3%83%95%E3%82%A1%E3%82%A4%E3%83%AB", "https://example.test/日本語/ファイル"),
+        ("https://example.test/100%done", "https://example.test/100%done"),
+        ("#開始位置", "#開始位置"),
+    ],
+)
+def test_markdown_url_normalizes_only_unsafe_delimiters(target, expected):
+    assert normalize_markdown_url(target) == expected
+
+
+def test_hyperlink_field_escapes_markdown_url_delimiters():
+    document = Document()
+    paragraph = document.add_paragraph()
+    begin = OxmlElement("w:r")
+    begin_char = OxmlElement("w:fldChar")
+    begin_char.set(qn("w:fldCharType"), "begin")
+    begin.append(begin_char)
+    instruction = OxmlElement("w:r")
+    instr_text = OxmlElement("w:instrText")
+    instr_text.text = 'HYPERLINK "https://example.test/Shared%20Documents/file%20(1).html"'
+    instruction.append(instr_text)
+    separate = OxmlElement("w:r")
+    separate_char = OxmlElement("w:fldChar")
+    separate_char.set(qn("w:fldCharType"), "separate")
+    separate.append(separate_char)
+    result = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = "リンク"
+    result.append(text)
+    end = OxmlElement("w:r")
+    end_char = OxmlElement("w:fldChar")
+    end_char.set(qn("w:fldCharType"), "end")
+    end.append(end_char)
+    paragraph._p.extend([begin, instruction, separate, result, end])
+
+    assert convert_paragraph(paragraph) == (
+        "[リンク](https://example.test/Shared%20Documents/file%20%281%29.html)"
+    )
+
+
+def test_hyperlink_element_normalizes_external_and_internal_targets():
+    document = Document()
+    paragraph = document.add_paragraph()
+    external = OxmlElement("w:hyperlink")
+    external.set(
+        "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id",
+        "rId9",
+    )
+    external_run = OxmlElement("w:r")
+    external_text = OxmlElement("w:t")
+    external_text.text = "外部リンク"
+    external_run.append(external_text)
+    external.append(external_run)
+    internal = OxmlElement("w:hyperlink")
+    internal.set(qn("w:anchor"), "開始 位置(1)")
+    internal_run = OxmlElement("w:r")
+    internal_text = OxmlElement("w:t")
+    internal_text.text = "内部リンク"
+    internal_run.append(internal_text)
+    internal.append(internal_run)
+    paragraph._p.extend([external, internal])
+
+    assert convert_paragraph(
+        paragraph,
+        hyperlink_resolver={"rId9": "https://example.test/Shared Documents"}.get,
+    ) == (
+        "[外部リンク](https://example.test/Shared%20Documents)"
+        "[内部リンク](#開始%20位置%281%29)"
+    )
 
 
 def test_field_literals_and_adjacent_simple_fields_are_preserved():
