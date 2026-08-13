@@ -100,12 +100,17 @@ class NoteManager:
 
     def reference(self, kind: str, note_id: str) -> str:
         """本文内の参照を出現順のMarkdown脚注マーカーに変換する。"""
+        if not self.notes.get(kind, {}).get(note_id, "").strip():
+            logger.warning(
+                "%s note id=%sの本文が見つからないため参照マーカーを省略します",
+                kind,
+                note_id,
+            )
+            return ""
         key = (kind, note_id)
         if key not in self.references:
             self.references[key] = len([item for item in self.references if item[0] == kind]) + 1
         number = self.references[key]
-        if note_id not in self.notes.get(kind, {}):
-            logger.warning("%s note id=%sが見つかりません", kind, note_id)
         return f"[^{kind}{number}]"
 
     def definitions(self, text_only=False, renderer=None) -> list[str]:

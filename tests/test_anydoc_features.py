@@ -152,6 +152,133 @@ def test_hyperlink_unresolved_target_keeps_text_and_nested_containers():
     assert convert_paragraph(paragraph) == "content controlリンク文字"
 
 
+def test_top_level_sdt_recursively_converts_paragraph_and_table(tmp_path):
+    document = Document()
+    document.add_paragraph("前段落")
+    sdt = OxmlElement("w:sdt")
+    properties = OxmlElement("w:sdtPr")
+    content = OxmlElement("w:sdtContent")
+    nested = OxmlElement("w:sdt")
+    nested_content = OxmlElement("w:sdtContent")
+    paragraph = OxmlElement("w:p")
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = "SDT内段落"
+    run.append(text)
+    paragraph.append(run)
+    nested_content.append(paragraph)
+    nested.append(nested_content)
+    content.append(nested)
+    table = OxmlElement("w:tbl")
+    table_properties = OxmlElement("w:tblPr")
+    table_grid = OxmlElement("w:tblGrid")
+    grid_column = OxmlElement("w:gridCol")
+    grid_column.set(qn("w:w"), "1000")
+    table_grid.append(grid_column)
+    row = OxmlElement("w:tr")
+    cell = OxmlElement("w:tc")
+    cell_properties = OxmlElement("w:tcPr")
+    cell_width = OxmlElement("w:tcW")
+    cell_width.set(qn("w:w"), "1000")
+    cell_width.set(qn("w:type"), "dxa")
+    cell_properties.append(cell_width)
+    cell_paragraph = OxmlElement("w:p")
+    cell_run = OxmlElement("w:r")
+    cell_text = OxmlElement("w:t")
+    cell_text.text = "SDT内表"
+    cell_run.append(cell_text)
+    cell_paragraph.append(cell_run)
+    cell.append(cell_properties)
+    cell.append(cell_paragraph)
+    row.append(cell)
+    table.extend([table_properties, table_grid, row])
+    content.append(table)
+    sdt.extend([properties, content])
+    document._body._element.append(sdt)
+    path = tmp_path / "top-level-sdt.docx"
+    document.save(path)
+
+    from o2md.d2md import WordToMarkdownConverter
+
+    output_path = WordToMarkdownConverter(str(path), output_dir=str(tmp_path)).convert()
+    output = Path(output_path).read_text()
+    assert "前段落" in output
+    assert "SDT内段落" in output
+    assert "| SDT内表 |" in output
+    assert output.count("SDT内段落") == 1
+
+
+def test_top_level_toc_sdt_does_not_duplicate_generated_toc(tmp_path):
+    document = Document()
+    document.add_paragraph("目次")
+    document.add_heading("見出し", level=1)
+    sdt = OxmlElement("w:sdt")
+    properties = OxmlElement("w:sdtPr")
+    gallery = OxmlElement("w:docPartObj")
+    gallery_name = OxmlElement("w:docPartGallery")
+    gallery_name.set(qn("w:val"), "Table of Contents")
+    gallery.append(gallery_name)
+    properties.append(gallery)
+    content = OxmlElement("w:sdtContent")
+    paragraph = OxmlElement("w:p")
+    run = OxmlElement("w:r")
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    instruction = OxmlElement("w:instrText")
+    instruction.text = ' TOC \\o "1-3" '
+    separate = OxmlElement("w:fldChar")
+    separate.set(qn("w:fldCharType"), "separate")
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    run.extend([begin, instruction, separate, end])
+    paragraph.append(run)
+    content.append(paragraph)
+    sdt.extend([properties, content])
+    document._body._element.append(sdt)
+    path = tmp_path / "toc-sdt.docx"
+    document.save(path)
+
+    from o2md.d2md import WordToMarkdownConverter
+
+    output_path = WordToMarkdownConverter(str(path), output_dir=str(tmp_path)).convert()
+    output = Path(output_path).read_text()
+    assert output.count("# 目次") == 1
+    assert "TOC" not in output
+
+
+def test_empty_note_reference_is_omitted_but_surrounding_text_kept(tmp_path):
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run("前")
+    reference_run = paragraph.add_run()
+    reference = OxmlElement("w:footnoteReference")
+    reference.set(qn("w:id"), "1")
+    reference_run._r.append(reference)
+    paragraph.add_run("後")
+    path = tmp_path / "empty-note.docx"
+    document.save(path)
+    rebuilt = tmp_path / "empty-note-rebuilt.docx"
+    footnotes = f"""<w:footnotes xmlns:w="{W}">
+      <w:footnote w:id="-1" w:type="separator"/>
+      <w:footnote w:id="1"><w:p/></w:footnote>
+    </w:footnotes>""".encode()
+    with zipfile.ZipFile(path) as source, zipfile.ZipFile(rebuilt, "w") as target:
+        for item in source.infolist():
+            if item.filename == "word/footnotes.xml":
+                target.writestr(item, footnotes)
+            else:
+                target.writestr(item, source.read(item.filename))
+
+    from o2md.d2md import WordToMarkdownConverter
+
+    output_path = WordToMarkdownConverter(
+        str(rebuilt), output_dir=str(tmp_path)
+    ).convert()
+    output = Path(output_path).read_text()
+    assert "前後" in output
+    assert "[^fn1]" not in output
+
+
 def test_hyperlink_inside_field_keeps_link_text_and_markup():
     document = Document()
     paragraph = document.add_paragraph()

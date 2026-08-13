@@ -30,6 +30,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from PIL import Image
 import io
 from docx.oxml import parse_xml
+from docx.oxml.ns import qn
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 from docx.text.run import Run
@@ -607,46 +608,81 @@ class WordToMarkdownConverter:
         previous_element_type = None
         heading_counter = 0
         total_headings = len(self.headings)
-        
-        for element in self.doc.element.body:
-            if element.tag.endswith('}p'):  # 段落
-                paragraph = self._find_paragraph_by_element(element)
-                if paragraph:
-                    # 図形処理を先に行う（図形が画像化された場合、段落を記録）
-                    shape_processed = self._process_paragraph_images(paragraph)
-                    
-                    # 図形として処理された段落はテキスト出力をスキップ
-                    if not shape_processed:
-                        self._convert_paragraph(paragraph)
-                    
-                    # 見出しかどうかを記録
-                    if self._is_heading(paragraph):
-                        if total_headings > 0:
-                            heading_counter += 1
-                            heading_text = paragraph.text.strip()
-                            print(_("セクション {current}/{total} を処理中: {name}").format(
-                                current=heading_counter, total=total_headings, name=heading_text))
-                        previous_element_type = 'heading'
-                    elif self._is_list_item(paragraph):
-                        previous_element_type = 'list'
+
+        block_wrappers = {
+            qn("w:smartTag"),
+            qn("w:sdt"),
+            qn("w:sdtContent"),
+            qn("w:ins"),
+            qn("w:del"),
+            qn("w:customXml"),
+            qn("w:moveFrom"),
+            qn("w:moveTo"),
+        }
+
+        def is_toc_wrapper(element):
+            if element.tag != qn("w:sdt"):
+                return False
+            gallery = element.find(f".//{qn('w:docPartGallery')}")
+            if gallery is not None and gallery.get(qn("w:val"), "").lower() == "table of contents":
+                return True
+            return any(
+                instr.text and instr.text.strip().upper().startswith("TOC")
+                for instr in element.iter(qn("w:instrText"))
+            )
+
+        def process_blocks(container):
+            nonlocal previous_element_type, heading_counter
+            for element in container:
+                if element.tag in block_wrappers:
+                    if is_toc_wrapper(element):
+                        continue
+                    process_blocks(element)
+                    continue
+                if element.tag.endswith('}p'):  # 段落
+                    paragraph = self._find_paragraph_by_element(element)
+                    if paragraph is None:
+                        paragraph = Paragraph(element, self.doc._body)
+                    if paragraph:
+                        # 図形処理を先に行う（図形が画像化された場合、段落を記録）
+                        shape_processed = self._process_paragraph_images(paragraph)
+
+                        # 図形として処理された段落はテキスト出力をスキップ
+                        if not shape_processed:
+                            self._convert_paragraph(paragraph)
+
+                        # 見出しかどうかを記録
+                        if self._is_heading(paragraph):
+                            if total_headings > 0:
+                                heading_counter += 1
+                                heading_text = paragraph.text.strip()
+                                print(_("セクション {current}/{total} を処理中: {name}").format(
+                                    current=heading_counter, total=total_headings, name=heading_text))
+                            previous_element_type = 'heading'
+                        elif self._is_list_item(paragraph):
+                            previous_element_type = 'list'
+                        else:
+                            previous_element_type = 'paragraph'
                     else:
-                        previous_element_type = 'paragraph'
-                else:
-                    # python-docx の paragraphs に含まれない段落（数式前処理で追加された段落など）
-                    # XML要素から直接テキストを抽出
-                    text = self._extract_text_from_xml_element(element)
-                    if text and text.strip():
-                        self.markdown_lines.append(text)
-                        self.markdown_lines.append("")
-                        previous_element_type = 'paragraph'
-            elif element.tag.endswith('}tbl'):  # 表
-                table = self._find_table_by_element(element)
-                if table:
-                    # 見出しやリスト項目の直後にテーブルが来る場合は空行を挿入
-                    if previous_element_type in ['heading', 'list']:
-                        self.markdown_lines.append("")
-                    self._convert_table(table)
-                    previous_element_type = 'table'
+                        # python-docx の paragraphs に含まれない段落（数式前処理で追加された段落など）
+                        # XML要素から直接テキストを抽出
+                        text = self._extract_text_from_xml_element(element)
+                        if text and text.strip():
+                            self.markdown_lines.append(text)
+                            self.markdown_lines.append("")
+                            previous_element_type = 'paragraph'
+                elif element.tag.endswith('}tbl'):  # 表
+                    table = self._find_table_by_element(element)
+                    if table is None:
+                        table = Table(element, self.doc._body)
+                    if table:
+                        # 見出しやリスト項目の直後にテーブルが来る場合は空行を挿入
+                        if previous_element_type in ['heading', 'list']:
+                            self.markdown_lines.append("")
+                        self._convert_table(table)
+                        previous_element_type = 'table'
+
+        process_blocks(self.doc.element.body)
         
         # 残りの画像を処理
         self._process_images()
