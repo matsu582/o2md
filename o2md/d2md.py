@@ -45,6 +45,10 @@ from o2md.d2md_fields import (
 from o2md.d2md_notes import NoteManager
 from o2md.d2md_numbering import NumberingResolver
 from o2md.d2md_tables import render_table
+from o2md.d2md_composite import (
+    composite_paragraphs_xml,
+    section_properties_xml,
+)
 
 # 数式変換モジュール (オプション)
 try:
@@ -1291,7 +1295,9 @@ class WordToMarkdownConverter:
         # 画像とテキストボックスが両方ある場合、vector_compositeとして処理
         if has_bitmap_image and has_textbox:
             logger.debug(f"[DEBUG] 画像+テキストボックス混在段落を検出、vector_compositeとして処理")
-            if self._process_mixed_drawings_as_vector(all_drawings, all_shape_texts):
+            if self._process_mixed_drawings_as_vector(
+                all_drawings, all_shape_texts, [paragraph]
+            ):
                 return True  # vector_compositeとして処理された
         
         # 通常の画像処理（テキストボックスがない場合）
@@ -1546,7 +1552,9 @@ class WordToMarkdownConverter:
             traceback.print_exc()
             return None
     
-    def _process_mixed_drawings_as_vector(self, drawing_elements, shape_texts):
+    def _process_mixed_drawings_as_vector(
+        self, drawing_elements, shape_texts, paragraphs=None
+    ):
         """画像とテキストボックスが混在するdrawing要素をvector_compositeとして処理
         
         Args:
@@ -1560,7 +1568,9 @@ class WordToMarkdownConverter:
             logger.info(f"画像+テキストボックス混在図形を処理中...")
             
             # 一時的なWord文書を作成して複数のdrawing要素を含める
-            temp_doc_path = self._create_canvas_document(None, drawing_elements)
+            temp_doc_path = self._create_canvas_document(
+                None, drawing_elements, paragraphs
+            )
             if not temp_doc_path:
                 return False
             
@@ -2187,7 +2197,9 @@ class WordToMarkdownConverter:
             # ここを先に処理しないと、背景画像または前景図形のどちらかが失われる。
             if has_picture and (canvas_drawings or shape_only_drawings):
                 shape_texts = self._extract_shape_texts_from_drawing(drawings)
-                if self._process_mixed_drawings_as_vector(drawings, shape_texts):
+                if self._process_mixed_drawings_as_vector(
+                    drawings, shape_texts, [paragraph]
+                ):
                     return True
                 logger.warning(
                     "画像と図形の合成に失敗したため、画像のみのフォールバックへ移行します"
@@ -2216,7 +2228,9 @@ class WordToMarkdownConverter:
                         combined_drawings
                     )
                     if self._process_mixed_drawings_as_vector(
-                        combined_drawings, shape_texts
+                        combined_drawings,
+                        shape_texts,
+                        [paragraph, picture_paragraph],
                     ):
                         self._composite_skip_paragraphs.add(picture_paragraph._p)
                         return True
@@ -2632,7 +2646,9 @@ class WordToMarkdownConverter:
             logger.debug(f"[DEBUG] テキスト色変換エラー: {e}")
             return ET.tostring(drawing_element, encoding='unicode')
     
-    def _create_canvas_document(self, canvas_element, drawing_elements):
+    def _create_canvas_document(
+        self, canvas_element, drawing_elements, paragraphs=None
+    ):
         """キャンバス要素のみを含む一時Word文書を作成
         
         Args:
@@ -2677,6 +2693,28 @@ class WordToMarkdownConverter:
                 converted_drawings.append(converted_xml)
             drawings_xml = "".join(converted_drawings)
             logger.debug(f"[DEBUG] Drawing XML長: {len(drawings_xml)}")
+
+            if paragraphs:
+                drawing_counts = [
+                    len(paragraph._element.xpath(".//w:drawing"))
+                    for paragraph in paragraphs
+                ]
+                drawing_groups = []
+                offset = 0
+                for count in drawing_counts:
+                    drawing_groups.append(
+                        converted_drawings[offset : offset + count]
+                    )
+                    offset += count
+                body_xml = composite_paragraphs_xml(paragraphs, drawing_groups)
+                section_xml = section_properties_xml(self.doc)
+            else:
+                body_xml = f"<w:p><w:r>{drawings_xml}</w:r></w:p>"
+                section_xml = (
+                    '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
+                    '<w:pgMar w:top="1440" w:right="1440" '
+                    'w:bottom="1440" w:left="1440"/></w:sectPr>'
+                )
             
             # より適切なWord文書XMLを作成
             doc_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -2690,15 +2728,8 @@ class WordToMarkdownConverter:
             xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"
             xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
     <w:body>
-        <w:p>
-            <w:r>
-                {drawings_xml}
-            </w:r>
-        </w:p>
-        <w:sectPr>
-            <w:pgSz w:w="11906" w:h="16838"/>
-            <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>
-        </w:sectPr>
+        {body_xml}
+        {section_xml}
     </w:body>
 </w:document>'''
 

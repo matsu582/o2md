@@ -17,6 +17,11 @@ from o2md.d2md_notes import NoteManager
 from o2md.d2md_numbering import NumberingResolver
 from o2md.d2md_tables import render_table
 from o2md.d2md import WordToMarkdownConverter
+from o2md.d2md_composite import (
+    composite_paragraphs_xml,
+    paragraph_properties_xml,
+    section_properties_xml,
+)
 from o2md.filter import detect_type_from_bytes
 import o2md.filter as filter_cli
 from o2md.mspdi import is_mspdi_xml
@@ -50,8 +55,8 @@ def _fake_composite_converter(document, calls):
     converter = object.__new__(WordToMarkdownConverter)
     converter.doc = document
     converter._composite_skip_paragraphs = set()
-    converter._process_mixed_drawings_as_vector = lambda drawings, texts: (
-        calls.append((drawings, texts)) or True
+    converter._process_mixed_drawings_as_vector = lambda drawings, texts, paragraphs=None: (
+        calls.append((drawings, texts, paragraphs)) or True
     )
     return converter
 
@@ -69,6 +74,7 @@ def test_word_composite_figure_keeps_picture_and_shape_in_one_render():
     assert len(calls[0][0]) == 2
     assert calls[0][0][0].xpath('.//*[local-name()="wsp"]')
     assert calls[0][0][1].xpath('.//*[local-name()="pic"]')
+    assert calls[0][2] == [paragraph]
 
 
 def test_word_composite_figure_merges_safe_adjacent_shape_and_picture():
@@ -83,7 +89,24 @@ def test_word_composite_figure_merges_safe_adjacent_shape_and_picture():
     assert converter._process_composite_figure(shape_paragraph) is True
     assert len(calls) == 1
     assert len(calls[0][0]) == 2
+    assert [paragraph._p for paragraph in calls[0][2]] == [
+        shape_paragraph._p,
+        picture_paragraph._p,
+    ]
     assert picture_paragraph._p in converter._composite_skip_paragraphs
+
+
+def test_word_composite_preserves_paragraph_and_section_coordinates():
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph.alignment = 1
+    drawings_xml = composite_paragraphs_xml(
+        [paragraph], [["<w:drawing/>"]]
+    )
+    assert 'w:jc w:val="center"' in drawings_xml
+    assert paragraph_properties_xml(paragraph) in drawings_xml
+    assert "w:pgSz" in section_properties_xml(document)
+    assert "w:pgMar" in section_properties_xml(document)
 
 
 def _numbering_xml():
