@@ -40,7 +40,7 @@ def _cell_span(tc_pr) -> int:
 
 
 def render_table(table, process_cell):
-    """結合セルを空のcovered slotとして保持したMarkdown表を返す。"""
+    """結合セルのorigin値をcovered slotにも繰り返したMarkdown表を返す。"""
     tbl = table._element
     grid = tbl.find(qn("tblGrid"))
     if grid is not None:
@@ -52,11 +52,13 @@ def render_table(table, process_cell):
 
     rows: list[list[Slot]] = []
     header_flags: list[bool] = []
+    active_vertical: list[object | None] = [None] * columns
     for tr in tbl.tr_lst:
         tr_pr = tr.trPr
         before = _int_value(tr_pr.find(qn("gridBefore")) if tr_pr is not None else None, "val")
         after = _int_value(tr_pr.find(qn("gridAfter")) if tr_pr is not None else None, "val")
         slots = [Slot(covered=True) for _ in range(columns)]
+        next_vertical: list[object | None] = [None] * columns
         cursor = before
         hmerge_spans = {}
         hmerge_continuations = set()
@@ -91,21 +93,35 @@ def render_table(table, process_cell):
             is_vertical_continuation = (
                 merge is not None and merge.get(qn("val"), "continue") != "restart"
             )
+            origin = (
+                active_vertical[cursor]
+                if is_vertical_continuation and cursor < columns
+                else None
+            )
             required = cursor + span
             for slot_index in range(cursor, min(required, len(slots))):
+                covered_by = origin if is_vertical_continuation else cell
                 slots[slot_index] = Slot(
                     cell=cell if slot_index == cursor and not is_vertical_continuation else None,
                     covered=slot_index != cursor or is_vertical_continuation,
-                    covered_by=cell if slot_index != cursor and not is_vertical_continuation else None,
+                    covered_by=covered_by if slot_index != cursor or is_vertical_continuation else None,
                 )
+                if merge is not None:
+                    next_vertical[slot_index] = cell if not is_vertical_continuation else origin
             cursor += span
         rows.append(slots)
+        active_vertical = next_vertical
         header_flags.append(
             tr_pr is not None and tr_pr.find(qn("tblHeader")) is not None
         )
 
     def row_text(row: list[Slot]) -> list[str]:
-        return [process_cell(slot.cell) if slot.cell is not None else "" for slot in row]
+        return [
+            process_cell(slot.cell or slot.covered_by)
+            if slot.cell is not None or slot.covered_by is not None
+            else ""
+            for slot in row
+        ]
 
     header_count = 0
     for is_header in header_flags:
@@ -115,11 +131,7 @@ def render_table(table, process_cell):
     rendered_rows = [row_text(row) for row in rows]
     if header_count > 1:
         def header_cell_text(row: int, column: int) -> str:
-            text = rendered_rows[row][column]
-            covered_by = rows[row][column].covered_by
-            if not text and covered_by is not None:
-                return process_cell(covered_by)
-            return text
+            return rendered_rows[row][column]
 
         header = [
             " ".join(

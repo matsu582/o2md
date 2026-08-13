@@ -593,6 +593,7 @@ def test_word_table_vmerge_does_not_shift_following_unmerged_row():
 
     assert lines[0] == "| 0-0 | 0-1 | 0-2 |"
     assert lines[2] == "| 1-0 | 1-1 | 1-2 |"
+    assert lines[3] == "| 2-0 | 2-1 | 2-2 |"
 
 
 def test_word_table_hmerge_uses_each_row_cell_declaration():
@@ -611,8 +612,46 @@ def test_word_table_hmerge_uses_each_row_cell_declaration():
 
     lines = render_table(table, lambda cell: cell.text)
 
-    assert lines[0] == "| 0-0 |  | 0-2 |"
+    assert lines[0] == "| 0-0 | 0-0 | 0-2 |"
     assert lines[2] == "| 1-0 | 1-1 | 1-2 |"
+
+
+def test_word_table_gridspan_repeats_origin_label_and_keeps_grid():
+    document = Document()
+    table = document.add_table(rows=2, cols=3)
+    for row_index, row in enumerate(table.rows):
+        for col_index, cell in enumerate(row.cells):
+            cell.text = f"{row_index}-{col_index}"
+    first = table._tbl.tr_lst[0].tc_lst[0]
+    span = OxmlElement("w:gridSpan")
+    span.set(qn("w:val"), "2")
+    first.get_or_add_tcPr().append(span)
+    table._tbl.tr_lst[0].remove(table._tbl.tr_lst[0].tc_lst[1])
+
+    lines = render_table(table, lambda cell: cell.text)
+
+    assert lines[0] == "| 0-0 | 0-0 | 0-2 |"
+    assert all(line.count("|") == 4 for line in lines)
+
+
+def test_word_table_three_row_vmerge_repeats_origin_label_and_keeps_grid():
+    document = Document()
+    table = document.add_table(rows=3, cols=2)
+    for row_index, row in enumerate(table.rows):
+        for col_index, cell in enumerate(row.cells):
+            cell.text = f"{row_index}-{col_index}"
+    rows = table._tbl.tr_lst
+    for index, row in enumerate(rows):
+        merge = OxmlElement("w:vMerge")
+        merge.set(qn("w:val"), "restart" if index == 0 else "continue")
+        row.tc_lst[0].get_or_add_tcPr().append(merge)
+
+    lines = render_table(table, lambda cell: cell.text)
+
+    assert lines[0] == "| 0-0 | 0-1 |"
+    assert lines[2] == "| 0-0 | 1-1 |"
+    assert lines[3] == "| 0-0 | 2-1 |"
+    assert all(line.count("|") == 3 for line in lines)
 
 
 def test_word_table_header_inherits_horizontal_merge_labels():
