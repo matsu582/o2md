@@ -6,6 +6,8 @@ from docx.oxml.ns import qn
 
 
 WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+EMU_PER_TWIP = 635
 
 
 def _tag(namespace, name):
@@ -26,6 +28,105 @@ def _position_offset(position):
         return None
 
 
+def _parse_fragment(xml_text):
+    if not xml_text:
+        return None
+    try:
+        return ET.fromstring(xml_text)
+    except ET.ParseError:
+        if xml_text.lstrip().startswith("<w:"):
+            try:
+                start = xml_text.find(">")
+                if start < 0:
+                    return None
+                return ET.fromstring(
+                    xml_text[:start]
+                    + f' xmlns:w="{W_NS}"'
+                    + xml_text[start:]
+                )
+            except ET.ParseError:
+                return None
+        return None
+
+
+def _twips_attribute(element, name):
+    value = element.get(_tag(W_NS, name))
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _paragraph_layout(paragraph_xml, section_xml):
+    paragraph = _parse_fragment(paragraph_xml)
+    section = _parse_fragment(section_xml)
+    if paragraph is None or section is None:
+        return None
+
+    paragraph_properties = (
+        paragraph
+        if _local_name(paragraph.tag) == "pPr"
+        else paragraph.find(_tag(W_NS, "pPr"))
+    )
+    section_properties = section
+    page_size = section_properties.find(_tag(W_NS, "pgSz"))
+    page_margins = section_properties.find(_tag(W_NS, "pgMar"))
+    if page_size is None or page_margins is None:
+        return None
+
+    page_width = _twips_attribute(page_size, "w")
+    margin_left = _twips_attribute(page_margins, "left")
+    margin_right = _twips_attribute(page_margins, "right")
+    if None in {page_width, margin_left, margin_right}:
+        return None
+
+    left_indent = 0
+    right_indent = 0
+    alignment = None
+    if paragraph_properties is not None:
+        alignment_element = paragraph_properties.find(_tag(W_NS, "jc"))
+        if alignment_element is not None:
+            alignment = alignment_element.get(_tag(W_NS, "val"))
+        indent = paragraph_properties.find(_tag(W_NS, "ind"))
+        if indent is not None:
+            left_indent = _twips_attribute(indent, "left")
+            if left_indent is None:
+                left_indent = _twips_attribute(indent, "start")
+            right_indent = _twips_attribute(indent, "right")
+            if right_indent is None:
+                right_indent = _twips_attribute(indent, "end")
+            left_indent = left_indent or 0
+            right_indent = right_indent or 0
+
+    text_width = page_width - margin_left - margin_right - left_indent - right_indent
+    if text_width < 0:
+        return None
+    return {
+        "alignment": alignment,
+        "left_indent": left_indent * EMU_PER_TWIP,
+        "text_width": text_width * EMU_PER_TWIP,
+    }
+
+
+def _inline_horizontal_offset(image_width, layout):
+    if layout is None:
+        return None
+    available_width = layout["text_width"]
+    left_indent = layout["left_indent"]
+    alignment = layout["alignment"]
+    if image_width > available_width:
+        return 0
+    if alignment in {"center", "distribute"}:
+        offset = (available_width - image_width) // 2 + left_indent
+    elif alignment in {"right", "end"}:
+        offset = available_width - image_width + left_indent
+    else:
+        offset = left_indent
+    return max(0, offset)
+
+
 def _set_margin_position(position, offset):
     position.set("relativeFrom", "margin")
     align = position.find(_tag(WP_NS, "align"))
@@ -38,7 +139,7 @@ def _set_margin_position(position, offset):
     pos_offset.text = str(offset)
 
 
-def _rewrite_shape_anchor(anchor):
+def _rewrite_shape_anchor(anchor, left_indent=0):
     extent = anchor.find(_tag(WP_NS, "extent"))
     position_h = anchor.find(_tag(WP_NS, "positionH"))
     position_v = anchor.find(_tag(WP_NS, "positionV"))
@@ -53,7 +154,7 @@ def _rewrite_shape_anchor(anchor):
         offset = _position_offset(position_h)
         if offset is None:
             return False
-        _set_margin_position(position_h, offset)
+        _set_margin_position(position_h, offset + left_indent)
     elif horizontal not in {"page", "margin"}:
         return False
 
@@ -69,7 +170,7 @@ def _rewrite_shape_anchor(anchor):
     return True
 
 
-def _inline_to_margin_anchor(inline, drawing_index):
+def _inline_to_margin_anchor(inline, drawing_index, horizontal_offset=0):
     extent = inline.find(_tag(WP_NS, "extent"))
     if extent is None or extent.get("cx") is None or extent.get("cy") is None:
         return None
@@ -95,7 +196,9 @@ def _inline_to_margin_anchor(inline, drawing_index):
     position_h = ET.SubElement(
         anchor, _tag(WP_NS, "positionH"), {"relativeFrom": "margin"}
     )
-    ET.SubElement(position_h, _tag(WP_NS, "posOffset")).text = "0"
+    ET.SubElement(position_h, _tag(WP_NS, "posOffset")).text = str(
+        horizontal_offset
+    )
     position_v = ET.SubElement(
         anchor, _tag(WP_NS, "positionV"), {"relativeFrom": "margin"}
     )
@@ -118,7 +221,9 @@ def _inline_to_margin_anchor(inline, drawing_index):
     return anchor
 
 
-def absolute_drawing_xml(drawing_xmls, logger=None):
+def absolute_drawing_xml(
+    drawing_xmls, logger=None, paragraph_xml="", section_xml=""
+):
     """合成図形を余白基準の絶対配置へ変換する。"""
     parsed_drawings = []
     used_doc_pr_ids = set()
@@ -134,6 +239,13 @@ def absolute_drawing_xml(drawing_xmls, logger=None):
             if doc_pr.get("id") is not None:
                 used_doc_pr_ids.add(doc_pr.get("id"))
 
+    layout = _paragraph_layout(paragraph_xml, section_xml)
+    if paragraph_xml or section_xml:
+        if layout is None:
+            if logger:
+                logger.warning("段落またはセクションの座標情報を取得できないため、従来配置へフォールバックします")
+            return None
+
     converted = []
     next_doc_pr_id = 1
     for drawing in parsed_drawings:
@@ -148,7 +260,24 @@ def absolute_drawing_xml(drawing_xmls, logger=None):
             return None
 
         if inline is not None:
-            replacement = _inline_to_margin_anchor(inline, next_doc_pr_id)
+            extent = inline.find(_tag(WP_NS, "extent"))
+            image_width = (
+                int(extent.get("cx"))
+                if extent is not None and extent.get("cx", "").isdigit()
+                else None
+            )
+            horizontal_offset = (
+                _inline_horizontal_offset(image_width, layout)
+                if image_width is not None and layout is not None
+                else 0
+            )
+            if horizontal_offset is None:
+                if logger:
+                    logger.warning("画像の水平配置を計算できないため、従来配置へフォールバックします")
+                return None
+            replacement = _inline_to_margin_anchor(
+                inline, next_doc_pr_id, horizontal_offset
+            )
             if replacement is None:
                 if logger:
                     logger.warning("画像のextentを取得できないため、従来配置へフォールバックします")
@@ -159,7 +288,8 @@ def absolute_drawing_xml(drawing_xmls, logger=None):
             used_doc_pr_ids.add(str(next_doc_pr_id))
             next_doc_pr_id += 1
         elif anchor is not None:
-            if not _rewrite_shape_anchor(anchor):
+            left_indent = layout["left_indent"] if layout is not None else 0
+            if not _rewrite_shape_anchor(anchor, left_indent):
                 if logger:
                     logger.warning("図形の座標情報を取得できないため、従来配置へフォールバックします")
                 return None

@@ -49,6 +49,7 @@ from o2md.d2md_composite import (
     absolute_composite_paragraph_xml,
     absolute_drawing_xml,
     composite_paragraphs_xml,
+    paragraph_properties_xml,
     section_properties_xml,
 )
 
@@ -2696,7 +2697,22 @@ class WordToMarkdownConverter:
             drawings_xml = "".join(converted_drawings)
             logger.debug(f"[DEBUG] Drawing XML長: {len(drawings_xml)}")
 
-            absolute_drawings = absolute_drawing_xml(converted_drawings, logger)
+            layout_paragraph_xml = (
+                paragraph_properties_xml(paragraphs[0])
+                if paragraphs and len(paragraphs) == 1
+                else ""
+            )
+            layout_section_xml = (
+                section_properties_xml(self.doc)
+                if paragraphs and len(paragraphs) == 1
+                else ""
+            )
+            absolute_drawings = absolute_drawing_xml(
+                converted_drawings,
+                logger,
+                layout_paragraph_xml,
+                layout_section_xml,
+            )
             if absolute_drawings is not None and (not paragraphs or len(paragraphs) == 1):
                 body_xml = absolute_composite_paragraph_xml(absolute_drawings)
                 section_xml = section_properties_xml(self.doc)

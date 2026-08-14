@@ -182,6 +182,103 @@ def test_absolute_composite_paragraph_has_minimal_fixed_line_height():
     assert 'w:sz w:val="1"' in paragraph_xml
 
 
+def _layout_section_xml():
+    return f"""
+      <w:sectPr xmlns:w="{W}">
+        <w:pgSz w:w="1000" w:h="2000"/>
+        <w:pgMar w:left="100" w:right="100"/>
+      </w:sectPr>
+    """
+
+
+def _inline_drawing_xml(width=254000):
+    return f"""
+      <w:drawing xmlns:w="{W}"
+          xmlns:wp="{WP}">
+        <wp:inline>
+          <wp:extent cx="{width}" cy="1000"/>
+          <wp:docPr id="7" name="画像"/>
+        </wp:inline>
+      </w:drawing>
+    """
+
+
+@pytest.mark.parametrize(
+    ("jc", "expected_twips"),
+    [
+        ("center", 200),
+        ("distribute", 200),
+        ("right", 400),
+        ("end", 400),
+        (None, 0),
+        ("left", 0),
+    ],
+)
+def test_absolute_composite_horizontal_offset_follows_alignment(jc, expected_twips):
+    jc_xml = f'<w:jc w:val="{jc}"/>' if jc else ""
+    paragraph_xml = f'<w:pPr xmlns:w="{W}">{jc_xml}</w:pPr>'
+    converted = absolute_drawing_xml(
+        [_inline_drawing_xml()],
+        paragraph_xml=paragraph_xml,
+        section_xml=_layout_section_xml(),
+    )
+    root = etree.fromstring(converted[0].encode())
+    offset = root.find(f".//{{{WP}}}positionH/{{{WP}}}posOffset").text
+    assert int(offset) == expected_twips * 635
+
+
+def test_absolute_composite_horizontal_offset_includes_indents():
+    paragraph_xml = f"""
+      <w:pPr xmlns:w="{W}">
+        <w:jc w:val="center"/>
+        <w:ind w:left="100" w:right="50"/>
+      </w:pPr>
+    """
+    converted = absolute_drawing_xml(
+        [_inline_drawing_xml()],
+        paragraph_xml=paragraph_xml,
+        section_xml=_layout_section_xml(),
+    )
+    root = etree.fromstring(converted[0].encode())
+    offset = root.find(f".//{{{WP}}}positionH/{{{WP}}}posOffset").text
+    assert int(offset) == 225 * 635
+
+
+def test_absolute_composite_horizontal_offset_clamps_overwide_image():
+    paragraph_xml = f'<w:pPr xmlns:w="{W}"><w:jc w:val="right"/></w:pPr>'
+    converted = absolute_drawing_xml(
+        [_inline_drawing_xml(width=600000)],
+        paragraph_xml=paragraph_xml,
+        section_xml=_layout_section_xml(),
+    )
+    root = etree.fromstring(converted[0].encode())
+    offset = root.find(f".//{{{WP}}}positionH/{{{WP}}}posOffset").text
+    assert offset == "0"
+
+
+def test_absolute_composite_shape_column_offset_includes_left_indent():
+    paragraph_xml = f"""
+      <w:pPr xmlns:w="{W}"><w:ind w:left="100"/></w:pPr>
+    """
+    drawing = f"""
+      <w:drawing xmlns:w="{W}" xmlns:wp="{WP}">
+        <wp:anchor>
+          <wp:positionH relativeFrom="column"><wp:posOffset>20</wp:posOffset></wp:positionH>
+          <wp:positionV relativeFrom="paragraph"><wp:posOffset>30</wp:posOffset></wp:positionV>
+          <wp:extent cx="100" cy="100"/>
+        </wp:anchor>
+      </w:drawing>
+    """
+    converted = absolute_drawing_xml(
+        [drawing],
+        paragraph_xml=paragraph_xml,
+        section_xml=_layout_section_xml(),
+    )
+    root = etree.fromstring(converted[0].encode())
+    offset = root.find(f".//{{{WP}}}positionH/{{{WP}}}posOffset").text
+    assert int(offset) == 100 * 635 + 20
+
+
 def _numbering_xml():
     return f"""<w:numbering xmlns:w="{W}">
       <w:abstractNum w:abstractNumId="1">
