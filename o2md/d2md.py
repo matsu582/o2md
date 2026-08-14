@@ -46,6 +46,8 @@ from o2md.d2md_notes import NoteManager
 from o2md.d2md_numbering import NumberingResolver
 from o2md.d2md_tables import render_table
 from o2md.d2md_composite import (
+    absolute_composite_paragraph_xml,
+    absolute_drawing_xml,
     composite_paragraphs_xml,
     section_properties_xml,
 )
@@ -2694,7 +2696,12 @@ class WordToMarkdownConverter:
             drawings_xml = "".join(converted_drawings)
             logger.debug(f"[DEBUG] Drawing XML長: {len(drawings_xml)}")
 
-            if paragraphs:
+            absolute_drawings = absolute_drawing_xml(converted_drawings, logger)
+            if absolute_drawings is not None and (not paragraphs or len(paragraphs) == 1):
+                body_xml = absolute_composite_paragraph_xml(absolute_drawings)
+                section_xml = section_properties_xml(self.doc)
+                logger.debug("[DEBUG] 合成図形を余白基準の絶対配置で構成")
+            elif paragraphs:
                 drawing_counts = [
                     len(paragraph._element.xpath(".//w:drawing"))
                     for paragraph in paragraphs

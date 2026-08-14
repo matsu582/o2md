@@ -18,6 +18,8 @@ from o2md.d2md_numbering import NumberingResolver
 from o2md.d2md_tables import render_table
 from o2md.d2md import WordToMarkdownConverter
 from o2md.d2md_composite import (
+    absolute_composite_paragraph_xml,
+    absolute_drawing_xml,
     composite_paragraphs_xml,
     paragraph_properties_xml,
     section_properties_xml,
@@ -30,6 +32,7 @@ from o2md.x2md import ExcelToMarkdownConverter
 
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 PIC = "http://schemas.openxmlformats.org/drawingml/2006/picture"
 WPS = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
 
@@ -107,6 +110,76 @@ def test_word_composite_preserves_paragraph_and_section_coordinates():
     assert paragraph_properties_xml(paragraph) in drawings_xml
     assert "w:pgSz" in section_properties_xml(document)
     assert "w:pgMar" in section_properties_xml(document)
+
+
+def test_absolute_composite_converts_inline_image_and_preserves_extent():
+    drawing = f"""
+      <w:drawing xmlns:w="{W}"
+          xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+        <wp:inline>
+          <wp:extent cx="1234" cy="5678"/>
+          <wp:docPr id="7" name="画像"/>
+        </wp:inline>
+      </w:drawing>
+    """
+
+    converted = absolute_drawing_xml([drawing])
+    assert converted is not None
+    root = etree.fromstring(converted[0].encode())
+    anchor = root.find(f".//{{{WP}}}anchor")
+    assert anchor is not None
+    assert anchor.get("relativeFrom") is None
+    assert anchor.get("behindDoc") == "1"
+    assert anchor.find(f"{{{WP}}}extent").get("cx") == "1234"
+    assert anchor.find(f"{{{WP}}}extent").get("cy") == "5678"
+    assert anchor.find(f".//{{{WP}}}docPr").get("id") == "1"
+    assert anchor.find(f"{{{WP}}}positionH").get("relativeFrom") == "margin"
+    assert anchor.find(f"{{{WP}}}positionV").find(f"{{{WP}}}posOffset").text == "0"
+
+
+def test_absolute_composite_rebases_paragraph_anchor_to_margin():
+    drawing = f"""
+      <w:drawing xmlns:w="{W}"
+          xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+        <wp:anchor>
+          <wp:positionH relativeFrom="column"><wp:posOffset>111</wp:posOffset></wp:positionH>
+          <wp:positionV relativeFrom="paragraph"><wp:posOffset>222</wp:posOffset></wp:positionV>
+          <wp:extent cx="1234" cy="5678"/>
+          <wp:wrapNone/>
+        </wp:anchor>
+      </w:drawing>
+    """
+
+    converted = absolute_drawing_xml([drawing])
+    assert converted is not None
+    root = etree.fromstring(converted[0].encode())
+    anchor = root.find(f".//{{{WP}}}anchor")
+    assert anchor.find(f"{{{WP}}}positionH").get("relativeFrom") == "margin"
+    assert anchor.find(f"{{{WP}}}positionV").get("relativeFrom") == "margin"
+    assert anchor.find(f"{{{WP}}}positionH/{{{WP}}}posOffset").text == "111"
+    assert anchor.find(f"{{{WP}}}positionV/{{{WP}}}posOffset").text == "222"
+
+
+def test_absolute_composite_falls_back_when_position_is_incomplete():
+    drawing = f"""
+      <w:drawing xmlns:w="{W}"
+          xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+        <wp:anchor>
+          <wp:positionH relativeFrom="column"/>
+          <wp:positionV relativeFrom="paragraph"><wp:posOffset>222</wp:posOffset></wp:positionV>
+          <wp:extent cx="1234" cy="5678"/>
+        </wp:anchor>
+      </w:drawing>
+    """
+
+    assert absolute_drawing_xml([drawing]) is None
+
+
+def test_absolute_composite_paragraph_has_minimal_fixed_line_height():
+    paragraph_xml = absolute_composite_paragraph_xml(["<w:drawing/>"])
+    assert 'w:line="1"' in paragraph_xml
+    assert 'w:lineRule="exact"' in paragraph_xml
+    assert 'w:sz w:val="1"' in paragraph_xml
 
 
 def _numbering_xml():
