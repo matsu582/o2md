@@ -182,23 +182,36 @@ def test_absolute_composite_paragraph_has_minimal_fixed_line_height():
     assert 'w:sz w:val="1"' in paragraph_xml
 
 
-def _layout_section_xml():
+def _layout_section_xml(doc_grid=""):
     return f"""
       <w:sectPr xmlns:w="{W}">
         <w:pgSz w:w="1000" w:h="2000"/>
         <w:pgMar w:left="100" w:right="100"/>
+        {doc_grid}
       </w:sectPr>
     """
 
 
-def _inline_drawing_xml(width=254000):
+def _inline_drawing_xml(width=254000, height=1000):
     return f"""
       <w:drawing xmlns:w="{W}"
           xmlns:wp="{WP}">
         <wp:inline>
-          <wp:extent cx="{width}" cy="1000"/>
+          <wp:extent cx="{width}" cy="{height}"/>
           <wp:docPr id="7" name="画像"/>
         </wp:inline>
+      </w:drawing>
+    """
+
+
+def _shape_drawing_xml(vertical_offset=300000):
+    return f"""
+      <w:drawing xmlns:w="{W}" xmlns:wp="{WP}">
+        <wp:anchor>
+          <wp:positionH relativeFrom="column"><wp:posOffset>20</wp:posOffset></wp:positionH>
+          <wp:positionV relativeFrom="paragraph"><wp:posOffset>{vertical_offset}</wp:posOffset></wp:positionV>
+          <wp:extent cx="100" cy="100"/>
+        </wp:anchor>
       </w:drawing>
     """
 
@@ -277,6 +290,82 @@ def test_absolute_composite_shape_column_offset_includes_left_indent():
     root = etree.fromstring(converted[0].encode())
     offset = root.find(f".//{{{WP}}}positionH/{{{WP}}}posOffset").text
     assert int(offset) == 100 * 635 + 20
+
+
+def test_absolute_composite_vertical_offset_subtracts_half_grid_gap():
+    paragraph_xml = f'<w:pPr xmlns:w="{W}"/>'
+    section_xml = _layout_section_xml(
+        f'<w:docGrid w:type="lines" w:linePitch="360"/>'
+    )
+    converted = absolute_drawing_xml(
+        [_shape_drawing_xml(), _inline_drawing_xml(height=200000)],
+        paragraph_xml=paragraph_xml,
+        section_xml=section_xml,
+    )
+    root = etree.fromstring(converted[0].encode())
+    offset = root.find(f".//{{{WP}}}positionV/{{{WP}}}posOffset").text
+    expected_gap = (360 * 635 - (200000 % (360 * 635))) // 2
+    assert int(offset) == 300000 - expected_gap
+
+
+def test_absolute_composite_vertical_offset_keeps_exact_grid_height():
+    paragraph_xml = f'<w:pPr xmlns:w="{W}"/>'
+    section_xml = _layout_section_xml(
+        f'<w:docGrid w:type="lineAndChar" w:linePitch="360"/>'
+    )
+    inline = _inline_drawing_xml().replace('cy="1000"', 'cy="228600"')
+    converted = absolute_drawing_xml(
+        [_shape_drawing_xml(), inline],
+        paragraph_xml=paragraph_xml,
+        section_xml=section_xml,
+    )
+    root = etree.fromstring(converted[0].encode())
+    offset = root.find(f".//{{{WP}}}positionV/{{{WP}}}posOffset").text
+    assert int(offset) == 300000
+
+
+@pytest.mark.parametrize(
+    "paragraph_xml, section_xml, drawings",
+    [
+        (
+            f'<w:pPr xmlns:w="{W}"/>',
+            _layout_section_xml(),
+            [_shape_drawing_xml(), _inline_drawing_xml()],
+        ),
+        (
+            f'<w:pPr xmlns:w="{W}"/>',
+            _layout_section_xml(
+                f'<w:docGrid w:type="default" w:linePitch="360"/>'
+            ),
+            [_shape_drawing_xml(), _inline_drawing_xml()],
+        ),
+        (
+            f'<w:pPr xmlns:w="{W}"><w:snapToGrid w:val="0"/></w:pPr>',
+            _layout_section_xml(
+                f'<w:docGrid w:type="lines" w:linePitch="360"/>'
+            ),
+            [_shape_drawing_xml(), _inline_drawing_xml()],
+        ),
+        (
+            f'<w:pPr xmlns:w="{W}"/>',
+            _layout_section_xml(
+                f'<w:docGrid w:type="lines" w:linePitch="360"/>'
+            ),
+            [_shape_drawing_xml()],
+        ),
+    ],
+)
+def test_absolute_composite_vertical_offset_skips_grid_gap_without_requirements(
+    paragraph_xml, section_xml, drawings
+):
+    converted = absolute_drawing_xml(
+        drawings,
+        paragraph_xml=paragraph_xml,
+        section_xml=section_xml,
+    )
+    root = etree.fromstring(converted[0].encode())
+    offset = root.find(f".//{{{WP}}}positionV/{{{WP}}}posOffset").text
+    assert int(offset) == 300000
 
 
 def _numbering_xml():

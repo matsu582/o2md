@@ -103,10 +103,29 @@ def _paragraph_layout(paragraph_xml, section_xml):
     text_width = page_width - margin_left - margin_right - left_indent - right_indent
     if text_width < 0:
         return None
+    snap_to_grid = True
+    if paragraph_properties is not None:
+        snap_element = paragraph_properties.find(_tag(W_NS, "snapToGrid"))
+        if snap_element is not None:
+            snap_to_grid = snap_element.get(_tag(W_NS, "val")) not in {
+                "0",
+                "false",
+                "off",
+            }
+    doc_grid = section_properties.find(_tag(W_NS, "docGrid"))
+    line_pitch = None
+    if (
+        doc_grid is not None
+        and doc_grid.get(_tag(W_NS, "type")) in {"lines", "lineAndChar"}
+    ):
+        line_pitch_twips = _twips_attribute(doc_grid, "linePitch")
+        if line_pitch_twips is not None and line_pitch_twips > 0:
+            line_pitch = line_pitch_twips * EMU_PER_TWIP
     return {
         "alignment": alignment,
         "left_indent": left_indent * EMU_PER_TWIP,
         "text_width": text_width * EMU_PER_TWIP,
+        "line_pitch": line_pitch if snap_to_grid else None,
     }
 
 
@@ -127,6 +146,20 @@ def _inline_horizontal_offset(image_width, layout):
     return max(0, offset)
 
 
+def _vertical_grid_gap(image_heights, layout):
+    line_pitch = layout.get("line_pitch") if layout else None
+    if not line_pitch or not image_heights:
+        return 0
+    image_height = max(image_heights)
+    remainder = image_height % line_pitch
+    if remainder == 0:
+        return 0
+    gap = (line_pitch - remainder) // 2
+    if gap > image_height:
+        return None
+    return gap
+
+
 def _set_margin_position(position, offset):
     position.set("relativeFrom", "margin")
     align = position.find(_tag(WP_NS, "align"))
@@ -139,7 +172,7 @@ def _set_margin_position(position, offset):
     pos_offset.text = str(offset)
 
 
-def _rewrite_shape_anchor(anchor, left_indent=0):
+def _rewrite_shape_anchor(anchor, left_indent=0, vertical_gap=0):
     extent = anchor.find(_tag(WP_NS, "extent"))
     position_h = anchor.find(_tag(WP_NS, "positionH"))
     position_v = anchor.find(_tag(WP_NS, "positionV"))
@@ -163,7 +196,7 @@ def _rewrite_shape_anchor(anchor, left_indent=0):
         offset = _position_offset(position_v)
         if offset is None:
             return False
-        _set_margin_position(position_v, offset)
+        _set_margin_position(position_v, offset - vertical_gap)
     elif vertical not in {"page", "margin"}:
         return False
 
@@ -246,6 +279,37 @@ def absolute_drawing_xml(
                 logger.warning("段落またはセクションの座標情報を取得できないため、従来配置へフォールバックします")
             return None
 
+    inline_heights = []
+    for drawing in parsed_drawings:
+        inline = drawing.find(f".//{_tag(WP_NS, 'inline')}")
+        if inline is None:
+            continue
+        extent = inline.find(_tag(WP_NS, "extent"))
+        image_height = (
+            int(extent.get("cy"))
+            if extent is not None and extent.get("cy", "").isdigit()
+            else None
+        )
+        if image_height is None:
+            if logger:
+                logger.warning("画像の高さを取得できないため、従来配置へフォールバックします")
+            return None
+        inline_heights.append(image_height)
+    vertical_gap = _vertical_grid_gap(inline_heights, layout)
+    if vertical_gap is None:
+        if logger:
+            logger.warning("行グリッド補正量が画像高を超えるため、従来配置へフォールバックします")
+        return None
+    if vertical_gap and logger:
+        line_pitch = layout["line_pitch"]
+        logger.debug(
+            "[DEBUG] 行グリッド補正: 画像高=%d EMU, linePitch=%d EMU, gap=%d EMU (%.3fpt)",
+            max(inline_heights),
+            line_pitch,
+            vertical_gap,
+            vertical_gap / 12700,
+        )
+
     converted = []
     next_doc_pr_id = 1
     for drawing in parsed_drawings:
@@ -289,7 +353,7 @@ def absolute_drawing_xml(
             next_doc_pr_id += 1
         elif anchor is not None:
             left_indent = layout["left_indent"] if layout is not None else 0
-            if not _rewrite_shape_anchor(anchor, left_indent):
+            if not _rewrite_shape_anchor(anchor, left_indent, vertical_gap):
                 if logger:
                     logger.warning("図形の座標情報を取得できないため、従来配置へフォールバックします")
                 return None
