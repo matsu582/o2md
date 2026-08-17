@@ -159,6 +159,51 @@ msgstr "Output both .md and .txt (plain text conversion)"
 msgid "MS Project変換開始: {file}"
 msgstr "Starting MS Project conversion: {file}"
 
+msgid "JVM起動完了: {jvm_path}"
+msgstr "JVM started: {jvm_path}"
+
+msgid "JVM初期化エラー: {error}"
+msgstr "JVM initialization error: {error}"
+
+msgid "日時フォーマットエラー: {error}"
+msgstr "Date formatting error: {error}"
+
+msgid "期間フォーマットエラー: {error}"
+msgstr "Duration formatting error: {error}"
+
+msgid "期間の日数換算に失敗: {error}"
+msgstr "Failed to convert duration to days: {error}"
+
+msgid "パーセント変換エラー: {error}"
+msgstr "Percentage conversion error: {error}"
+
+msgid "MPP読み込み: {file}"
+msgstr "Reading MPP: {file}"
+
+msgid "ファイルの読み込みに失敗: {file}"
+msgstr "Failed to read file: {file}"
+
+msgid "MPP読み込みエラー: {error}"
+msgstr "MPP reading error: {error}"
+
+msgid "プロジェクト情報抽出エラー: {error}"
+msgstr "Project information extraction error: {error}"
+
+msgid "依存関係抽出エラー: {error}"
+msgstr "Dependency extraction error: {error}"
+
+msgid "getPredecessorsエラー: {error}"
+msgstr "getPredecessors error: {error}"
+
+msgid "サマリー判定エラー: {error}"
+msgstr "Summary detection error: {error}"
+
+msgid "リソース抽出エラー: {error}"
+msgstr "Resource extraction error: {error}"
+
+msgid "getResourcesエラー: {error}"
+msgstr "getResources error: {error}"
+
 msgid "エラー: {ext} 形式のファイルを指定してください。"
 msgstr "Error: Please specify a {ext} file."
 
