@@ -34,8 +34,16 @@ class NoteManager:
                     name = targets.get(kind, conventional)
                     if name not in names:
                         continue
-                    data = package.read(name)
-                    root = safe_fromstring(data)
+                    try:
+                        root = safe_fromstring(package.read(name))
+                    except ET.ParseError as exc:
+                        logger.warning(
+                            "%sパートを読み込めないためスキップします: %s (%s)",
+                            kind,
+                            name,
+                            exc,
+                        )
+                        continue
                     for node in root:
                         if node.tag != QN("footnote") and node.tag != QN("endnote"):
                             continue
