@@ -29,10 +29,29 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any
 from PIL import Image
 import io
+from docx.oxml import parse_xml
+from docx.oxml.ns import qn
+from docx.table import Table
+from docx.text.paragraph import Paragraph
+from docx.text.run import Run
 
-from o2md.utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed
+from o2md.utils import get_libreoffice_path, is_libreoffice_available, is_libreoffice_installed, is_text_only
 from o2md.d2md_charts import extract_charts_from_docx
 from o2md.chart_utils import chart_data_to_markdown
+from o2md.d2md_fields import (
+    convert_paragraph as convert_field_paragraph,
+    normalize_markdown_url,
+)
+from o2md.d2md_notes import NoteManager
+from o2md.d2md_numbering import NumberingResolver
+from o2md.d2md_tables import render_table
+from o2md.d2md_composite import (
+    absolute_composite_paragraph_xml,
+    absolute_drawing_xml,
+    composite_paragraphs_xml,
+    paragraph_properties_xml,
+    section_properties_xml,
+)
 
 # 数式変換モジュール (オプション)
 try:
@@ -114,7 +133,10 @@ class WordToMarkdownConverter:
                 processed_docx = pre_process_docx(f)
             self.doc = Document(processed_docx)
         else:
-            self.doc = Document(word_file_path)
+            self.doc = self._load_document_with_optional_degradation(word_file_path)
+        self.note_manager = NoteManager(word_file_path)
+        self.hyperlink_targets = self._load_hyperlink_targets(word_file_path)
+        self.numbering_resolver = None
         self.base_name = Path(word_file_path).stem
         
         # 出力ディレクトリの設定
@@ -137,6 +159,7 @@ class WordToMarkdownConverter:
         self.processed_images = {}  # ハッシュベース重複検出用辞書
         self._emitted_plain_paragraphs = set()  # 本文として出力したテキスト（重複チェック用）
         self._shape_processed_paragraphs = set()  # 図形として処理済みの段落（テキスト出力スキップ用）
+        self._composite_skip_paragraphs = set()  # 合成済み図形の重複処理を防ぐ段落
         self._shape_texts_by_image = {}  # 画像ファイル名 -> 図形内テキストのマップ
         self._emitted_shape_texts = set()  # 図形処理時に出力したテキスト（重複チェック用）
         self.referenced_images = set()  # 実際に文書内で参照されている画像のrId
@@ -153,6 +176,87 @@ class WordToMarkdownConverter:
             self.output_format = 'png'
         
         logger.info(f"出力画像形式: {self.output_format.upper()}")
+
+    def _load_hyperlink_targets(self, word_file_path):
+        """document.xmlの外部ハイパーリンクrelationshipを読み込む。"""
+        try:
+            with zipfile.ZipFile(word_file_path) as package:
+                rels = package.read("word/_rels/document.xml.rels")
+            root = ET.fromstring(rels)
+        except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError):
+            return {}
+        targets = {}
+        for relation in root:
+            relation_id = relation.get("Id")
+            target = relation.get("Target")
+            if relation_id and target and relation.get("TargetMode") == "External":
+                targets[relation_id] = normalize_markdown_url(target)
+        return targets
+
+    def _load_document_with_optional_degradation(self, word_file_path):
+        """壊れた任意パートを除外してDOCX本文を読み込む。"""
+        try:
+            return Document(word_file_path)
+        except Exception as exc:
+            load_error = exc
+            logger.warning("DOCXの任意パートを除外して再読み込みします: %s", exc)
+        optional_prefixes = (
+            "word/numbering.xml",
+            "word/footnotes.xml",
+            "word/endnotes.xml",
+            "word/charts/",
+            "word/diagrams/",
+        )
+        try:
+            with zipfile.ZipFile(word_file_path) as source:
+                buffer = io.BytesIO()
+                with zipfile.ZipFile(buffer, "w") as target:
+                    for item in source.infolist():
+                        data = source.read(item.filename)
+                        if (
+                            item.filename.startswith(optional_prefixes)
+                            and item.filename.endswith(".xml")
+                        ):
+                            try:
+                                ET.fromstring(data)
+                            except ET.ParseError as part_error:
+                                logger.warning(
+                                    "DOCX任意パートをスキップします: %s (%s)",
+                                    item.filename,
+                                    part_error,
+                                )
+                                if item.filename.endswith("numbering.xml"):
+                                    data = (
+                                        b'<w:numbering xmlns:w="'
+                                        b'http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>'
+                                    )
+                                elif item.filename.endswith("footnotes.xml"):
+                                    data = (
+                                        b'<w:footnotes xmlns:w="'
+                                        b'http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>'
+                                    )
+                                elif item.filename.endswith("endnotes.xml"):
+                                    data = (
+                                        b'<w:endnotes xmlns:w="'
+                                        b'http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>'
+                                    )
+                                elif item.filename.startswith("word/charts/"):
+                                    data = (
+                                        b'<c:chartSpace xmlns:c="'
+                                        b'http://schemas.openxmlformats.org/drawingml/2006/chart"/>'
+                                    )
+                                elif item.filename.startswith("word/diagrams/"):
+                                    data = (
+                                        b'<dgm:diagram xmlns:dgm="'
+                                        b'http://schemas.openxmlformats.org/drawingml/2006/diagram"/>'
+                                    )
+                                else:
+                                    continue
+                        target.writestr(item, data)
+                buffer.seek(0)
+                return Document(buffer)
+        except (OSError, zipfile.BadZipFile, ET.ParseError) as fallback_error:
+            raise RuntimeError(f"DOCX本文の読み込みに失敗しました: {fallback_error}") from load_error
         
     def get_auto_generated_patterns(self) -> list:
         """このコンバータが自動付与する見出しの正規表現パターンを返す"""
@@ -172,7 +276,6 @@ class WordToMarkdownConverter:
         Returns:
             出力ファイルのパス（.mdまたは.txt）
         """
-        from o2md.utils import is_text_only
         print(_("Word文書変換開始: {file}").format(file=self.display_name))
         
         # 1. 見出し構造を解析（参照リンク生成のため）
@@ -194,6 +297,14 @@ class WordToMarkdownConverter:
         
         # 2.6. チャートデータを抽出してMarkdownテーブルとして出力
         self._process_document_charts()
+
+        note_definitions = self.note_manager.definitions(
+            text_only=is_text_only(),
+            renderer=self._render_note,
+        )
+        if note_definitions:
+            self.markdown_lines.append("")
+            self.markdown_lines.extend(note_definitions)
         
         # 3. コンテンツを構築
         markdown_content = "\n".join(self.markdown_lines)
@@ -233,6 +344,25 @@ class WordToMarkdownConverter:
         import shutil
         if os.path.exists(self.images_dir):
             shutil.rmtree(self.images_dir)
+
+    def _render_note(self, note_node) -> str:
+        """脚注内のブロックを本文と同じ変換処理でMarkdown化する。"""
+        note_root = parse_xml(ET.tostring(note_node, encoding="utf-8"))
+        lines = []
+        for child in note_root:
+            if child.tag.endswith("}p"):
+                before = self.markdown_lines
+                self.markdown_lines = []
+                self._convert_paragraph(Paragraph(child, self.doc._body))
+                lines.extend(self.markdown_lines)
+                self.markdown_lines = before
+            elif child.tag.endswith("}tbl"):
+                before = self.markdown_lines
+                self.markdown_lines = []
+                self._convert_table(Table(child, self.doc._body))
+                lines.extend(self.markdown_lines)
+                self.markdown_lines = before
+        return "\n".join(line for line in lines if line).strip()
     
     def _process_document_charts(self):
         """Word文書内のチャートデータを抽出してMarkdownテーブルとして出力する
@@ -399,16 +529,6 @@ class WordToMarkdownConverter:
             numId = numId_elem[0].get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')
             ilvl = int(ilvl_elem[0].get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')) if ilvl_elem else 0
             
-            # numbering_types辞書を使用して番号付けスタイルを取得
-            if hasattr(self, 'numbering_types') and numId in self.numbering_types:
-                numbering_info = self.numbering_types[numId]
-                if ilvl < len(numbering_info):
-                    level_info = numbering_info[ilvl]
-                    # 数値形式の場合のみ章番号として使用
-                    if level_info.get('numFmt') == 'decimal':
-                        # 実際の番号を計算（簡易実装）
-                        return str(ilvl + 1)  # レベルベースの簡易計算
-                        
             return None
             
         except Exception:
@@ -499,46 +619,81 @@ class WordToMarkdownConverter:
         previous_element_type = None
         heading_counter = 0
         total_headings = len(self.headings)
-        
-        for element in self.doc.element.body:
-            if element.tag.endswith('}p'):  # 段落
-                paragraph = self._find_paragraph_by_element(element)
-                if paragraph:
-                    # 図形処理を先に行う（図形が画像化された場合、段落を記録）
-                    shape_processed = self._process_paragraph_images(paragraph)
-                    
-                    # 図形として処理された段落はテキスト出力をスキップ
-                    if not shape_processed:
-                        self._convert_paragraph(paragraph)
-                    
-                    # 見出しかどうかを記録
-                    if self._is_heading(paragraph):
-                        if total_headings > 0:
-                            heading_counter += 1
-                            heading_text = paragraph.text.strip()
-                            print(_("セクション {current}/{total} を処理中: {name}").format(
-                                current=heading_counter, total=total_headings, name=heading_text))
-                        previous_element_type = 'heading'
-                    elif self._is_list_item(paragraph):
-                        previous_element_type = 'list'
+
+        block_wrappers = {
+            qn("w:smartTag"),
+            qn("w:sdt"),
+            qn("w:sdtContent"),
+            qn("w:ins"),
+            qn("w:del"),
+            qn("w:customXml"),
+            qn("w:moveFrom"),
+            qn("w:moveTo"),
+        }
+
+        def is_toc_wrapper(element):
+            if element.tag != qn("w:sdt"):
+                return False
+            gallery = element.find(f".//{qn('w:docPartGallery')}")
+            if gallery is not None and gallery.get(qn("w:val"), "").lower() == "table of contents":
+                return True
+            return any(
+                instr.text and instr.text.strip().upper().startswith("TOC")
+                for instr in element.iter(qn("w:instrText"))
+            )
+
+        def process_blocks(container):
+            nonlocal previous_element_type, heading_counter
+            for element in container:
+                if element.tag in block_wrappers:
+                    if is_toc_wrapper(element):
+                        continue
+                    process_blocks(element)
+                    continue
+                if element.tag.endswith('}p'):  # 段落
+                    paragraph = self._find_paragraph_by_element(element)
+                    if paragraph is None:
+                        paragraph = Paragraph(element, self.doc._body)
+                    if paragraph:
+                        # 図形処理を先に行う（図形が画像化された場合、段落を記録）
+                        shape_processed = self._process_paragraph_images(paragraph)
+
+                        # 図形として処理された段落はテキスト出力をスキップ
+                        if not shape_processed:
+                            self._convert_paragraph(paragraph)
+
+                        # 見出しかどうかを記録
+                        if self._is_heading(paragraph):
+                            if total_headings > 0:
+                                heading_counter += 1
+                                heading_text = paragraph.text.strip()
+                                print(_("セクション {current}/{total} を処理中: {name}").format(
+                                    current=heading_counter, total=total_headings, name=heading_text))
+                            previous_element_type = 'heading'
+                        elif self._is_list_item(paragraph):
+                            previous_element_type = 'list'
+                        else:
+                            previous_element_type = 'paragraph'
                     else:
-                        previous_element_type = 'paragraph'
-                else:
-                    # python-docx の paragraphs に含まれない段落（数式前処理で追加された段落など）
-                    # XML要素から直接テキストを抽出
-                    text = self._extract_text_from_xml_element(element)
-                    if text and text.strip():
-                        self.markdown_lines.append(text)
-                        self.markdown_lines.append("")
-                        previous_element_type = 'paragraph'
-            elif element.tag.endswith('}tbl'):  # 表
-                table = self._find_table_by_element(element)
-                if table:
-                    # 見出しやリスト項目の直後にテーブルが来る場合は空行を挿入
-                    if previous_element_type in ['heading', 'list']:
-                        self.markdown_lines.append("")
-                    self._convert_table(table)
-                    previous_element_type = 'table'
+                        # python-docx の paragraphs に含まれない段落（数式前処理で追加された段落など）
+                        # XML要素から直接テキストを抽出
+                        text = self._extract_text_from_xml_element(element)
+                        if text and text.strip():
+                            self.markdown_lines.append(text)
+                            self.markdown_lines.append("")
+                            previous_element_type = 'paragraph'
+                elif element.tag.endswith('}tbl'):  # 表
+                    table = self._find_table_by_element(element)
+                    if table is None:
+                        table = Table(element, self.doc._body)
+                    if table:
+                        # 見出しやリスト項目の直後にテーブルが来る場合は空行を挿入
+                        if previous_element_type in ['heading', 'list']:
+                            self.markdown_lines.append("")
+                        self._convert_table(table)
+                        previous_element_type = 'table'
+
+        process_blocks(self.doc.element.body)
         
         # 残りの画像を処理
         self._process_images()
@@ -586,6 +741,30 @@ class WordToMarkdownConverter:
         Returns:
             str: テキスト（フォーマット情報付き）
         """
+        has_special_content = False
+        for element in paragraph._element.iter():
+            local_name = element.tag.rsplit("}", 1)[-1]
+            if local_name == "instrText" and element.text:
+                has_special_content = True
+                break
+            if local_name in {
+                "fldChar",
+                "fldSimple",
+                "footnoteReference",
+                "endnoteReference",
+                "hyperlink",
+            }:
+                has_special_content = True
+                break
+        if has_special_content:
+            return convert_field_paragraph(
+                paragraph,
+                formatter=lambda value, element: self._format_field_text(
+                    paragraph, value, element, preserve_format
+                ),
+                reference_handler=self.note_manager.reference,
+                hyperlink_resolver=self.hyperlink_targets.get,
+            )
         text_parts = []
         for run in paragraph.runs:
             try:
@@ -601,6 +780,18 @@ class WordToMarkdownConverter:
                     text_parts.append(run.text)
         
         return ''.join(text_parts)
+
+    def _format_field_text(self, paragraph, text, element, preserve_format=True):
+        """field内のテキストに既存のrun装飾を適用する。"""
+        if not preserve_format or element is None or not element.tag.endswith("}r"):
+            return text
+        try:
+            if element.xpath(".//w:vanish"):
+                return ""
+            return self._apply_run_formatting(Run(element, paragraph), text)
+        except Exception as exc:
+            logger.warning("field内runの装飾処理に失敗しました: %s", exc)
+            return text
     
     def _apply_run_formatting(self, run, text: str) -> str:
         """Run のフォーマット情報を Markdown 記法に変換
@@ -899,16 +1090,12 @@ class WordToMarkdownConverter:
             numId = numId_elem[0].get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val') if numId_elem else '0'
             ilvl = int(ilvl_elem[0].get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')) if ilvl_elem else 0
             
-            # numbering_types辞書を使用して正確に判定
-            if hasattr(self, 'numbering_types') and numId in self.numbering_types:
-                numbering_info = self.numbering_types[numId]
-                is_bullet = numbering_info['type'] == 'bullet'
-                
-                logger.debug(f"[DEBUG] numId={numId} -> type={numbering_info['type']}, format='{numbering_info['format']}'")
+            marker = self.numbering_resolver.marker(paragraph) if self.numbering_resolver else None
+            if marker:
+                ilvl, label, is_bullet = marker
             else:
-                # フォールバック：従来の判定方法
                 is_bullet = self._is_bullet_numbering(numId)
-                logger.debug(f"[DEBUG] numId={numId} -> フォールバック判定: {'bullet' if is_bullet else 'number'}")
+                label = "1."
             
             if is_bullet:
                 # 箇条書きリスト
@@ -919,7 +1106,7 @@ class WordToMarkdownConverter:
                 # 段落番号（番号付きリスト）
                 indent = "  " * ilvl  # インデントレベル対応
                 text = re.sub(r'^\d+\.\s*', '', text)
-                return f"{indent}1. {text}"
+                return f"{indent}{label} {text}"
         
         # フォールバック：テキストパターンで判定
         if re.match(r'^\d+\.', text):
@@ -974,9 +1161,6 @@ class WordToMarkdownConverter:
     def _analyze_numbering_definitions(self):
         """numbering.xmlから番号付け定義を解析"""
         try:
-            # numbering_types辞書を初期化
-            self.numbering_types = {}
-            
             # Word文書からnumbering.xmlを取得
             numbering_part = None
             for rel in self.doc.part.rels.values():
@@ -985,67 +1169,21 @@ class WordToMarkdownConverter:
                     break
             
             if numbering_part:
-                numbering_xml = numbering_part.blob.decode('utf-8')
-                logger.debug(f"[DEBUG] numbering.xml の一部: {numbering_xml[:500]}")
-                
-                # 各numIdのlvlText（表示形式）を解析
-                import xml.etree.ElementTree as ET
-                root = ET.fromstring(numbering_xml)
-                
-                # numId -> abstractNumId のマッピングを作成
-                num_to_abstract = {}
-                for num in root.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}num'):
-                    num_id = num.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}numId')
-                    abstract_num_id = num.find('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNumId')
-                    if abstract_num_id is not None:
-                        abstract_id = abstract_num_id.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')
-                        num_to_abstract[num_id] = abstract_id
-                        logger.debug(f"[DEBUG] numId={num_id} -> abstractNumId={abstract_id}")
-                
-                # abstractNum定義から実際の番号形式を解析
-                for abstract_num in root.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNum'):
-                    abstract_id = abstract_num.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNumId')
-                    
-                    # レベル0の番号形式を取得（名前空間を考慮）
-                    lvl_elements = abstract_num.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}lvl')
-                    lvl_element = None
-                    
-                    # ilvl="0"のlvl要素を探す
-                    for lvl in lvl_elements:
-                        ilvl_val = lvl.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ilvl')
-                        if ilvl_val == '0':
-                            lvl_element = lvl
-                            break
-                    
-                    if lvl_element is not None:
-                        lvl_text = lvl_element.find('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}lvlText')
-                        num_fmt = lvl_element.find('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}numFmt')
-                        
-                        format_text = lvl_text.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val') if lvl_text is not None else ''
-                        format_type = num_fmt.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val') if num_fmt is not None else ''
-                        
-                        # 番号形式を判定
-                        is_bullet = False
-                        if format_type == 'bullet' or format_text in ['·', '•', '-', '○', '■', 'l']:
-                            is_bullet = True
-                        elif '%1' in format_text and format_type in ['decimal', 'lowerLetter', 'upperLetter']:
-                            is_bullet = False
-                        
-                        # 該当するnumIdに情報を保存
-                        for num_id, mapped_abstract_id in num_to_abstract.items():
-                            if mapped_abstract_id == abstract_id:
-                                self.numbering_types[num_id] = {
-                                    'type': 'bullet' if is_bullet else 'number',
-                                    'format': format_text,
-                                    'format_type': format_type,
-                                    'abstract_id': abstract_id
-                                }
-                                logger.debug(f"[DEBUG] numId={num_id}: type={'bullet' if is_bullet else 'number'}, format='{format_text}', format_type='{format_type}'")
+                numbering_xml = numbering_part.blob
+                self.numbering_resolver = NumberingResolver(
+                    numbering_xml,
+                    getattr(self.doc.styles, "_element", None),
+                )
+                if not self.numbering_resolver.valid:
+                    logger.warning("numbering.xmlの解析に失敗したため、従来の番号判定を使用します")
+                return
+            else:
+                logger.warning("numbering.xmlが見つからないため、従来の番号判定を使用します")
+                self.numbering_resolver = None
                         
         except Exception as e:
-            logger.debug(f"[DEBUG] numbering解析エラー: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.warning("numbering.xmlの解析でエラーが発生しました。従来の番号判定を使用します: %s", e)
+            self.numbering_resolver = None
     
     def _convert_table(self, table):
         """表を変換"""
@@ -1060,27 +1198,9 @@ class WordToMarkdownConverter:
             self.markdown_lines.append("")
             return
         
-        # ヘッダー行
-        header_row = table.rows[0]
-        header_cells = [self._process_table_cell_text(cell) for cell in header_row.cells]
-        
-        # Markdownテーブル形式で出力
-        self.markdown_lines.append("| " + " | ".join(header_cells) + " |")
-        self.markdown_lines.append("| " + " | ".join(["---"] * len(header_cells)) + " |")
-        
-        # データ行
-        for row in table.rows[1:]:
-            cells = [self._process_table_cell_text(cell) for cell in row.cells]
-            # セル数を調整
-            while len(cells) < len(header_cells):
-                cells.append("")
-            cells = cells[:len(header_cells)]
-            
-            self.markdown_lines.append("| " + " | ".join(cells) + " |")
-        
-        # 表の後に空行を追加（次の要素との間隔確保）
+        lines = render_table(table, self._process_table_cell_text)
+        self.markdown_lines.extend(lines)
         self.markdown_lines.append("")
-        
         self.markdown_lines.append("")
     
     def _process_table_cell_text(self, cell):
@@ -1094,12 +1214,13 @@ class WordToMarkdownConverter:
         # 段落ごとのテキストを取得
         paragraph_texts = []
         for paragraph in paragraphs:
-            text = paragraph.text.strip()
+            text = self._get_paragraph_text_without_hidden(paragraph).strip()
             if text:  # 空でない段落のみを処理
                 paragraph_texts.append(text)
         
         # 段落間を<br>で結合
         cell_text = "<br>".join(paragraph_texts)
+        cell_text = cell_text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
         
         # 章番号のリンク変換を適用
         cell_text = self._convert_chapter_references(cell_text)
@@ -1130,6 +1251,9 @@ class WordToMarkdownConverter:
         Returns:
             bool: 図形として処理された場合はTrue（テキスト出力をスキップすべき）
         """
+        if paragraph._p in self._composite_skip_paragraphs:
+            return True
+
         # Word図形キャンバスがある場合は複合図形として処理
         # 処理が行われた場合のみ早期終了、そうでなければ通常の画像処理にフォールバック
         if self._has_word_processing_canvas(paragraph):
@@ -1174,7 +1298,9 @@ class WordToMarkdownConverter:
         # 画像とテキストボックスが両方ある場合、vector_compositeとして処理
         if has_bitmap_image and has_textbox:
             logger.debug(f"[DEBUG] 画像+テキストボックス混在段落を検出、vector_compositeとして処理")
-            if self._process_mixed_drawings_as_vector(all_drawings, all_shape_texts):
+            if self._process_mixed_drawings_as_vector(
+                all_drawings, all_shape_texts, [paragraph]
+            ):
                 return True  # vector_compositeとして処理された
         
         # 通常の画像処理（テキストボックスがない場合）
@@ -1429,7 +1555,9 @@ class WordToMarkdownConverter:
             traceback.print_exc()
             return None
     
-    def _process_mixed_drawings_as_vector(self, drawing_elements, shape_texts):
+    def _process_mixed_drawings_as_vector(
+        self, drawing_elements, shape_texts, paragraphs=None
+    ):
         """画像とテキストボックスが混在するdrawing要素をvector_compositeとして処理
         
         Args:
@@ -1443,7 +1571,9 @@ class WordToMarkdownConverter:
             logger.info(f"画像+テキストボックス混在図形を処理中...")
             
             # 一時的なWord文書を作成して複数のdrawing要素を含める
-            temp_doc_path = self._create_canvas_document(None, drawing_elements)
+            temp_doc_path = self._create_canvas_document(
+                None, drawing_elements, paragraphs
+            )
             if not temp_doc_path:
                 return False
             
@@ -2019,7 +2149,8 @@ class WordToMarkdownConverter:
         段落単位で図形を分類し、以下のルールで処理:
         1. wpg/wpcがある段落では、グループのみを処理（個別wspは無視）
         2. wspのみの段落では、すべてのdrawingを1つの画像にまとめる
-        3. pic（通常の画像）がある段落では、段落グループ化をスキップ
+        3. pic（通常の画像）と図形が同じ段落にある場合は合成する
+        4. 図形だけの段落に続く画像段落は、位置とサイズが安全に対応する場合だけ合成する
         
         Returns:
             bool: 処理が行われた場合はTrue、スキップした場合はFalse
@@ -2065,6 +2196,19 @@ class WordToMarkdownConverter:
                     has_picture = True
                     logger.debug("[DEBUG] 段落内にpic（通常の画像）を検出")
             
+            # 画像とキャンバス/図形が混在する場合は、全drawingを合成対象にする。
+            # ここを先に処理しないと、背景画像または前景図形のどちらかが失われる。
+            if has_picture and (canvas_drawings or shape_only_drawings):
+                shape_texts = self._extract_shape_texts_from_drawing(drawings)
+                if self._process_mixed_drawings_as_vector(
+                    drawings, shape_texts, [paragraph]
+                ):
+                    return True
+                logger.warning(
+                    "画像と図形の合成に失敗したため、画像のみのフォールバックへ移行します"
+                )
+                return False
+
             # wpc/wpgがある場合は、それらのみを処理（個別wspは無視）
             if canvas_drawings:
                 processed = False
@@ -2077,14 +2221,26 @@ class WordToMarkdownConverter:
                         logger.error("ベクター処理失敗")
                 return processed
             
-            # pic（通常の画像）がある段落では、段落グループ化をスキップ
-            # 通常の画像処理ロジックに任せる
-            if has_picture:
-                logger.info("段落内にpic（通常の画像）があるため、段落グループ化をスキップ")
-                return False
-            
             # wspのみの段落では、すべてのdrawingを1つの画像にまとめる
             if shape_only_drawings:
+                adjacent_picture = self._find_safe_adjacent_picture(paragraph)
+                if adjacent_picture is not None:
+                    picture_paragraph, picture_drawings = adjacent_picture
+                    combined_drawings = [*drawings, *picture_drawings]
+                    shape_texts = self._extract_shape_texts_from_drawing(
+                        combined_drawings
+                    )
+                    if self._process_mixed_drawings_as_vector(
+                        combined_drawings,
+                        shape_texts,
+                        [paragraph, picture_paragraph],
+                    ):
+                        self._composite_skip_paragraphs.add(picture_paragraph._p)
+                        return True
+                    logger.warning(
+                        "隣接段落との図形合成に失敗したため、図形のみのフォールバックへ移行します"
+                    )
+
                 if len(shape_only_drawings) == 1:
                     # 1つだけの場合は従来通り処理
                     logger.info("単一のWord Processing Shape として処理")
@@ -2109,6 +2265,66 @@ class WordToMarkdownConverter:
         except Exception as e:
             logger.error(f"複合図形処理エラー: {e}")
             return False
+
+    def _find_safe_adjacent_picture(self, paragraph):
+        """図形段落に対応する隣接画像段落を保守的に探す。
+
+        Wordでは同じ図のアンカー図形と画像が別段落に保存されることがある。
+        直後の空段落が画像だけを持ち、図形のサイズが画像内に収まる場合だけ
+        同じ図とみなす。本文や別の図形をまたぐ結合は行わない。
+        """
+        if paragraph.text.strip():
+            return None
+
+        next_element = paragraph._p.getnext()
+        if next_element is None or not next_element.tag.endswith("}p"):
+            return None
+
+        candidate = self._find_paragraph_by_element(next_element)
+        if candidate is None or candidate.text.strip():
+            return None
+
+        candidate_drawings = candidate._element.xpath(".//w:drawing")
+        if not candidate_drawings:
+            return None
+        if any(
+            drawing.xpath('.//*[local-name()="wpg"]')
+            or drawing.xpath('.//*[local-name()="wpc"]')
+            for drawing in candidate_drawings
+        ):
+            return None
+        picture_drawings = [
+            drawing
+            for drawing in candidate_drawings
+            if drawing.xpath('.//*[local-name()="pic"]')
+        ]
+        if len(picture_drawings) != 1:
+            return None
+
+        shape_drawings = paragraph._element.xpath(".//w:drawing")
+        if len(shape_drawings) != 1:
+            return None
+        shape_extent = self._drawing_extent(shape_drawings[0], "anchor")
+        picture_extent = self._drawing_extent(picture_drawings[0], "inline")
+        if shape_extent is None or picture_extent is None:
+            return None
+        if shape_extent[0] > picture_extent[0] or shape_extent[1] > picture_extent[1]:
+            return None
+
+        return candidate, candidate_drawings
+
+    @staticmethod
+    def _drawing_extent(drawing, drawing_type):
+        """drawingのwp:extentをEMU単位の(width, height)で返す。"""
+        extents = drawing.xpath(
+            f'.//*[local-name()="{drawing_type}"]/*[local-name()="extent"]'
+        )
+        if not extents:
+            return None
+        try:
+            return int(extents[0].get("cx")), int(extents[0].get("cy"))
+        except (TypeError, ValueError):
+            return None
     
     def _process_shape_as_vector(self, shape_element, drawing_element):
         """個別のWord図形をベクター画像として処理"""
@@ -2433,7 +2649,9 @@ class WordToMarkdownConverter:
             logger.debug(f"[DEBUG] テキスト色変換エラー: {e}")
             return ET.tostring(drawing_element, encoding='unicode')
     
-    def _create_canvas_document(self, canvas_element, drawing_elements):
+    def _create_canvas_document(
+        self, canvas_element, drawing_elements, paragraphs=None
+    ):
         """キャンバス要素のみを含む一時Word文書を作成
         
         Args:
@@ -2478,6 +2696,48 @@ class WordToMarkdownConverter:
                 converted_drawings.append(converted_xml)
             drawings_xml = "".join(converted_drawings)
             logger.debug(f"[DEBUG] Drawing XML長: {len(drawings_xml)}")
+
+            layout_paragraph_xml = (
+                paragraph_properties_xml(paragraphs[0])
+                if paragraphs and len(paragraphs) == 1
+                else ""
+            )
+            layout_section_xml = (
+                section_properties_xml(self.doc)
+                if paragraphs and len(paragraphs) == 1
+                else ""
+            )
+            absolute_drawings = absolute_drawing_xml(
+                converted_drawings,
+                logger,
+                layout_paragraph_xml,
+                layout_section_xml,
+            )
+            if absolute_drawings is not None and (not paragraphs or len(paragraphs) == 1):
+                body_xml = absolute_composite_paragraph_xml(absolute_drawings)
+                section_xml = section_properties_xml(self.doc)
+                logger.debug("[DEBUG] 合成図形を余白基準の絶対配置で構成")
+            elif paragraphs:
+                drawing_counts = [
+                    len(paragraph._element.xpath(".//w:drawing"))
+                    for paragraph in paragraphs
+                ]
+                drawing_groups = []
+                offset = 0
+                for count in drawing_counts:
+                    drawing_groups.append(
+                        converted_drawings[offset : offset + count]
+                    )
+                    offset += count
+                body_xml = composite_paragraphs_xml(paragraphs, drawing_groups)
+                section_xml = section_properties_xml(self.doc)
+            else:
+                body_xml = f"<w:p><w:r>{drawings_xml}</w:r></w:p>"
+                section_xml = (
+                    '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
+                    '<w:pgMar w:top="1440" w:right="1440" '
+                    'w:bottom="1440" w:left="1440"/></w:sectPr>'
+                )
             
             # より適切なWord文書XMLを作成
             doc_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -2491,15 +2751,8 @@ class WordToMarkdownConverter:
             xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"
             xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
     <w:body>
-        <w:p>
-            <w:r>
-                {drawings_xml}
-            </w:r>
-        </w:p>
-        <w:sectPr>
-            <w:pgSz w:w="11906" w:h="16838"/>
-            <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>
-        </w:sectPr>
+        {body_xml}
+        {section_xml}
     </w:body>
 </w:document>'''
 
@@ -3401,4 +3654,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

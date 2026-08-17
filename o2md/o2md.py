@@ -64,6 +64,7 @@ import argparse
 from pathlib import Path
 
 from o2md.i18n import _, setup_i18n
+from o2md.mspdi import is_mspdi_file
 
 # 各変換クラスをインポート
 try:
@@ -334,6 +335,8 @@ def detect_file_type(file_path: str) -> str:
         return 'ichitaro'
     elif file_path_lower.endswith(('.mpp', '.mpt', '.mpx')):
         return 'msproject'
+    elif file_path_lower.endswith('.xml') and is_mspdi_file(file_path):
+        return 'msproject'
     elif file_path_lower.endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp')):
         return 'image'
     else:
@@ -368,7 +371,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
     if file_type == 'unknown':
         raise ValueError(
             _("サポートされていないファイル形式です: {file}").format(file=file_path) + "\n"
-            + _("対応形式: {formats}").format(formats=".xlsx, .xls, .docx, .doc, .pptx, .ppt, .pdf, .jtd, .jtt, .mpp, .mpt, .mpx, .jpg, .jpeg, .png, .gif, .bmp, .tiff, .tif, .webp")
+            + _("対応形式: {formats}").format(formats=".xlsx, .xls, .docx, .doc, .pptx, .ppt, .pdf, .jtd, .jtt, .mpp, .mpt, .mpx, .xml (MSPDI), .jpg, .jpeg, .png, .gif, .bmp, .tiff, .tif, .webp")
         )
     
     print(_("ファイルタイプを検出: {file_type}").format(file_type=file_type))
@@ -574,15 +577,23 @@ def collect_target_files(folder_path: str, recursive: bool = False) -> list:
     """
     target_files = []
     folder = Path(folder_path).resolve()
+
+    def is_target(filename: str) -> bool:
+        """通常拡張子またはMSPDI内容から対象ファイルか判定する。"""
+        if filename.lower().endswith(SUPPORTED_EXTENSIONS):
+            return True
+        return filename.lower().endswith(".xml") and detect_file_type(filename) == "msproject"
+
     if recursive:
         for root, _dirs, files in os.walk(folder):
             for fname in files:
-                if fname.lower().endswith(SUPPORTED_EXTENSIONS):
-                    target_files.append(os.path.join(root, fname))
+                fpath = os.path.join(root, fname)
+                if is_target(fpath):
+                    target_files.append(fpath)
     else:
         for fname in os.listdir(folder):
             fpath = os.path.join(folder, fname)
-            if os.path.isfile(fpath) and fname.lower().endswith(SUPPORTED_EXTENSIONS):
+            if os.path.isfile(fpath) and is_target(fpath):
                 target_files.append(fpath)
     target_files.sort()
     return target_files

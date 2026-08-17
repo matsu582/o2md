@@ -249,6 +249,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         total_sheets = len(visible_sheets)
         print(_("総シート数: {total_sheets}").format(total_sheets=total_sheets))
         sheet_idx = 0
+        converted_sheets = 0
         for sheet_name in self.workbook.sheetnames:
             try:
                 sheet = self.workbook[sheet_name]
@@ -261,11 +262,14 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 sheet_idx += 1
                 print(_("シート {current}/{total} を処理中: {name}").format(current=sheet_idx, total=total_sheets, name=sheet_name))
                 self._convert_sheet(sheet)
+                converted_sheets += 1
             except Exception as e:
                 logger.warning(f"シート処理中にエラーが発生しました: {sheet_name} -> {e}")
                 import traceback
                 traceback.print_exc()
                 continue
+        if total_sheets and not converted_sheets:
+            raise RuntimeError(_("すべてのシートの変換に失敗しました"))
 
         content = "\n".join(str(x) for x in self.markdown_lines)
 
