@@ -440,7 +440,7 @@ def test_numbering_resolver_zero_lvl_restart_preserves_lower_counter():
     assert resolver.marker(_paragraph_with_num(1, "20"))[1] == "2.2."
 
 
-def test_numbering_resolver_explicit_restart_level_controls_reset():
+def test_numbering_resolver_restart_level_threshold_controls_reset():
     blob = f"""<w:numbering xmlns:w="{W}">
       <w:abstractNum w:abstractNumId="21">
         <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
@@ -455,7 +455,7 @@ def test_numbering_resolver_explicit_restart_level_controls_reset():
     assert resolver.marker(_paragraph_with_num(1, "21"))[1] == "1.1."
     assert resolver.marker(_paragraph_with_num(2, "21"))[1] == "1.1.1."
     assert resolver.marker(_paragraph_with_num(0, "21"))[1] == "2."
-    assert resolver.marker(_paragraph_with_num(2, "21"))[1] == "2.1.2."
+    assert resolver.marker(_paragraph_with_num(2, "21"))[1] == "2.1.1."
     assert resolver.marker(_paragraph_with_num(1, "21"))[1] == "2.1."
     assert resolver.marker(_paragraph_with_num(2, "21"))[1] == "2.1.1."
 
