@@ -11,11 +11,15 @@ Gradle/Maven コマンド実行に依存しない Pure Python 実装。
 
 import os
 import hashlib
+import logging
 import stat
 import time
 import urllib.request
 import urllib.error
 from pathlib import Path
+
+
+logger = logging.getLogger(__name__)
 
 
 # MPXJ 13.5.1 が必要とする JAR と Maven Central URL
@@ -133,17 +137,36 @@ def get_jar_cache_dir() -> Path:
     JARのSHA-256検証を組み合わせてキャッシュを保護する。
     """
     if os.name == "nt":
-        base = (
-            os.environ.get("LOCALAPPDATA")
-            or os.environ.get("USERPROFILE")
-        )
-        if not base:
-            base = str(Path.home())
-        user_dir = Path(base) / "o2md" / "libs"
-        user_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if not _is_safe_cache_dir(user_dir):
-            raise RuntimeError(f"JARキャッシュディレクトリを安全に用意できません: {user_dir}")
-        return user_dir
+        candidates = []
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            candidates.append(local_app_data)
+        profile = os.environ.get("USERPROFILE")
+        if not profile:
+            try:
+                profile = str(Path.home())
+            except OSError:
+                profile = None
+        if profile and profile not in candidates:
+            candidates.append(profile)
+        for base in candidates:
+            user_dir = Path(base) / "o2md" / "libs"
+            try:
+                user_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            except OSError as exc:
+                logger.warning(
+                    "WindowsのJARキャッシュを作成できないため次の候補へ移ります: %s (%s)",
+                    user_dir,
+                    exc,
+                )
+                continue
+            if _is_safe_cache_dir(user_dir):
+                return user_dir
+            logger.warning(
+                "WindowsのJARキャッシュ先が安全性検査に通らないため次の候補へ移ります: %s",
+                user_dir,
+            )
+        raise RuntimeError("JARキャッシュディレクトリを安全に用意できません")
 
     package_dir = Path(__file__).parent / "libs"
     try:

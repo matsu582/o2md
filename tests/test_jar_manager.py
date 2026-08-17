@@ -29,6 +29,21 @@ def test_windows_cache_dir_uses_local_appdata(tmp_path, monkeypatch):
     assert cache_dir != package_dir
 
 
+def test_windows_cache_dir_falls_back_when_local_appdata_is_outside_profile(
+    tmp_path, monkeypatch
+):
+    profile_dir = tmp_path / "profile"
+    local_app_data = tmp_path / "redirected-local-appdata"
+    monkeypatch.setattr(jar_manager, "Path", PosixPath)
+    monkeypatch.setattr(jar_manager.os, "name", "nt")
+    monkeypatch.setenv("USERPROFILE", str(profile_dir))
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+
+    cache_dir = jar_manager.get_jar_cache_dir()
+
+    assert cache_dir == profile_dir / "o2md" / "libs"
+
+
 def test_posix_cache_dir_rejects_group_writable_directory(tmp_path, monkeypatch):
     path = tmp_path / "libs"
     path.mkdir()
