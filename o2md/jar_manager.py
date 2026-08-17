@@ -101,6 +101,10 @@ def _is_safe_cache_dir(path: Path) -> bool:
     """キャッシュ先が他ユーザから書き換えられない実ディレクトリか判定する。"""
     if path.is_symlink() or not path.is_dir():
         return False
+    if os.name == "nt":
+        # WindowsのCPythonはACLをPOSIXのモードビットへ反映しないため、
+        # モード値ではなく実ディレクトリとリンクの検査だけを行う。
+        return True
     info = path.stat()
     if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
         return False

@@ -5,6 +5,7 @@ import logging
 import re
 import xml.etree.ElementTree as ET
 
+from o2md.xml_safe import fromstring as safe_fromstring
 
 logger = logging.getLogger(__name__)
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -88,7 +89,6 @@ class NumberingResolver:
         self.levels = {}
         self.instances = {}
         self.counters = {}
-        self.restart_seen = {}
         self.style_root = style_root
         if blob:
             try:
@@ -98,7 +98,7 @@ class NumberingResolver:
                 logger.warning("numbering.xmlを読み込めません。従来の判定へ退避します: %s", exc)
 
     def _parse(self, blob: bytes):
-        root = ET.fromstring(blob)
+        root = safe_fromstring(blob)
         abstracts = {}
         for abstract in root.findall(f".//{QN('abstractNum')}"):
             abstract_id = _value(abstract, "abstractNumId")
@@ -180,14 +180,13 @@ class NumberingResolver:
             return None
         definition = levels.get(ilvl, LevelDefinition(level_text=f"%{ilvl + 1}."))
         state = self.counters.setdefault(num_id, [0] * 9)
-        seen = self.restart_seen.setdefault(num_id, [None] * 9)
-        if definition.restart is not None and definition.restart < ilvl:
-            higher_count = state[definition.restart]
-            if seen[ilvl] is not None and seen[ilvl] != higher_count:
-                state[ilvl] = 0
-            seen[ilvl] = higher_count
         for index in range(ilvl + 1, 9):
-            state[index] = 0
+            lower_definition = levels.get(index)
+            restart_level = (
+                lower_definition.restart if lower_definition is not None else None
+            )
+            if restart_level is None or restart_level == ilvl + 1:
+                state[index] = 0
         state[ilvl] = max(definition.start, state[ilvl] + 1)
         values = {
             index + 1: format_number(

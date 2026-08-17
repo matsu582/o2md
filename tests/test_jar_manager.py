@@ -1,10 +1,31 @@
 """MPXJ JAR管理の回帰テスト。"""
 
 import hashlib
+from pathlib import PosixPath
 
 import pytest
 
 from o2md import jar_manager
+
+
+def test_windows_cache_dir_does_not_reject_mode_bits(tmp_path, monkeypatch):
+    package_dir = tmp_path / "package" / "libs"
+    package_dir.mkdir(parents=True)
+    package_dir.chmod(0o777)
+    monkeypatch.setattr(jar_manager, "__file__", str(tmp_path / "package" / "jar_manager.py"))
+    monkeypatch.setattr(jar_manager, "Path", PosixPath)
+    monkeypatch.setattr(jar_manager.os, "name", "nt")
+
+    assert jar_manager.get_jar_cache_dir() == package_dir
+
+
+def test_posix_cache_dir_rejects_group_writable_directory(tmp_path, monkeypatch):
+    path = tmp_path / "libs"
+    path.mkdir()
+    path.chmod(0o775)
+    monkeypatch.setattr(jar_manager.os, "name", "posix")
+
+    assert not jar_manager._is_safe_cache_dir(path)
 
 
 def test_jar_hash_mismatch_is_redownloaded_and_unexpected_jar_excluded(

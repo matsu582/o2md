@@ -159,6 +159,51 @@ msgstr ".mdと.txtの両方を出力（プレーンテキスト変換）"
 msgid "MS Project変換開始: {file}"
 msgstr "MS Project変換開始: {file}"
 
+msgid "JVM起動完了: {jvm_path}"
+msgstr "JVM起動完了: {jvm_path}"
+
+msgid "JVM初期化エラー: {error}"
+msgstr "JVM初期化エラー: {error}"
+
+msgid "日時フォーマットエラー: {error}"
+msgstr "日時フォーマットエラー: {error}"
+
+msgid "期間フォーマットエラー: {error}"
+msgstr "期間フォーマットエラー: {error}"
+
+msgid "期間の日数換算に失敗: {error}"
+msgstr "期間の日数換算に失敗: {error}"
+
+msgid "パーセント変換エラー: {error}"
+msgstr "パーセント変換エラー: {error}"
+
+msgid "MPP読み込み: {file}"
+msgstr "MPP読み込み: {file}"
+
+msgid "ファイルの読み込みに失敗: {file}"
+msgstr "ファイルの読み込みに失敗: {file}"
+
+msgid "MPP読み込みエラー: {error}"
+msgstr "MPP読み込みエラー: {error}"
+
+msgid "プロジェクト情報抽出エラー: {error}"
+msgstr "プロジェクト情報抽出エラー: {error}"
+
+msgid "依存関係抽出エラー: {error}"
+msgstr "依存関係抽出エラー: {error}"
+
+msgid "getPredecessorsエラー: {error}"
+msgstr "getPredecessorsエラー: {error}"
+
+msgid "サマリー判定エラー: {error}"
+msgstr "サマリー判定エラー: {error}"
+
+msgid "リソース抽出エラー: {error}"
+msgstr "リソース抽出エラー: {error}"
+
+msgid "getResourcesエラー: {error}"
+msgstr "getResourcesエラー: {error}"
+
 msgid "エラー: {ext} 形式のファイルを指定してください。"
 msgstr "エラー: {ext} 形式のファイルを指定してください。"
 

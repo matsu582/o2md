@@ -3,6 +3,7 @@
 import xml.etree.ElementTree as ET
 
 from docx.oxml.ns import qn
+from o2md.xml_safe import fromstring as safe_fromstring
 
 
 WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
@@ -32,14 +33,14 @@ def _parse_fragment(xml_text):
     if not xml_text:
         return None
     try:
-        return ET.fromstring(xml_text)
+        return safe_fromstring(xml_text)
     except ET.ParseError:
         if xml_text.lstrip().startswith("<w:"):
             try:
                 start = xml_text.find(">")
                 if start < 0:
                     return None
-                return ET.fromstring(
+                return safe_fromstring(
                     xml_text[:start]
                     + f' xmlns:w="{W_NS}"'
                     + xml_text[start:]
@@ -262,7 +263,7 @@ def absolute_drawing_xml(
     used_doc_pr_ids = set()
     for drawing_xml in drawing_xmls:
         try:
-            drawing = ET.fromstring(drawing_xml)
+            drawing = safe_fromstring(drawing_xml)
         except ET.ParseError:
             if logger:
                 logger.warning("合成図形のXMLを解析できないため、従来配置へフォールバックします")

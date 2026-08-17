@@ -5,6 +5,7 @@ import posixpath
 import zipfile
 import xml.etree.ElementTree as ET
 
+from o2md.xml_safe import fromstring as safe_fromstring
 
 logger = logging.getLogger(__name__)
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -34,14 +35,7 @@ class NoteManager:
                     if name not in names:
                         continue
                     data = package.read(name)
-                    if b"<!DOCTYPE" in data.upper():
-                        logger.warning(
-                            "DTDを含む%sパートをスキップします: %s",
-                            kind,
-                            name,
-                        )
-                        continue
-                    root = ET.fromstring(data)
+                    root = safe_fromstring(data)
                     for node in root:
                         if node.tag != QN("footnote") and node.tag != QN("endnote"):
                             continue
@@ -61,7 +55,7 @@ class NoteManager:
         if rels_name not in package.namelist():
             return {}
         try:
-            root = ET.fromstring(package.read(rels_name))
+            root = safe_fromstring(package.read(rels_name))
             targets = {}
             for relation in root:
                 rel_type = relation.get("Type", "")
