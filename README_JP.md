@@ -436,6 +436,8 @@ SVG形式はベクター形式のため、拡大しても品質が劣化しま�
 - mpxjライブラリをJPype経由で使用（JDK 11+必要）
 - オプション依存: `pip install o2md[mpp]`
 - JARはMaven Centralから初回実行時に自動ダウンロード
+- `CLASSPATH`を指定した場合は、利用者が用意したJARを自動取得より優先
+- 自動取得・キャッシュしたJARは、利用前にMaven CentralのSHA-256値で検証
 - MSPDI XML（.xml）形式も`mpp2md`コマンドで直接対応
 - MSPDI XML（.xml）は統合`o2md`と`o2md-filter`でも判定できます
 
@@ -508,6 +510,8 @@ SVG形式はベクター形式のため、拡大しても品質が劣化しま�
 - JDK/JRE 11+とjpype1が必要: `pip install o2md[mpp]`
 - MPXJ JAR（約30MB）は初回実行時にMaven Centralから自動ダウンロード
 - 初回JARダウンロードにネットワーク接続が必要
+- `CLASSPATH`を指定した場合は、利用者が用意したJARを優先
+- キャッシュ済み・新規取得したJARはクラスパスへ追加する前にSHA-256検証
 
 ### 画像OCR変換 (`img2md`)
 - OCRの精度は画像の品質・解像度に依存します
