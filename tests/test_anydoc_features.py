@@ -27,6 +27,7 @@ from o2md.d2md_composite import (
 from o2md.filter import detect_type_from_bytes
 import o2md.filter as filter_cli
 from o2md.mspdi import is_mspdi_xml
+from o2md.mpp2md import resources_to_markdown_table
 from o2md.o2md import detect_file_type
 from o2md.x2md import ExcelToMarkdownConverter
 
@@ -1309,3 +1310,29 @@ def test_filter_file_sniffed_type_uses_converter_extension(
     assert result == "変換結果"
     assert Path(captured["path"]).suffix == expected_suffix
     assert not Path(captured["path"]).exists()
+
+
+def test_resource_duration_totals_use_preconverted_days():
+    resources = [{"id": 1, "name": "担当者"}]
+    tasks = [
+        {"resources": "担当者", "duration": "8時間", "duration_days": 1.0},
+        {"resources": "担当者", "duration": "2週", "duration_days": 10.0},
+        {"resources": "担当者", "duration": "1ヶ月", "duration_days": 20.0},
+        {"resources": "担当者", "duration": "3日", "duration_days": 3.0},
+    ]
+
+    output = resources_to_markdown_table(resources, tasks)
+
+    assert "| 1 | 担当者 | 4 | 34日 |" in output
+
+
+def test_resource_duration_totals_note_unconvertible_values():
+    resources = [{"id": 1, "name": "担当者"}]
+    tasks = [
+        {"resources": "担当者", "duration": "8時間", "duration_days": 1.0},
+        {"resources": "担当者", "duration": "不明", "duration_days": None},
+    ]
+
+    output = resources_to_markdown_table(resources, tasks)
+
+    assert "1日（1件は換算不能）" in output
