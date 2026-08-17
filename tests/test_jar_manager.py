@@ -1,6 +1,7 @@
 """MPXJ JAR管理の回帰テスト。"""
 
 import hashlib
+from pathlib import PosixPath
 
 import pytest
 
@@ -12,6 +13,7 @@ def test_windows_cache_dir_does_not_reject_mode_bits(tmp_path, monkeypatch):
     package_dir.mkdir(parents=True)
     package_dir.chmod(0o777)
     monkeypatch.setattr(jar_manager, "__file__", str(tmp_path / "package" / "jar_manager.py"))
+    monkeypatch.setattr(jar_manager, "Path", PosixPath)
     monkeypatch.setattr(jar_manager.os, "name", "nt")
 
     assert jar_manager.get_jar_cache_dir() == package_dir
