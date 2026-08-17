@@ -14,8 +14,10 @@ RUN apk add --no-cache \
     tesseract-ocr-data-eng
 
 # venv作成（system-site-packagesでcv2を参照）+ o2md インストール
+# 旧一太郎(ver4-7)のテキスト抽出は 0.1.3 以降が必要
+ARG O2MD_VERSION=0.1.3
 RUN python3 -m venv --system-site-packages /opt/o2md-venv \
-    && /opt/o2md-venv/bin/pip install --no-cache-dir --no-deps o2md==0.1.2 \
+    && /opt/o2md-venv/bin/pip install --no-cache-dir --no-deps o2md==${O2MD_VERSION} \
     && /opt/o2md-venv/bin/pip install --no-cache-dir \
        olefile openpyxl pdfplumber pymupdf pytesseract \
        python-docx python-pptx requests pdfminer.six \
