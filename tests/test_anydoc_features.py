@@ -27,6 +27,7 @@ from o2md.d2md_composite import (
 from o2md.filter import detect_type_from_bytes
 import o2md.filter as filter_cli
 from o2md.mspdi import is_mspdi_xml
+from o2md.mpp2md import resources_to_markdown_table
 from o2md.o2md import detect_file_type
 from o2md.x2md import ExcelToMarkdownConverter
 
@@ -445,6 +446,53 @@ def test_unknown_field_result_is_kept_and_hyperlink_is_rendered():
     end.append(end_char)
     paragraph._p.extend([begin, instruction, separate, result, end])
     assert convert_paragraph(paragraph) == "[リンク](https://example.test)"
+
+
+@pytest.mark.parametrize(
+    ("instruction_text", "expected"),
+    [
+        (
+            'HYPERLINK "https://example.test" \\l "bookmark"',
+            "[リンク](https://example.test#bookmark)",
+        ),
+        (
+            'HYPERLINK \\l "bookmark"',
+            "[リンク](#bookmark)",
+        ),
+        (
+            'HYPERLINK "https://example.test" \\l',
+            "[リンク](https://example.test)",
+        ),
+    ],
+)
+def test_hyperlink_field_combines_document_url_and_bookmark(
+    instruction_text, expected
+):
+    document = Document()
+    paragraph = document.add_paragraph()
+    begin = OxmlElement("w:r")
+    begin_char = OxmlElement("w:fldChar")
+    begin_char.set(qn("w:fldCharType"), "begin")
+    begin.append(begin_char)
+    instruction = OxmlElement("w:r")
+    instr_text = OxmlElement("w:instrText")
+    instr_text.text = instruction_text
+    instruction.append(instr_text)
+    separate = OxmlElement("w:r")
+    separate_char = OxmlElement("w:fldChar")
+    separate_char.set(qn("w:fldCharType"), "separate")
+    separate.append(separate_char)
+    result = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = "リンク"
+    result.append(text)
+    end = OxmlElement("w:r")
+    end_char = OxmlElement("w:fldChar")
+    end_char.set(qn("w:fldCharType"), "end")
+    end.append(end_char)
+    paragraph._p.extend([begin, instruction, separate, result, end])
+
+    assert convert_paragraph(paragraph) == expected
 
 
 @pytest.mark.parametrize(
@@ -920,6 +968,37 @@ def test_mspdi_content_sniffing_is_not_extension_only():
     assert detect_type_from_bytes(b"<Project xmlns='http://example.test'/>") == "unknown"
 
 
+def test_mspdi_xml_rejects_doctype_without_entity_expansion():
+    data = b"""<!DOCTYPE lolz [
+      <!ENTITY a "1234567890">
+      <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+    ]>
+    <Project xmlns="http://schemas.microsoft.com/project">&b;</Project>"""
+
+    assert not is_mspdi_xml(data)
+
+
+def test_notes_manager_skips_doctype_note_part(tmp_path):
+    document = Document()
+    path = tmp_path / "notes-dtd.docx"
+    document.save(path)
+    footnotes = f"""<!DOCTYPE footnotes [
+      <!ENTITY text "危険な脚注">
+    ]>
+    <w:footnotes xmlns:w="{W}">
+      <w:footnote w:id="1"><w:p><w:r><w:t>&text;</w:t></w:r></w:p></w:footnote>
+    </w:footnotes>""".encode()
+    rebuilt = tmp_path / "notes-dtd-rebuilt.docx"
+    with zipfile.ZipFile(path) as source, zipfile.ZipFile(rebuilt, "w") as target:
+        for item in source.infolist():
+            target.writestr(item, source.read(item.filename))
+        target.writestr("word/footnotes.xml", footnotes)
+
+    manager = NoteManager(str(rebuilt))
+
+    assert manager.reference("fn", "1") == ""
+
+
 def test_notes_manager_maps_references_and_definitions(tmp_path):
     document = Document()
     path = tmp_path / "notes.docx"
@@ -1213,3 +1292,78 @@ def test_filter_file_and_stdin_routes_sniff_mspdi(tmp_path, monkeypatch, capsys)
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(data)))
     filter_cli.main()
     assert capsys.readouterr().out == "変換結果"
+
+
+@pytest.mark.parametrize(
+    ("name", "payload", "expected_suffix"),
+    [
+        (
+            "project-without-extension",
+            b'<Project xmlns="http://schemas.microsoft.com/project"/>',
+            ".xml",
+        ),
+        (
+            "document-without-extension",
+            b"PK\x03\x04",
+            ".docx",
+        ),
+    ],
+)
+def test_filter_file_sniffed_type_uses_converter_extension(
+    tmp_path, monkeypatch, name, payload, expected_suffix
+):
+    if expected_suffix == ".docx":
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as package:
+            package.writestr(
+                "[Content_Types].xml",
+                '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                '<Override PartName="/word/document.xml" '
+                'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+                "</Types>",
+            )
+        payload = archive.getvalue()
+    source = tmp_path / name
+    source.write_bytes(payload)
+    captured = {}
+
+    def fake_convert(path, output_dir=None, **_kwargs):
+        captured["path"] = path
+        output = Path(output_dir) / "result.txt"
+        output.write_text("変換結果", encoding="utf-8")
+        return str(output), {}, 0
+
+    monkeypatch.setattr(
+        "o2md.o2md.convert_office_to_markdown", fake_convert
+    )
+    result = filter_cli.filter_file(str(source))
+
+    assert result == "変換結果"
+    assert Path(captured["path"]).suffix == expected_suffix
+    assert not Path(captured["path"]).exists()
+
+
+def test_resource_duration_totals_use_preconverted_days():
+    resources = [{"id": 1, "name": "担当者"}]
+    tasks = [
+        {"resources": "担当者", "duration": "8時間", "duration_days": 1.0},
+        {"resources": "担当者", "duration": "2週", "duration_days": 10.0},
+        {"resources": "担当者", "duration": "1ヶ月", "duration_days": 20.0},
+        {"resources": "担当者", "duration": "3日", "duration_days": 3.0},
+    ]
+
+    output = resources_to_markdown_table(resources, tasks)
+
+    assert "| 1 | 担当者 | 4 | 34日 |" in output
+
+
+def test_resource_duration_totals_note_unconvertible_values():
+    resources = [{"id": 1, "name": "担当者"}]
+    tasks = [
+        {"resources": "担当者", "duration": "8時間", "duration_days": 1.0},
+        {"resources": "担当者", "duration": "不明", "duration_days": None},
+    ]
+
+    output = resources_to_markdown_table(resources, tasks)
+
+    assert "1日（1件は換算不能）" in output

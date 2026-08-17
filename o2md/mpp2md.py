@@ -153,6 +153,24 @@ def _java_duration_to_string(java_duration) -> str:
         return '-'
 
 
+def _java_duration_to_days(java_duration, project_properties=None) -> Optional[float]:
+    """MPXJ Durationをプロジェクト設定に基づく日数へ換算する。"""
+    if java_duration is None or project_properties is None:
+        return None
+    try:
+        from jpype import JClass
+
+        time_unit = JClass("net.sf.mpxj.TimeUnit")
+        converted = java_duration.convertUnits(
+            time_unit.DAYS,
+            project_properties,
+        )
+        return float(converted.getDuration())
+    except Exception as e:
+        debug_print(_(f"期間の日数換算に失敗: {e}"))
+        return None
+
+
 def _java_percent_to_string(java_percent) -> str:
     """JavaのNumber (百分比)をPython文字列に変換"""
     if java_percent is None:
@@ -267,7 +285,10 @@ def _extract_tasks(project) -> list[dict]:
                 if not task_name:
                     continue
                 
-                task_dict = _task_to_dict(task)
+                task_dict = _task_to_dict(
+                    task,
+                    project.getProjectProperties(),
+                )
                 tasks.append(task_dict)
                 # 子タスクを再帰処理
                 child_tasks = task.getChildTasks()
@@ -284,7 +305,7 @@ def _extract_tasks(project) -> list[dict]:
     return tasks
 
 
-def _task_to_dict(task) -> dict:
+def _task_to_dict(task, project_properties=None) -> dict:
     """Task → dict変換"""
     # 依存関係を抽出
     predecessors = []
@@ -330,6 +351,8 @@ def _task_to_dict(task) -> dict:
     except Exception as e:
         debug_print(_(f"サマリー判定エラー: {e}"))
     
+    duration = task.getDuration()
+    duration_days = _java_duration_to_days(duration, project_properties)
     return {
         'task_id': int(task.getID() or 0),
         'unique_id': int(task.getUniqueID() or 0),
@@ -337,7 +360,8 @@ def _task_to_dict(task) -> dict:
         'outline_level': int(task.getOutlineLevel() or 0),
         'start': _java_date_to_string(task.getStart()),
         'finish': _java_date_to_string(task.getFinish()),
-        'duration': _java_duration_to_string(task.getDuration()),
+        'duration': _java_duration_to_string(duration),
+        'duration_days': duration_days,
         'percent_complete': _java_percent_to_string(task.getPercentageComplete()),
         'resources': resources_str,
         'is_summary': is_summary,
@@ -455,23 +479,21 @@ def resources_to_markdown_table(resources: list[dict], tasks: list[dict] = None)
                 res_names = [r.strip() for r in task_resources.split(',')]
                 
                 # タスク期間を数値に変換
-                duration_str = task.get('duration', '-')
-                duration_days = 0
-                if duration_str and duration_str != '-':
-                    try:
-                        # "124日" から "124" を抽出
-                        match = re.match(r'(\d+(?:\.\d+)?)', duration_str)
-                        if match:
-                            duration_days = float(match.group(1))
-                    except Exception as e:
-                        debug_print(f"期間パース失敗: {duration_str} - {e}")
+                duration_days = task.get('duration_days')
                 
                 # リソース毎に集計
                 for res_name in res_names:
                     if res_name not in resource_stats:
-                        resource_stats[res_name] = {'count': 0, 'days': 0.0}
+                        resource_stats[res_name] = {
+                            'count': 0,
+                            'days': 0.0,
+                            'unknown': 0,
+                        }
                     resource_stats[res_name]['count'] += 1
-                    resource_stats[res_name]['days'] += duration_days
+                    if duration_days is None:
+                        resource_stats[res_name]['unknown'] += 1
+                    else:
+                        resource_stats[res_name]['days'] += duration_days
 
     header = _("| ID | リソース名 | 割当タスク数 | 合計日数 |")
     separator = "| --- | --- | --- | --- |"
@@ -481,15 +503,23 @@ def resources_to_markdown_table(resources: list[dict], tasks: list[dict] = None)
         name = _escape_md_cell(res['name'])
         
         # 統計情報を取得
-        stats = resource_stats.get(res['name'], {'count': 0, 'days': 0.0})
+        stats = resource_stats.get(
+            res['name'],
+            {'count': 0, 'days': 0.0, 'unknown': 0},
+        )
         task_count = stats['count']
         total_days = stats['days']
         
         # 日数をフォーマット
-        if total_days == int(total_days):
+        unknown_count = stats['unknown']
+        if unknown_count and total_days == 0:
+            days_str = f"-（{unknown_count}{_('件は換算不能')}）"
+        elif total_days == int(total_days):
             days_str = f"{int(total_days)}{_('日')}"
         else:
             days_str = f"{total_days:.1f}{_('日')}"
+        if unknown_count and total_days:
+            days_str += f"（{unknown_count}{_('件は換算不能')}）"
         
         rows.append(f"| {res['id']} | {name} | {task_count} | {days_str} |")
 

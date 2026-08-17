@@ -33,7 +33,15 @@ class NoteManager:
                     name = targets.get(kind, conventional)
                     if name not in names:
                         continue
-                    root = ET.fromstring(package.read(name))
+                    data = package.read(name)
+                    if b"<!DOCTYPE" in data.upper():
+                        logger.warning(
+                            "DTDを含む%sパートをスキップします: %s",
+                            kind,
+                            name,
+                        )
+                        continue
+                    root = ET.fromstring(data)
                     for node in root:
                         if node.tag != QN("footnote") and node.tag != QN("endnote"):
                             continue

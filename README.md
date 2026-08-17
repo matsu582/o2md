@@ -438,6 +438,8 @@ This ensures callouts, colored rectangles, and other decorative elements are pro
 - Uses mpxj library via JPype (JDK 11+ required)
 - Optional dependency: `pip install o2md[mpp]`
 - JARs are auto-downloaded from Maven Central on first use
+- If `CLASSPATH` is set, user-provided JARs are preferred over automatic downloads
+- Automatically downloaded and cached JARs are verified against Maven Central SHA-256 values before use
 - MSPDI XML (.xml) format also supported via `mpp2md` command directly
 - MSPDI XML (.xml) is also detected by the integrated `o2md` and `o2md-filter` commands
 
@@ -510,6 +512,8 @@ This ensures callouts, colored rectangles, and other decorative elements are pro
 - Requires JDK/JRE 11+ and jpype1: `pip install o2md[mpp]`
 - MPXJ JARs (~30MB) are auto-downloaded from Maven Central on first use
 - Network access required for initial JAR download
+- If `CLASSPATH` is set, the user-provided JARs take precedence
+- Cached and newly downloaded JARs are SHA-256 verified before they are added to the classpath
 
 ### Image OCR (`img2md`)
 - OCR accuracy depends on image quality and resolution

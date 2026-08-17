@@ -91,10 +91,13 @@ def convert_paragraph(
     def finish(field, sink):
         result = "".join(field["result"])
         kind, args, switches = parse_instruction(field["instruction"])
-        if kind == "HYPERLINK" and (args or switches.get("l")):
-            target = str(switches.get("l") or args[0])
-            if switches.get("l"):
-                target = "#" + target
+        bookmark = switches.get("l")
+        if kind == "HYPERLINK" and (
+            args or isinstance(bookmark, str)
+        ):
+            target = str(args[0]) if args else ""
+            if isinstance(bookmark, str):
+                target += "#" + bookmark
             target = normalize_markdown_url(target)
             value = f"[{result}]({target})" if result else ""
         else:
