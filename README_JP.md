@@ -10,7 +10,7 @@ docling、markitdown との機能比較は [o2md_comparison.md](o2md_comparison.
 
 ## 概要
 
-o2mdは、Microsoft Office文書（Excel、Word、PowerPoint）、PDF、一太郎文書（.jtd/.jtt）、および画像ファイル（JPEG/PNG/GIF/BMP/TIFF/WebP）を**それっぽい**Markdown形式に変換するPythonツールです。ファイルの種類を自動判定し、適切な変換エンジンを使用して処理します。
+o2mdは、Microsoft Office文書（Excel、Word、PowerPoint、MS Project）、PDF、一太郎文書（.jtd/.jtt/.jsw/.jaw/.jtw/.jbw/.juw/.jfw/.jvw）、および画像ファイル（JPEG/PNG/GIF/BMP/TIFF/WebP）を**それっぽい**Markdown形式に変換するPythonツールです。ファイルの種類を自動判定し、適切な変換エンジンを使用して処理します。
 o2mdは流行りの機械学習を使った変換ではなく、泥臭い昔ながらのロジックベースの変換を行います。
 画像ファイルや画像ベースのPDF（スキャン文書等）は、OCR（Tesseract/manga-ocr/sarashina2.2-ocr）によりテキスト抽出を行います。
 古い形式（.xls, .doc, .ppt）の変換、図形の画像処理と変換は**LibreOffice**に依存しています。LibreOfficeがない環境でもテキストのみの変換は正常に動作します。
@@ -25,7 +25,8 @@ o2mdは流行りの機械学習を使った変換ではなく、泥臭い昔な�
 - **Word変換** (`d2md`): 見出し、表、画像、リストを含む文書を変換
 - **PowerPoint変換** (`p2md`): スライド、図形、表、テキストを変換
 - **PDF変換** (`pdf2md`): PDFを画像とテキストに変換（[Tesseract](https://github.com/tesseract-ocr/tesseract)/[manga-ocr](https://github.com/kha-white/manga-ocr)/[sarashina2.2-ocr](https://huggingface.co/sbintuitions/sarashina2.2-ocr)によるOCR対応）
-- **一太郎変換** (`jtd2md`): 一太郎文書のOLE2バイナリを独自解析し、テキスト・テーブル・太字を変換
+- **一太郎変換** (`jtd2md`): 一太郎文書のOLE2バイナリ(ver8+)および旧形式バイナリ(ver4-7)を独自解析し、テキスト・テーブル・太字を変換
+- **MS Project変換** (`mpp2md`): MS Projectファイル(.mpp/.mpt/.mpx)をタスク一覧・スケジュール・進捗・担当者のMarkdownテーブルに変換。mpxjをJPype経由で使用（JDK 11+必要、オプション依存: `pip install o2md[mpp]`）
 - **画像OCR変換** (`img2md`): 画像ファイルからOCRでテキスト抽出しMarkdownに変換（Tesseract/manga-ocr/sarashina対応）
 - **画像処理**: 図形やグラフを自動的に画像として抽出・埋め込み
 - **複雑な要素の処理**: 表と図形が混在するスライドは全体を画像化
@@ -57,8 +58,11 @@ pip install o2md[sarashina]
 # docling（AI表検出）も含める場合
 pip install o2md[docling]
 
+# MS Project対応も含める場合（JDK 11+必要）
+pip install o2md[mpp]
+
 # 全てのオプショナル依存関係を含める場合
-pip install o2md[manga-ocr,sarashina,docling]
+pip install o2md[manga-ocr,sarashina,docling,mpp]
 ```
 
 uvを使う場合:
@@ -73,8 +77,11 @@ uv pip install o2md[manga-ocr]
 # sarashina2.2-ocrも含める場合
 uv pip install o2md[sarashina]
 
+# MS Project対応も含める場合（JDK 11+必要）
+uv pip install o2md[mpp]
+
 # 全てのオプショナル依存関係を含める場合
-uv pip install o2md[manga-ocr,sarashina,docling]
+uv pip install o2md[manga-ocr,sarashina,docling,mpp]
 ```
 
 ### ローカル開発環境のセットアップ
@@ -101,6 +108,9 @@ uv sync --extra sarashina
 
 # docling（AI表検出）も含める場合
 uv sync --extra docling
+
+# MS Project対応も含める場合（JDK 11+必要）
+uv sync --extra mpp
 
 # 全てのオプショナル依存関係を含める場合
 uv sync --all-extras
@@ -174,6 +184,9 @@ o2md document.pdf
 # 一太郎ファイルを変換
 o2md document.jtd
 
+# MS Projectファイルを変換
+o2md project.mpp
+
 # 画像ファイルを変換（OCRでテキスト抽出）
 o2md photo.jpg
 ```
@@ -187,6 +200,7 @@ uv run o2md input_files/presentation.pptx
 uv run o2md input_files/document.pdf
 uv run o2md input_files/document.jtd
 uv run o2md input_files/photo.jpg
+uv run o2md input_files/project.mpp
 ```
 
 ### 単体コマンド
@@ -201,6 +215,7 @@ p2md presentation.pptx
 pdf2md document.pdf
 jtd2md document.jtd
 img2md photo.jpg
+mpp2md project.mpp
 
 # ローカルクローン時
 uv run d2md input_files/document.docx
@@ -209,6 +224,7 @@ uv run p2md input_files/presentation.pptx
 uv run pdf2md input_files/document.pdf
 uv run jtd2md input_files/document.jtd
 uv run img2md input_files/photo.jpg
+uv run mpp2md input_files/project.mpp
 ```
 
 ### プレーンテキストフィルタ (`o2md-filter`)
@@ -328,7 +344,8 @@ o2md old_presentation.ppt
 | Word         | `.docx`, `.doc` | `d2md`     | 見出し、表、画像、リスト     |
 | PowerPoint   | `.pptx`, `.ppt` | `p2md`     | スライド、図形、表、テキスト |
 | PDF          | `.pdf`          | `pdf2md`   | 画像変換、テキスト抽出、OCR  |
-| 一太郎       | `.jtd`, `.jtt`  | `jtd2md`   | テキスト、表、太字、見出し   |
+| 一太郎       | `.jtd`, `.jtt`, `.jsw`, `.jaw`, `.jtw`, `.jbw`, `.juw`, `.jfw`, `.jvw` | `jtd2md`   | テキスト、表、太字、見出し   |
+| MS Project   | `.mpp`, `.mpt`, `.mpx`, `.xml` (MSPDI) | `mpp2md`   | タスク、スケジュール、進捗、担当者 |
 | 画像         | `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tiff`, `.tif`, `.webp` | `img2md` | OCRテキスト抽出、画像埋め込み |
 
 ## 出力形式
@@ -409,6 +426,21 @@ SVG形式はベクター形式のため、拡大しても品質が劣化しま�
 - 脚注テキストの抽出
 - OLE2メタデータ（作成日時等）の出力
 
+### MS Project変換 (`mpp2md`)
+
+- MS Projectファイル（.mpp/.mpt/.mpx）をMarkdownに変換
+- タスク名・開始日・終了日・期間・進捗・担当者のテーブル出力
+- タスク階層をインデントで表現（サマリタスクは太字）
+- リソース一覧テーブル出力
+- プロジェクトメタデータ（タイトル、作者、開始/終了日）
+- mpxjライブラリをJPype経由で使用（JDK 11+必要）
+- オプション依存: `pip install o2md[mpp]`
+- JARはMaven Centralから初回実行時に自動ダウンロード
+- `CLASSPATH`を指定した場合は、利用者が用意したJARを自動取得より優先
+- 自動取得・キャッシュしたJARは、利用前にMaven CentralのSHA-256値で検証
+- MSPDI XML（.xml）形式も`mpp2md`コマンドで直接対応
+- MSPDI XML（.xml）は統合`o2md`と`o2md-filter`でも判定できます
+
 ### 画像OCR変換 (`img2md`)
 
 - 画像ファイル（JPEG/PNG/GIF/BMP/TIFF/WebP）からOCRでテキスト抽出
@@ -468,10 +500,18 @@ SVG形式はベクター形式のため、拡大しても品質が劣化しま�
   - 日本語縦書き・表・数式に対応
 
 ### 一太郎 (`jtd2md`)
-- 一太郎 ver8以降のOLE2形式のみ対応（ver5-7の古い形式は非対応）
+- 一太郎 ver8以降のOLE2形式および旧形式(ver4-7)に対応
+- 旧形式(ver4-6)のテキスト抽出は、実ファイルが入手困難なため実ファイルでのテストを行っていません。合成テストデータによるユニットテストのみ実施しています
 - 画像・図形の抽出は非対応
 - 太字検出は段落単位（インラインの文字装飾は非対応）
 - セル結合のある複雑な表はレイアウトが崩れる場合があります
+
+### MS Project変換 (`mpp2md`)
+- JDK/JRE 11+とjpype1が必要: `pip install o2md[mpp]`
+- MPXJ JAR（約30MB）は初回実行時にMaven Centralから自動ダウンロード
+- 初回JARダウンロードにネットワーク接続が必要
+- `CLASSPATH`を指定した場合は、利用者が用意したJARを優先
+- キャッシュ済み・新規取得したJARはクラスパスへ追加する前にSHA-256検証
 
 ### 画像OCR変換 (`img2md`)
 - OCRの精度は画像の品質・解像度に依存します
@@ -493,6 +533,9 @@ o2md/
 │   ├── p2md.py             # PowerPoint変換エンジン
 │   ├── pdf2md.py           # PDF変換エンジン
 │   ├── jtd2md.py           # 一太郎変換エンジン
+│   ├── jtd2md_legacy.py    # 一太郎旧形式(ver4-7)変換エンジン
+│   ├── mpp2md.py           # MS Project変換エンジン
+│   ├── jar_manager.py      # MPXJ JAR自動ダウンロード管理
 │   ├── img2md.py           # 画像OCR変換エンジン
 │   ├── filter.py           # 検索エンジン用プレーンテキストフィルタ
 │   ├── utils.py            # 共通ユーティリティ

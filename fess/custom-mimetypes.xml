@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info>
+    <!-- 一太郎 ver8以降 (OLE2形式) -->
+    <mime-type type="application/x-js-taro">
+        <glob pattern="*.jtd"/>
+        <glob pattern="*.jtt"/>
+        <!-- ver7 (OLE2形式) -->
+        <glob pattern="*.jfw"/>
+        <glob pattern="*.jvw"/>
+        <!-- ver4-6 (独自バイナリ形式) -->
+        <glob pattern="*.jsw"/>
+        <glob pattern="*.jaw"/>
+        <glob pattern="*.jtw"/>
+        <glob pattern="*.jbw"/>
+        <glob pattern="*.juw"/>
+        <magic priority="50">
+            <match value="DOC\x00" type="string" offset="0"/>
+        </magic>
+    </mime-type>
+</mime-info>

@@ -10,6 +10,7 @@ Excel、Word、PowerPoint、PDFファイルを自動判定してMarkdownに変�
 - PowerPoint (.pptx, .ppt) → p2md.PowerPointToMarkdownConverter
 - PDF (.pdf) → pdf2md.PDFToMarkdownConverter
 - 一太郎 (.jtd, .jtt) → jtd2md.JtdToMarkdownConverter
+- MS Project (.mpp, .mpt, .mpx) → mpp2md.MppToMarkdownConverter
 - 古い形式（.xls, .doc, .ppt）は自動的に新形式に変換してから処理
 - フォルダ指定時はサブフォルダを含む全対象ファイルを再帰的に一括変換
 
@@ -19,6 +20,7 @@ Excel、Word、PowerPoint、PDFファイルを自動判定してMarkdownに変�
 - PowerPoint: .pptx, .ppt
 - PDF: .pdf
 - 一太郎: .jtd, .jtt
+- MS Project: .mpp, .mpt, .mpx
 
 使用例:
     # 基本的な使用方法
@@ -62,6 +64,7 @@ import argparse
 from pathlib import Path
 
 from o2md.i18n import _, setup_i18n
+from o2md.mspdi import is_mspdi_file
 
 # 各変換クラスをインポート
 try:
@@ -112,6 +115,15 @@ except ImportError as e:
         "img2md.pyのインポートに失敗しました。必要な依存関係をインストールしてください: uv sync"
     ) from e
 
+try:
+    from o2md.mpp2md import MppToMarkdownConverter
+    from o2md import mpp2md
+except ImportError as e:
+    # MS Project変換はオプション機能（jpype1が必要）。
+    # 未インストールでも他の変換機能は利用可能にする。
+    MppToMarkdownConverter = None
+    mpp2md = None
+    _MPP_IMPORT_ERROR = e
 
 
 logger = logging.getLogger(__name__)
@@ -138,6 +150,8 @@ def set_verbose(verbose: bool):
     pdf2md.set_verbose(verbose)
     jtd2md.set_verbose(verbose)
     img2md.set_verbose(verbose)
+    if mpp2md is not None:
+        mpp2md.set_verbose(verbose)
 
 def is_verbose() -> bool:
     """verboseモードかどうかを返す"""
@@ -303,7 +317,7 @@ def detect_file_type(file_path: str) -> str:
         file_path: ファイルパス
         
     Returns:
-        'excel', 'word', 'powerpoint', 'pdf', 'ichitaro', 'image', 'unknown'のいずれか
+        'excel', 'word', 'powerpoint', 'pdf', 'ichitaro', 'msproject', 'image', 'unknown'のいずれか
     """
     file_path_lower = file_path.lower()
     
@@ -317,6 +331,12 @@ def detect_file_type(file_path: str) -> str:
         return 'pdf'
     elif file_path_lower.endswith(('.jtd', '.jtt')):
         return 'ichitaro'
+    elif file_path_lower.endswith(('.jsw', '.jaw', '.jtw', '.jbw', '.juw', '.jfw', '.jvw')):
+        return 'ichitaro'
+    elif file_path_lower.endswith(('.mpp', '.mpt', '.mpx')):
+        return 'msproject'
+    elif file_path_lower.endswith('.xml') and is_mspdi_file(file_path):
+        return 'msproject'
     elif file_path_lower.endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp')):
         return 'image'
     else:
@@ -351,7 +371,7 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
     if file_type == 'unknown':
         raise ValueError(
             _("サポートされていないファイル形式です: {file}").format(file=file_path) + "\n"
-            + _("対応形式: {formats}").format(formats=".xlsx, .xls, .docx, .doc, .pptx, .ppt, .pdf, .jtd, .jtt, .jpg, .jpeg, .png, .gif, .bmp, .tiff, .tif, .webp")
+            + _("対応形式: {formats}").format(formats=".xlsx, .xls, .docx, .doc, .pptx, .ppt, .pdf, .jtd, .jtt, .mpp, .mpt, .mpx, .xml (MSPDI), .jpg, .jpeg, .png, .gif, .bmp, .tiff, .tif, .webp")
         )
     
     print(_("ファイルタイプを検出: {file_type}").format(file_type=file_type))
@@ -440,8 +460,29 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
             output_file = converter.convert()
 
         elif file_type == 'ichitaro':
-            # 一太郎変換
-            converter = JtdToMarkdownConverter(
+            # 一太郎変換 (旧形式/新形式を自動判定)
+            from o2md.jtd2md_legacy import is_legacy_jtd_file, is_ver7_file
+            if is_legacy_jtd_file(file_path) and not is_ver7_file(file_path):
+                from o2md.jtd2md import LegacyJtdToMarkdownConverter
+                converter = LegacyJtdToMarkdownConverter(
+                    file_path,
+                    output_dir=output_dir,
+                )
+            else:
+                converter = JtdToMarkdownConverter(
+                    file_path,
+                    output_dir=output_dir,
+                )
+            output_file = converter.convert()
+
+        elif file_type == 'msproject':
+            # MS Project変換（オプション機能: jpype1が必要）
+            if MppToMarkdownConverter is None:
+                raise ImportError(
+                    "MS Project変換にはjpype1が必要です。"
+                    "pip install 'o2md[mpp]' でインストールしてください。"
+                ) from _MPP_IMPORT_ERROR
+            converter = MppToMarkdownConverter(
                 file_path,
                 output_dir=output_dir,
             )
@@ -518,6 +559,8 @@ def convert_office_to_markdown(file_path: str, output_dir: str = None, **kwargs)
 SUPPORTED_EXTENSIONS = (
     '.xlsx', '.xls', '.docx', '.doc', '.pptx', '.ppt', '.pdf',
     '.jtd', '.jtt',
+    '.jsw', '.jaw', '.jtw', '.jbw', '.juw', '.jfw', '.jvw',
+    '.mpp', '.mpt', '.mpx',
     '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp',
 )
 
@@ -534,15 +577,23 @@ def collect_target_files(folder_path: str, recursive: bool = False) -> list:
     """
     target_files = []
     folder = Path(folder_path).resolve()
+
+    def is_target(filename: str) -> bool:
+        """通常拡張子またはMSPDI内容から対象ファイルか判定する。"""
+        if filename.lower().endswith(SUPPORTED_EXTENSIONS):
+            return True
+        return filename.lower().endswith(".xml") and detect_file_type(filename) == "msproject"
+
     if recursive:
         for root, _dirs, files in os.walk(folder):
             for fname in files:
-                if fname.lower().endswith(SUPPORTED_EXTENSIONS):
-                    target_files.append(os.path.join(root, fname))
+                fpath = os.path.join(root, fname)
+                if is_target(fpath):
+                    target_files.append(fpath)
     else:
         for fname in os.listdir(folder):
             fpath = os.path.join(folder, fname)
-            if os.path.isfile(fpath) and fname.lower().endswith(SUPPORTED_EXTENSIONS):
+            if os.path.isfile(fpath) and is_target(fpath):
                 target_files.append(fpath)
     target_files.sort()
     return target_files
@@ -625,6 +676,7 @@ def main():
   PowerPoint: .pptx, .ppt
   PDF:        .pdf
   一太郎:    .jtd, .jtt
+  MS Project: .mpp, .mpt, .mpx
 
 使用例:
   python o2md.py data.xlsx

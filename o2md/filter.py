@@ -25,8 +25,10 @@ import os
 import sys
 import tempfile
 import logging
+import shutil
 
-from o2md.utils import set_text_only
+from o2md.utils import is_text_only, set_text_only
+from o2md.mspdi import is_mspdi_xml
 
 
 logger = logging.getLogger(__name__)
@@ -50,10 +52,13 @@ def detect_type_from_bytes(header: bytes) -> str:
         header: ファイル先頭のバイト列（最低4バイト）
 
     Returns:
-        'excel', 'word', 'powerpoint', 'pdf', 'ole', 'zip', 'image', 'unknown'
+        'excel', 'word', 'powerpoint', 'pdf', 'ole', 'zip', 'msproject', 'image', 'unknown'
     """
     if len(header) < 4:
         return 'unknown'
+
+    if is_mspdi_xml(header):
+        return 'msproject'
 
     # PDF判定
     if header[:4] == b'%PDF':
@@ -62,6 +67,10 @@ def detect_type_from_bytes(header: bytes) -> str:
     # OLE2判定 (doc/xls/ppt/jtd)
     if header[:4] == b'\xd0\xcf\x11\xe0':
         return 'ole'
+
+    # 旧一太郎判定 (ver4-6: DOC\x00シグネチャ)
+    if header[:4] == b'DOC\x00':
+        return 'legacy_ichitaro'
 
     # ZIP系 (xlsx/docx/pptx)
     if header[:4] == _ZIP_SIGNATURE:
@@ -167,7 +176,7 @@ def resolve_file_type(file_path: str) -> str:
         file_path: ファイルパス
 
     Returns:
-        'excel', 'word', 'powerpoint', 'pdf', 'ichitaro', 'image', 'unknown'
+        'excel', 'word', 'powerpoint', 'pdf', 'ichitaro', 'msproject', 'image', 'unknown'
     """
     # 拡張子で判定可能ならそれを使用
     from o2md.o2md import detect_file_type
@@ -177,7 +186,7 @@ def resolve_file_type(file_path: str) -> str:
 
     # マジックバイトで判定
     with open(file_path, 'rb') as f:
-        header = f.read(12)
+        header = f.read(16384)
 
     base_type = detect_type_from_bytes(header)
 
@@ -185,17 +194,25 @@ def resolve_file_type(file_path: str) -> str:
         return detect_zip_subtype(file_path)
     elif base_type == 'ole':
         return detect_ole_subtype(file_path)
+    elif base_type == 'legacy_ichitaro':
+        return 'ichitaro'
+    elif base_type == 'msproject':
+        return 'msproject'
     elif base_type in ('pdf', 'image'):
         return base_type
 
     return 'unknown'
 
 
-def filter_file(file_path: str, ocr_engine: str = 'tesseract') -> str:
+def filter_file(
+    file_path: str,
+    ocr_engine: str = 'tesseract',
+    file_type: str | None = None,
+) -> str:
     """ファイルをプレーンテキストに変換する
 
-    convert_office_to_markdownがファイル拡張子からタイプを判定するため、
-    呼び出し前に正しい拡張子を設定しておく必要がある。
+    内容判定と拡張子が異なる場合は、変換器が認識できる拡張子の
+    一時ファイルへコピーしてから変換する。
 
     Args:
         file_path: 変換対象ファイルパス（正しい拡張子であること）
@@ -204,30 +221,58 @@ def filter_file(file_path: str, ocr_engine: str = 'tesseract') -> str:
     Returns:
         プレーンテキスト文字列
     """
-    from o2md.o2md import convert_office_to_markdown, strip_markdown
+    from o2md.o2md import (
+        convert_office_to_markdown,
+        detect_file_type,
+        strip_markdown,
+    )
 
-    # テキストモードを有効化（画像処理スキップ）
+    previous_text_only = is_text_only()
     set_text_only(True)
 
-    # 一時出力ディレクトリを使用
-    with tempfile.TemporaryDirectory(prefix='o2md_filter_') as tmp_dir:
-        output_file, auto_patterns, _ = convert_office_to_markdown(
-            file_path,
-            output_dir=tmp_dir,
-            ocr_engine=ocr_engine,
-        )
+    try:
+        # 一時出力ディレクトリを使用
+        with tempfile.TemporaryDirectory(prefix='o2md_filter_') as tmp_dir:
+            resolved_type = file_type or resolve_file_type(file_path)
+            processing_path = file_path
+            temporary_input = None
+            actual_type = detect_file_type(file_path)
+            if resolved_type != actual_type:
+                with open(file_path, 'rb') as source:
+                    header = source.read(16384)
+                base_type = detect_type_from_bytes(header)
+                suffix = _type_to_extension(resolved_type, base_type)
+                temporary_input = tempfile.NamedTemporaryFile(
+                    suffix=suffix,
+                    prefix='o2md_filter_input_',
+                    dir=tmp_dir,
+                    delete=False,
+                )
+                temporary_input.close()
+                shutil.copyfile(file_path, temporary_input.name)
+                processing_path = temporary_input.name
 
-        # 出力ファイルを読み込み
-        with open(output_file, 'r', encoding='utf-8') as f:
-            content = f.read()
+            try:
+                output_file, auto_patterns, _ = convert_office_to_markdown(
+                    processing_path,
+                    output_dir=tmp_dir,
+                    ocr_engine=ocr_engine,
+                )
 
-    # テキストモードでは既に.txt出力されるが、念のためstrip_markdownを適用
-    # .txt出力の場合はそのまま返す
-    if output_file.endswith('.txt'):
-        return content
+                # 出力ファイルを読み込み
+                with open(output_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            finally:
+                if temporary_input is not None and os.path.exists(temporary_input.name):
+                    os.unlink(temporary_input.name)
 
-    # .md出力の場合はMarkdown記法を除去
-    return strip_markdown(content, auto_patterns=auto_patterns)
+        # テキストモードでは既に.txt出力されるが、念のためstrip_markdownを適用
+        if output_file.endswith('.txt'):
+            return content
+
+        return strip_markdown(content, auto_patterns=auto_patterns)
+    finally:
+        set_text_only(previous_text_only)
 
 
 def main():
@@ -244,7 +289,8 @@ def main():
 
 対応形式:
   Excel (.xlsx, .xls), Word (.docx, .doc), PowerPoint (.pptx, .ppt),
-  PDF (.pdf), 一太郎 (.jtd, .jtt), 画像 (.jpg, .png, etc.)
+  PDF (.pdf), 一太郎 (.jtd, .jtt, .jsw, .jaw, .jtw, .jbw, .juw, .jfw, .jvw),
+  MS Project (.mpp, .mpt, .mpx), 画像 (.jpg, .png, etc.)
         """
     )
 
@@ -282,7 +328,11 @@ def main():
                       file=sys.stderr)
                 sys.exit(1)
 
-            text = filter_file(args.file, ocr_engine=args.ocr_engine)
+            text = filter_file(
+                args.file,
+                ocr_engine=args.ocr_engine,
+                file_type=file_type,
+            )
 
         else:
             # stdinから読み込み
@@ -300,7 +350,7 @@ def main():
                 sys.exit(1)
 
             # マジックバイトでタイプ判定
-            base_type = detect_type_from_bytes(stdin_data[:12])
+            base_type = detect_type_from_bytes(stdin_data[:16384])
 
             # 一時ファイルに保存して処理
             suffix = _get_suffix_for_type(base_type)
@@ -354,12 +404,15 @@ def _type_to_extension(file_type: str, base_type: str = 'zip') -> str:
     LibreOfficeによる変換ステップを実行できる。
 
     Args:
-        file_type: 'excel', 'word', 'powerpoint', 'pdf', 'ichitaro', 'image'
+        file_type: 'excel', 'word', 'powerpoint', 'pdf', 'ichitaro', 'msproject', 'image'
         base_type: コンテナ形式 ('ole', 'zip', 'pdf', 'image', 'unknown')
 
     Returns:
         拡張子文字列（ドット付き）
     """
+    if base_type == 'legacy_ichitaro':
+        return '.jsw'
+
     if base_type == 'ole':
         ole_ext_map = {
             'excel': '.xls',
@@ -376,6 +429,7 @@ def _type_to_extension(file_type: str, base_type: str = 'zip') -> str:
         'powerpoint': '.pptx',
         'pdf': '.pdf',
         'ichitaro': '.jtd',
+        'msproject': '.xml' if base_type == 'msproject' else '.mpp',
         'image': '.png',
     }
     return zip_ext_map.get(file_type, '.bin')
@@ -395,6 +449,8 @@ def _get_suffix_for_type(base_type: str) -> str:
         'ole': '.bin',
         'zip': '.zip',
         'image': '.png',
+        'legacy_ichitaro': '.jsw',
+        'msproject': '.xml',
     }
     return type_suffix_map.get(base_type, '.bin')
 

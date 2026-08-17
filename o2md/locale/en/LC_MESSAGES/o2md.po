@@ -138,3 +138,95 @@ msgstr "Error: Please specify a .docx or .doc file."
 
 msgid "エラー: .pptまたは.pptx形式のファイルを指定してください。"
 msgstr "Error: Please specify a .ppt or .pptx file."
+
+# --- MS Project変換 ---
+
+msgid "MS Projectファイル(.mpp/.mpt/.mpx)をMarkdownに変換"
+msgstr "Convert MS Project file (.mpp/.mpt/.mpx) to Markdown"
+
+msgid "変換するMS Projectファイル"
+msgstr "MS Project file to convert"
+
+msgid "出力ディレクトリを指定（デフォルト: ./output）"
+msgstr "Specify output directory (default: ./output)"
+
+msgid "デバッグ情報を出力"
+msgstr "Output debug information"
+
+msgid ".mdと.txtの両方を出力（プレーンテキスト変換）"
+msgstr "Output both .md and .txt (plain text conversion)"
+
+msgid "MS Project変換開始: {file}"
+msgstr "Starting MS Project conversion: {file}"
+
+msgid "エラー: {ext} 形式のファイルを指定してください。"
+msgstr "Error: Please specify a {ext} file."
+
+msgid "エラー: {error}"
+msgstr "Error: {error}"
+
+msgid "## プロジェクト情報"
+msgstr "## Project Information"
+
+msgid "## タスク一覧"
+msgstr "## Task List"
+
+msgid "## リソース一覧"
+msgstr "## Resource List"
+
+msgid "| ID | タスク名 | 開始日 | 終了日 | 期間 | 進捗 | 担当者 | 依存タスク |"
+msgstr "| ID | Task Name | Start Date | End Date | Duration | Progress | Resource | Dependencies |"
+
+msgid "| ID | リソース名 | 割当タスク数 | 合計日数 |"
+msgstr "| ID | Resource Name | Assigned Tasks | Total Days |"
+
+msgid "プロジェクト名"
+msgstr "Project Name"
+
+msgid "作成者"
+msgstr "Author"
+
+msgid "開始日"
+msgstr "Start Date"
+
+msgid "終了日"
+msgstr "End Date"
+
+msgid "日"
+msgstr "days"
+
+msgid "時間"
+msgstr "hours"
+
+msgid "週"
+msgstr "weeks"
+
+msgid "ヶ月"
+msgstr "months"
+
+msgid "分"
+msgstr "minutes"
+
+msgid "年"
+msgstr "years"
+
+msgid "タスク一覧"
+msgstr "Task List"
+
+msgid "リソース一覧"
+msgstr "Resource List"
+
+msgid "プロジェクト情報"
+msgstr "Project Information"
+
+msgid "プロジェクト名"
+msgstr "Project Name"
+
+msgid "Task List"
+msgstr "Task List"
+
+msgid "Resource List"
+msgstr "Resource List"
+
+msgid "Project Information"
+msgstr "Project Information"
