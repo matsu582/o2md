@@ -968,6 +968,37 @@ def test_mspdi_content_sniffing_is_not_extension_only():
     assert detect_type_from_bytes(b"<Project xmlns='http://example.test'/>") == "unknown"
 
 
+def test_mspdi_xml_rejects_doctype_without_entity_expansion():
+    data = b"""<!DOCTYPE lolz [
+      <!ENTITY a "1234567890">
+      <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+    ]>
+    <Project xmlns="http://schemas.microsoft.com/project">&b;</Project>"""
+
+    assert not is_mspdi_xml(data)
+
+
+def test_notes_manager_skips_doctype_note_part(tmp_path):
+    document = Document()
+    path = tmp_path / "notes-dtd.docx"
+    document.save(path)
+    footnotes = f"""<!DOCTYPE footnotes [
+      <!ENTITY text "危険な脚注">
+    ]>
+    <w:footnotes xmlns:w="{W}">
+      <w:footnote w:id="1"><w:p><w:r><w:t>&text;</w:t></w:r></w:p></w:footnote>
+    </w:footnotes>""".encode()
+    rebuilt = tmp_path / "notes-dtd-rebuilt.docx"
+    with zipfile.ZipFile(path) as source, zipfile.ZipFile(rebuilt, "w") as target:
+        for item in source.infolist():
+            target.writestr(item, source.read(item.filename))
+        target.writestr("word/footnotes.xml", footnotes)
+
+    manager = NoteManager(str(rebuilt))
+
+    assert manager.reference("fn", "1") == ""
+
+
 def test_notes_manager_maps_references_and_definitions(tmp_path):
     document = Document()
     path = tmp_path / "notes.docx"

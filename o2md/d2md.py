@@ -218,6 +218,8 @@ class WordToMarkdownConverter:
                             and item.filename.endswith(".xml")
                         ):
                             try:
+                                if b"<!DOCTYPE" in data.upper():
+                                    raise ET.ParseError("DTDを含む任意パート")
                                 ET.fromstring(data)
                             except ET.ParseError as part_error:
                                 logger.warning(

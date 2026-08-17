@@ -11,8 +11,21 @@ def is_mspdi_xml(data: bytes) -> bool:
     """XMLデータがMSPDIのProject要素か判定する。"""
     if not data or b"<" not in data:
         return False
+    if b"<!DOCTYPE" in data.upper():
+        return False
     try:
-        root = ET.fromstring(data)
+        parser = ET.XMLPullParser(events=("start",))
+        for offset in range(0, len(data), 1024):
+            parser.feed(data[offset:offset + 1024])
+            for _, root in parser.read_events():
+                local_name = root.tag.rsplit("}", 1)[-1]
+                namespace = (
+                    root.tag.split("}", 1)[0].lstrip("{")
+                    if "}" in root.tag
+                    else ""
+                )
+                return local_name == "Project" and MSPDI_NAMESPACE in namespace
+        return False
     except ET.ParseError:
         match = re.search(
             rb"<(?:[A-Za-z_][\w.-]*:)?Project\b[^>]*\bxmlns(?::[A-Za-z_][\w.-]*)?"
@@ -20,9 +33,6 @@ def is_mspdi_xml(data: bytes) -> bool:
             data,
         )
         return bool(match)
-    local_name = root.tag.rsplit("}", 1)[-1]
-    namespace = root.tag.split("}", 1)[0].lstrip("{") if "}" in root.tag else ""
-    return local_name == "Project" and MSPDI_NAMESPACE in namespace
 
 
 def is_mspdi_file(file_path: str, limit: int = 16384) -> bool:
