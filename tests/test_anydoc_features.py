@@ -461,7 +461,7 @@ def test_numbering_resolver_explicit_restart_level_controls_reset():
 
 
 def test_safe_xml_parser_rejects_doctype_and_accepts_normal_xml():
-    with pytest.raises(Exception, match="DOCTYPE"):
+    with pytest.raises(ET.ParseError, match="DOCTYPE"):
         safe_fromstring(
             b'<!DOCTYPE root [<!ENTITY value "expanded">]><root>&value;</root>'
         )
