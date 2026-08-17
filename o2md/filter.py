@@ -27,7 +27,7 @@ import tempfile
 import logging
 import shutil
 
-from o2md.utils import set_text_only
+from o2md.utils import is_text_only, set_text_only
 from o2md.mspdi import is_mspdi_xml
 
 
@@ -227,51 +227,52 @@ def filter_file(
         strip_markdown,
     )
 
-    # テキストモードを有効化（画像処理スキップ）
+    previous_text_only = is_text_only()
     set_text_only(True)
 
-    # 一時出力ディレクトリを使用
-    with tempfile.TemporaryDirectory(prefix='o2md_filter_') as tmp_dir:
-        resolved_type = file_type or resolve_file_type(file_path)
-        processing_path = file_path
-        temporary_input = None
-        actual_type = detect_file_type(file_path)
-        if resolved_type != actual_type:
-            with open(file_path, 'rb') as source:
-                header = source.read(16384)
-            base_type = detect_type_from_bytes(header)
-            suffix = _type_to_extension(resolved_type, base_type)
-            temporary_input = tempfile.NamedTemporaryFile(
-                suffix=suffix,
-                prefix='o2md_filter_input_',
-                dir=tmp_dir,
-                delete=False,
-            )
-            temporary_input.close()
-            shutil.copyfile(file_path, temporary_input.name)
-            processing_path = temporary_input.name
+    try:
+        # 一時出力ディレクトリを使用
+        with tempfile.TemporaryDirectory(prefix='o2md_filter_') as tmp_dir:
+            resolved_type = file_type or resolve_file_type(file_path)
+            processing_path = file_path
+            temporary_input = None
+            actual_type = detect_file_type(file_path)
+            if resolved_type != actual_type:
+                with open(file_path, 'rb') as source:
+                    header = source.read(16384)
+                base_type = detect_type_from_bytes(header)
+                suffix = _type_to_extension(resolved_type, base_type)
+                temporary_input = tempfile.NamedTemporaryFile(
+                    suffix=suffix,
+                    prefix='o2md_filter_input_',
+                    dir=tmp_dir,
+                    delete=False,
+                )
+                temporary_input.close()
+                shutil.copyfile(file_path, temporary_input.name)
+                processing_path = temporary_input.name
 
-        try:
-            output_file, auto_patterns, _ = convert_office_to_markdown(
-                processing_path,
-                output_dir=tmp_dir,
-                ocr_engine=ocr_engine,
-            )
+            try:
+                output_file, auto_patterns, _ = convert_office_to_markdown(
+                    processing_path,
+                    output_dir=tmp_dir,
+                    ocr_engine=ocr_engine,
+                )
 
-            # 出力ファイルを読み込み
-            with open(output_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-        finally:
-            if temporary_input is not None and os.path.exists(temporary_input.name):
-                os.unlink(temporary_input.name)
+                # 出力ファイルを読み込み
+                with open(output_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            finally:
+                if temporary_input is not None and os.path.exists(temporary_input.name):
+                    os.unlink(temporary_input.name)
 
-    # テキストモードでは既に.txt出力されるが、念のためstrip_markdownを適用
-    # .txt出力の場合はそのまま返す
-    if output_file.endswith('.txt'):
-        return content
+        # テキストモードでは既に.txt出力されるが、念のためstrip_markdownを適用
+        if output_file.endswith('.txt'):
+            return content
 
-    # .md出力の場合はMarkdown記法を除去
-    return strip_markdown(content, auto_patterns=auto_patterns)
+        return strip_markdown(content, auto_patterns=auto_patterns)
+    finally:
+        set_text_only(previous_text_only)
 
 
 def main():
