@@ -185,7 +185,13 @@ class NumberingResolver:
             restart_level = (
                 lower_definition.restart if lower_definition is not None else None
             )
-            if restart_level is None or restart_level == ilvl + 1:
+            if restart_level is None or (
+                restart_level != 0
+                and (
+                    restart_level >= index + 1
+                    or ilvl + 1 <= restart_level
+                )
+            ):
                 state[index] = 0
         state[ilvl] = max(definition.start, state[ilvl] + 1)
         values = {
