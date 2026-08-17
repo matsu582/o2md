@@ -11,6 +11,7 @@ Gradle/Maven コマンド実行に依存しない Pure Python 実装。
 
 import os
 import hashlib
+import stat
 import time
 import urllib.request
 import urllib.error
@@ -96,14 +97,39 @@ def _verify_jar(path: Path, expected_sha256: str) -> bool:
     return digest == expected_sha256
 
 
-def get_jar_cache_dir() -> Path:
-    """JAR キャッシュディレクトリ（o2md パッケージ内 libs/）を取得
+def _is_safe_cache_dir(path: Path) -> bool:
+    """キャッシュ先が他ユーザから書き換えられない実ディレクトリか判定する。"""
+    if path.is_symlink() or not path.is_dir():
+        return False
+    info = path.stat()
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        return False
+    if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
+        return False
+    return True
 
-    pip でインストールされたパッケージフォルダ内に libs/ を作成する。
+
+def get_jar_cache_dir() -> Path:
+    """JAR キャッシュディレクトリを取得
+
+    既定は o2md パッケージフォルダ内 libs/ で、所有者のみ書き込み可として作成する。
+    パッケージフォルダが他ユーザ書き込み可などで安全に使えない場合は、
+    ユーザ専用のキャッシュ（$XDG_CACHE_HOME もしくは ~/.cache/o2md/libs）へ退避する。
     """
-    cache_dir = Path(__file__).parent / "libs"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir
+    package_dir = Path(__file__).parent / "libs"
+    try:
+        package_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
+        if _is_safe_cache_dir(package_dir):
+            return package_dir
+    except OSError:
+        pass
+
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    user_dir = Path(base) / "o2md" / "libs"
+    user_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not _is_safe_cache_dir(user_dir):
+        raise RuntimeError(f"JARキャッシュディレクトリを安全に用意できません: {user_dir}")
+    return user_dir
 
 
 def ensure_mpxj_jars(verbose: bool = False) -> str:

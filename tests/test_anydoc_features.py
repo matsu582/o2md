@@ -1017,6 +1017,34 @@ def test_notes_manager_maps_references_and_definitions(tmp_path):
     assert manager.definitions() == ["[^fn1]: 脚注本文"]
 
 
+def test_notes_manager_definitions_handles_nested_note_reference(tmp_path):
+    document = Document()
+    path = tmp_path / "nested-notes.docx"
+    document.save(path)
+    footnotes = f"""<w:footnotes xmlns:w="{W}">
+      <w:footnote w:id="1"><w:p><w:r><w:t>1つ目の脚注</w:t></w:r></w:p></w:footnote>
+      <w:footnote w:id="2"><w:p><w:r><w:t>2つ目の脚注</w:t></w:r></w:p></w:footnote>
+    </w:footnotes>""".encode()
+    rebuilt = tmp_path / "nested-notes-rebuilt.docx"
+    with zipfile.ZipFile(path) as source, zipfile.ZipFile(rebuilt, "w") as target:
+        for item in source.infolist():
+            target.writestr(item, source.read(item.filename))
+        target.writestr("word/footnotes.xml", footnotes)
+    manager = NoteManager(str(rebuilt))
+    assert manager.reference("fn", "1") == "[^fn1]"
+
+    def renderer(node):
+        text = "".join(t.text for t in node.iter(f"{{{W}}}t") if t.text)
+        # 脚注本文の変換中に別の脚注参照が現れる状況を再現する。
+        if text == "1つ目の脚注":
+            text += manager.reference("fn", "2")
+        return text
+
+    definitions = manager.definitions(renderer=renderer)
+
+    assert definitions == ["[^fn1]: 1つ目の脚注[^fn2]", "[^fn2]: 2つ目の脚注"]
+
+
 def test_word_table_grid_keeps_column_count():
     document = Document()
     table = document.add_table(rows=2, cols=2)

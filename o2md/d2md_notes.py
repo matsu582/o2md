@@ -122,22 +122,36 @@ class NoteManager:
         return f"[^{kind}{number}]"
 
     def definitions(self, text_only=False, renderer=None) -> list[str]:
-        """本文参照された脚注の定義をMarkdown行として返す。"""
+        """本文参照された脚注の定義をMarkdown行として返す。
+
+        脚注本文の変換中に別の脚注参照が現れると参照表が増えるため、
+        スナップショットを取りながら未処理分が無くなるまで繰り返す。
+        """
         lines = []
-        for (kind, note_id), number in self.references.items():
-            text = self.notes.get(kind, {}).get(note_id, "")
-            if not text:
-                logger.warning("%s note id=%sの本文が見つからないため定義を省略します", kind, note_id)
-                continue
-            if renderer is not None and note_id in self.note_nodes.get(kind, {}):
-                text = renderer(self.note_nodes[kind][note_id])
-            if not text:
-                logger.warning("%s note id=%sの変換結果が空のため定義を省略します", kind, note_id)
-                continue
-            marker = f"{kind}{number}"
-            if text_only:
-                label = "脚注" if kind == "fn" else "文末注"
-                lines.append(f"{label}{number}: {text}")
-            else:
-                lines.append(f"[^{marker}]: {text}")
+        emitted = set()
+        pending = [item for item in self.references.items() if item[0] not in emitted]
+        while pending:
+            for key, number in pending:
+                emitted.add(key)
+                line = self._definition_line(key, number, text_only, renderer)
+                if line is not None:
+                    lines.append(line)
+            pending = [item for item in self.references.items() if item[0] not in emitted]
         return lines
+
+    def _definition_line(self, key, number, text_only, renderer):
+        """1件の脚注定義をMarkdown行にする。省略する場合はNoneを返す。"""
+        kind, note_id = key
+        text = self.notes.get(kind, {}).get(note_id, "")
+        if not text:
+            logger.warning("%s note id=%sの本文が見つからないため定義を省略します", kind, note_id)
+            return None
+        if renderer is not None and note_id in self.note_nodes.get(kind, {}):
+            text = renderer(self.note_nodes[kind][note_id])
+        if not text:
+            logger.warning("%s note id=%sの変換結果が空のため定義を省略します", kind, note_id)
+            return None
+        if text_only:
+            label = "脚注" if kind == "fn" else "文末注"
+            return f"{label}{number}: {text}"
+        return f"[^{kind}{number}]: {text}"
