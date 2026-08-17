@@ -1074,6 +1074,33 @@ def test_notes_manager_skips_doctype_note_part(tmp_path):
     assert manager.reference("fn", "1") == ""
 
 
+def test_notes_manager_keeps_endnotes_when_footnotes_are_invalid(tmp_path):
+    document = Document()
+    path = tmp_path / "notes-isolated.docx"
+    document.save(path)
+    footnotes = f"""<!DOCTYPE footnotes [
+      <!ENTITY text "危険な脚注">
+    ]>
+    <w:footnotes xmlns:w="{W}">
+      <w:footnote w:id="1"><w:p><w:r><w:t>&text;</w:t></w:r></w:p></w:footnote>
+    </w:footnotes>""".encode()
+    endnotes = f"""<w:endnotes xmlns:w="{W}">
+      <w:endnote w:id="1"><w:p><w:r><w:t>文末脚注本文</w:t></w:r></w:p></w:endnote>
+    </w:endnotes>""".encode()
+    rebuilt = tmp_path / "notes-isolated-rebuilt.docx"
+    with zipfile.ZipFile(path) as source, zipfile.ZipFile(rebuilt, "w") as target:
+        for item in source.infolist():
+            target.writestr(item, source.read(item.filename))
+        target.writestr("word/footnotes.xml", footnotes)
+        target.writestr("word/endnotes.xml", endnotes)
+
+    manager = NoteManager(str(rebuilt))
+
+    assert manager.reference("fn", "1") == ""
+    assert manager.reference("en", "1") == "[^en1]"
+    assert manager.definitions() == ["[^en1]: 文末脚注本文"]
+
+
 def test_notes_manager_maps_references_and_definitions(tmp_path):
     document = Document()
     path = tmp_path / "notes.docx"

@@ -514,6 +514,7 @@ This ensures callouts, colored rectangles, and other decorative elements are pro
 - Network access required for initial JAR download
 - If `CLASSPATH` is set, the user-provided JARs take precedence
 - Cached and newly downloaded JARs are SHA-256 verified before they are added to the classpath
+- On Windows, JARs are cached under the user's profile directory instead of the package directory
 
 ### Image OCR (`img2md`)
 - OCR accuracy depends on image quality and resolution

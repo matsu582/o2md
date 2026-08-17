@@ -8,15 +8,25 @@ import pytest
 from o2md import jar_manager
 
 
-def test_windows_cache_dir_does_not_reject_mode_bits(tmp_path, monkeypatch):
+def test_windows_cache_dir_uses_local_appdata(tmp_path, monkeypatch):
     package_dir = tmp_path / "package" / "libs"
     package_dir.mkdir(parents=True)
-    package_dir.chmod(0o777)
-    monkeypatch.setattr(jar_manager, "__file__", str(tmp_path / "package" / "jar_manager.py"))
+    profile_dir = tmp_path / "profile"
+    local_app_data = profile_dir / "AppData" / "Local"
     monkeypatch.setattr(jar_manager, "Path", PosixPath)
     monkeypatch.setattr(jar_manager.os, "name", "nt")
+    monkeypatch.setattr(
+        jar_manager,
+        "__file__",
+        str(tmp_path / "package" / "jar_manager.py"),
+    )
+    monkeypatch.setenv("USERPROFILE", str(profile_dir))
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
 
-    assert jar_manager.get_jar_cache_dir() == package_dir
+    cache_dir = jar_manager.get_jar_cache_dir()
+
+    assert cache_dir == local_app_data / "o2md" / "libs"
+    assert cache_dir != package_dir
 
 
 def test_posix_cache_dir_rejects_group_writable_directory(tmp_path, monkeypatch):
