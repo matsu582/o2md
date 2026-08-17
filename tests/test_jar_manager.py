@@ -1,10 +1,56 @@
 """MPXJ JAR管理の回帰テスト。"""
 
 import hashlib
+from pathlib import PosixPath
 
 import pytest
 
 from o2md import jar_manager
+
+
+def test_windows_cache_dir_uses_local_appdata(tmp_path, monkeypatch):
+    package_dir = tmp_path / "package" / "libs"
+    package_dir.mkdir(parents=True)
+    profile_dir = tmp_path / "profile"
+    local_app_data = profile_dir / "AppData" / "Local"
+    monkeypatch.setattr(jar_manager, "Path", PosixPath)
+    monkeypatch.setattr(jar_manager.os, "name", "nt")
+    monkeypatch.setattr(
+        jar_manager,
+        "__file__",
+        str(tmp_path / "package" / "jar_manager.py"),
+    )
+    monkeypatch.setenv("USERPROFILE", str(profile_dir))
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+
+    cache_dir = jar_manager.get_jar_cache_dir()
+
+    assert cache_dir == local_app_data / "o2md" / "libs"
+    assert cache_dir != package_dir
+
+
+def test_windows_cache_dir_falls_back_when_local_appdata_is_outside_profile(
+    tmp_path, monkeypatch
+):
+    profile_dir = tmp_path / "profile"
+    local_app_data = tmp_path / "redirected-local-appdata"
+    monkeypatch.setattr(jar_manager, "Path", PosixPath)
+    monkeypatch.setattr(jar_manager.os, "name", "nt")
+    monkeypatch.setenv("USERPROFILE", str(profile_dir))
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+
+    cache_dir = jar_manager.get_jar_cache_dir()
+
+    assert cache_dir == profile_dir / "o2md" / "libs"
+
+
+def test_posix_cache_dir_rejects_group_writable_directory(tmp_path, monkeypatch):
+    path = tmp_path / "libs"
+    path.mkdir()
+    path.chmod(0o775)
+    monkeypatch.setattr(jar_manager.os, "name", "posix")
+
+    assert not jar_manager._is_safe_cache_dir(path)
 
 
 def test_jar_hash_mismatch_is_redownloaded_and_unexpected_jar_excluded(

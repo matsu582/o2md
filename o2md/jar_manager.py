@@ -11,11 +11,15 @@ Gradle/Maven コマンド実行に依存しない Pure Python 実装。
 
 import os
 import hashlib
+import logging
 import stat
 import time
 import urllib.request
 import urllib.error
 from pathlib import Path
+
+
+logger = logging.getLogger(__name__)
 
 
 # MPXJ 13.5.1 が必要とする JAR と Maven Central URL
@@ -101,6 +105,19 @@ def _is_safe_cache_dir(path: Path) -> bool:
     """キャッシュ先が他ユーザから書き換えられない実ディレクトリか判定する。"""
     if path.is_symlink() or not path.is_dir():
         return False
+    if os.name == "nt":
+        profile = os.environ.get("USERPROFILE")
+        if not profile:
+            try:
+                profile = str(Path.home())
+            except OSError:
+                return False
+        try:
+            profile_path = Path(profile).resolve()
+            candidate = path.resolve()
+        except OSError:
+            return False
+        return candidate == profile_path or profile_path in candidate.parents
     info = path.stat()
     if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
         return False
@@ -115,7 +132,42 @@ def get_jar_cache_dir() -> Path:
     既定は o2md パッケージフォルダ内 libs/ で、所有者のみ書き込み可として作成する。
     パッケージフォルダが他ユーザ書き込み可などで安全に使えない場合は、
     ユーザ専用のキャッシュ（$XDG_CACHE_HOME もしくは ~/.cache/o2md/libs）へ退避する。
+    Windowsではパッケージ内のlibsを使用せず、ユーザープロファイル配下の
+    LOCALAPPDATA（なければUSERPROFILE）へ保存する。Windowsの既定ACLと
+    JARのSHA-256検証を組み合わせてキャッシュを保護する。
     """
+    if os.name == "nt":
+        candidates = []
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            candidates.append(local_app_data)
+        profile = os.environ.get("USERPROFILE")
+        if not profile:
+            try:
+                profile = str(Path.home())
+            except OSError:
+                profile = None
+        if profile and profile not in candidates:
+            candidates.append(profile)
+        for base in candidates:
+            user_dir = Path(base) / "o2md" / "libs"
+            try:
+                user_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            except OSError as exc:
+                logger.warning(
+                    "WindowsのJARキャッシュを作成できないため次の候補へ移ります: %s (%s)",
+                    user_dir,
+                    exc,
+                )
+                continue
+            if _is_safe_cache_dir(user_dir):
+                return user_dir
+            logger.warning(
+                "WindowsのJARキャッシュ先が安全性検査に通らないため次の候補へ移ります: %s",
+                user_dir,
+            )
+        raise RuntimeError("JARキャッシュディレクトリを安全に用意できません")
+
     package_dir = Path(__file__).parent / "libs"
     try:
         package_dir.mkdir(parents=True, exist_ok=True, mode=0o755)

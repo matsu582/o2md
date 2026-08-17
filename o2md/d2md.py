@@ -43,6 +43,7 @@ from o2md.d2md_fields import (
     normalize_markdown_url,
 )
 from o2md.d2md_notes import NoteManager
+from o2md.xml_safe import fromstring as safe_fromstring
 from o2md.d2md_numbering import NumberingResolver
 from o2md.d2md_tables import render_table
 from o2md.d2md_composite import (
@@ -182,7 +183,7 @@ class WordToMarkdownConverter:
         try:
             with zipfile.ZipFile(word_file_path) as package:
                 rels = package.read("word/_rels/document.xml.rels")
-            root = ET.fromstring(rels)
+            root = safe_fromstring(rels)
         except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError):
             return {}
         targets = {}
@@ -218,9 +219,7 @@ class WordToMarkdownConverter:
                             and item.filename.endswith(".xml")
                         ):
                             try:
-                                if b"<!DOCTYPE" in data.upper():
-                                    raise ET.ParseError("DTDを含む任意パート")
-                                ET.fromstring(data)
+                                safe_fromstring(data)
                             except ET.ParseError as part_error:
                                 logger.warning(
                                     "DOCX任意パートをスキップします: %s (%s)",

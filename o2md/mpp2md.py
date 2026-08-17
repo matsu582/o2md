@@ -81,7 +81,7 @@ def _init_jpype():
             
             # JVMを起動
             startJVM(jvm_path, "-Xmx4G", classpath=classpath)
-            debug_print(_(f"JVM起動完了: {jvm_path}"))
+            debug_print(_("JVM起動完了: {jvm_path}").format(jvm_path=jvm_path))
         
         _JPY_INITIALIZED = True
     except ImportError as e:
@@ -92,7 +92,7 @@ def _init_jpype():
             )
         ) from e
     except Exception as e:
-        raise RuntimeError(_(f"JVM初期化エラー: {e}")) from e
+        raise RuntimeError(_("JVM初期化エラー: {error}").format(error=e)) from e
 
 
 def _get_java_classes():
@@ -121,7 +121,7 @@ def _java_date_to_string(java_date, formatter=None) -> str:
         
         return str(java_date.format(formatter))
     except Exception as e:
-        debug_print(_(f"日時フォーマットエラー: {e}"))
+        debug_print(_("日時フォーマットエラー: {error}").format(error=e))
         return '-'
 
 
@@ -149,7 +149,7 @@ def _java_duration_to_string(java_duration) -> str:
             return f"{int(value)}{label}"
         return f"{value:.1f}{label}"
     except Exception as e:
-        debug_print(_(f"期間フォーマットエラー: {e}"))
+        debug_print(_("期間フォーマットエラー: {error}").format(error=e))
         return '-'
 
 
@@ -167,7 +167,7 @@ def _java_duration_to_days(java_duration, project_properties=None) -> Optional[f
         )
         return float(converted.getDuration())
     except Exception as e:
-        debug_print(_(f"期間の日数換算に失敗: {e}"))
+        debug_print(_("期間の日数換算に失敗: {error}").format(error=e))
         return None
 
 
@@ -182,7 +182,7 @@ def _java_percent_to_string(java_percent) -> str:
             return f"{int(value)}%"
         return f"{value:.1f}%"
     except Exception as e:
-        debug_print(_(f"パーセント変換エラー: {e}"))
+        debug_print(_("パーセント変換エラー: {error}").format(error=e))
         return '-'
 
 
@@ -209,9 +209,11 @@ def read_project_mpxj(file_path: str) -> dict:
     abs_path = os.path.abspath(file_path)
     
     if not os.path.exists(abs_path):
-        raise FileNotFoundError(_(f"ファイルが見つかりません: {abs_path}"))
+        raise FileNotFoundError(
+            _("ファイルが見つかりません: {file}").format(file=abs_path)
+        )
     
-    debug_print(_(f"MPP読み込み: {abs_path}"))
+    debug_print(_("MPP読み込み: {file}").format(file=abs_path))
     
     try:
         from jpype import JClass
@@ -239,7 +241,9 @@ def read_project_mpxj(file_path: str) -> dict:
         project = proxy.read()
         
         if not project:
-            raise RuntimeError(_(f"ファイルの読み込みに失敗: {abs_path}"))
+            raise RuntimeError(
+                _("ファイルの読み込みに失敗: {file}").format(file=abs_path)
+            )
         
         # Python辞書に変換
         result = {
@@ -253,7 +257,7 @@ def read_project_mpxj(file_path: str) -> dict:
         return result
         
     except Exception as e:
-        raise RuntimeError(_(f"MPP読み込みエラー: {e}"))
+        raise RuntimeError(_("MPP読み込みエラー: {error}").format(error=e))
 
 
 def _extract_project_info(project) -> dict:
@@ -267,7 +271,7 @@ def _extract_project_info(project) -> dict:
             'finish': _java_date_to_string(props.getFinishDate()),
         }
     except Exception as e:
-        debug_print(_(f"プロジェクト情報抽出エラー: {e}"))
+        debug_print(_("プロジェクト情報抽出エラー: {error}").format(error=e))
         return {'title': '', 'author': '', 'start': '-', 'finish': '-'}
 
 
@@ -324,9 +328,9 @@ def _task_to_dict(task, project_properties=None) -> dict:
                                 'lag': _java_duration_to_string(rel.getLag()),
                             })
                 except Exception as e:
-                    debug_print(_(f"依存関係抽出エラー: {e}"))
+                    debug_print(_("依存関係抽出エラー: {error}").format(error=e))
     except Exception as e:
-        debug_print(_(f"getPredecessorsエラー: {e}"))
+        debug_print(_("getPredecessorsエラー: {error}").format(error=e))
     
     # 担当者を抽出
     resources_str = '-'
@@ -349,7 +353,7 @@ def _task_to_dict(task, project_properties=None) -> dict:
         child_tasks = task.getChildTasks()
         is_summary = bool(child_tasks)
     except Exception as e:
-        debug_print(_(f"サマリー判定エラー: {e}"))
+        debug_print(_("サマリー判定エラー: {error}").format(error=e))
     
     duration = task.getDuration()
     duration_days = _java_duration_to_days(duration, project_properties)
@@ -384,9 +388,9 @@ def _extract_resources(project) -> list[dict]:
                         'name': str(res_name),
                     })
             except Exception as e:
-                debug_print(_(f"リソース抽出エラー: {e}"))
+                debug_print(_("リソース抽出エラー: {error}").format(error=e))
     except Exception as e:
-        debug_print(_(f"getResourcesエラー: {e}"))
+        debug_print(_("getResourcesエラー: {error}").format(error=e))
     
     return resources
 
