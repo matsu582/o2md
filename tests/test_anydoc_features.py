@@ -4,6 +4,7 @@ import tempfile
 import zipfile
 import io
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -26,9 +27,11 @@ from o2md.d2md_composite import (
 )
 from o2md.filter import detect_type_from_bytes
 import o2md.filter as filter_cli
+import o2md.i18n as i18n
 from o2md.mspdi import is_mspdi_xml
 from o2md.mpp2md import resources_to_markdown_table
 from o2md.o2md import detect_file_type
+from o2md.xml_safe import fromstring as safe_fromstring
 from o2md.x2md import ExcelToMarkdownConverter
 
 
@@ -419,6 +422,78 @@ def test_numbering_resolver_honors_start_override_and_lvl_restart():
     assert resolver.marker(paragraph)[1] == "4."
     paragraph = _paragraph_with_num(1, "10")
     assert resolver.marker(paragraph)[1] == "4.1."
+
+
+def test_numbering_resolver_zero_lvl_restart_preserves_lower_counter():
+    blob = f"""<w:numbering xmlns:w="{W}">
+      <w:abstractNum w:abstractNumId="20">
+        <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
+        <w:lvl w:ilvl="1"><w:lvlRestart w:val="0"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2."/></w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="20"><w:abstractNumId w:val="20"/></w:num>
+    </w:numbering>""".encode()
+    resolver = NumberingResolver(blob)
+
+    assert resolver.marker(_paragraph_with_num(0, "20"))[1] == "1."
+    assert resolver.marker(_paragraph_with_num(1, "20"))[1] == "1.1."
+    assert resolver.marker(_paragraph_with_num(0, "20"))[1] == "2."
+    assert resolver.marker(_paragraph_with_num(1, "20"))[1] == "2.2."
+
+
+def test_numbering_resolver_explicit_restart_level_controls_reset():
+    blob = f"""<w:numbering xmlns:w="{W}">
+      <w:abstractNum w:abstractNumId="21">
+        <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
+        <w:lvl w:ilvl="1"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2."/></w:lvl>
+        <w:lvl w:ilvl="2"><w:lvlRestart w:val="2"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2.%3."/></w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="21"><w:abstractNumId w:val="21"/></w:num>
+    </w:numbering>""".encode()
+    resolver = NumberingResolver(blob)
+
+    assert resolver.marker(_paragraph_with_num(0, "21"))[1] == "1."
+    assert resolver.marker(_paragraph_with_num(1, "21"))[1] == "1.1."
+    assert resolver.marker(_paragraph_with_num(2, "21"))[1] == "1.1.1."
+    assert resolver.marker(_paragraph_with_num(0, "21"))[1] == "2."
+    assert resolver.marker(_paragraph_with_num(2, "21"))[1] == "2.1.2."
+    assert resolver.marker(_paragraph_with_num(1, "21"))[1] == "2.1."
+    assert resolver.marker(_paragraph_with_num(2, "21"))[1] == "2.1.1."
+
+
+def test_safe_xml_parser_rejects_doctype_and_accepts_normal_xml():
+    with pytest.raises(Exception, match="DOCTYPE"):
+        safe_fromstring(
+            b'<!DOCTYPE root [<!ENTITY value "expanded">]><root>&value;</root>'
+        )
+    assert safe_fromstring(b"<root />").tag == "root"
+
+
+def test_numbering_resolver_skips_doctype_payload():
+    blob = b"""<!DOCTYPE numbering [<!ENTITY value "expanded">]>
+    <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
+    </w:numbering>"""
+
+    resolver = NumberingResolver(blob)
+
+    assert not resolver.valid
+
+
+def test_composite_xml_skips_doctype_payload():
+    drawing = b"""<!DOCTYPE drawing [<!ENTITY value "expanded">]>
+    <wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" />"""
+
+    assert absolute_drawing_xml([drawing]) is None
+
+
+def test_mpp_error_message_uses_english_translation():
+    i18n.setup_i18n("en")
+
+    assert i18n._("MPP読み込みエラー: {error}").format(error="broken") == (
+        "MPP reading error: broken"
+    )
+
+    i18n.setup_i18n("ja")
 
 
 def test_unknown_field_result_is_kept_and_hyperlink_is_rendered():
