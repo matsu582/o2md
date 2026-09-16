@@ -14,6 +14,7 @@ Excelファイルをシートごとに詳細なMarkdown形式に変換するツ�
 
 import logging
 import os
+import re
 import sys
 import tempfile
 import subprocess
