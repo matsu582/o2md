@@ -1,0 +1,2 @@
+excel_with_chart_図形テスト_chart_001.png
+excel_with_chart_図形テスト_sheet.png

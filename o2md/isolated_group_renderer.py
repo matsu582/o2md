@@ -2128,6 +2128,9 @@ class IsolatedGroupRenderer:
                 suffix = "_grp"
             
             excel_base = os.path.splitext(os.path.basename(self.converter.excel_file))[0]
+            # 複数シートで図形インデックス集合が同じでも同名にならないようシート名を含める
+            # サニタイズで同名になるシート（例: `A B` と `A_B`）も区別できるようシート番号を含める
+            safe_sheet = self.converter._sanitize_filename(sheet.title)
             
             if getattr(self.converter, 'debug_mode', False):
                 dbg_dir = os.path.join(self.converter.output_dir, 'debug_workbooks')
@@ -2135,7 +2138,9 @@ class IsolatedGroupRenderer:
             else:
                 dbg_dir = tempfile.mkdtemp()
             
-            final_xlsx_name = f"{excel_base}_iso_group{suffix}.xlsx"
+            final_xlsx_name = self.converter._bounded_filename(
+                f"{excel_base}_sheet{sheet_index + 1}_{safe_sheet}_iso_group{suffix}", '.xlsx'
+            )
             src_for_conv = os.path.join(dbg_dir, final_xlsx_name)
             
             import zipfile
@@ -2221,7 +2226,9 @@ class IsolatedGroupRenderer:
                     import hashlib
                     indices_str = '_'.join(map(str, sorted(shape_indices)))
                     group_hash = hashlib.md5(indices_str.encode()).hexdigest()[:8]
-                    saved_pdf_name = f"{self.converter.base_name}_{safe_sheet}_iso_group_{group_hash}.pdf"
+                    saved_pdf_name = self.converter._bounded_filename(
+                        f"{self.converter.base_name}_{safe_sheet}_iso_group_{group_hash}", '.pdf'
+                    )
                     saved_pdf_path = os.path.join(pdfs_dir, saved_pdf_name)
                     shutil.copyfile(pdf_path, saved_pdf_path)
                     logger.info(f"分離グループPDFを保存しました: {saved_pdf_path}")

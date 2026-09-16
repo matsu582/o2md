@@ -14,6 +14,7 @@ Excelファイルをシートごとに詳細なMarkdown形式に変換するツ�
 
 import logging
 import os
+import re
 import sys
 import tempfile
 import subprocess
@@ -33,7 +34,11 @@ from o2md.utils import get_libreoffice_path, is_libreoffice_available, is_libreo
 from o2md.isolated_group_renderer import IsolatedGroupRenderer
 from o2md.x2md_tables import _TablesMixin
 from o2md.x2md_graphics import _GraphicsMixin
-from o2md.x2md_charts import extract_charts_from_worksheet
+from o2md.x2md_charts import extract_charts_from_worksheet, CELL_REF_RE
+from o2md.x2md_text_patterns import (
+    looks_like_enumerated_list,
+    ENUMERATED_LIST_MIN_RIGHT_AVG_IMPLICIT,
+)
 from o2md.chart_utils import chart_data_to_markdown
 
 try:
@@ -207,7 +212,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
         """セル値を安全に取得し、エラー時はNoneを返す"""
         try:
             return sheet.cell(row, col).value
-        except Exception:
+        except Exception as e:
+            logger.debug("セル値の取得に失敗 (sheet=%s, row=%s, col=%s): %s", getattr(sheet, 'title', sheet), row, col, e)
             return None
 
     def get_auto_generated_patterns(self) -> list:
@@ -464,7 +470,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                         # 末尾の'の図'が存在する場合は削除（一般的なaltテキストパターン）
                         if sheet_title.endswith('の図'):
                             sheet_title = sheet_title[:-2]
-                except Exception:
+                except Exception as e:
+                    logger.debug("altテキストからのシートタイトル推測に失敗: %s", e)
                     sheet_title = None
                 key = sheet_title if sheet_title is not None else 'unknown'
                 # sheet_shape_imagesは延期された非正式なコレクションで
@@ -655,8 +662,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             finally:
                 try:
                     shutil.rmtree(tmpdir)
-                except Exception:
-                    pass  # 一時ファイルの削除失敗は無視
+                except Exception as e:
+                    logger.debug("一時ディレクトリの削除に失敗 (tmpdir=%s): %s", tmpdir, e)
         except Exception as e:
             logger.error(f"pageSetup設定に失敗: {e}")
             return False
@@ -741,7 +748,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                     try:
                         cell = sheet.cell(r, c)
                         v = cell.value
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("先頭行スキャン中のセル読み取りに失敗 (sheet=%s, row=%s, col=%s): %s", getattr(sheet, 'title', sheet), r, c, e)
                         cell = None
                         v = None
                     if v is not None:
@@ -843,7 +851,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                     for cc in range(c1, c2 + 1):
                         try:
                             v = sheet.cell(row=rr, column=cc).value
-                        except Exception:
+                        except Exception as e:
+                            logger.debug("セル値の読み取りに失敗 (sheet=%s, row=%s, col=%s): %s", getattr(sheet, 'title', sheet), rr, cc, e)
                             v = None
                         if v is not None and str(v).strip():
                             has_content = True
@@ -992,7 +1001,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             
             self.image_counter += 1
             ext = self.output_format
-            image_filename = f"{self.base_name}_{sheet.title}_chart_{chart_index + 1:03d}.{ext}"
+            image_filename = self._bounded_filename(f"{self.base_name}_{sheet.title}_chart_{chart_index + 1:03d}", f".{ext}")
             image_path = os.path.join(self.images_dir, image_filename)
             
             if self.output_format == 'svg':
@@ -1035,9 +1044,10 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             if not ref_str:
                 return []
             
-            match = re.match(r"'?[^'!]+'?\!\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)", ref_str)
-            if match:
-                col_start, row_start, col_end, row_end = match.groups()
+            match = CELL_REF_RE.match(ref_str)
+            # 従来どおり範囲参照のみを対象とし、単一セル参照（group(4)がNone）は無視する
+            if match and match.group(4) is not None:
+                col_start, row_start, col_end, row_end = match.group(2), match.group(3), match.group(4), match.group(5)
                 row_start, row_end = int(row_start), int(row_end)
                 
                 from openpyxl.utils import column_index_from_string
@@ -1560,7 +1570,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 for c in range(1, min(60, sheet.max_column) + 1):
                     try:
                         v = sheet.cell(r, c).value
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("セル値の読み取りに失敗 (sheet=%s, row=%s, col=%s): %s", getattr(sheet, 'title', sheet), r, c, e)
                         v = None
                     if v is not None:
                         s = str(v).strip()
@@ -1651,11 +1662,13 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                 # 予期しない形状: ベストエフォートで展開を試行
                                 try:
                                     anchor_row = entry[0]
-                                except Exception:
+                                except Exception as e:
+                                    logger.debug("延期テーブルエントリのanchor展開に失敗: %s", e)
                                     anchor_row = None
                                 try:
                                     tdata = entry[1]
-                                except Exception:
+                                except Exception as e:
+                                    logger.debug("延期テーブルエントリのtable_data展開に失敗: %s", e)
                                     tdata = None
                                 src_rows = None
 
@@ -1832,7 +1845,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                             if m:
                                 imgnm = m.group(1)
                                 self._mark_image_emitted(imgnm)
-                        except Exception:
+                        except Exception as e:
+                            logger.debug("出力済み画像参照のスキャンに失敗: %s", e)
                             continue
                 except Exception as e:
                     logger.warning(f"ファイル操作エラー: {e}")
@@ -1869,7 +1883,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                 try:
                                     if isinstance(meta, dict):
                                         title = meta.get('title')
-                                except Exception:
+                                except Exception as e:
+                                    logger.debug("テーブルメタ情報からのタイトル取得に失敗: %s", e)
                                     title = None
                                 if title:
                                     logger.debug(f"  [LOG] table @{row} title: {title} rows={len(tdata) if isinstance(tdata, list) else 'N/A'} src_rows={src_rows}")
@@ -1974,7 +1989,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                         except Exception:
                                             self._emit_free_text(sheet, row, title)
                             except Exception as e:
-                                pass  # XML解析エラーは無視
+                                logger.warning("テーブルタイトルの出力処理に失敗 (sheet=%s, row=%s): %s", sheet.title, row, e, exc_info=True)
 
                             # 正規出力: テーブルを出力しマッピングを記録
                             try:
@@ -2225,7 +2240,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                 return True
                 
             return False
-        except Exception:
+        except Exception as e:
+            logger.debug("セル書式の確認に失敗: %s", e)
             return False
     
     def _convert_sheet_data(self, sheet, data_range: Tuple[int, int, int, int]):
@@ -2348,7 +2364,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             for dr in drawing_ranges:
                 try:
                     d_c1, d_c2, d_r1, d_r2 = dr
-                except Exception:
+                except Exception as e:
+                    logger.warning("描画範囲エントリの解釈に失敗したためスキップ (sheet=%s, region=%s, entry=%r): %s", sheet.title, region, dr, e, exc_info=True)
                     continue
                 inter_r1 = max(r1, d_r1)
                 inter_r2 = min(r2, d_r2)
@@ -2520,8 +2537,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                         # 後でプレーンテキストとして発見できるようにする。
                         for (rr, _) in lines:
                             processed_rows.add(rr)
-                except Exception:
-                    pass  # データ構造操作失敗は無視
+                except Exception as e:
+                    logger.warning("除外領域のテキスト収集に失敗 (sheet=%s, rows=%s-%s): %s", sheet.title, srow, erow, e, exc_info=True)
 
         # プレーンテキスト領域を先に走査して収集する
         # 変更点: プレーン判定でTrueにならない場合でも、非空の行を"説明文"として出力するフォールバックを追加
@@ -2636,35 +2653,22 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                 for rr in range(srow, erow + 1):
                                     try:
                                         lv = sheet.cell(rr, lcol).value
-                                    except Exception:
+                                    except Exception as e:
+                                        logger.debug("左列セル値の取得に失敗 (sheet=%s, row=%s, col=%s): %s", getattr(sheet, 'title', sheet), rr, lcol, e)
                                         lv = None
                                     try:
                                         rv = sheet.cell(rr, rcol).value
-                                    except Exception:
+                                    except Exception as e:
+                                        logger.debug("右列セル値の取得に失敗 (sheet=%s, row=%s, col=%s): %s", getattr(sheet, 'title', sheet), rr, rcol, e)
                                         rv = None
                                     if lv is not None and str(lv).strip():
                                         l_texts.append(str(lv).strip())
                                     if rv is not None and str(rv).strip():
                                         r_texts.append(str(rv).strip())
 
-                                if l_texts and r_texts and len(l_texts) >= 2:
-                                    import re
-                                    circled = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'
-                                    num_matches = 0
-                                    for t in l_texts:
-                                        tt = t.strip()
-                                        if any(ch in circled for ch in tt):
-                                            num_matches += 1
-                                        elif re.match(r'^[0-9]+[\.)]?$|^[A-Za-z]$|^[IVXivx]+$', tt):
-                                            num_matches += 1
-                                        elif len(tt) <= 2:
-                                            num_matches += 1
-
-                                    ratio = num_matches / len(l_texts) if l_texts else 0.0
-                                    r_avg = sum(len(x) for x in r_texts) / len(r_texts) if r_texts else 0
-                                    if ratio >= 0.8 and r_avg >= 8:
-                                        logger.debug(f"[DEBUG] implicit run looks like enumerated list; skipping rows={srow}-{erow}")
-                                        skip_run = True
+                                if looks_like_enumerated_list(l_texts, r_texts, ENUMERATED_LIST_MIN_RIGHT_AVG_IMPLICIT):
+                                    logger.debug(f"[DEBUG] implicit run looks like enumerated list; skipping rows={srow}-{erow}")
+                                    skip_run = True
                         except (ValueError, TypeError) as e:
                             logger.debug(f"[DEBUG] 型変換エラー（無視）: {e}")
                         
@@ -2681,10 +2685,10 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                     self._convert_table_region(sheet, (srow, erow, smin, smax), table_number=0, all_table_regions=all_implicit_regions)
                     for rr in range(srow, erow + 1):
                         processed_rows.add(rr)
-                except Exception:
-                    pass  # データ構造操作失敗は無視
-        except Exception:
-            pass  # データ構造操作失敗は無視
+                except Exception as e:
+                    logger.warning("暗黙テーブル領域の変換に失敗 (sheet=%s, rows=%d-%d, cols=%d-%d): %s", sheet.title, srow, erow, smin, smax, e, exc_info=True)
+        except Exception as e:
+            logger.warning("暗黙テーブル検出・変換処理に失敗 (sheet=%s): %s", sheet.title, e, exc_info=True)
 
         # merged_textsを行番号（昇順）でソートしてシート順序を保持
         merged_texts.sort(key=lambda x: x[0])
@@ -2722,123 +2726,12 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                     self._mark_emitted_row(sheet.title, rr)
                                 break
                     except Exception as e:
-                        pass  # XML解析エラーは無視
+                        logger.debug("除外ブロックの出力済み行マーキングに失敗 (sheet=%s, row=%s): %s", getattr(sheet, 'title', sheet), r, e)
                 last_emitted_row = r
             # マージされたフリーテキスト領域の後に区切りの空行を追加（実際に出力する場合のみ）
             if getattr(self, '_in_canonical_emit', False):
                 self.markdown_lines.append("")
     
-    def _detect_and_process_plain_text_regions(self, sheet, min_row: int, max_row: int, min_col: int, max_col: int, processed_rows: set = None) -> set:
-        """プレーンテキスト領域を検出して処理し、処理済み行のセットを返す"""
-        if processed_rows is None:
-            processed_rows = set()
-        for row_num in range(min_row, max_row + 1):
-            if row_num in processed_rows:
-                continue
-            # この行がプレーンテキスト行かチェック
-            region = (row_num, row_num, min_col, max_col)
-            if self._is_plain_text_region(sheet, region):
-                logger.debug(f"[DEBUG] プレーンテキスト行を検出: 行{row_num}")
-                # 連続するプレーンテキスト行を検索
-                text_end_row = row_num
-                for next_row in range(row_num + 1, max_row + 1):
-                    next_region = (next_row, next_row, min_col, max_col)
-                    if self._is_plain_text_region(sheet, next_region):
-                        text_end_row = next_row
-                    else:
-                        break
-                # プレーンテキスト領域を出力
-                self._output_plain_text_region(sheet, row_num, text_end_row, min_col, max_col)
-                # 処理済み行を記録
-                for r in range(row_num, text_end_row + 1):
-                    processed_rows.add(r)
-        return processed_rows
-    
-    def _process_excluded_region_as_text(self, sheet, region: Tuple[int, int, int, int]):
-        """フィルタで除外されたテーブル領域をプレーンテキストとして処理"""
-        start_row, end_row, min_col, max_col = region
-        
-        for row_num in range(start_row, end_row + 1):
-            # 行のテキストを収集
-            row_texts = []
-            for col_num in range(min_col, max_col + 1):
-                if row_num <= sheet.max_row and col_num <= sheet.max_column:
-                    cell = sheet.cell(row=row_num, column=col_num)
-                    cell_value = cell.value
-                    if cell_value is not None:
-                        text = str(cell_value).strip()
-                        if text:
-                            # セルの書式を適用
-                            text = self._apply_cell_formatting(cell, text)
-                            row_texts.append(text)
-            
-            # 行にテキストがある場合は出力
-            if row_texts:
-                line_text = " ".join(row_texts)
-                self._emit_free_text(sheet, row_num, line_text)
-        
-        if end_row >= start_row:  # 何らかのテキストが処理された場合
-            # 正規出力時のみセパレータを追加し、出力済み行をマーク
-            if getattr(self, '_in_canonical_emit', False):
-                self.markdown_lines.append("")  # 空行を追加
-                # end_rowを空行インデックスにマッピングし出力済み行をマーク (helper already registered normalized texts)
-                try:
-                    self._mark_sheet_map(sheet.title, end_row, len(self.markdown_lines) - 1)
-                except Exception as e:
-                    pass  # XML解析エラーは無視
-                try:
-                    for r in range(start_row, end_row + 1):
-                        self._mark_emitted_row(sheet.title, r)
-                except Exception as e:
-                    pass  # XML解析エラーは無視
-            else:
-                logger.debug(f"[TRACE] Skipping authoritative mapping for excluded_region rows {start_row}-{end_row} (non-canonical)")
-    
-    def _output_plain_text_region(self, sheet, start_row: int, end_row: int, min_col: int, max_col: int):
-        """プレーンテキスト領域をMarkdownに出力"""
-        text_content = []
-
-        for row_num in range(start_row, end_row + 1):
-            row_text = []
-            for col_num in range(min_col, max_col + 1):
-                cell = sheet.cell(row=row_num, column=col_num)
-                if cell.value is not None:
-                    text = str(cell.value).strip()
-                    if text:
-                        # セルの書式を適用
-                        text = self._apply_cell_formatting(cell, text)
-                        row_text.append(text)
-
-            if row_text:
-                text_content.append(" ".join(row_text))
-
-        # 空でないテキストのみ出力
-        if text_content:
-            # ここでマッピングが存在しない場合は作成しない。マッピングは権威的であり、
-            # _mark_sheet_mapを介した正規出力時にのみ設定されるべき。
-            sheet_map = self._cell_to_md_index.get(sheet.title, {})
-            for i, text in enumerate(text_content):
-                if text.strip():
-                    src_row = start_row + i
-                    emitted = self._emit_free_text(sheet, src_row, text)
-                    # emittedがFalseの場合は重複としてスキップ
-            # 空行を追加し、最後のソース行を空白セパレータインデックスにマップ
-            # 正規出力時のみ実際に追加し、出力済み行をマーク
-            if getattr(self, '_in_canonical_emit', False):
-                self.markdown_lines.append("")  # 空行を追加
-                try:
-                    self._mark_sheet_map(sheet.title, end_row, len(self.markdown_lines) - 1)
-                except Exception as e:
-                    pass  # XML解析エラーは無視
-                # すべての出力済み行をマーク
-                try:
-                    for r in range(start_row, end_row + 1):
-                        self._mark_emitted_row(sheet.title, r)
-                except Exception as e:
-                    pass  # XML解析エラーは無視
-            logger.debug(f"[DEBUG] プレーンテキスト出力: {len(text_content)}行")
-
-
 def convert_xls_to_xlsx(xls_file_path: str) -> Optional[str]:
     """XLSファイルをXLSXに変換"""
     if not is_libreoffice_installed():

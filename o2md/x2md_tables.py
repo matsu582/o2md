@@ -14,6 +14,13 @@ ExcelToMarkdownConverterクラスのテーブル検出・構築・出力機能�
 import logging
 from typing import List, Dict, Tuple, Optional, Any, Set
 
+from o2md.x2md_text_patterns import (
+    is_path_like,
+    enum_marker_ratio,
+    looks_like_enumerated_list,
+    ENUMERATED_LIST_MIN_RIGHT_AVG_PLAIN,
+)
+
 logger = logging.getLogger(__name__)
 
 def _get_debug_print():
@@ -361,121 +368,6 @@ class _TablesMixin:
             return (r1, r2, c1, c2)
         return None
 
-    def _detect_table_regions_excluding_processed(self, sheet, min_row: int, max_row: int, min_col: int, max_col: int, processed_rows: set) -> Tuple[List[Tuple[int, int, int, int]], List[str]]:
-        """処理済み行を除外してテーブル領域を検出"""
-        try:
-            logger.info("罫線による表領域の検出を開始...")
-            logger.debug(f"[TRACE][_detect_table_regions_excl_entry] sheet={getattr(sheet,'title',None)} range=({min_row}-{max_row},{min_col}-{max_col}) processed_rows_count={len(processed_rows) if processed_rows else 0} processed_rows_sample={sorted(list(processed_rows))[:20] if processed_rows else []}")
-        except (ValueError, TypeError) as e:
-            logger.debug(f"[DEBUG] 型変換エラー（無視）: {e}")
-        
-        table_boundaries = []
-        current_table_start = None
-        
-        for row_num in range(min_row, max_row + 2):  # +2で最後の境界も検出
-            # 処理済み行はスキップ
-            if row_num in processed_rows:
-                if current_table_start is not None:
-                    # テーブル中の処理済み行があった場合、テーブルを分割
-                    logger.debug(f"[DEBUG] テーブル内の処理済み行{row_num}でテーブル分割")
-                    current_table_start = None
-                continue
-                
-            # シート固有の記述的テキスト除外は廃止し、汎用判定に委ねる
-            # (以前は特定語で行をスキップしていたが、特殊処理を減らすため削除)
-            
-            has_border = self._is_table_row(sheet, row_num, min_col, max_col)
-            has_data = self._row_has_data(sheet, row_num, min_col, max_col) if row_num <= max_row else False
-            is_empty_row = self._is_empty_row(sheet, row_num, min_col, max_col) if row_num <= max_row else True
-            
-            current_table_start = self._process_table_boundary(
-                table_boundaries, current_table_start, row_num, has_data, has_border, is_empty_row,
-                sheet, min_col, max_col
-            )
-        
-        # プレーンテキスト的なテーブル領域を除外
-        table_boundaries = self._filter_real_tables(sheet, table_boundaries, processed_rows)
-        
-        # 結合セルによる境界調整
-        table_boundaries = self._adjust_table_regions_for_merged_cells(sheet, table_boundaries)
-        
-        # 水平分離処理（注釈付き）
-        final_regions, annotations = self._split_horizontal_tables_with_annotations(sheet, table_boundaries)
-        
-        final_regions = self._filter_real_tables(sheet, final_regions, processed_rows)
-        
-        # 検出された領域のトレースサマリー
-        summary = f"DET_EXCL sheet={getattr(sheet,'title',None)} regions={len(final_regions)} " + ",".join([f"{r[0]}-{r[1]}" for r in final_regions[:10]])
-        logger.debug(summary)
-        return final_regions, annotations
-
-    def _filter_real_tables(self, sheet, table_boundaries: List[Tuple[int, int, int, int]], processed_rows: set) -> List[Tuple[int, int, int, int]]:
-        """実際のテーブル構造を持つ領域のみをフィルタ"""
-        real_tables = []
-        
-        for boundary in table_boundaries:
-            start_row, end_row, start_col, end_col = boundary
-            
-            # 短すぎるテーブルは除外（2行以下）
-            if end_row - start_row < 2:
-                logger.debug(f"[DEBUG] 短すぎるテーブル除外: 行{start_row}〜{end_row}")
-                continue
-            
-            if self._is_colon_separated_list(sheet, start_row, end_row, start_col, end_col):
-                logger.debug(f"[DEBUG] コロン区切り項目リストのため除外: 行{start_row}〜{end_row}")
-                continue
-            
-            # プレーンテキスト行が多い場合は除外
-            plain_text_count = 0
-            total_rows = 0
-            descriptive_content_count = 0
-            
-            for row_num in range(start_row, end_row + 1):
-                if row_num in processed_rows:
-                    continue
-                    
-                total_rows += 1
-                region = (row_num, row_num, start_col, end_col)
-                if self._is_plain_text_region(sheet, region):
-                    plain_text_count += 1
-                
-                # 記述的テキストの検出
-                for col_num in range(start_col, end_col + 1):
-                    if row_num <= sheet.max_row and col_num <= sheet.max_column:
-                        cell_value = str(sheet.cell(row=row_num, column=col_num).value or "").strip()
-                        if not cell_value:
-                            continue
-                        lower = cell_value.lower()
-                        # 説明的コンテンツの一般的なヒューリスティック: ファイルパス、URL、XML、非常に長いテキスト
-                        if ('\\' in cell_value and ':' in cell_value) or '/' in cell_value or lower.startswith('http'):
-                            descriptive_content_count += 1
-                            break
-                        if '<' in cell_value or '>' in cell_value or 'xml' in lower:
-                            descriptive_content_count += 1
-                            break
-                        if len(cell_value) > 200:
-                            descriptive_content_count += 1
-                            break
-            
-            plain_text_ratio = plain_text_count / total_rows if total_rows > 0 else 0
-            descriptive_ratio = descriptive_content_count / total_rows if total_rows > 0 else 0
-            
-            logger.debug(f"[DEBUG] テーブル判定: 行{start_row}〜{end_row}, プレーンテキスト比率: {plain_text_ratio:.2f}, 記述的テキスト比率: {descriptive_ratio:.2f}")
-            # 罫線で囲まれている領域は必ずテーブルとして出力（除外判定を緩和）
-            # 記述的テキスト比率やプレーンテキスト比率による除外は行わない
-            
-            # 罫線密度が低い小さなテーブルは除外
-            if (end_row - start_row) <= 5:  # 5行以下の小さなテーブル
-                border_density = self._calculate_border_density(sheet, start_row, end_row, start_col, end_col)
-                if border_density < 0.3:  # 境界線密度30%未満
-                    logger.debug(f"[DEBUG] 小さなテーブルで罫線密度低いため除外: 行{start_row}〜{end_row} (密度: {border_density:.2f})")
-                    continue
-            
-            logger.debug(f"[DEBUG] 実テーブルとして認定: 行{start_row}〜{end_row}")
-            real_tables.append(boundary)
-        
-        return real_tables
-    
     def _is_colon_separated_list(self, sheet, start_row: int, end_row: int, start_col: int, end_col: int) -> bool:
         """コロン区切りの項目リストパターンを検出（例：項目名：値）"""
         rows_with_colon = 0
@@ -506,30 +398,6 @@ class _TablesMixin:
         
         return False
     
-    def _calculate_border_density(self, sheet, start_row: int, end_row: int, start_col: int, end_col: int) -> float:
-        """境界線密度を計算"""
-        total_borders = 0
-        possible_borders = 0
-        
-        for row_num in range(start_row, end_row + 1):
-            for col_num in range(start_col, end_col + 1):
-                try:
-                    cell = sheet.cell(row=row_num, column=col_num)
-                    possible_borders += 4  # 上下左右
-                    
-                    if cell.border.top and cell.border.top.style:
-                        total_borders += 1
-                    if cell.border.bottom and cell.border.bottom.style:
-                        total_borders += 1
-                    if cell.border.left and cell.border.left.style:
-                        total_borders += 1
-                    if cell.border.right and cell.border.right.style:
-                        total_borders += 1
-                except Exception as e:
-                    pass  # XML解析エラーは無視
-        
-        return total_borders / possible_borders if possible_borders > 0 else 0.0
-
     def _detect_table_regions(self, sheet, min_row: int, max_row: int, min_col: int, max_col: int) -> Tuple[List[Tuple[int, int, int, int]], List[str]]:
         """罫線情報を基に表の領域を検出"""
         logger.info("罫線による表領域の検出を開始...")
@@ -818,56 +686,6 @@ class _TablesMixin:
         
         return None
     
-    def _split_horizontal_tables(self, sheet, table_regions: List[Tuple[int, int, int, int]]) -> List[Tuple[int, int, int, int]]:
-        """横並びのテーブルを分離"""
-        separated_tables = []
-        
-        for region in table_regions:
-            start_row, end_row, start_col, end_col = region
-            
-            # 大きなテーブルのみ分離処理を行う
-            if (end_col - start_col) < 8:  # 8列未満は分離しない
-                separated_tables.append(region)
-                continue
-                
-            # 明確な列区切りを検出
-            main_separations = self._find_major_column_separations(sheet, start_row, end_row, start_col, end_col)
-            
-            if len(main_separations) == 0:
-                # 分離点がない場合、注意書きを除外してそのまま追加
-                cleaned_region = self._clean_annotation_from_region(sheet, region)
-                if cleaned_region:
-                    separated_tables.append(cleaned_region)
-                    logger.debug(f"[DEBUG] 分離なし、テーブル追加: {cleaned_region}")
-            else:
-                # 明確な分離点で分ける
-                logger.debug(f"[DEBUG] 分離点で分割開始: {main_separations}")
-                current_start_col = start_col
-                
-                for i, sep_col in enumerate(main_separations):
-                    if sep_col > current_start_col + 2:  # 最低3列は必要
-                        table_region = (start_row, end_row, current_start_col, sep_col - 1)
-                        logger.debug(f"[DEBUG] 分離前テーブル{i+1}: {table_region}")
-                        cleaned_region = self._clean_annotation_from_region(sheet, table_region)
-                        if cleaned_region:
-                            separated_tables.append(cleaned_region)
-                            logger.debug(f"[DEBUG] 分離テーブル{i+1}追加: {cleaned_region}")
-                        else:
-                            logger.debug(f"[DEBUG] 分離テーブル{i+1}は空のためスキップ")
-                    else:
-                        logger.debug(f"[DEBUG] 分離テーブル{i+1}は列数不足のためスキップ: {sep_col} <= {current_start_col + 2}")
-                    current_start_col = sep_col + 1
-                
-                # 最後の部分
-                if end_col - current_start_col >= 2:  # 最低3列は必要
-                    table_region = (start_row, end_row, current_start_col, end_col)
-                    cleaned_region = self._clean_annotation_from_region(sheet, table_region)
-                    if cleaned_region:
-                        separated_tables.append(cleaned_region)
-                        logger.debug(f"[DEBUG] 最後のテーブル追加: {cleaned_region}")
-        
-        return separated_tables
-    
     def _create_parameter_value_table(self, sheet, start_row: int, end_row: int, param_col: int, value_col: int) -> Optional[Tuple[int, int, int, int]]:
         """
         パラメータ名列と値列を組み合わせた2列テーブルを作成
@@ -1073,47 +891,6 @@ class _TablesMixin:
         
         return (min(actual_rows), max(actual_rows), start_col, end_col)
     
-    def _detect_column_separations(self, sheet, start_row: int, end_row: int, start_col: int, end_col: int) -> List[int]:
-        """列の分離点を検出（テーブル構造を基準）"""
-        split_points = []
-        
-        # 各列に対してテーブル的なデータがあるかを評価
-        column_scores = {}
-        
-        for col in range(start_col, end_col + 1):
-            score = 0
-            data_count = 0
-            
-            for row in range(start_row, end_row + 1):
-                cell = sheet.cell(row, col)
-                if cell.value is not None and str(cell.value).strip():
-                    data_count += 1
-                    
-                    # テーブルデータらしさをスコア化
-                    if self._is_annotation_text(cell_text):
-                        score -= 2  # 注意書きは減点
-                    elif self._is_table_content(cell_text):
-                        score += 1  # テーブル内容は加点
-                    else:
-                        score += 0.5  # 通常のデータは少し加点
-            
-            column_scores[col] = score if data_count > 0 else -10
-        
-        # スコアの変化点を検出して分離点を特定
-        prev_score = None
-        for col in range(start_col, end_col):
-            current_score = column_scores.get(col, -10)
-            next_score = column_scores.get(col + 1, -10)
-            
-            # 低スコア列の後に高スコア列がある場合、分離点とする
-            if current_score < 0 and next_score > 0:
-                split_points.append(col)
-            # または大きなスコア差がある場合
-            elif abs(current_score - next_score) > 3:
-                split_points.append(col)
-        
-        return split_points
-    
     def _optimize_table_for_two_columns(self, sheet, region: Tuple[int, int, int, int], headers: List[str], header_positions: List[int]) -> Optional[List[List[str]]]:
         """2列テーブルに最適化"""
         start_row, end_row, start_col, end_col = region
@@ -1176,57 +953,6 @@ class _TablesMixin:
         
         return None
     
-    def _is_setting_item_pattern(self, col1_header: str, col2_header: str) -> bool:
-        """設定項目のパターンかどうか判定"""
-        # 固定の文字列リストに依存せず、汎用的なヒューリスティックで判定する。
-        # 目的: 左列がパラメータ名（比較的自由な文字列）で、右列が短いフラグや選択肢を表している
-        try:
-            a = (col1_header or '').strip()
-            b = (col2_header or '').strip()
-        except Exception:
-            return False
-
-        if not a or not b:
-            return False
-
-        # 除外条件: 明らかにパスやXMLのようなデータを示すヘッダは設定パターンではない
-        if any(ch in b for ch in ['\\', '/', '<', '>', ':']):
-            return False
-
-        score = 0
-
-        # 右列が短い（単語）であることを評価
-        if len(b) <= 8:
-            score += 1
-        # 右列がスペースを含まずワンワードである
-        if ' ' not in b:
-            score += 1
-        # 左列が中短文（パラメータ名らしい長さ）である
-        if 1 <= len(a) <= 60:
-            score += 1
-        # 文字種ベースの判定は廃止：代わりに構造的な手がかり（空白、アンダースコア、括弧）を使う
-        if any(tok in a for tok in (' ', '_', '(', ')', '-')):
-            score += 1
-        # 右列が論理値や短い選択肢を示唆するかを、固定トークンに依存せず
-        # 汎用的な特徴量で判定する（長さ・単語数・英数字比率・左列との長さ差）
-        # - 非常に短いヘッダ（<=2文字）は強く候補
-        if len(b) <= 2:
-            score += 2
-        # - 短め（<=6文字）で一語（空白なし）は候補
-        if len(b) <= 6 and ' ' not in b:
-            score += 1
-        # - 英数字や記号の割合が高く（選択肢やフラグっぽい）、かつ全体が短めなら少し加点
-        import unicodedata
-        alnum_chars = sum(1 for ch in b if unicodedata.category(ch)[0] in ('L', 'N'))
-        if len(b) > 0 and (alnum_chars / len(b)) >= 0.6 and len(b) <= 12:
-            score += 1
-        # - 左列が右列より長ければ、右列がフラグ/選択肢である可能性が高い
-        if len(a) > len(b):
-            score += 1
-
-        # 最終判断: スコアが閾値以上なら設定パターンと判断
-        return score >= 3
-    
     def _is_table_content(self, text: str) -> bool:
         """テーブル的な内容かどうかを判定"""
         # 単一の語に依存せず、行ごとの分割トークンや列数の一貫性でテーブルらしさを判定する
@@ -1247,8 +973,8 @@ class _TablesMixin:
             try:
                 if statistics.pstdev([c for c in pipe_counts if c > 0]) < 1.5:
                     return True
-            except Exception:
-                pass  # データ構造操作失敗は無視
+            except Exception as e:
+                logger.debug("パイプ区切り数の分散計算に失敗: %s", e)
 
         # 2) タブやカンマ等の区切り文字が行の多くで使われ、かつ列数が安定している
         for delim in ['\t', ',', ';']:
@@ -1258,8 +984,8 @@ class _TablesMixin:
                 try:
                     if statistics.pstdev([c for c in counts if c > 0]) < 1.5:
                         return True
-                except Exception:
-                    pass  # データ構造操作失敗は無視
+                except Exception as e:
+                    logger.debug("区切り文字数の分散計算に失敗: %s", e)
 
         # 3) 連続したスペース (2文字以上) で分割して列数が安定している場合
         token_counts = [len(re.split(r'\s{2,}', ln)) for ln in lines]
@@ -1268,8 +994,8 @@ class _TablesMixin:
             try:
                 if statistics.pstdev([c for c in token_counts if c > 1]) < 1.5:
                     return True
-            except Exception:
-                pass  # データ構造操作失敗は無視
+            except Exception as e:
+                logger.debug("トークン数の分散計算に失敗: %s", e)
 
         # 4) 各行の単語数がほぼ同じで、かつ多くの行が2語以上を含む場合は表っぽい
         word_counts = [len(ln.split()) for ln in lines]
@@ -1394,43 +1120,6 @@ class _TablesMixin:
 
         # Markdown 強調は注記とみなさない
         return any(pattern in text for pattern in annotation_patterns)
-    
-    def _refine_table_boundaries(self, sheet, start_row: int, end_row: int, start_col: int, end_col: int) -> Optional[Tuple[int, int, int, int]]:
-        """テーブル境界を精緻化（注意書きを除外）"""
-        # 実際にデータがある範囲を特定
-        actual_start_row = start_row
-        actual_end_row = end_row
-        actual_start_col = start_col
-        actual_end_col = end_col
-        
-        # 上から注意書きを除外
-        for row in range(start_row, end_row + 1):
-            has_table_data = False
-            for col in range(start_col, end_col + 1):
-                cell = sheet.cell(row, col)
-                if cell.value is not None and str(cell.value).strip():
-                    has_table_data = True
-                    break
-            
-            if has_table_data:
-                actual_start_row = row
-                break
-        
-        # 左右の境界を調整
-        has_significant_data = False
-        for row in range(actual_start_row, actual_end_row + 1):
-            for col in range(start_col, end_col + 1):
-                cell = sheet.cell(row, col)
-                if cell.value is not None and str(cell.value).strip():
-                    has_significant_data = True
-                    break
-            if has_significant_data:
-                break
-        
-        if not has_significant_data:
-            return None
-        
-        return (actual_start_row, actual_end_row, actual_start_col, actual_end_col)
     
     def _is_empty_row(self, sheet, row_num: int, min_col: int, max_col: int) -> bool:
         """指定行が完全に空かチェック(罫線は無視)"""
@@ -1635,69 +1324,6 @@ class _TablesMixin:
         
         return False
     
-    def _find_table_title_start(self, sheet, current_row: int, min_col: int, max_col: int) -> int:
-        """テーブルのタイトル行を探す"""
-        # 現在行から上に向かって、テーブルタイトルらしい行を探す
-        title_start = current_row
-        
-        # 最大3行上まで遡ってタイトルを探す
-        for check_row in range(max(1, current_row - 3), current_row):
-            if self._is_potential_table_title(sheet, check_row, min_col, max_col):
-                title_start = check_row
-                break
-        
-        return title_start
-    
-    def _is_potential_table_title(self, sheet, row: int, min_col: int, max_col: int) -> bool:
-        """テーブルタイトルらしい行かどうか判定"""
-        try:
-            # セルの内容をチェック
-            for col in range(min_col, min_col + 5):  # 最初の5列をチェック
-                if col > max_col:
-                    break
-                cell = sheet.cell(row, col)
-                if cell.value and isinstance(cell.value, str):
-                    text = str(cell.value).strip()
-                    # マークダウン強調や太字はタイトル候補として扱う（特定キーワードには依存しない）
-                    if text.startswith('**') and text.endswith('**') and len(text) > 4:
-                        return True
-                    if cell.font and cell.font.bold:
-                        return True
-            return False
-        except (ValueError, TypeError):
-            return False
-    
-    def _row_has_content(self, sheet, row: int, min_col: int, max_col: int) -> bool:
-        """行にコンテンツがあるかチェック"""
-        try:
-            for col in range(min_col, max_col + 1):
-                cell = sheet.cell(row, col)
-                if cell.value is not None:
-                    return True
-            return False
-        except Exception:
-            return False
-    
-    def _is_table_separator_row(self, sheet, row: int, min_col: int, max_col: int) -> bool:
-        """テーブル区切り行かどうか判定"""
-        # 空行が連続している場合はテーブル区切りとみなす
-        try:
-            # 前後の行もチェック
-            for check_row in [row - 1, row, row + 1]:
-                if check_row < 1:
-                    continue
-                has_content = False
-                for col in range(min_col, min(min_col + 10, max_col + 1)):  # 最初の10列をチェック
-                    cell = sheet.cell(check_row, col)
-                    if cell.value is not None:
-                        has_content = True
-                        break
-                if has_content:
-                    return False
-            return True
-        except Exception:
-            return True
-    
     def _row_has_data(self, sheet, row_num: int, min_col: int, max_col: int) -> bool:
         """指定行にデータがあるかチェック"""
         if row_num > sheet.max_row:
@@ -1790,31 +1416,6 @@ class _TablesMixin:
         logger.debug("[DEBUG] 罫線ベース列検出失敗")
         return None
     
-    def _has_table_borders(self, cell) -> bool:
-        """セルに表らしい罫線があるかチェック"""
-        try:
-            if not cell.border:
-                return False
-            
-            # 上下左右のいずれかに罫線があるかチェック
-            borders = [
-                cell.border.left,
-                cell.border.right,
-                cell.border.top,
-                cell.border.bottom
-            ]
-            
-            border_count = 0
-            for border in borders:
-                if border and border.style:
-                    border_count += 1
-            
-            # 2つ以上の辺に罫線がある場合は表の一部とみなす
-            return border_count >= 2
-            
-        except Exception:
-            return False
-    
     def _get_row_column_range(self, sheet, row_num: int, min_col: int, max_col: int) -> Optional[Tuple[int, int]]:
         """1行の列範囲を取得"""
         row_min_col = None
@@ -1835,62 +1436,6 @@ class _TablesMixin:
         updated_min = new_min if current_min is None or new_min < current_min else current_min
         updated_max = new_max if current_max is None or new_max > current_max else current_max
         return updated_min, updated_max
-    
-    def _convert_single_table(self, sheet, min_row: int, max_row: int, min_col: int, max_col: int):
-        """単一テーブルとして変換（従来の処理）"""
-        table_data = []
-        
-        for row_num in range(min_row, max_row + 1):
-            row_data = []
-            for col_num in range(min_col, max_col + 1):
-                cell = sheet.cell(row_num, col_num)
-                cell_content = self._format_cell_content(cell)
-                row_data.append(cell_content)
-            table_data.append(row_data)
-        
-        if table_data:
-            # 出力前にデバッグ用にtable_dataをダンプ
-            try:
-                cols = max(len(r) for r in table_data) if table_data else 0
-            except Exception:
-                cols = 0
-            logger.debug(f"[DEBUG] _output_markdown_table called (single_table path): rows={len(table_data)}, max_cols={cols}")
-            for i, r in enumerate(table_data[:10]):
-                logger.debug(f"[DEBUG] table_data row {i} cols={len(r)}: {r}")
-            # min_row..max_rowの仮定からsource_rowsを順次構築
-                try:
-                    source_rows = list(range(min_row, max_row + 1))[:len(table_data)]
-                except (ValueError, TypeError):
-                    source_rows = None
-                # シートで既に出力済みの行を削除（データ前の行）
-                try:
-                    logger.debug(f"[DEBUG][_prune_call_single] sheet={sheet.title} before_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
-                    table_data, source_rows = self._prune_emitted_rows(sheet.title, table_data, source_rows)
-                    logger.debug(f"[DEBUG][_prune_result_single] sheet={sheet.title} after_prune rows={len(table_data) if table_data else 0} source_rows_sample={source_rows[:10] if source_rows else None}")
-                except (ValueError, TypeError) as e:
-                    logger.debug(f"[DEBUG] 型変換エラー（無視）: {e}")
-                # デバッグ用の出力前決定論的ダンプ: table_dataとsource_rowsの小さなプレビューをキャプチャ
-                try:
-                    src_sample = source_rows[:10] if source_rows else None
-                    rows_len = len(table_data) if table_data else 0
-                    logger.debug(f"[DEBUG][_pre_output_call] path=single_table sheet={sheet.title} rows={rows_len} source_rows_sample={src_sample}")
-                except (ValueError, TypeError) as e:
-                    logger.debug(f"[DEBUG] 型変換エラー（無視）: {e}")
-                # 正規パスまでテーブル出力を遅延させ、権威的マッピングが
-                # そのパス中にのみ記録されるようにする。最初のソース行を
-                # アンカーとして使用。後方互換性のある形状のために
-                # オプションのメタデータ（このパスではタイトルなし）を含める。
-                try:
-                    anchor = (source_rows[0] if source_rows else min_row)
-                except (ValueError, TypeError):
-                    anchor = min_row
-                try:
-                    meta = None
-                    self._sheet_deferred_tables.setdefault(sheet.title, []).append((anchor, table_data, source_rows, meta))
-                    logger.debug(f"DEFER_TABLE single_table sheet={sheet.title} anchor={anchor} rows={len(table_data)}")
-                except (ValueError, TypeError):
-                    # 失敗時はデータ損失を避けるため即時出力にフォールバック
-                    self._output_markdown_table(table_data, source_rows=source_rows, sheet_title=sheet.title)
     
     def _convert_table_region(self, sheet, region: Tuple[int, int, int, int], table_number: int,
                               strict_column_bounds: bool = False,
@@ -2113,7 +1658,8 @@ class _TablesMixin:
                     title_in_region = None
                     try:
                         title_in_region = self._find_table_title_in_region(sheet, region)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("領域タイトルの検出に失敗 (sheet=%s): %s", getattr(sheet, 'title', sheet), e)
                         title_in_region = None
                     if sheet_name == 'XMLファイル自動生成' or title_in_region == 'XMLファイル自動生成':
                         logger.debug('[DEBUG-TRACE] Detected target sheet/region for deep dump: XMLファイル自動生成')
@@ -2191,7 +1737,7 @@ class _TablesMixin:
                     try:
                         self._output_markdown_table(table_data)
                     except Exception as e:
-                        pass  # XML解析エラーは無視
+                        logger.warning("テーブルの直接出力に失敗 (sheet=%s): %s", sheet.title, e, exc_info=True)
                 return
 
         # テーブルデータを結合セル考慮で構築
@@ -2258,7 +1804,7 @@ class _TablesMixin:
                 try:
                     self._last_table_title_row = None
                 except Exception as e:
-                    pass  # XML解析エラーは無視
+                    logger.debug("一時タイトル行情報のクリアに失敗: %s", e)
                 logger.debug(f"DEFER_TABLE sheet={sheet.title} anchor={anchor} rows={len(table_data)} title_present={bool(safe_title)}")
             except (ValueError, TypeError):
                 # 延期が失敗した場合は即時出力にフォールバック
@@ -2368,7 +1914,7 @@ class _TablesMixin:
         # - セルの平均長が大きい（長文が多い） -> プレーンテキスト
         # - 列ごとの非空セル分布が均一で、各行に同程度の列数のデータがある -> 表形式
         long_count = sum(1 for t in texts if len(t) > 120)
-        path_like_count = sum(1 for t in texts if ('\\' in t and ':' in t) or '/' in t or t.lower().startswith('http') or 'xml' in t.lower() or ('<' in t and '>' in t))
+        path_like_count = sum(1 for t in texts if is_path_like(t))
 
         # 列ごとの非空セル数を数える（構造性の指標）
         col_nonempty = {c: 0 for c in range(start_col, end_col + 1)}
@@ -2401,7 +1947,8 @@ class _TablesMixin:
                     try:
                         lv = sheet.cell(r, left_col).value
                         rv = sheet.cell(r, right_col).value
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("左右列セル値の取得に失敗 (sheet=%s, row=%s): %s", getattr(sheet, 'title', sheet), r, e)
                         lv = None
                         rv = None
                     if lv is not None and str(lv).strip():
@@ -2409,55 +1956,11 @@ class _TablesMixin:
                     if rv is not None and str(rv).strip():
                         right_texts.append(str(rv).strip())
 
-                if left_texts and right_texts and len(left_texts) >= 2:
-                    import re
-                    import unicodedata
-                    num_matches = 0
-                    # 一般的な丸数字を明示的に含める（①〜⑳）
-                    circled = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'
-                    for t in left_texts:
-                        tt = t.strip()
-                        # 全角数字/句読点をASCII相当に正規化
-                        try:
-                            nn = unicodedata.normalize('NFKC', tt)
-                        except Exception:
-                            nn = tt
-
-                        # 丸数字を最初にチェック（ASCIIに正規化されない）
-                        if any(ch in circled for ch in tt):
-                            num_matches += 1
-                            continue
-
-                        # 以下のパターンを受け入れる:
-                        #  - (1) / （1） / 1) / 1）
-                        #  - 1. / 1．
-                        #  - 1 / １ (NFKCで正規化された全角)
-                        #  - (a) / a)
-                        #  - ローマ数字 I, II, III（オプションで句読点付き）
-                        # 正規化された文字列を正規表現に使用し、全角句読点を処理
-                        # オプションの括弧（ASCIIと全角の両方）と
-                        # オプションの末尾句読点（'.'や'．'など）を許可
-                        try:
-                            if re.match(r'^[\(\（]?\s*(?:\d+|[IVXivx]+|[A-Za-z])\s*[\)\）]?[\.．]?$', nn):
-                                num_matches += 1
-                                continue
-                        except Exception:
-                            pass  # データ構造操作失敗は無視
-
-                        # フォールバック: 単一文字マーカー（例: '-', 'a', '1'）
-                        try:
-                            if len(nn.strip()) == 1 and re.match(r'^[A-Za-z0-9\-]$', nn.strip()):
-                                num_matches += 1
-                                continue
-                        except Exception:
-                            pass  # データ構造操作失敗は無視
-
-                    ratio = (num_matches / len(left_texts)) if left_texts else 0.0
-                    right_avg = sum(len(s) for s in right_texts) / len(right_texts) if right_texts else 0
-                    # ヒューリスティック閾値: 左の80%以上が番号のようで、右の平均長が10以上
-                    if ratio >= 0.8 and right_avg >= 10:
-                        logger.debug(f"[DEBUG] 番号付きリスト検出: 行{start_row}〜{end_row} 左番号率={num_matches}/{len(left_texts)} 右平均長={right_avg:.1f}")
-                        return True
+                if looks_like_enumerated_list(left_texts, right_texts, ENUMERATED_LIST_MIN_RIGHT_AVG_PLAIN):
+                    ratio = enum_marker_ratio(left_texts)
+                    right_avg = sum(len(s) for s in right_texts) / len(right_texts)
+                    logger.debug(f"[DEBUG] 番号付きリスト検出: 行{start_row}〜{end_row} 左番号率={ratio:.2f} 右平均長={right_avg:.1f}")
+                    return True
         except (ValueError, TypeError) as e:
             logger.debug(f"[DEBUG] 型変換エラー（無視）: {e}")
 
@@ -2548,15 +2051,15 @@ class _TablesMixin:
                                 md_idx = len(self.markdown_lines) - 1
                                 self._mark_sheet_map(sheet.title, row_num, md_idx)
                             except Exception as e:
-                                pass  # XML解析エラーは無視
+                                logger.debug("シートマップへの記録に失敗 (sheet=%s, row=%s): %s", sheet.title, row_num, e)
                             try:
                                 self._mark_emitted_row(sheet.title, row_num)
                             except Exception as e:
-                                pass  # XML解析エラーは無視
+                                logger.debug("出力済み行のマーキングに失敗 (sheet=%s, row=%s): %s", sheet.title, row_num, e)
                             try:
                                 self._mark_emitted_text(sheet.title, self._normalize_text(combined))
                             except Exception as e:
-                                pass  # XML解析エラーは無視
+                                logger.debug("出力済みテキストのマーキングに失敗 (sheet=%s, row=%s): %s", sheet.title, row_num, e)
                         else:
                             # 非正規コンテキスト: 正規パスがインデックスを割り当てる
                             logger.debug(f"[TRACE] Skipping authoritative mapping for plain-text fallback row={row_num} (non-canonical)")
@@ -2742,8 +2245,8 @@ class _TablesMixin:
                         # 次に[A,B,A,B,A,B] -> [A,B]のような完全な繰り返しシーケンスを折りたたむ
                         collapsed = self._collapse_repeated_sequence(uniq)
                         combined = '<br>'.join(collapsed)
-                except Exception:
-                    pass  # 一時ファイルの削除失敗は無視
+                except Exception as e:
+                    logger.debug("繰り返しシーケンスの折りたたみに失敗: %s", e)
             except Exception:
                 combined = '<br>'.join(dedup_parts) if dedup_parts else ''
 
@@ -2771,15 +2274,15 @@ class _TablesMixin:
                             if head_cell.border and (getattr(head_cell.border.left, 'style', None) or getattr(head_cell.border.right, 'style', None)):
                                 keep_despite_low_ratio = True
                         except Exception as e:
-                            pass  # XML解析エラーは無視
+                            logger.debug("ヘッダーセルの罫線確認に失敗 (row=%s, col=%s): %s", header_row, col, e)
                         
                         # 塗りつぶしがある列も保持
                         if not keep_despite_low_ratio:
                             try:
                                 if head_cell.fill and head_cell.fill.patternType and head_cell.fill.patternType != 'none':
                                     keep_despite_low_ratio = True
-                            except Exception:
-                                pass  # エラーは無視
+                            except Exception as e:
+                                logger.debug("ヘッダーセルの塗りつぶし確認に失敗 (row=%s, col=%s): %s", header_row, col, e)
 
                         if not keep_despite_low_ratio:
                             right_count = 0
@@ -2791,7 +2294,7 @@ class _TablesMixin:
                                     if c.border and c.border.right and getattr(c.border.right, 'style', None):
                                         right_count += 1
                                 except Exception as e:
-                                    pass  # XML解析エラーは無視
+                                    logger.debug("右罫線の確認に失敗 (row=%s, col=%s): %s", rr, col, e)
                             if total_check > 0 and (right_count / total_check) >= 0.5:
                                 keep_despite_low_ratio = True
                         
@@ -2811,7 +2314,7 @@ class _TablesMixin:
                                             keep_despite_low_ratio = True
                                             break
                                 except Exception as e:
-                                    pass  # XML解析エラーは無視
+                                    logger.debug("データセルの書式確認に失敗 (row=%s, col=%s): %s", rr, col, e)
                 except Exception:
                     keep_despite_low_ratio = False
 
@@ -2914,7 +2417,7 @@ class _TablesMixin:
         for h in headers:
             if not h:
                 continue
-            if ('\\' in h or '/' in h or '<' in h or '>' in h or 'xml' in h.lower()) or len(h) > 80:
+            if is_path_like(h) or len(h) > 80:
                 data_like_count += 1
 
         # チェック対象ヘッダーのいずれかに結合セル情報があるかを確認する
@@ -3080,7 +2583,7 @@ class _TablesMixin:
                     if hdr_cell and hdr_cell.border and hdr_cell.border.right and getattr(hdr_cell.border.right, 'style', None):
                         has_strong_right = True
                 except Exception as e:
-                    pass  # XML解析エラーは無視
+                    logger.debug("ヘッダー右罫線の確認に失敗 (row=%s, col=%s): %s", header_row, col_left, e)
 
                 # ヘッダー行間で結合セルのマスターの違いもチェック
                 masters_differ = False
@@ -3315,120 +2818,6 @@ class _TablesMixin:
         # 将来の拡張のため関数本体は残しておく
         logger.debug(f"[DEBUG] 2列最適化は無効化されています（3列テーブルは3列のまま出力）")
         
-        # 先頭/末尾の空列を削除して返す
-        # --- ヒューリスティック：任意の列内で結合されている設定行を分割 ---
-        # 例: "転送設定初期値(CF-60) IsEnabled 「有効」or 「無効」" を
-        #      [親項目, プロパティ, 値] の3列に分割する
-        try:
-            import re
-            # 列数が多い表は既に構造化されているため、セル内分割は行わない
-            table_width = len(table_data[0]) if table_data else 0
-            if table_data and len(table_data) > 1 and table_width <= 3:
-                headers = table_data[0]
-                data_rows = table_data[1:]
-
-                cols_to_split = set()
-
-                # 各列について分割が多く発生するか確認する
-                col_details = []
-                # 2つの正規表現パターンを準備: より厳密なプライマリと寛容なフォールバック
-                # プライマリ: より厳密な分割パターンだが、明示的なUnicode範囲チェックを避ける。
-                # 空白でなく、明らかなパス/XML文字を含まない中間トークンを受け入れる
-                primary_re = re.compile(r'^(.*?)\s+([^\\\/<>:\"\s]{1,60})\s+(.+)$')
-                # 寛容: 中間トークンに多くの文字を許可するが、後でパス/XML文字を除外
-                # 正規化後に日本語の引用符と全角句読点も受け入れる
-                permissive_re = re.compile(r'^(.*?)\s+([^\\\/<>:\\"]{1,60})\s+(.+)$')
-
-                def _normalize_for_split(s: str) -> str:
-                    # マッチングを改善するために全角スペース/引用符/括弧を正規化
-                    if not s:
-                        return ''
-                    s = s.replace('\u3000', ' ')
-                    s = s.replace('\uFF08', '(').replace('\uFF09', ')')  # 全角括弧
-                    s = s.replace('（', '(').replace('）', ')')
-                    s = s.replace('「', ' ').replace('」', ' ')
-                    s = s.replace('”', '"').replace('“', '"')
-                    # 複数のスペースを圧縮
-                    import re as _re
-                    s = _re.sub(r'\s+', ' ', s).strip()
-                    return s
-
-                for col_idx in range(len(headers)):
-                    non_empty = 0
-                    matches = 0
-                    for row in data_rows:
-                        if col_idx < len(row):
-                            cell = row[col_idx] or ''
-                        else:
-                            cell = ''
-                        if cell and cell.strip():
-                            non_empty += 1
-                            norm = _normalize_for_split(cell)
-                            # 首にまず厳密パターンでマッチを試みる
-                            if primary_re.match(norm):
-                                matches += 1
-                            else:
-                                # 次に寛容なパターンを試みるが、パスやXML等のトークンを含む場合は除外して誤検出を抑制
-                                m2 = permissive_re.match(norm)
-                                if m2:
-                                    mid = m2.group(2)
-                                    # 明らかなパスのようなまたはXMLのようなトークンを除外
-                                    if ('\\' not in mid and '/' not in mid and '<' not in mid and '>' not in mid and ':' not in mid):
-                                        matches += 1
-                    # 非空行が一定数以上かつマッチ率が高ければ分割候補とする
-                    ratio = (matches / non_empty) if non_empty > 0 else 0
-                    col_details.append((col_idx, non_empty, matches, ratio))
-                    # 分割の誤検出を減らすために閾値を上げる
-                    if non_empty >= 2 and ratio >= 0.40:
-                        cols_to_split.add(col_idx)
-
-                # デバッグ出力: 列ごとのマッチ状況
-                logger.debug(f"[DEBUG] 列分割判定: headers={headers}")
-                for d in col_details:
-                    logger.debug(f"[DEBUG] 列{d[0]}: non_empty={d[1]}, matches={d[2]}, ratio={d[3]:.2f}")
-                logger.debug(f"[DEBUG] 分割候補の列: {sorted(list(cols_to_split))}")
-
-                if cols_to_split:
-                    new_headers = []
-                    for idx, h in enumerate(headers):
-                        if idx in cols_to_split:
-                            # 元のヘッダーを保持しつつ Property/Value 列を追加
-                            new_headers.extend([h, 'Property', 'Value'])
-                        else:
-                            new_headers.append(h)
-
-                    new_rows = []
-                    for row in data_rows:
-                        new_row = []
-                        for idx in range(len(headers)):
-                            cell = row[idx] if idx < len(row) else ''
-                            if idx in cols_to_split:
-                                # 正規化された形式に対してマッチするが、可能な限り元のピースを保持
-                                norm_cell = _normalize_for_split(cell or '')
-                                m = primary_re.match(norm_cell)
-                                used_a = used_b = used_c = None
-                                if not m:
-                                    m = permissive_re.match(norm_cell)
-                                    if m:
-                                        mid = m.group(2)
-                                        if ('\\' in mid or '/' in mid or '<' in mid or '>' in mid or ':' in mid):
-                                            m = None
-
-                                if m:
-                                    a, b, c = m.groups()
-                                    # 元のセルから対応する部分文字列を緩く抽出しようとする
-                                    new_row.extend([a.strip(), b.strip(), c.strip()])
-                                else:
-                                    # マッチしない場合はオリジナルを維持し、Property/Value は空にする
-                                    new_row.extend([cell or '', '', ''])
-                            else:
-                                new_row.append(cell)
-                        new_rows.append(new_row)
-
-                    table_data = [new_headers] + new_rows
-        except Exception:
-            # ここで失敗しても元のtable_dataを返す
-            pass
 
         if len(table_data) > 1:
             headers = table_data[0]
@@ -3750,7 +3139,8 @@ class _TablesMixin:
                                 nx = sheet.cell(bottom_row + 1, c)
                                 if nx.border and nx.border.top and getattr(nx.border.top, 'style', None):
                                     border_hits += 1
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("下端罫線の確認に失敗 (row=%s, col=%s): %s", bottom_row, c, e)
                         continue
                 header_border_fraction = (border_hits / border_total) if border_total > 0 else 0.0
 
@@ -3796,14 +3186,13 @@ class _TablesMixin:
                                 short_count += 1
                             if '<br>' not in txt:
                                 nobr_count += 1
-                            low = txt.lower()
-                            if ('\\' in txt and ':' in txt) or '/' in txt or low.startswith('http') or 'xml' in low or '<' in txt or '>' in txt:
+                            if is_path_like(txt):
                                 path_like_count += 1
                             try:
                                 if cell_obj and cell_obj.font and getattr(cell_obj.font, 'bold', False):
                                     bold_count += 1
                             except Exception as e:
-                                pass  # XML解析エラーは無視
+                                logger.debug("セルの太字確認に失敗 (row=%s, col=%s): %s", rnum, c, e)
 
                         if total_nonempty == 0:
                             return 0.0
@@ -3814,7 +3203,8 @@ class _TablesMixin:
                         # 過学習を避けるために保守的に選択された重み
                         score = short_frac + 0.45 * nobr_frac + 0.35 * bold_frac - 0.9 * path_frac
                         return max(0.0, score)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("行ヘッダーらしさスコアの計算に失敗 (row=%s): %s", rnum, e)
                         return 0.0
 
                 likeness_score = _row_header_likeness(bottom_row)
@@ -3887,8 +3277,8 @@ class _TablesMixin:
                         best_metrics = metrics
                         try:
                             self._best_top_merged_fraction = top_merged_fraction
-                        except Exception:
-                            pass  # エラーは無視
+                        except Exception as e:
+                            logger.debug("最良ヘッダー情報の記録に失敗: %s", e)
                     else:
                         # 辞書順で比較
                         try:
@@ -3899,8 +3289,8 @@ class _TablesMixin:
                                 best_metrics = metrics
                                 try:
                                     self._best_top_merged_fraction = top_merged_fraction
-                                except Exception:
-                                    pass  # エラーは無視
+                                except Exception as e:
+                                    logger.debug("最良ヘッダー情報の記録に失敗: %s", e)
                         except Exception:
                             # 以前のタイブレーカーにフォールバック
                             if group_count > best_group_count:
@@ -4531,7 +3921,8 @@ class _TablesMixin:
                 if pattern * (n // plen) == parts:
                     return pattern
             return parts
-        except Exception:
+        except Exception as e:
+            logger.debug("繰り返しパターンの検出に失敗: %s", e)
             return parts
     
     def _apply_cell_formatting(self, cell, text: str) -> str:
@@ -4629,7 +4020,8 @@ class _TablesMixin:
                 t = t.replace(ph, normalized_tag)
 
             return t
-        except Exception:
+        except Exception as e:
+            logger.debug("セルテキストのエスケープに失敗: %s", e)
             return str(text)
     
     def _output_markdown_table(self, table_data: List[List[str]], source_rows: Optional[List[int]] = None, sheet_title: Optional[str] = None):
@@ -4673,7 +4065,7 @@ class _TablesMixin:
                 if joined:
                     nonempty_total += 1
                     length_acc += len(joined)
-                    if ('\\' in joined and ':' in joined) or '/' in joined or '<' in joined or '>' in joined or 'xml' in joined.lower():
+                    if is_path_like(joined):
                         path_like_total += 1
             avg_len = (length_acc / nonempty_total) if nonempty_total else 0
             path_like_frac = (path_like_total / nonempty_total) if nonempty_total else 0
@@ -4880,7 +4272,8 @@ class _TablesMixin:
         if source_rows and sheet_title:
             try:
                 sheet_map = self._cell_to_md_index.get(sheet_title, {})
-            except Exception:
+            except Exception as e:
+                logger.debug("セル→Markdownマッピングの取得に失敗 (sheet=%s): %s", sheet_title, e)
                 sheet_map = None
 
         for idx, row in enumerate(table_data[start_idx:], start=start_idx):
@@ -4895,31 +4288,10 @@ class _TablesMixin:
                 self.markdown_lines.append("| " + " | ".join(safe_row) + " |")
                 try:
                     self._mark_sheet_map(sheet_title, src, len(self.markdown_lines) - 1)
-                except Exception:
-                    pass  # データ構造操作失敗は無視
+                except Exception as e:
+                    logger.debug("シートマップへの記録に失敗 (sheet=%s, row=%s): %s", sheet_title, src, e)
             else:
                 self.markdown_lines.append("| " + " | ".join(safe_row) + " |")
 
         self.markdown_lines.append("")
 
-    def _is_fully_bordered_row(self, sheet, row_num: int, min_col: int, max_col: int) -> bool:
-        """行全体のすべてのセルが上下左右罫線で囲まれている場合のみTrue"""
-        for col_num in range(min_col, max_col + 1):
-            cell = sheet.cell(row_num, column=col_num)
-            if not (cell.border and cell.border.left and cell.border.left.style and
-                    cell.border.right and cell.border.right.style and
-                    cell.border.top and cell.border.top.style and
-                    cell.border.bottom and cell.border.bottom.style):
-                return False
-        return True
-    
-    def _is_table_row(self, sheet, row_num: int, min_col: int, max_col: int) -> bool:
-        """行内のいずれかのセルが上下左右罫線で囲まれていればテーブルとみなす"""
-        for col_num in range(min_col, max_col + 1):
-            cell = sheet.cell(row=row_num, column=col_num)
-            if (cell.border and cell.border.left and cell.border.left.style and
-                cell.border.right and cell.border.right.style and
-                cell.border.top and cell.border.top.style and
-                cell.border.bottom and cell.border.bottom.style):
-                return True
-        return False
