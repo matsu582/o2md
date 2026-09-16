@@ -14,6 +14,13 @@ ExcelToMarkdownConverterクラスのテーブル検出・構築・出力機能�
 import logging
 from typing import List, Dict, Tuple, Optional, Any, Set
 
+from o2md.x2md_text_patterns import (
+    is_path_like,
+    enum_marker_ratio,
+    looks_like_enumerated_list,
+    ENUMERATED_LIST_MIN_RIGHT_AVG_PLAIN,
+)
+
 logger = logging.getLogger(__name__)
 
 def _get_debug_print():
@@ -1906,7 +1913,7 @@ class _TablesMixin:
         # - セルの平均長が大きい（長文が多い） -> プレーンテキスト
         # - 列ごとの非空セル分布が均一で、各行に同程度の列数のデータがある -> 表形式
         long_count = sum(1 for t in texts if len(t) > 120)
-        path_like_count = sum(1 for t in texts if ('\\' in t and ':' in t) or '/' in t or t.lower().startswith('http') or 'xml' in t.lower() or ('<' in t and '>' in t))
+        path_like_count = sum(1 for t in texts if is_path_like(t))
 
         # 列ごとの非空セル数を数える（構造性の指標）
         col_nonempty = {c: 0 for c in range(start_col, end_col + 1)}
@@ -1947,55 +1954,11 @@ class _TablesMixin:
                     if rv is not None and str(rv).strip():
                         right_texts.append(str(rv).strip())
 
-                if left_texts and right_texts and len(left_texts) >= 2:
-                    import re
-                    import unicodedata
-                    num_matches = 0
-                    # 一般的な丸数字を明示的に含める（①〜⑳）
-                    circled = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'
-                    for t in left_texts:
-                        tt = t.strip()
-                        # 全角数字/句読点をASCII相当に正規化
-                        try:
-                            nn = unicodedata.normalize('NFKC', tt)
-                        except Exception:
-                            nn = tt
-
-                        # 丸数字を最初にチェック（ASCIIに正規化されない）
-                        if any(ch in circled for ch in tt):
-                            num_matches += 1
-                            continue
-
-                        # 以下のパターンを受け入れる:
-                        #  - (1) / （1） / 1) / 1）
-                        #  - 1. / 1．
-                        #  - 1 / １ (NFKCで正規化された全角)
-                        #  - (a) / a)
-                        #  - ローマ数字 I, II, III（オプションで句読点付き）
-                        # 正規化された文字列を正規表現に使用し、全角句読点を処理
-                        # オプションの括弧（ASCIIと全角の両方）と
-                        # オプションの末尾句読点（'.'や'．'など）を許可
-                        try:
-                            if re.match(r'^[\(\（]?\s*(?:\d+|[IVXivx]+|[A-Za-z])\s*[\)\）]?[\.．]?$', nn):
-                                num_matches += 1
-                                continue
-                        except Exception:
-                            pass  # データ構造操作失敗は無視
-
-                        # フォールバック: 単一文字マーカー（例: '-', 'a', '1'）
-                        try:
-                            if len(nn.strip()) == 1 and re.match(r'^[A-Za-z0-9\-]$', nn.strip()):
-                                num_matches += 1
-                                continue
-                        except Exception:
-                            pass  # データ構造操作失敗は無視
-
-                    ratio = (num_matches / len(left_texts)) if left_texts else 0.0
-                    right_avg = sum(len(s) for s in right_texts) / len(right_texts) if right_texts else 0
-                    # ヒューリスティック閾値: 左の80%以上が番号のようで、右の平均長が10以上
-                    if ratio >= 0.8 and right_avg >= 10:
-                        logger.debug(f"[DEBUG] 番号付きリスト検出: 行{start_row}〜{end_row} 左番号率={num_matches}/{len(left_texts)} 右平均長={right_avg:.1f}")
-                        return True
+                if looks_like_enumerated_list(left_texts, right_texts, ENUMERATED_LIST_MIN_RIGHT_AVG_PLAIN):
+                    ratio = enum_marker_ratio(left_texts)
+                    right_avg = sum(len(s) for s in right_texts) / len(right_texts)
+                    logger.debug(f"[DEBUG] 番号付きリスト検出: 行{start_row}〜{end_row} 左番号率={ratio:.2f} 右平均長={right_avg:.1f}")
+                    return True
         except (ValueError, TypeError) as e:
             logger.debug(f"[DEBUG] 型変換エラー（無視）: {e}")
 
@@ -2452,7 +2415,7 @@ class _TablesMixin:
         for h in headers:
             if not h:
                 continue
-            if ('\\' in h or '/' in h or '<' in h or '>' in h or 'xml' in h.lower()) or len(h) > 80:
+            if is_path_like(h) or len(h) > 80:
                 data_like_count += 1
 
         # チェック対象ヘッダーのいずれかに結合セル情報があるかを確認する
@@ -3220,8 +3183,7 @@ class _TablesMixin:
                                 short_count += 1
                             if '<br>' not in txt:
                                 nobr_count += 1
-                            low = txt.lower()
-                            if ('\\' in txt and ':' in txt) or '/' in txt or low.startswith('http') or 'xml' in low or '<' in txt or '>' in txt:
+                            if is_path_like(txt):
                                 path_like_count += 1
                             try:
                                 if cell_obj and cell_obj.font and getattr(cell_obj.font, 'bold', False):
@@ -4097,7 +4059,7 @@ class _TablesMixin:
                 if joined:
                     nonempty_total += 1
                     length_acc += len(joined)
-                    if ('\\' in joined and ':' in joined) or '/' in joined or '<' in joined or '>' in joined or 'xml' in joined.lower():
+                    if is_path_like(joined):
                         path_like_total += 1
             avg_len = (length_acc / nonempty_total) if nonempty_total else 0
             path_like_frac = (path_like_total / nonempty_total) if nonempty_total else 0

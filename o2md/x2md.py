@@ -34,6 +34,10 @@ from o2md.isolated_group_renderer import IsolatedGroupRenderer
 from o2md.x2md_tables import _TablesMixin
 from o2md.x2md_graphics import _GraphicsMixin
 from o2md.x2md_charts import extract_charts_from_worksheet
+from o2md.x2md_text_patterns import (
+    looks_like_enumerated_list,
+    ENUMERATED_LIST_MIN_RIGHT_AVG_IMPLICIT,
+)
 from o2md.chart_utils import chart_data_to_markdown
 
 try:
@@ -2647,24 +2651,9 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                     if rv is not None and str(rv).strip():
                                         r_texts.append(str(rv).strip())
 
-                                if l_texts and r_texts and len(l_texts) >= 2:
-                                    import re
-                                    circled = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'
-                                    num_matches = 0
-                                    for t in l_texts:
-                                        tt = t.strip()
-                                        if any(ch in circled for ch in tt):
-                                            num_matches += 1
-                                        elif re.match(r'^[0-9]+[\.)]?$|^[A-Za-z]$|^[IVXivx]+$', tt):
-                                            num_matches += 1
-                                        elif len(tt) <= 2:
-                                            num_matches += 1
-
-                                    ratio = num_matches / len(l_texts) if l_texts else 0.0
-                                    r_avg = sum(len(x) for x in r_texts) / len(r_texts) if r_texts else 0
-                                    if ratio >= 0.8 and r_avg >= 8:
-                                        logger.debug(f"[DEBUG] implicit run looks like enumerated list; skipping rows={srow}-{erow}")
-                                        skip_run = True
+                                if looks_like_enumerated_list(l_texts, r_texts, ENUMERATED_LIST_MIN_RIGHT_AVG_IMPLICIT):
+                                    logger.debug(f"[DEBUG] implicit run looks like enumerated list; skipping rows={srow}-{erow}")
+                                    skip_run = True
                         except (ValueError, TypeError) as e:
                             logger.debug(f"[DEBUG] 型変換エラー（無視）: {e}")
                         
