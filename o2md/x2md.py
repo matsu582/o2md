@@ -33,7 +33,7 @@ from o2md.utils import get_libreoffice_path, is_libreoffice_available, is_libreo
 from o2md.isolated_group_renderer import IsolatedGroupRenderer
 from o2md.x2md_tables import _TablesMixin
 from o2md.x2md_graphics import _GraphicsMixin
-from o2md.x2md_charts import extract_charts_from_worksheet
+from o2md.x2md_charts import extract_charts_from_worksheet, CELL_REF_RE
 from o2md.x2md_text_patterns import (
     looks_like_enumerated_list,
     ENUMERATED_LIST_MIN_RIGHT_AVG_IMPLICIT,
@@ -1039,9 +1039,10 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             if not ref_str:
                 return []
             
-            match = re.match(r"'?[^'!]+'?\!\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)", ref_str)
-            if match:
-                col_start, row_start, col_end, row_end = match.groups()
+            match = CELL_REF_RE.match(ref_str)
+            # 従来どおり範囲参照のみを対象とし、単一セル参照（group(4)がNone）は無視する
+            if match and match.group(4) is not None:
+                col_start, row_start, col_end, row_end = match.group(2), match.group(3), match.group(4), match.group(5)
                 row_start, row_end = int(row_start), int(row_end)
                 
                 from openpyxl.utils import column_index_from_string

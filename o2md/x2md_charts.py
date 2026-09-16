@@ -32,6 +32,11 @@ CHART_TYPE_MAP = {
 
 logger = logging.getLogger(__name__)
 
+# セル参照（例: "'Sheet1'!$A$1:$A$5" / "'Sheet1'!$B$2"）のパース用正規表現
+# group(1)=シート名, group(2)=開始列, group(3)=開始行,
+# group(4)=終了列（省略可）, group(5)=終了行（省略可）
+CELL_REF_RE = re.compile(r"'?([^'!]+)'?!\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?")
+
 def extract_charts_from_worksheet(worksheet, workbook) -> List[ChartData]:
     """
     ワークシートからチャートデータを抽出する
@@ -306,8 +311,7 @@ def _resolve_cell_reference(ref_str: str, workbook) -> List[Any]:
     if not ref_str:
         return []
     
-    pattern = r"'?([^'!]+)'?!\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?"
-    match = re.match(pattern, ref_str)
+    match = CELL_REF_RE.match(ref_str)
     
     if not match:
         return []
