@@ -2128,6 +2128,8 @@ class IsolatedGroupRenderer:
                 suffix = "_grp"
             
             excel_base = os.path.splitext(os.path.basename(self.converter.excel_file))[0]
+            # 複数シートで図形インデックス集合が同じでも同名にならないようシート名を含める
+            safe_sheet = self.converter._sanitize_filename(sheet.title)
             
             if getattr(self.converter, 'debug_mode', False):
                 dbg_dir = os.path.join(self.converter.output_dir, 'debug_workbooks')
@@ -2135,7 +2137,7 @@ class IsolatedGroupRenderer:
             else:
                 dbg_dir = tempfile.mkdtemp()
             
-            final_xlsx_name = f"{excel_base}_iso_group{suffix}.xlsx"
+            final_xlsx_name = f"{excel_base}_{safe_sheet}_iso_group{suffix}.xlsx"
             src_for_conv = os.path.join(dbg_dir, final_xlsx_name)
             
             import zipfile

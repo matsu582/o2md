@@ -5,7 +5,7 @@
 Excel図形テストシート  
 このシートは図形変換テスト用です  
 四角形、楕円、コネクタを含みます  
-![図形テスト](images/excel_shapes_sample_iso_group_grp_2553fe71.png)
+![図形テスト](images/excel_shapes_sample_図形テスト_iso_group_grp_2553fe71.png)
 
 
 <details>
