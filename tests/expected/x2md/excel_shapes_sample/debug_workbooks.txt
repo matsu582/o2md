@@ -1,4 +1,4 @@
-excel_shapes_sample_図形テスト_iso_group_grp_2553fe71.xlsx
+excel_shapes_sample_sheet1_図形テスト_iso_group_grp_2553fe71.xlsx
   [Content_Types].xml
   _rels/.rels
   docProps/app.xml
