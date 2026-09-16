@@ -2463,7 +2463,7 @@ class _TablesMixin:
 
         # 例外: 複数行・複数列がほぼ埋まった密なグリッドは表として扱う
         # （URLやパスを含む列があっても、行ごとの列数が揃っていれば表の構造が優先）
-        fill_ratio = (non_empty_cells / total_cells) if total_cells > 0 else 0
+        fill_ratio = (sum(row_counts) / total_cells) if total_cells > 0 else 0
         if row_count >= 2 and cols_with_content >= 3 and fill_ratio >= 0.8 and row_std <= 1.0:
             logger.debug(f"[DEBUG] 密なグリッドのため表扱い: 行{start_row}〜{end_row}, fill={fill_ratio:.2f}, cols={cols_with_content}, row_std={row_std:.2f}")
             return False
@@ -3322,13 +3322,8 @@ class _TablesMixin:
         try:
             import re
             # 列数が多い表は既に構造化されているため、セル内分割は行わない
-            content_col_count = 0
-            if table_data:
-                content_col_count = max(
-                    (sum(1 for v in row if v is not None and str(v).strip()) for row in table_data),
-                    default=0,
-                )
-            if table_data and len(table_data) > 1 and content_col_count <= 3:
+            table_width = len(table_data[0]) if table_data else 0
+            if table_data and len(table_data) > 1 and table_width <= 3:
                 headers = table_data[0]
                 data_rows = table_data[1:]
 
