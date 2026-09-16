@@ -975,7 +975,6 @@ class _TablesMixin:
                     return True
             except Exception as e:
                 logger.debug("パイプ区切り数の分散計算に失敗: %s", e)
-                pass
 
         # 2) タブやカンマ等の区切り文字が行の多くで使われ、かつ列数が安定している
         for delim in ['\t', ',', ';']:
@@ -987,7 +986,6 @@ class _TablesMixin:
                         return True
                 except Exception as e:
                     logger.debug("区切り文字数の分散計算に失敗: %s", e)
-                    pass
 
         # 3) 連続したスペース (2文字以上) で分割して列数が安定している場合
         token_counts = [len(re.split(r'\s{2,}', ln)) for ln in lines]
@@ -998,7 +996,6 @@ class _TablesMixin:
                     return True
             except Exception as e:
                 logger.debug("トークン数の分散計算に失敗: %s", e)
-                pass
 
         # 4) 各行の単語数がほぼ同じで、かつ多くの行が2語以上を含む場合は表っぽい
         word_counts = [len(ln.split()) for ln in lines]
@@ -1741,7 +1738,6 @@ class _TablesMixin:
                         self._output_markdown_table(table_data)
                     except Exception as e:
                         logger.warning("テーブルの直接出力に失敗 (sheet=%s): %s", sheet.title, e, exc_info=True)
-                        pass
                 return
 
         # テーブルデータを結合セル考慮で構築
@@ -1809,7 +1805,6 @@ class _TablesMixin:
                     self._last_table_title_row = None
                 except Exception as e:
                     logger.debug("一時タイトル行情報のクリアに失敗: %s", e)
-                    pass
                 logger.debug(f"DEFER_TABLE sheet={sheet.title} anchor={anchor} rows={len(table_data)} title_present={bool(safe_title)}")
             except (ValueError, TypeError):
                 # 延期が失敗した場合は即時出力にフォールバック
@@ -2057,17 +2052,14 @@ class _TablesMixin:
                                 self._mark_sheet_map(sheet.title, row_num, md_idx)
                             except Exception as e:
                                 logger.debug("シートマップへの記録に失敗 (sheet=%s, row=%s): %s", sheet.title, row_num, e)
-                                pass
                             try:
                                 self._mark_emitted_row(sheet.title, row_num)
                             except Exception as e:
                                 logger.debug("出力済み行のマーキングに失敗 (sheet=%s, row=%s): %s", sheet.title, row_num, e)
-                                pass
                             try:
                                 self._mark_emitted_text(sheet.title, self._normalize_text(combined))
                             except Exception as e:
                                 logger.debug("出力済みテキストのマーキングに失敗 (sheet=%s, row=%s): %s", sheet.title, row_num, e)
-                                pass
                         else:
                             # 非正規コンテキスト: 正規パスがインデックスを割り当てる
                             logger.debug(f"[TRACE] Skipping authoritative mapping for plain-text fallback row={row_num} (non-canonical)")
@@ -2255,7 +2247,6 @@ class _TablesMixin:
                         combined = '<br>'.join(collapsed)
                 except Exception as e:
                     logger.debug("繰り返しシーケンスの折りたたみに失敗: %s", e)
-                    pass
             except Exception:
                 combined = '<br>'.join(dedup_parts) if dedup_parts else ''
 
@@ -2284,7 +2275,6 @@ class _TablesMixin:
                                 keep_despite_low_ratio = True
                         except Exception as e:
                             logger.debug("ヘッダーセルの罫線確認に失敗 (row=%s, col=%s): %s", header_row, col, e)
-                            pass
                         
                         # 塗りつぶしがある列も保持
                         if not keep_despite_low_ratio:
@@ -2293,7 +2283,6 @@ class _TablesMixin:
                                     keep_despite_low_ratio = True
                             except Exception as e:
                                 logger.debug("ヘッダーセルの塗りつぶし確認に失敗 (row=%s, col=%s): %s", header_row, col, e)
-                                pass
 
                         if not keep_despite_low_ratio:
                             right_count = 0
@@ -2306,7 +2295,6 @@ class _TablesMixin:
                                         right_count += 1
                                 except Exception as e:
                                     logger.debug("右罫線の確認に失敗 (row=%s, col=%s): %s", rr, col, e)
-                                    pass
                             if total_check > 0 and (right_count / total_check) >= 0.5:
                                 keep_despite_low_ratio = True
                         
@@ -2327,7 +2315,6 @@ class _TablesMixin:
                                             break
                                 except Exception as e:
                                     logger.debug("データセルの書式確認に失敗 (row=%s, col=%s): %s", rr, col, e)
-                                    pass
                 except Exception:
                     keep_despite_low_ratio = False
 
@@ -2597,7 +2584,6 @@ class _TablesMixin:
                         has_strong_right = True
                 except Exception as e:
                     logger.debug("ヘッダー右罫線の確認に失敗 (row=%s, col=%s): %s", header_row, col_left, e)
-                    pass
 
                 # ヘッダー行間で結合セルのマスターの違いもチェック
                 masters_differ = False
@@ -3207,7 +3193,6 @@ class _TablesMixin:
                                     bold_count += 1
                             except Exception as e:
                                 logger.debug("セルの太字確認に失敗 (row=%s, col=%s): %s", rnum, c, e)
-                                pass
 
                         if total_nonempty == 0:
                             return 0.0
@@ -3294,7 +3279,6 @@ class _TablesMixin:
                             self._best_top_merged_fraction = top_merged_fraction
                         except Exception as e:
                             logger.debug("最良ヘッダー情報の記録に失敗: %s", e)
-                            pass
                     else:
                         # 辞書順で比較
                         try:
@@ -3307,7 +3291,6 @@ class _TablesMixin:
                                     self._best_top_merged_fraction = top_merged_fraction
                                 except Exception as e:
                                     logger.debug("最良ヘッダー情報の記録に失敗: %s", e)
-                                    pass
                         except Exception:
                             # 以前のタイブレーカーにフォールバック
                             if group_count > best_group_count:
@@ -4307,7 +4290,6 @@ class _TablesMixin:
                     self._mark_sheet_map(sheet_title, src, len(self.markdown_lines) - 1)
                 except Exception as e:
                     logger.debug("シートマップへの記録に失敗 (sheet=%s, row=%s): %s", sheet_title, src, e)
-                    pass
             else:
                 self.markdown_lines.append("| " + " | ".join(safe_row) + " |")
 

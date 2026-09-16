@@ -663,7 +663,6 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                     shutil.rmtree(tmpdir)
                 except Exception as e:
                     logger.debug("一時ディレクトリの削除に失敗 (tmpdir=%s): %s", tmpdir, e)
-                    pass
         except Exception as e:
             logger.error(f"pageSetup設定に失敗: {e}")
             return False
@@ -1990,7 +1989,6 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                             self._emit_free_text(sheet, row, title)
                             except Exception as e:
                                 logger.warning("テーブルタイトルの出力処理に失敗 (sheet=%s, row=%s): %s", sheet.title, row, e, exc_info=True)
-                                pass
 
                             # 正規出力: テーブルを出力しマッピングを記録
                             try:
@@ -2540,7 +2538,6 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                             processed_rows.add(rr)
                 except Exception as e:
                     logger.warning("除外領域のテキスト収集に失敗 (sheet=%s, rows=%s-%s): %s", sheet.title, srow, erow, e, exc_info=True)
-                    pass
 
         # プレーンテキスト領域を先に走査して収集する
         # 変更点: プレーン判定でTrueにならない場合でも、非空の行を"説明文"として出力するフォールバックを追加
@@ -2689,10 +2686,8 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                         processed_rows.add(rr)
                 except Exception as e:
                     logger.warning("暗黙テーブル領域の変換に失敗 (sheet=%s, rows=%d-%d, cols=%d-%d): %s", sheet.title, srow, erow, smin, smax, e, exc_info=True)
-                    pass
         except Exception as e:
             logger.warning("暗黙テーブル検出・変換処理に失敗 (sheet=%s): %s", sheet.title, e, exc_info=True)
-            pass
 
         # merged_textsを行番号（昇順）でソートしてシート順序を保持
         merged_texts.sort(key=lambda x: x[0])
@@ -2731,7 +2726,6 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
                                 break
                     except Exception as e:
                         logger.debug("除外ブロックの出力済み行マーキングに失敗 (sheet=%s, row=%s): %s", getattr(sheet, 'title', sheet), r, e)
-                        pass
                 last_emitted_row = r
             # マージされたフリーテキスト領域の後に区切りの空行を追加（実際に出力する場合のみ）
             if getattr(self, '_in_canonical_emit', False):
