@@ -12,6 +12,7 @@ ExcelToMarkdownConverterクラスの画像処理・図形処理機能を提供�
 - 分離グループのレンダリング
 """
 
+import hashlib
 import logging
 import os
 import sys
@@ -26,6 +27,9 @@ import xml.etree.ElementTree as ET
 
 from o2md.utils import get_libreoffice_path, is_libreoffice_available, col_letter, normalize_excel_path, get_xml_from_zip, extract_anchor_id, anchor_is_hidden, anchor_has_drawable as utils_anchor_has_drawable
 from o2md.isolated_group_renderer import IsolatedGroupRenderer
+
+# 出力画像・中間ファイル名の UTF-8 バイト長上限（ファイルシステムの名前長制限対策）
+MAX_OUTPUT_FILENAME_BYTES = 200
 
 try:
     import openpyxl
@@ -915,10 +919,10 @@ class _GraphicsMixin:
             try:
                 import hashlib
                 h = hashlib.sha1(image_data).hexdigest()[:8]
-                image_filename = f"{self.base_name}_{safe_sheet_name}_image_{h}{extension}"
+                image_filename = self._bounded_filename(f"{self.base_name}_{safe_sheet_name}_image_{h}", extension)
             except Exception:
                 # シートレベルの安定した名前にフォールバック
-                image_filename = f"{self.base_name}_{safe_sheet_name}_image{extension}"
+                image_filename = self._bounded_filename(f"{self.base_name}_{safe_sheet_name}_image", extension)
             image_path = os.path.join(self.images_dir, image_filename)
             
             # 画像を保存
@@ -936,7 +940,7 @@ class _GraphicsMixin:
                             # 衝突は稀。一意のサフィックスにフォールバック
                             import time
                             alt = f"_{int(time.time())}"
-                            image_filename = f"{self.base_name}_{safe_sheet_name}_image_{h}{alt}{extension}"
+                            image_filename = self._bounded_filename(f"{self.base_name}_{safe_sheet_name}_image_{h}{alt}", extension)
                             image_path = os.path.join(self.images_dir, image_filename)
                             with open(image_path, 'wb') as f:
                                 f.write(image_data)
@@ -1710,12 +1714,15 @@ class _GraphicsMixin:
             
             # 3. PDF→画像変換（出力形式に応じてPNGまたはSVG）
             safe_sheet = self._sanitize_filename(sheet.title)
+            stem = os.path.splitext(self._bounded_filename(
+                f"{self.base_name}_{safe_sheet}_sheet", f".{self.output_format}"
+            ))[0]
             result_filename = self._convert_page_to_image(
                 pdf_path,
                 page_index,
                 dpi,
                 self.images_dir,
-                f"{self.base_name}_{safe_sheet}_sheet"
+                stem
             )
             
             if result_filename is None:
@@ -1809,6 +1816,17 @@ class _GraphicsMixin:
         if not txt:
             return 'image'
         return txt
+
+    def _bounded_filename(self, stem: str, ext: str) -> str:
+        """stem+ext が UTF-8 で MAX_OUTPUT_FILENAME_BYTES を超える場合、stem を切り詰めて
+        元 stem の sha1 先頭8桁を付けた `<切詰stem>_<hash8><ext>` を返す。超えなければそのまま。"""
+        name = f"{stem}{ext}"
+        if len(name.encode('utf-8')) <= MAX_OUTPUT_FILENAME_BYTES:
+            return name
+        h = hashlib.sha1(stem.encode('utf-8')).hexdigest()[:8]
+        while len(f"{stem}_{h}{ext}".encode('utf-8')) > MAX_OUTPUT_FILENAME_BYTES:
+            stem = stem[:-1]
+        return f"{stem}_{h}{ext}"
 
     def _get_drawing_max_col_row(self, sheet):
         """図形が参照する最大の列・行番号を取得する。

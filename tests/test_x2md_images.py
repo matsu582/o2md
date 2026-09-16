@@ -123,3 +123,25 @@ def test_iso_group_images_sanitize_collision(tmp_path):
     iso_refs = [r for r in refs if "_iso_group" in r]
     assert len(iso_refs) == 2, f"iso_group画像参照が2件ではありません: {refs}"
     assert len(set(iso_refs)) == 2, f"両シートが同じ画像を参照しています: {iso_refs}"
+
+
+def test_bounded_filename(tmp_path):
+    """_bounded_filename: 短い名前はそのまま、長い名前は200バイト以下に切り詰め"""
+    from o2md.x2md import ExcelToMarkdownConverter
+
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    converter = ExcelToMarkdownConverter(str(INPUT_XLSX), output_dir=str(output_dir))
+
+    # 短い名前はそのまま返る
+    short = "abc_sheet"
+    assert converter._bounded_filename(short, ".svg") == "abc_sheet.svg"
+
+    # 240文字の日本語 stem + .svg は200バイトを超えるので切り詰められる
+    long_stem = "あ" * 240
+    bounded = converter._bounded_filename(long_stem, ".svg")
+    assert len(bounded.encode("utf-8")) <= 200
+    assert re.match(r"^あ+_[0-9a-f]{8}\.svg$", bounded)
+
+    # 同じ stem は同じ結果（決定的）
+    assert converter._bounded_filename(long_stem, ".svg") == bounded

@@ -1001,7 +1001,7 @@ class ExcelToMarkdownConverter(_TablesMixin, _GraphicsMixin):
             
             self.image_counter += 1
             ext = self.output_format
-            image_filename = f"{self.base_name}_{sheet.title}_chart_{chart_index + 1:03d}.{ext}"
+            image_filename = self._bounded_filename(f"{self.base_name}_{sheet.title}_chart_{chart_index + 1:03d}", f".{ext}")
             image_path = os.path.join(self.images_dir, image_filename)
             
             if self.output_format == 'svg':
